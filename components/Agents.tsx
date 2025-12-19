@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata } from '../types';
+import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle } from '../types';
 import { generateNPCStats } from '../utils/procedural';
 import { NPC } from './NPC';
 import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
@@ -13,10 +13,11 @@ interface AgentsProps {
   rats: any[]; 
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
+  obstacles?: Obstacle[];
   maxAgents?: number;
 }
 
-export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, buildings, buildingHash = null, maxAgents = 30 }) => {
+export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, buildings, buildingHash = null, obstacles = [], maxAgents = 30 }) => {
   const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3 }>>(new Map());
   const agentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
   const statsTickRef = useRef(0);
@@ -87,6 +88,7 @@ export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, 
           simulationSpeed={params.simulationSpeed}
           buildings={buildings}
           buildingHash={buildingHash || undefined}
+          obstacles={obstacles}
           agentHash={agentHashRef.current || undefined}
           initialState={i === 0 ? AgentState.INCUBATING : AgentState.HEALTHY}
         />

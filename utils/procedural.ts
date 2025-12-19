@@ -58,7 +58,43 @@ export const generateNPCStats = (seed: number): NPCStats => {
   const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.4);
   const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.4 : 0.6);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.75 : 0.4);
+  const sleeveCoverage: 'full' | 'lower' | 'none' =
+    socialClass === SocialClass.NOBILITY ? (rand() > 0.35 ? 'full' : 'lower')
+    : socialClass === SocialClass.MERCHANT ? (rand() > 0.45 ? 'full' : 'lower')
+    : socialClass === SocialClass.CLERGY ? (rand() > 0.5 ? 'full' : 'lower')
+    : rand() > 0.7 ? 'none' : 'lower';
 
+  const hairStyle: 'short' | 'medium' | 'long' | 'covered' = gender === 'Female'
+    ? 'covered'
+    : (age > 45 ? (rand() > 0.6 ? 'short' : 'medium')
+      : profession.includes('Laborer') || profession.includes('Porter') || profession.includes('Guard')
+        ? (rand() > 0.7 ? 'medium' : 'short')
+        : socialClass === SocialClass.NOBILITY ? (rand() > 0.4 ? 'medium' : 'long')
+        : socialClass === SocialClass.CLERGY ? (rand() > 0.6 ? 'short' : 'medium')
+        : rand() > 0.5 ? 'medium' : 'short');
+  const headwearStyle: 'scarf' | 'cap' | 'turban' | 'none' = gender === 'Female'
+    ? 'scarf'
+    : socialClass === SocialClass.NOBILITY
+      ? (rand() > 0.2 ? 'turban' : 'cap')
+      : socialClass === SocialClass.CLERGY
+        ? (rand() > 0.4 ? 'turban' : 'cap')
+        : rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
+  const footwearStyle: 'sandals' | 'shoes' | 'bare' =
+    socialClass === SocialClass.NOBILITY ? (rand() > 0.2 ? 'shoes' : 'sandals')
+    : socialClass === SocialClass.MERCHANT ? (rand() > 0.3 ? 'shoes' : 'sandals')
+    : rand() > 0.8 ? 'bare' : 'sandals';
+  const footwearColor = footwearStyle === 'shoes' ? '#3b2a1a' : '#9b7b4f';
+  const accessoryPool = gender === 'Female'
+    ? (socialClass === SocialClass.NOBILITY
+      ? ['bronze earrings', 'copper bracelet', 'small nose ring', 'etched bracelet']
+      : ['bronze earrings', 'copper bracelet'])
+    : (socialClass === SocialClass.NOBILITY
+      ? ['leather belt pouch', 'woven sash', 'bronze ring']
+      : ['leather belt pouch', 'woven sash']);
+  const accessories = [
+    rand() > 0.6 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none',
+    rand() > 0.7 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none'
+  ].filter(a => a !== 'none');
   return {
     id: `npc-${seed}`,
     name,
@@ -73,6 +109,12 @@ export const generateNPCStats = (seed: number): NPCStats => {
     robeHasTrim,
     robeHemBand,
     robeOverwrap,
+    hairStyle,
+    headwearStyle,
+    sleeveCoverage,
+    footwearStyle,
+    footwearColor,
+    accessories,
   };
 };
 
@@ -88,10 +130,11 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
   else if (classRoll > 0.62) socialClass = SocialClass.CLERGY;
 
   const age = Math.floor(rand() * 35) + 16;
-  const skinTone = `hsl(28, ${30 + Math.round(rand() * 20)}%, ${30 + Math.round(rand() * 28)}%)`;
+  const skinTone = `hsl(${26 + Math.round(rand() * 8)}, ${28 + Math.round(rand() * 18)}%, ${30 + Math.round(rand() * 18)}%)`;
   const skinDescriptions = ['olive-toned complexion', 'sun-browned skin', 'warm sand-brown skin', 'weathered bronze complexion'];
-  const hairDescriptions = ['dark chestnut hair', 'black hair', 'deep brown hair', 'soot-black hair'];
-  const hairColor = rand() > 0.6 ? '#2a1a12' : rand() > 0.3 ? '#3b2a1a' : '#4a3a2a';
+  const hairDescriptions = ['black hair', 'deep brown hair', 'dark chestnut hair'];
+  const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
+  const hairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
 
   const maleProfessions: Record<SocialClass, string[]> = {
     [SocialClass.PEASANT]: ['Water-Carrier', 'Day-Laborer', 'Tanner', 'Porter', 'Potter'],
@@ -135,8 +178,8 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
   const headwearByGender = gender === 'Female'
     ? [
         { desc: 'linen khimar in faded cloth', color: '#c2a878' },
-        { desc: 'cotton milhafa with a soft wrap', color: '#d9c9a8' },
-        { desc: 'light khimar with a simple band', color: '#cdbb9a' }
+        { desc: 'cotton milhafa with a soft wrap', color: '#d6c2a4' },
+        { desc: 'light khimar with a simple band', color: '#c7b08c' }
       ]
     : [
         { desc: 'plain imamah (turban) of undyed cloth', color: '#d9c9a8' },
@@ -148,7 +191,6 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
   const clothing = [
     robePick.desc,
     headwearPick.desc,
-    rand() > 0.6 ? 'leather sandals' : 'woven sandals',
     rand() > 0.7 ? 'a thin leather belt' : 'a simple cord belt'
   ];
 
@@ -189,6 +231,41 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
   const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.65 : 0.4);
   const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.35 : 0.6);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.35);
+  const sleeveCoverage: 'full' | 'lower' | 'none' = robePick.sleeves
+    ? (rand() > 0.6 ? 'full' : 'lower')
+    : 'none';
+  const hairStyle: 'short' | 'medium' | 'long' | 'covered' = gender === 'Female'
+    ? 'covered'
+    : (age > 45 ? (rand() > 0.6 ? 'short' : 'medium')
+      : profession.includes('Laborer') || profession.includes('Porter') || profession.includes('Guard')
+        ? (rand() > 0.7 ? 'medium' : 'short')
+        : socialClass === SocialClass.NOBILITY ? (rand() > 0.4 ? 'medium' : 'long')
+        : socialClass === SocialClass.CLERGY ? (rand() > 0.6 ? 'short' : 'medium')
+        : rand() > 0.5 ? 'medium' : 'short');
+  const headwearStyle: 'scarf' | 'cap' | 'turban' | 'none' = gender === 'Female'
+    ? 'scarf'
+    : socialClass === SocialClass.NOBILITY
+      ? (rand() > 0.2 ? 'turban' : 'cap')
+      : socialClass === SocialClass.CLERGY
+        ? (rand() > 0.4 ? 'turban' : 'cap')
+        : rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
+  const footwearStyle: 'sandals' | 'shoes' | 'bare' =
+    socialClass === SocialClass.NOBILITY ? (rand() > 0.2 ? 'shoes' : 'sandals')
+    : socialClass === SocialClass.MERCHANT ? (rand() > 0.3 ? 'shoes' : 'sandals')
+    : rand() > 0.8 ? 'bare' : 'sandals';
+  const footwearColor = footwearStyle === 'shoes' ? '#3b2a1a' : '#9b7b4f';
+  const footwearDescription = footwearStyle === 'bare' ? 'bare feet' : footwearStyle === 'shoes' ? 'simple leather shoes' : 'woven leather sandals';
+  const accessoryPool = gender === 'Female'
+    ? (socialClass === SocialClass.NOBILITY
+      ? ['bronze earrings', 'copper bracelet', 'small nose ring', 'etched bracelet']
+      : ['bronze earrings', 'copper bracelet'])
+    : (socialClass === SocialClass.NOBILITY
+      ? ['leather belt pouch', 'woven sash', 'bronze ring']
+      : ['leather belt pouch', 'woven sash']);
+  const accessories = [
+    rand() > 0.6 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none',
+    rand() > 0.7 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none'
+  ].filter(a => a !== 'none');
 
   return {
     name: generateNPCStats(seed).name,
@@ -216,6 +293,13 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
     robeHemBand,
     robeSpread,
     robeOverwrap,
+    hairStyle,
+    headwearStyle,
+    sleeveCoverage,
+    footwearStyle,
+    footwearColor,
+    footwearDescription,
+    accessories,
     headwearColor: headwearPick.color,
     healthHistory: healthHistoryOptions[Math.floor(rand() * healthHistoryOptions.length)],
     clothing,
@@ -268,6 +352,8 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
     ownerGender, 
     position: [x, 0, z],
     doorSide: Math.floor(rand() * 4),
-    hasSymmetricalWindows: rand() > 0.5
+    hasSymmetricalWindows: rand() > 0.5,
+    isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || rand() > 0.985,
+    isQuarantined: type === BuildingType.RESIDENTIAL && rand() > 0.965
   };
 };

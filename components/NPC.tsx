@@ -2,9 +2,9 @@ import React, { useRef, useState, useMemo, memo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
-import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata } from '../types';
+import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, Obstacle } from '../types';
 import { Humanoid } from './Humanoid';
-import { isBlockedByBuildings } from '../utils/collision';
+import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 import { seededRandom } from '../utils/procedural';
 
@@ -21,6 +21,7 @@ interface NPCProps {
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   agentHash?: SpatialHash<AgentSnapshot> | null;
+  obstacles?: Obstacle[];
 }
 
 export const NPC: React.FC<NPCProps> = memo(({ 
@@ -35,7 +36,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   simulationSpeed,
   buildings,
   buildingHash = null,
-  agentHash = null
+  agentHash = null,
+  obstacles = []
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -47,23 +49,27 @@ export const NPC: React.FC<NPCProps> = memo(({
 
   const colors = useMemo(() => {
     switch (stats.socialClass) {
-      case SocialClass.PEASANT: return { body: '#4e342e', head: '#efebe9', turban: '#d2b48c' };
-      case SocialClass.MERCHANT: return { body: '#bf360c', head: '#fff3e0', turban: '#ffffff' };
-      case SocialClass.CLERGY: return { body: '#1b5e20', head: '#e8f5e9', turban: '#000000' };
-      case SocialClass.NOBILITY: return { body: '#4a148c', head: '#f3e5f5', turban: '#ffd700' };
-      default: return { body: '#4e342e', head: '#efebe9', turban: '#d2b48c' };
+      case SocialClass.PEASANT: return { body: '#6b5a45', head: '#e2c6a2', turban: '#cdbb9a' };
+      case SocialClass.MERCHANT: return { body: '#7b5a4a', head: '#e6c9a6', turban: '#d9c9a8' };
+      case SocialClass.CLERGY: return { body: '#4a4f59', head: '#d9c4a0', turban: '#bfa57e' };
+      case SocialClass.NOBILITY: return { body: '#6a5b4a', head: '#e6c9a6', turban: '#cbb58c' };
+      default: return { body: '#6b5a45', head: '#e2c6a2', turban: '#cdbb9a' };
     }
   }, [stats.socialClass]);
 
   const appearance = useMemo(() => {
     const seed = Number(stats.id.split('-')[1] || '1');
     const tone = seededRandom(seed + 11);
-    const skin = `hsl(28, ${30 + Math.round(tone * 20)}%, ${30 + Math.round(tone * 28)}%)`;
-    const scarfSeed = seededRandom(seed + 29);
-    const scarf = scarfSeed > 0.66 ? '#6a4b2a' : scarfSeed > 0.33 ? '#8c6b3c' : '#c2a878';
-    const robeSeed = seededRandom(seed + 41);
-    const robe = robeSeed > 0.66 ? '#6b3d2e' : robeSeed > 0.33 ? '#3f4a3f' : '#5c4b3a';
-    return { skin, scarf, robe };
+    const skin = `hsl(${26 + Math.round(tone * 8)}, ${28 + Math.round(tone * 18)}%, ${30 + Math.round(tone * 18)}%)`;
+    const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
+    const hair = hairPalette[Math.floor(seededRandom(seed + 17) * hairPalette.length)];
+    const scarfPalette = ['#d6c2a4', '#c7b08c', '#c2a878', '#bfa57e'];
+    const scarf = scarfPalette[Math.floor(seededRandom(seed + 29) * scarfPalette.length)];
+    const robePalette = ['#6f6a3f', '#7b5a4a', '#6b5a45', '#5c4b3a', '#4a4f59'];
+    const robe = robePalette[Math.floor(seededRandom(seed + 41) * robePalette.length)];
+    const accentPalette = ['#e1d3b3', '#d9c9a8', '#cbb58c', '#bfa57e'];
+    const accent = accentPalette[Math.floor(seededRandom(seed + 43) * accentPalette.length)];
+    return { skin, scarf, robe, accent, hair };
   }, [stats.id]);
 
   const pickNewTarget = () => {
@@ -97,7 +103,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       
       const step = dir.multiplyScalar(speed * delta * simulationSpeed);
       const nextPos = currentPosRef.current.clone().add(step);
-      if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined)) {
+      if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined) || isBlockedByObstacles(nextPos, obstacles, 0.5)) {
         pickNewTarget();
       } else {
         currentPosRef.current.copy(nextPos);
@@ -148,12 +154,20 @@ export const NPC: React.FC<NPCProps> = memo(({
         headColor={appearance.skin}
         turbanColor={colors.turban}
         headscarfColor={appearance.scarf}
+        robeAccentColor={appearance.accent}
+        hairColor={appearance.hair}
         gender={stats.gender}
         scale={[stats.weight, stats.height, stats.weight] as [number, number, number]}
         robeHasTrim={stats.robeHasTrim}
         robeHemBand={stats.robeHemBand}
         robeSpread={stats.robeSpread}
         robeOverwrap={stats.robeOverwrap}
+        hairStyle={stats.hairStyle}
+        headwearStyle={stats.headwearStyle}
+        sleeveCoverage={stats.sleeveCoverage}
+        footwearStyle={stats.footwearStyle}
+        footwearColor={stats.footwearColor}
+        accessories={stats.accessories}
         enableArmSwing
         armSwingMode="both"
         isWalking={simulationSpeed > 0 && stateRef.current !== AgentState.DECEASED && (!quarantine || stateRef.current !== AgentState.INFECTED)}

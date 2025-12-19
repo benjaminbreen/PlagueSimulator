@@ -739,6 +739,15 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                     />
                   </label>
                   <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Hover Wireframe</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showHoverWireframe}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showHoverWireframe: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
                     <span className="text-amber-300/80">Shadows</span>
                     <input
                       type="checkbox"
@@ -830,6 +839,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </div>
           <div className="space-y-2 text-[10px] uppercase tracking-widest">
             <label className="flex items-center justify-between">
+              <span>Hover Wireframe</span>
+              <input type="checkbox" checked={devSettings.showHoverWireframe} onChange={(e) => setDevSettings(prev => ({ ...prev, showHoverWireframe: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
               <span>Shadows</span>
               <input type="checkbox" checked={devSettings.showShadows} onChange={(e) => setDevSettings(prev => ({ ...prev, showShadows: e.target.checked }))} className="accent-amber-600" />
             </label>
@@ -889,6 +902,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Hair</span><div>{playerStats.hairDescription}</div></div>
                 <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Robe</span><div>{playerStats.robeDescription}</div></div>
                 <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Headwear</span><div>{playerStats.headwearDescription}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Footwear</span><div>{playerStats.footwearDescription}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Accessories</span><div>{playerStats.accessories.length ? playerStats.accessories.join(', ') : 'None noted'}</div></div>
                 <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Clothing</span><div>{playerStats.clothing.join(', ')}</div></div>
               </div>
             </div>

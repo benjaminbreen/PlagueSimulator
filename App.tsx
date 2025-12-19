@@ -41,6 +41,7 @@ function App() {
     humidityOverride: null,
     fogDensityScale: 1,
     showPerfPanel: false,
+    showHoverWireframe: false,
     showShadows: true,
     showClouds: true,
     showFog: true,

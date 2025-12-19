@@ -1,9 +1,9 @@
 
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents } from './Agents';
 import { Rats, Rat } from './Rats';
@@ -245,6 +245,59 @@ const TorchLightPool: React.FC<{
   );
 };
 
+const getWindowGlowPositions = (buildings: BuildingMetadata[]) => {
+  const positions: THREE.Vector3[] = [];
+  const buildingSize = CONSTANTS.BUILDING_SIZE;
+  for (const data of buildings) {
+    const localSeed = data.position[0] * 1000 + data.position[2];
+    const roll = seededRandom(localSeed + 120);
+    if (roll < 0.9) continue;
+    const side = Math.floor(seededRandom(localSeed + 121) * 4);
+    const offset = buildingSize / 2 + 0.2;
+    const height = 1.6 + seededRandom(localSeed + 122) * 2.2;
+    const pos = new THREE.Vector3(data.position[0], height, data.position[2]);
+    if (side === 0) pos.z += offset;
+    if (side === 1) pos.x += offset;
+    if (side === 2) pos.z -= offset;
+    if (side === 3) pos.x -= offset;
+    positions.push(pos);
+  }
+  return positions;
+};
+
+const WindowLightPool: React.FC<{ buildings: BuildingMetadata[]; timeOfDay: number }> = ({ buildings, timeOfDay }) => {
+  const lightPool = useRef<THREE.PointLight[]>([]);
+  const windowPositions = useMemo(() => getWindowGlowPositions(buildings), [buildings]);
+  const nightFactor = timeOfDay >= 19 || timeOfDay < 5 ? 1 : timeOfDay >= 17 ? (timeOfDay - 17) / 2 : timeOfDay < 7 ? (7 - timeOfDay) / 2 : 0;
+  const activeCount = Math.min(10, windowPositions.length);
+
+  useFrame(() => {
+    lightPool.current.forEach((light, i) => {
+      if (i >= activeCount) {
+        light.intensity = 0;
+        return;
+      }
+      light.position.copy(windowPositions[i]);
+      light.intensity = 0.6 * nightFactor;
+    });
+  });
+
+  return (
+    <>
+      {Array.from({ length: 10 }).map((_, i) => (
+        <pointLight
+          key={`window-light-${i}`}
+          ref={(el) => { if (el) lightPool.current[i] = el; }}
+          color="#f3c57a"
+          intensity={0}
+          distance={8}
+          decay={2}
+        />
+      ))}
+    </>
+  );
+};
+
 const MilkyWay: React.FC<{ visible: boolean }> = ({ visible }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const texture = useMemo(() => {
@@ -284,14 +337,122 @@ const MilkyWay: React.FC<{ visible: boolean }> = ({ visible }) => {
   );
 };
 
+const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
+  const sunriseBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
+  const sunsetBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
+  const skyKey = Math.round(timeOfDay * 4) / 4;
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const t = skyKey;
+    const sunAngle = (t / 24) * Math.PI * 2;
+    const elevation = Math.sin(sunAngle - Math.PI / 2);
+    const dayFactor = smoothstep(-0.05, 0.3, elevation);
+    const dawnFactor = smoothstep(-0.2, 0.05, elevation) * (1 - dayFactor);
+    const duskFactor = smoothstep(0.05, -0.2, -elevation) * (1 - dayFactor);
+
+    const top = new THREE.Color('#142243')
+      .lerp(new THREE.Color('#5aa6e8'), dayFactor)
+      .lerp(new THREE.Color('#2a3558'), duskFactor)
+      .lerp(new THREE.Color('#1b2438'), dawnFactor);
+    const mid = new THREE.Color('#162341')
+      .lerp(new THREE.Color('#49a6ef'), dayFactor)
+      .lerp(new THREE.Color('#a05044'), duskFactor)
+      .lerp(new THREE.Color('#6a3f61'), dawnFactor);
+    const bottom = new THREE.Color('#1c2a4a')
+      .lerp(new THREE.Color('#2f95ee'), dayFactor)
+      .lerp(new THREE.Color('#f7b25a'), duskFactor)
+      .lerp(new THREE.Color('#f0a06a'), dawnFactor);
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    gradient.addColorStop(0, `#${top.getHexString()}`);
+    gradient.addColorStop(0.55, `#${mid.getHexString()}`);
+    gradient.addColorStop(1, `#${bottom.getHexString()}`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (duskFactor > 0.05) {
+      const tNorm = Math.min(1, duskFactor * 2);
+      const bandStart = canvas.height * (0.5 + tNorm * 0.08);
+      const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
+      flare.addColorStop(0, `rgba(255,95,60,${0.5 * sunsetBoost * duskFactor})`);
+      flare.addColorStop(0.6, `rgba(255,160,85,${0.35 * sunsetBoost * duskFactor})`);
+      flare.addColorStop(1, `rgba(255,215,125,${0.25 * sunsetBoost * duskFactor})`);
+      ctx.fillStyle = flare;
+      ctx.fillRect(0, bandStart, canvas.width, canvas.height - bandStart);
+    } else if (dawnFactor > 0.05) {
+      const tNorm = Math.min(1, dawnFactor * 2);
+      const bandStart = canvas.height * (0.58 - tNorm * 0.08);
+      const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
+      flare.addColorStop(0, `rgba(255,110,75,${0.42 * sunriseBoost * dawnFactor})`);
+      flare.addColorStop(0.6, `rgba(255,165,110,${0.3 * sunriseBoost * dawnFactor})`);
+      flare.addColorStop(1, `rgba(255,210,150,${0.22 * sunriseBoost * dawnFactor})`);
+      ctx.fillStyle = flare;
+      ctx.fillRect(0, bandStart, canvas.width, canvas.height - bandStart);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    return tex;
+  }, [skyKey, sunriseBoost, sunsetBoost]);
+
+  if (!texture) return null;
+  return (
+    <mesh rotation={[0, 0, 0]}>
+      <sphereGeometry args={[210, 32, 16]} />
+      <meshBasicMaterial map={texture} side={THREE.BackSide} depthWrite={false} />
+    </mesh>
+  );
+};
+
+const SunDisc: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const haloRef = useRef<THREE.Mesh>(null);
+  useFrame(() => {
+    if (!meshRef.current) return;
+    const sunAngle = (timeOfDay / 24) * Math.PI * 2;
+    const elevation = Math.sin(sunAngle - Math.PI / 2);
+    const radius = 120;
+    meshRef.current.visible = elevation > -0.1;
+    meshRef.current.position.set(
+      Math.cos(sunAngle - Math.PI / 2) * radius,
+      Math.max(-10, elevation * 90),
+      60
+    );
+    meshRef.current.lookAt(0, 0, 0);
+    if (haloRef.current) {
+      haloRef.current.visible = elevation > -0.1;
+      haloRef.current.position.copy(meshRef.current.position);
+      haloRef.current.lookAt(0, 0, 0);
+    }
+  });
+  return (
+    <group>
+      <mesh ref={meshRef}>
+        <circleGeometry args={[6, 32]} />
+        <meshBasicMaterial color="#ffd39a" transparent opacity={0.85} />
+      </mesh>
+      <mesh ref={haloRef}>
+        <circleGeometry args={[10, 32]} />
+        <meshBasicMaterial color="#ffcc88" transparent opacity={0.25} />
+      </mesh>
+    </group>
+  );
+};
+
+
 export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
+  const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const ambientRef = useRef<THREE.AmbientLight>(null);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
+  const marketBounceRef = useRef<THREE.PointLight>(null);
   const fogRef = useRef<THREE.FogExp2>(null);
   const ratsRef = useRef<Rat[]>([]);
   const playerRef = useRef<THREE.Group>(null);
-  const { scene } = useThree();
+  const { scene, gl } = useThree();
   const buildingHashRef = useRef<SpatialHash<BuildingMetadata> | null>(null);
   const atmosphereTickRef = useRef(0);
   
@@ -299,6 +460,23 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [buildingsState, setBuildingsState] = useState<BuildingMetadata[]>([]);
   const buildingsRef = useRef<BuildingMetadata[]>([]);
   const [currentNearBuilding, setCurrentNearBuilding] = useState<BuildingMetadata | null>(null);
+  const playerSpawn = useMemo<[number, number, number]>(() => {
+    return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0];
+  }, [params.mapX, params.mapY]);
+  const obstacles = useMemo<Obstacle[]>(() => {
+    if (params.mapX !== 0 || params.mapY !== 0) return [];
+    return [
+      { position: [0, 0, 0], radius: 4.2 },
+      { position: [-6, 0, 0], radius: 0.9 },
+      { position: [6, 0, 0], radius: 0.9 },
+      { position: [-12, 0, 9], radius: 1.4 },
+      { position: [12, 0, -9], radius: 1.4 },
+      { position: [-3.2, 0, -3.2], radius: 0.6 },
+      { position: [3.4, 0, 3.3], radius: 0.6 },
+      { position: [6.2, 0, -5.0], radius: 0.5 },
+      { position: [-5.6, 0, 6.0], radius: 0.5 }
+    ];
+  }, [params.mapX, params.mapY]);
   const weather = useRef<WeatherState>({
     cloudCover: 0.25,
     humidity: 0.2,
@@ -312,11 +490,18 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   });
   const envPreset = params.timeOfDay < 6 || params.timeOfDay > 18 ? 'night' : 'sunset';
 
+  useEffect(() => {
+    gl.shadowMap.enabled = true;
+    gl.shadowMap.type = THREE.PCFSoftShadowMap;
+  }, [gl]);
+
   const sunAngle = (params.timeOfDay / 24) * Math.PI * 2;
   const sunElevation = Math.sin(sunAngle - Math.PI / 2);
   const dayFactor = smoothstep(-0.1, 0.35, sunElevation);
   const twilightFactor = smoothstep(-0.45, 0.05, sunElevation) * (1 - dayFactor);
   const nightFactor = 1 - Math.max(dayFactor, twilightFactor);
+  const enableHoverWireframe = params.cameraMode === CameraMode.OVERHEAD || devSettings.showHoverWireframe;
+  const enableHoverLabel = params.cameraMode === CameraMode.OVERHEAD;
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -414,12 +599,28 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         hemiRef.current.intensity = THREE.MathUtils.lerp(hemiRef.current.intensity, hemiIntensity, 0.08);
         hemiRef.current.color.lerp(hemiSky, 0.05);
         hemiRef.current.groundColor.lerp(hemiGround, 0.05);
+        if (rimLightRef.current) {
+          const rimTarget = twilightFactor * 0.6;
+          rimLightRef.current.intensity = THREE.MathUtils.lerp(rimLightRef.current.intensity, rimTarget, 0.05);
+        }
+        if (marketBounceRef.current) {
+          const isMarket = params.mapX === 0 && params.mapY === 0;
+          const bounceTarget = isMarket ? dayFactor * 0.45 : 0;
+          marketBounceRef.current.intensity = THREE.MathUtils.lerp(marketBounceRef.current.intensity, bounceTarget, 0.05);
+        }
+
+        if (gl) {
+          const targetExposure = 1 - nightFactor * 0.18 + twilightFactor * 0.05;
+          gl.toneMappingExposure = THREE.MathUtils.lerp(gl.toneMappingExposure, targetExposure, 0.05);
+        }
 
         if (fogRef.current && devSettings.showFog) {
-          const baseFog = weatherType === WeatherType.SANDSTORM ? 0.015 : weatherType === WeatherType.OVERCAST ? 0.012 : 0.008;
+          const baseFog = nightFactor > 0.2
+            ? (weatherType === WeatherType.SANDSTORM ? 0.01 : weatherType === WeatherType.OVERCAST ? 0.008 : 0.004)
+            : 0;
           fogRef.current.density = THREE.MathUtils.lerp(
             fogRef.current.density,
-            (baseFog + humidity * 0.008 + cloudCover * 0.004 + nightFactor * 0.006) * devSettings.fogDensityScale,
+            (baseFog + humidity * 0.004 + cloudCover * 0.002 + nightFactor * 0.004) * devSettings.fogDensityScale,
             0.02
           );
           fogRef.current.color.lerp(fogColor, 0.05);
@@ -460,13 +661,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
   return (
     <>
-      <ambientLight ref={ambientRef} intensity={0.2} color="#ccccff" />
-      <hemisphereLight ref={hemiRef} intensity={0.3} color="#cbd5ff" groundColor="#8b7d6b" />
+      <ambientLight ref={ambientRef} intensity={0.18} color="#b9c4e6" />
+      <pointLight ref={marketBounceRef} position={[0, 6, 0]} intensity={0} color="#f3cfa0" distance={36} decay={2} />
+      <hemisphereLight ref={hemiRef} intensity={0.28} color="#c7d2f0" groundColor="#6f6a7a" />
       <directionalLight
         ref={lightRef}
         position={[50, 50, 20]}
         castShadow={devSettings.showShadows}
-        shadow-mapSize={[1024, 1024]}
+        shadow-mapSize={[768, 768]}
         shadow-camera-left={-40}
         shadow-camera-right={40}
         shadow-camera-top={40}
@@ -476,7 +678,15 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         shadow-bias={-0.0004}
         shadow-normalBias={0.02}
       />
+      <directionalLight
+        ref={rimLightRef}
+        position={[-40, 10, -40]}
+        intensity={0}
+        color="#f2b27a"
+      />
       
+      <SkyGradientDome timeOfDay={params.timeOfDay} />
+      <SunDisc timeOfDay={params.timeOfDay} />
       <DreiEnvironment
         preset={envPreset}
         background={false}
@@ -509,6 +719,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }}
         nearBuildingId={currentNearBuilding?.id}
         timeOfDay={params.timeOfDay}
+        enableHoverWireframe={enableHoverWireframe}
+        enableHoverLabel={enableHoverLabel}
       />
       
       {/* Updated MiasmaFog to use infectionRate prop */}
@@ -522,19 +734,23 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           rats={ratsRef.current} 
           buildings={buildingsRef.current} 
           buildingHash={buildingHashRef.current}
+          obstacles={obstacles}
           maxAgents={30}
         />
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
+      {devSettings.showTorches && <WindowLightPool buildings={buildingsState} timeOfDay={params.timeOfDay} />}
       {devSettings.showRats && <Rats ref={ratsRef} params={params} />}
       
       <Player 
         ref={playerRef}
+        initialPosition={playerSpawn}
         targetPosition={playerTarget} 
         setTargetPosition={setPlayerTarget} 
         cameraMode={params.cameraMode}
         buildings={buildingsRef.current}
         buildingHash={buildingHashRef.current}
+        obstacles={obstacles}
         timeOfDay={params.timeOfDay}
         playerStats={playerStats}
       />

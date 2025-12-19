@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BuildingMetadata, CONSTANTS } from '../types';
+import { BuildingMetadata, CONSTANTS, Obstacle } from '../types';
 import { SpatialHash, queryNearbyBuildings } from './spatial';
 
 export const isBlockedByBuildings = (
@@ -14,6 +14,23 @@ export const isBlockedByBuildings = (
     const dx = Math.abs(position.x - b.position[0]);
     const dz = Math.abs(position.z - b.position[2]);
     if (dx < half + radius && dz < half + radius) {
+      return true;
+    }
+  }
+  return false;
+};
+
+export const isBlockedByObstacles = (
+  position: THREE.Vector3,
+  obstacles: Obstacle[],
+  radius = 0.6
+) => {
+  for (const obstacle of obstacles) {
+    const dx = position.x - obstacle.position[0];
+    const dz = position.z - obstacle.position[2];
+    const distSq = dx * dx + dz * dz;
+    const limit = obstacle.radius + radius;
+    if (distSq < limit * limit) {
       return true;
     }
   }

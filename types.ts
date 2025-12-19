@@ -40,6 +40,12 @@ export interface NPCStats {
   robeHasTrim?: boolean;
   robeHemBand?: boolean;
   robeOverwrap?: boolean;
+  hairStyle?: 'short' | 'medium' | 'long' | 'covered';
+  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'none';
+  sleeveCoverage?: 'full' | 'lower' | 'none';
+  footwearStyle?: 'sandals' | 'shoes' | 'bare';
+  footwearColor?: string;
+  accessories?: string[];
 }
 
 export interface PlayerStats {
@@ -68,6 +74,13 @@ export interface PlayerStats {
   robeHemBand: boolean;
   robeSpread: number;
   robeOverwrap: boolean;
+  hairStyle: 'short' | 'medium' | 'long' | 'covered';
+  headwearStyle: 'scarf' | 'cap' | 'turban' | 'none';
+  sleeveCoverage: 'full' | 'lower' | 'none';
+  footwearStyle: 'sandals' | 'shoes' | 'bare';
+  footwearColor: string;
+  footwearDescription: string;
+  accessories: string[];
   headwearColor: string;
   healthHistory: string;
   clothing: string[];
@@ -95,6 +108,13 @@ export interface BuildingMetadata {
   position: [number, number, number];
   doorSide: number; // 0: North, 1: South, 2: East, 3: West
   hasSymmetricalWindows: boolean;
+  isPointOfInterest?: boolean;
+  isQuarantined?: boolean;
+}
+
+export interface Obstacle {
+  position: [number, number, number];
+  radius: number;
 }
 
 export interface SimulationParams {
@@ -116,6 +136,7 @@ export interface DevSettings {
   humidityOverride: number | null;
   fogDensityScale: number;
   showPerfPanel: boolean;
+  showHoverWireframe: boolean;
   showShadows: boolean;
   showClouds: boolean;
   showFog: boolean;

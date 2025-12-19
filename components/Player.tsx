@@ -3,9 +3,9 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle } f
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, PointerLockControls } from '@react-three/drei';
-import { CameraMode, BuildingMetadata, PlayerStats } from '../types';
+import { CameraMode, BuildingMetadata, PlayerStats, Obstacle } from '../types';
 import { Humanoid } from './Humanoid';
-import { isBlockedByBuildings } from '../utils/collision';
+import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { SpatialHash } from '../utils/spatial';
 
 const PLAYER_SPEED = 6;
@@ -24,6 +24,7 @@ interface PlayerProps {
   cameraMode: CameraMode;
   buildings?: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
+  obstacles?: Obstacle[];
   timeOfDay?: number;
   playerStats?: PlayerStats;
 }
@@ -33,6 +34,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   cameraMode,
   buildings = [],
   buildingHash = null,
+  obstacles = [],
   timeOfDay = 12,
   playerStats
 }, ref) => {
@@ -190,11 +192,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       const speed = keys.shift ? RUN_SPEED : PLAYER_SPEED;
       const moveDelta = moveVec.multiplyScalar(speed * delta);
       const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-      if (!isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined)) {
+      if (!isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(nextX, obstacles, 0.6)) {
         group.current.position.x = nextX.x;
       }
       const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-      if (!isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined)) {
+      if (!isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(nextZ, obstacles, 0.6)) {
         group.current.position.z = nextZ.z;
       }
       
@@ -269,6 +271,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             robeHemBand={playerStats?.robeHemBand}
             robeSpread={playerStats?.robeSpread}
             robeOverwrap={playerStats?.robeOverwrap}
+            hairStyle={playerStats?.hairStyle}
+            headwearStyle={playerStats?.headwearStyle}
+            sleeveCoverage={playerStats?.sleeveCoverage}
+            footwearStyle={playerStats?.footwearStyle}
+            footwearColor={playerStats?.footwearColor}
+            accessories={playerStats?.accessories}
             isWalking={isWalking} 
             isSprinting={isSprinting}
           />
