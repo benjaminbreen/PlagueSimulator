@@ -1,9 +1,10 @@
 
 import React, { useState, Suspense, useCallback, useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
+import * as THREE from 'three';
 import { Simulation } from './components/Simulation';
 import { UI } from './components/UI';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, CameraMode, BuildingMetadata, BuildingType, CONSTANTS } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS } from './types';
 import { generatePlayerStats } from './utils/procedural';
 
 function App() {
@@ -31,7 +32,23 @@ function App() {
   const [transitioning, setTransitioning] = useState(false);
   const [nearBuilding, setNearBuilding] = useState<BuildingMetadata | null>(null);
   const [showEnterModal, setShowEnterModal] = useState(false);
-  const playerStats = useMemo<PlayerStats>(() => generatePlayerStats(1348), []);
+  const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
+  const playerStats = useMemo<PlayerStats>(() => generatePlayerStats(playerSeed), [playerSeed]);
+  const [devSettings, setDevSettings] = useState<DevSettings>({
+    enabled: false,
+    weatherOverride: 'auto',
+    cloudCoverOverride: null,
+    humidityOverride: null,
+    fogDensityScale: 1,
+    showPerfPanel: false,
+    showShadows: true,
+    showClouds: true,
+    showFog: true,
+    showTorches: true,
+    showNPCs: true,
+    showRats: true,
+    showMiasma: true,
+  });
 
   // Time tracking
   useEffect(() => {
@@ -127,6 +144,8 @@ function App() {
         setParams={setParams} 
         stats={stats} 
         playerStats={playerStats}
+        devSettings={devSettings}
+        setDevSettings={setDevSettings}
         nearBuilding={nearBuilding} 
         onFastTravel={handleFastTravel}
       />
@@ -171,14 +190,22 @@ function App() {
       <Canvas
         shadows
         camera={{ position: [20, 20, 20], fov: 45 }}
-        dpr={[1, 2]}
-        gl={{ toneMappingExposure: 1.1 }}
+        dpr={[1, 1.5]}
+        gl={{ toneMappingExposure: 1.05 }}
+        onCreated={({ gl }) => {
+          gl.shadowMap.enabled = true;
+          gl.shadowMap.type = THREE.PCFSoftShadowMap;
+          gl.toneMapping = THREE.ACESFilmicToneMapping;
+          gl.outputColorSpace = THREE.SRGBColorSpace;
+        }}
       >
         <Suspense fallback={null}>
             {!transitioning && (
               <Simulation 
                 params={params} 
                 simTime={stats.simTime}
+                devSettings={devSettings}
+                playerStats={playerStats}
                 onStatsUpdate={handleStatsUpdate} 
                 onMapChange={handleMapChange}
                 onNearBuilding={setNearBuilding}

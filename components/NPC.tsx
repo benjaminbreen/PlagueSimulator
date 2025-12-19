@@ -2,8 +2,11 @@ import React, { useRef, useState, useMemo, memo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
-import { AgentState, NPCStats, SocialClass, CONSTANTS } from '../types';
+import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata } from '../types';
 import { Humanoid } from './Humanoid';
+import { isBlockedByBuildings } from '../utils/collision';
+import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
+import { seededRandom } from '../utils/procedural';
 
 interface NPCProps {
   stats: NPCStats;
@@ -12,10 +15,12 @@ interface NPCProps {
   target: THREE.Vector3;
   onUpdate: (id: string, state: AgentState, pos: THREE.Vector3) => void;
   getSimTime: () => number;
-  allAgentsRef: React.MutableRefObject<Map<string, { state: AgentState, pos: THREE.Vector3 }>>;
   infectionRate: number;
   quarantine: boolean;
   simulationSpeed: number;
+  buildings: BuildingMetadata[];
+  buildingHash?: SpatialHash<BuildingMetadata> | null;
+  agentHash?: SpatialHash<AgentSnapshot> | null;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({ 
@@ -25,10 +30,12 @@ export const NPC: React.FC<NPCProps> = memo(({
   target, 
   onUpdate, 
   getSimTime,
-  allAgentsRef,
   infectionRate,
   quarantine,
-  simulationSpeed
+  simulationSpeed,
+  buildings,
+  buildingHash = null,
+  agentHash = null
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -47,6 +54,17 @@ export const NPC: React.FC<NPCProps> = memo(({
       default: return { body: '#4e342e', head: '#efebe9', turban: '#d2b48c' };
     }
   }, [stats.socialClass]);
+
+  const appearance = useMemo(() => {
+    const seed = Number(stats.id.split('-')[1] || '1');
+    const tone = seededRandom(seed + 11);
+    const skin = `hsl(28, ${30 + Math.round(tone * 20)}%, ${30 + Math.round(tone * 28)}%)`;
+    const scarfSeed = seededRandom(seed + 29);
+    const scarf = scarfSeed > 0.66 ? '#6a4b2a' : scarfSeed > 0.33 ? '#8c6b3c' : '#c2a878';
+    const robeSeed = seededRandom(seed + 41);
+    const robe = robeSeed > 0.66 ? '#6b3d2e' : robeSeed > 0.33 ? '#3f4a3f' : '#5c4b3a';
+    return { skin, scarf, robe };
+  }, [stats.id]);
 
   const pickNewTarget = () => {
     const range = CONSTANTS.MARKET_SIZE - 12;
@@ -77,8 +95,14 @@ export const NPC: React.FC<NPCProps> = memo(({
       let speed = stateRef.current === AgentState.INFECTED ? 0.7 : 2.0;
       if (quarantine && stateRef.current === AgentState.INFECTED) speed = 0;
       
-      currentPosRef.current.add(dir.multiplyScalar(speed * delta * simulationSpeed));
-      group.current.position.copy(currentPosRef.current);
+      const step = dir.multiplyScalar(speed * delta * simulationSpeed);
+      const nextPos = currentPosRef.current.clone().add(step);
+      if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined)) {
+        pickNewTarget();
+      } else {
+        currentPosRef.current.copy(nextPos);
+        group.current.position.copy(currentPosRef.current);
+      }
       group.current.lookAt(currentPosRef.current.clone().add(dir));
     }
 
@@ -93,18 +117,20 @@ export const NPC: React.FC<NPCProps> = memo(({
     }
 
     // 3. Infection Spread (Local Registry Lookup)
-    if (stateRef.current === AgentState.HEALTHY) {
-      allAgentsRef.current.forEach((other, otherId) => {
-        if (otherId === stats.id) return;
+    if (stateRef.current === AgentState.HEALTHY && agentHash) {
+      const neighbors = queryNearbyAgents(currentPosRef.current, agentHash);
+      for (const other of neighbors) {
+        if (other.id === stats.id) continue;
         if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
           if (currentPosRef.current.distanceToSquared(other.pos) < 4.0) {
             if (Math.random() < infectionRate * delta * simulationSpeed * 0.5) {
               stateRef.current = AgentState.INCUBATING;
               stateStartTimeRef.current = simTime;
+              break;
             }
           }
         }
-      });
+      }
     }
 
     // 4. Report back to Registry
@@ -118,10 +144,18 @@ export const NPC: React.FC<NPCProps> = memo(({
       onPointerOut={() => setHovered(false)}
     >
       <Humanoid 
-        color={stateRef.current === AgentState.DECEASED ? '#111' : colors.body} 
-        headColor={colors.head}
+        color={stats.gender === 'Female' ? appearance.robe : (stateRef.current === AgentState.DECEASED ? '#111' : colors.body)} 
+        headColor={appearance.skin}
         turbanColor={colors.turban}
+        headscarfColor={appearance.scarf}
+        gender={stats.gender}
         scale={[stats.weight, stats.height, stats.weight] as [number, number, number]}
+        robeHasTrim={stats.robeHasTrim}
+        robeHemBand={stats.robeHemBand}
+        robeSpread={stats.robeSpread}
+        robeOverwrap={stats.robeOverwrap}
+        enableArmSwing
+        armSwingMode="both"
         isWalking={simulationSpeed > 0 && stateRef.current !== AgentState.DECEASED && (!quarantine || stateRef.current !== AgentState.INFECTED)}
         isDead={stateRef.current === AgentState.DECEASED}
         walkSpeed={10 * simulationSpeed}

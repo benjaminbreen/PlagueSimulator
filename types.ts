@@ -36,6 +36,10 @@ export interface NPCStats {
   height: number;
   weight: number;
   mood: string;
+  robeSpread?: number;
+  robeHasTrim?: boolean;
+  robeHemBand?: boolean;
+  robeOverwrap?: boolean;
 }
 
 export interface PlayerStats {
@@ -48,6 +52,37 @@ export interface PlayerStats {
   weight: number;
   family: string;
   healthStatus: string;
+  skinTone: string;
+  hairColor: string;
+  robeColor: string;
+  headscarfColor: string;
+  skinDescription: string;
+  hairDescription: string;
+  robeDescription: string;
+  headwearDescription: string;
+  robeBaseColor: string;
+  robeAccentColor: string;
+  robeHasSash: boolean;
+  robeSleeves: boolean;
+  robeHasTrim: boolean;
+  robeHemBand: boolean;
+  robeSpread: number;
+  robeOverwrap: boolean;
+  headwearColor: string;
+  healthHistory: string;
+  clothing: string[];
+  strength: number;
+  piety: number;
+  perceptiveness: number;
+  neuroticism: number;
+  charisma: number;
+  humors: {
+    blood: number;
+    phlegm: number;
+    yellowBile: number;
+    blackBile: number;
+  };
+  humoralBalance: number;
 }
 
 export interface BuildingMetadata {
@@ -72,6 +107,22 @@ export interface SimulationParams {
   mapX: number;
   mapY: number;
   uiMinimized: boolean;
+}
+
+export interface DevSettings {
+  enabled: boolean;
+  weatherOverride: 'auto' | 'CLEAR' | 'OVERCAST' | 'SANDSTORM';
+  cloudCoverOverride: number | null;
+  humidityOverride: number | null;
+  fogDensityScale: number;
+  showPerfPanel: boolean;
+  showShadows: boolean;
+  showClouds: boolean;
+  showFog: boolean;
+  showTorches: boolean;
+  showNPCs: boolean;
+  showRats: boolean;
+  showMiasma: boolean;
 }
 
 export interface SimulationStats {
@@ -123,4 +174,15 @@ export const getLocationLabel = (x: number, y: number) => {
   const p = prefixes[seed % prefixes.length];
   const d = districts[(seed >> 2) % districts.length];
   return `${p} ${d} Block — ${x}, ${y}`;
+};
+
+export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS';
+
+export const getDistrictType = (x: number, y: number): DistrictType => {
+  if (x === 0 && y === 0) return 'MARKET';
+  if (x === -1 && y === 2) return 'WEALTHY';
+  if (x === 0 && y === -2) return 'HOVELS';
+  if (x === 2 && y === -1) return 'CIVIC';
+  if (x === 1 && y === 1) return 'ALLEYS';
+  return 'RESIDENTIAL';
 };

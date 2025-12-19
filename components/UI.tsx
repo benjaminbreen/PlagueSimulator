@@ -1,6 +1,6 @@
 
-import React, { useState } from 'react';
-import { SimulationParams, SimulationStats, PlayerStats, CameraMode, BuildingMetadata, BuildingType, getLocationLabel } from '../types';
+import React, { useState, useEffect } from 'react';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, getLocationLabel } from '../types';
 import { 
   Pause, 
   Play, 
@@ -29,6 +29,8 @@ interface UIProps {
   setParams: React.Dispatch<React.SetStateAction<SimulationParams>>;
   stats: SimulationStats;
   playerStats: PlayerStats;
+  devSettings: DevSettings;
+  setDevSettings: React.Dispatch<React.SetStateAction<DevSettings>>;
   nearBuilding: BuildingMetadata | null;
   onFastTravel: (x: number, y: number) => void;
 }
@@ -155,10 +157,32 @@ const MapModal: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, nearBuilding, onFastTravel }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [reportTab, setReportTab] = useState<'epidemic' | 'player'>('epidemic');
+  const [settingsTab, setSettingsTab] = useState<'about' | 'dev'>('about');
+  const [showPerspective, setShowPerspective] = useState(true);
+  const [fps, setFps] = useState(0);
+  const [showPlayerModal, setShowPlayerModal] = useState(false);
+
+  React.useEffect(() => {
+    if (!devSettings.showPerfPanel) return;
+    let last = performance.now();
+    let frames = 0;
+    let rafId = 0;
+    const loop = (now: number) => {
+      frames += 1;
+      if (now - last >= 500) {
+        setFps(Math.round((frames * 1000) / (now - last)));
+        frames = 0;
+        last = now;
+      }
+      rafId = requestAnimationFrame(loop);
+    };
+    rafId = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(rafId);
+  }, [devSettings.showPerfPanel]);
 
   const handleChange = (key: keyof SimulationParams, value: any) => {
     setParams(prev => ({ ...prev, [key]: value }));
@@ -168,6 +192,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
     if (e.target === e.currentTarget) {
       handleChange('uiMinimized', !params.uiMinimized);
     }
+  };
+
+  const cyclePerspective = () => {
+    const order = [CameraMode.THIRD_PERSON, CameraMode.OVERHEAD, CameraMode.FIRST_PERSON];
+    const idx = order.indexOf(params.cameraMode);
+    const next = order[(idx + 1) % order.length];
+    handleChange('cameraMode', next);
+    setShowPerspective(true);
   };
 
   const getBuildingTypeLabel = (type: BuildingType) => {
@@ -193,6 +225,22 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
     const displayH = h % 12 === 0 ? 12 : h % 12;
     return `${displayH}:${m.toString().padStart(2, '0')} ${suffix}`;
   };
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === 'v') {
+        cyclePerspective();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [params.cameraMode]);
+
+  useEffect(() => {
+    setShowPerspective(true);
+    const timer = window.setTimeout(() => setShowPerspective(false), 10000);
+    return () => window.clearTimeout(timer);
+  }, [params.cameraMode]);
 
   const formatHeight = (scale: number) => `${Math.round(scale * 170)} cm`;
   const formatWeight = (scale: number) => `${Math.round(scale * 70)} kg`;
@@ -256,7 +304,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
         <div className="flex items-center gap-4" onClick={e => e.stopPropagation()}>
           <div className="hidden lg:flex flex-col items-end mr-4 text-[9px] text-amber-500/50 uppercase tracking-widest font-bold">
             <div className="flex items-center gap-2"><span>Arrows to Move</span><Keyboard size={10}/></div>
-            <div className="flex items-center gap-2"><span>WASD to Look</span><MousePointer2 size={10}/></div>
+            <div className="flex items-center gap-2"><span>V to Change Perspective</span><MousePointer2 size={10}/></div>
           </div>
           <button 
             onClick={() => setShowSettings(!showSettings)}
@@ -327,7 +375,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
         
         {/* Reports Panel */}
         <div className="self-end md:self-start mt-12 md:mt-0 w-full md:w-[360px]">
-          <div className="bg-black/60 backdrop-blur-md p-4 rounded-lg border border-amber-800/50 shadow-lg pointer-events-auto">
+          <div className="bg-black/80 backdrop-blur-md p-4 rounded-lg border border-amber-800/50 shadow-lg pointer-events-auto">
             <div className="flex items-center justify-between mb-3 border-b border-amber-900/40 pb-2">
               <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Reports Panel</h4>
               <div className="flex gap-1 bg-amber-950/40 p-1 rounded-full border border-amber-900/40">
@@ -433,7 +481,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
               <div className="space-y-3 text-[11px] text-amber-50/90">
                 <div className="flex items-center justify-between">
                   <div className="historical-font text-amber-400 text-sm uppercase tracking-widest">Player Report</div>
-                  <div className="text-[9px] text-amber-100/40 uppercase tracking-[0.2em]">Citizen Dossier</div>
+                  <button
+                    onClick={() => setShowPlayerModal(true)}
+                    className="text-[9px] text-amber-100/40 uppercase tracking-[0.2em] hover:text-amber-100/70 transition-colors"
+                  >
+                    More Info
+                  </button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -468,6 +521,22 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
                     <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Weight</div>
                     <div className="font-bold">{formatWeight(playerStats.weight)}</div>
                   </div>
+                  <div>
+                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Skin</div>
+                    <div className="font-bold">{playerStats.skinDescription}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Hair</div>
+                    <div className="font-bold">{playerStats.hairDescription}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Robe</div>
+                    <div className="font-bold">{playerStats.robeDescription}</div>
+                  </div>
+                  <div>
+                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Headwear</div>
+                    <div className="font-bold">{playerStats.headwearDescription}</div>
+                  </div>
                 </div>
                 <div className="border-t border-amber-900/40 pt-3 text-[10px] text-amber-100/70">
                   <span className="uppercase tracking-widest text-amber-500/60">Family</span>
@@ -480,36 +549,37 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
 
         {/* Bottom Controls */}
         <div className="flex flex-col md:flex-row gap-4 items-end pointer-events-auto">
-          {/* Camera Settings Panel */}
-          <div className="bg-black/70 backdrop-blur-lg p-3 rounded-xl border border-amber-900/50 shadow-2xl flex flex-col gap-2">
-            <span className="text-[9px] uppercase tracking-widest text-amber-500/80 font-bold mb-1 px-1">Observation Perspective</span>
-            <div className="grid grid-cols-1 gap-1">
-              <button 
-                onClick={() => handleChange('cameraMode', CameraMode.THIRD_PERSON)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.THIRD_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-              >
-                <Camera size={12} /> Orbit View
-              </button>
-              <button 
-                onClick={() => handleChange('cameraMode', CameraMode.OVERHEAD)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVERHEAD ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-              >
-                <Layers size={12} /> Overhead Map
-              </button>
-              <button 
-                onClick={() => handleChange('cameraMode', CameraMode.FIRST_PERSON)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.FIRST_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-              >
-                <Eye size={12} /> Eyes of a Soul
-              </button>
+          {showPerspective && (
+            <div className="bg-black/70 backdrop-blur-lg p-3 rounded-xl border border-amber-900/50 shadow-2xl flex flex-col gap-2">
+              <span className="text-[9px] uppercase tracking-widest text-amber-500/80 font-bold mb-1 px-1">Observation Perspective</span>
+              <div className="grid grid-cols-1 gap-1">
+                <button 
+                  onClick={() => handleChange('cameraMode', CameraMode.THIRD_PERSON)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.THIRD_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+                >
+                  <Camera size={12} /> Orbit View
+                </button>
+                <button 
+                  onClick={() => handleChange('cameraMode', CameraMode.OVERHEAD)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVERHEAD ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+                >
+                  <Layers size={12} /> Overhead Map
+                </button>
+                <button 
+                  onClick={() => handleChange('cameraMode', CameraMode.FIRST_PERSON)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.FIRST_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+                >
+                  <Eye size={12} /> First Person
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
       {/* SETTINGS MENU OVERLAY */}
       {showSettings && (
-        <div className="absolute inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center pointer-events-auto p-8 animate-in fade-in zoom-in-95">
+        <div className="absolute inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center pointer-events-auto p-6 md:p-10 animate-in fade-in zoom-in-95">
           <button 
             onClick={() => setShowSettings(false)}
             className="absolute top-6 right-6 p-4 text-amber-500 hover:text-amber-400"
@@ -517,45 +587,231 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
             <X size={32} />
           </button>
           
-          <div className="max-w-2xl w-full flex flex-col gap-8">
-            <div className="text-center border-b border-amber-900/30 pb-6">
-              <h2 className="historical-font text-4xl text-amber-500 mb-2 tracking-tighter">DAMASCUS 1348</h2>
-              <p className="text-amber-100/50 uppercase tracking-[0.4em] text-xs">Simulated Reality Engine</p>
+          <div className="max-w-3xl w-full bg-black/60 border border-amber-900/40 rounded-xl shadow-2xl p-6 md:p-10">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-amber-900/30 pb-4">
+              <div>
+                <h2 className="historical-font text-3xl md:text-4xl text-amber-500 tracking-tighter">DAMASCUS 1348</h2>
+                <p className="text-amber-100/50 uppercase tracking-[0.35em] text-xs mt-2">Simulated Reality Engine</p>
+              </div>
+              <div className="flex gap-2 bg-amber-950/40 p-1 rounded-full border border-amber-900/40">
+                <button
+                  onClick={() => setSettingsTab('about')}
+                  className={`px-4 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all ${
+                    settingsTab === 'about' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/60 hover:text-amber-200'
+                  }`}
+                >
+                  About
+                </button>
+                <button
+                  onClick={() => setSettingsTab('dev')}
+                  className={`px-4 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all ${
+                    settingsTab === 'dev' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/60 hover:text-amber-200'
+                  }`}
+                >
+                  Dev Panel
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-12 text-sm text-amber-50/80 leading-relaxed">
-              <div>
-                <h3 className="historical-font text-amber-400 text-lg mb-4">Historical Context</h3>
-                <p>In 1348, the Black Death reached Damascus from Gaza. This simulation explores the dynamics of infection in the winding souks of the era. Use the controls to observe the spread and attempt to mitigate the disaster.</p>
-                <div className="mt-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg">
-                  <h4 className="text-xs font-bold text-amber-500 uppercase mb-2">Controls Guide</h4>
-                  <ul className="text-[11px] space-y-1">
-                    <li><span className="text-amber-200">ARROWS:</span> Move character</li>
-                    <li><span className="text-amber-200">WASD:</span> Adjust Camera / Look</li>
-                    <li><span className="text-amber-200">SHIFT:</span> Sprint</li>
-                    <li><span className="text-amber-200">PAUSE (TOP):</span> Stop time & movement</li>
+            {settingsTab === 'about' ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6 text-sm text-amber-50/80 leading-relaxed">
+                <div>
+                  <h3 className="historical-font text-amber-400 text-lg mb-4">About</h3>
+                  <p>In 1348, the Black Death reached Damascus from Gaza. This simulation explores infection dynamics across the city’s marketplaces and quarters. Observe, intervene, and learn the patterns of spread.</p>
+                  <div className="mt-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg">
+                    <h4 className="text-xs font-bold text-amber-500 uppercase mb-2">Controls</h4>
+                    <ul className="text-[11px] space-y-1">
+                      <li><span className="text-amber-200">ARROWS:</span> Move character</li>
+                      <li><span className="text-amber-200">WASD:</span> Adjust camera / look</li>
+                      <li><span className="text-amber-200">SHIFT:</span> Sprint</li>
+                      <li><span className="text-amber-200">PAUSE:</span> Stop time & movement</li>
+                    </ul>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="historical-font text-amber-400 text-lg mb-4">Simulation</h3>
+                  <ul className="space-y-2 list-disc pl-4">
+                    <li>Pathogens spread via proximity (2m contact).</li>
+                    <li>Incubation period: 1 simulation hour.</li>
+                    <li>Symptoms emerge after 2 hours.</li>
+                    <li>Mortality peaks at 24 hours.</li>
+                    <li>Rats appear when sanitation falls below 40%.</li>
                   </ul>
                 </div>
               </div>
-              <div>
-                <h3 className="historical-font text-amber-400 text-lg mb-4">Simulation Logic</h3>
-                <ul className="space-y-2 list-disc pl-4">
-                  <li>Pathogens spread via proximity (2m contact).</li>
-                  <li>Incubation period: 1 Simulation Hour.</li>
-                  <li>Symptomatic state: After 2 hours.</li>
-                  <li>Mortality risk peaks at 24 hours post-infection.</li>
-                  <li>Rats congregate where sanitation falls below 40%.</li>
-                </ul>
-              </div>
-            </div>
+            ) : (
+              <div className="mt-6 space-y-6 text-amber-50/80">
+                <div className="flex items-center justify-between">
+                  <div className="text-amber-400 uppercase tracking-widest text-xs font-bold">Developer Controls</div>
+                  <label className="flex items-center gap-2 text-[10px] uppercase tracking-widest">
+                    <input
+                      type="checkbox"
+                      checked={devSettings.enabled}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, enabled: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                    Enable
+                  </label>
+                </div>
 
-            <div className="flex justify-center mt-12">
-               <button 
-                 onClick={() => setShowSettings(false)}
-                 className="bg-amber-600 hover:bg-amber-500 text-white px-12 py-3 rounded-full historical-font tracking-widest text-xl transition-all shadow-[0_0_30px_rgba(217,119,6,0.2)]"
-               >
-                 RETURN TO OBSERVATION
-               </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Weather Override</label>
+                    <select
+                      value={devSettings.weatherOverride}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, weatherOverride: e.target.value as DevSettings['weatherOverride'] }))}
+                      className="mt-2 w-full bg-black/50 border border-amber-900/40 rounded-lg px-3 py-2 text-sm"
+                    >
+                      <option value="auto">Auto</option>
+                      <option value="CLEAR">Clear</option>
+                      <option value="OVERCAST">Overcast</option>
+                      <option value="SANDSTORM">Sandstorm</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Fog Density Scale</label>
+                    <input
+                      type="range"
+                      min="0.4"
+                      max="2"
+                      step="0.05"
+                      value={devSettings.fogDensityScale}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, fogDensityScale: parseFloat(e.target.value) }))}
+                      className="mt-3 w-full accent-amber-600"
+                    />
+                    <div className="text-[10px] mt-1 text-amber-200/60">{devSettings.fogDensityScale.toFixed(2)}x</div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Cloud Cover Override</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={devSettings.cloudCoverOverride ?? 0}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, cloudCoverOverride: parseFloat(e.target.value) }))}
+                      className="mt-3 w-full accent-amber-600"
+                    />
+                    <div className="mt-2 flex items-center justify-between text-[10px]">
+                      <span className="text-amber-200/60">{(devSettings.cloudCoverOverride ?? 0).toFixed(2)}</span>
+                      <button
+                        onClick={() => setDevSettings(prev => ({ ...prev, cloudCoverOverride: null }))}
+                        className="uppercase tracking-widest text-amber-300/70 hover:text-amber-300"
+                      >
+                        Reset to Auto
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Humidity Override</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={devSettings.humidityOverride ?? 0}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, humidityOverride: parseFloat(e.target.value) }))}
+                      className="mt-3 w-full accent-amber-600"
+                    />
+                    <div className="mt-2 flex items-center justify-between text-[10px]">
+                      <span className="text-amber-200/60">{(devSettings.humidityOverride ?? 0).toFixed(2)}</span>
+                      <button
+                        onClick={() => setDevSettings(prev => ({ ...prev, humidityOverride: null }))}
+                        className="uppercase tracking-widest text-amber-300/70 hover:text-amber-300"
+                      >
+                        Reset to Auto
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-6 text-[10px] uppercase tracking-widest">
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Perf Panel</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showPerfPanel}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showPerfPanel: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Shadows</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showShadows}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showShadows: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Clouds</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showClouds}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showClouds: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Fog</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showFog}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showFog: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Torches</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showTorches}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showTorches: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">NPCs</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showNPCs}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showNPCs: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Rats</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showRats}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showRats: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Miasma</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showMiasma}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showMiasma: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-center mt-10">
+              <button 
+                onClick={() => setShowSettings(false)}
+                className="bg-amber-600 hover:bg-amber-500 text-white px-10 py-3 rounded-full historical-font tracking-widest text-lg transition-all shadow-[0_0_30px_rgba(217,119,6,0.2)]"
+              >
+                RETURN TO OBSERVATION
+              </button>
             </div>
           </div>
         </div>
@@ -564,6 +820,104 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, n
       <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.5em] text-amber-100/20 pointer-events-none transition-opacity duration-700 ${params.uiMinimized ? 'opacity-100' : 'opacity-0'}`}>
         Click Top Bar to Restore Interface
       </div>
+
+      {devSettings.showPerfPanel && (
+        <div className="absolute bottom-6 right-6 z-50 bg-black/70 backdrop-blur-md border border-amber-900/40 rounded-lg p-4 text-amber-100 pointer-events-auto w-56">
+          <div className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-2">Performance</div>
+          <div className="flex items-center justify-between text-sm mb-3">
+            <span className="text-amber-200/70">FPS</span>
+            <span className="font-mono text-lg">{fps}</span>
+          </div>
+          <div className="space-y-2 text-[10px] uppercase tracking-widest">
+            <label className="flex items-center justify-between">
+              <span>Shadows</span>
+              <input type="checkbox" checked={devSettings.showShadows} onChange={(e) => setDevSettings(prev => ({ ...prev, showShadows: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>Clouds</span>
+              <input type="checkbox" checked={devSettings.showClouds} onChange={(e) => setDevSettings(prev => ({ ...prev, showClouds: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>Fog</span>
+              <input type="checkbox" checked={devSettings.showFog} onChange={(e) => setDevSettings(prev => ({ ...prev, showFog: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>Torches</span>
+              <input type="checkbox" checked={devSettings.showTorches} onChange={(e) => setDevSettings(prev => ({ ...prev, showTorches: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>NPCs</span>
+              <input type="checkbox" checked={devSettings.showNPCs} onChange={(e) => setDevSettings(prev => ({ ...prev, showNPCs: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>Rats</span>
+              <input type="checkbox" checked={devSettings.showRats} onChange={(e) => setDevSettings(prev => ({ ...prev, showRats: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>Miasma</span>
+              <input type="checkbox" checked={devSettings.showMiasma} onChange={(e) => setDevSettings(prev => ({ ...prev, showMiasma: e.target.checked }))} className="accent-amber-600" />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {showPlayerModal && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-start bg-black/70 backdrop-blur-sm p-6 md:p-10 pointer-events-auto">
+          <div className="w-full max-w-3xl h-[85vh] bg-black/75 border border-amber-900/40 rounded-xl shadow-2xl p-6 md:p-10 animate-in slide-in-from-left-8 fade-in overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-amber-900/40 pb-4">
+              <div>
+                <h3 className="historical-font text-amber-400 text-2xl tracking-widest">Player Dossier</h3>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-amber-200/40 mt-1">Detailed Record</div>
+              </div>
+              <button onClick={() => setShowPlayerModal(false)} className="text-amber-400 hover:text-amber-300">
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-8 text-amber-50/85 text-[12px]">
+              <div className="space-y-3">
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Name</span><div className="font-bold">{playerStats.name}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Age</span><div>{playerStats.age} Years</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Class</span><div>{playerStats.socialClass}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Profession</span><div>{playerStats.profession}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Family</span><div>{playerStats.family}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Health History</span><div>{playerStats.healthHistory}</div></div>
+              </div>
+
+              <div className="space-y-3">
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Skin</span><div>{playerStats.skinDescription}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Hair</span><div>{playerStats.hairDescription}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Robe</span><div>{playerStats.robeDescription}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Headwear</span><div>{playerStats.headwearDescription}</div></div>
+                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Clothing</span><div>{playerStats.clothing.join(', ')}</div></div>
+              </div>
+            </div>
+
+            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8 text-amber-50/85 text-[12px]">
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-2">Attributes</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>Strength: <span className="font-bold">{playerStats.strength}</span></div>
+                  <div>Piety: <span className="font-bold">{playerStats.piety}</span></div>
+                  <div>Perceptiveness: <span className="font-bold">{playerStats.perceptiveness}</span></div>
+                  <div>Neuroticism: <span className="font-bold">{playerStats.neuroticism}</span></div>
+                  <div>Charisma: <span className="font-bold">{playerStats.charisma}</span></div>
+                  <div>Humoral Balance: <span className="font-bold">{playerStats.humoralBalance}</span></div>
+                </div>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-2">Four Humors</div>
+                <div className="space-y-2">
+                  <div className="flex justify-between"><span>Blood</span><span className="font-bold">{playerStats.humors.blood}</span></div>
+                  <div className="flex justify-between"><span>Phlegm</span><span className="font-bold">{playerStats.humors.phlegm}</span></div>
+                  <div className="flex justify-between"><span>Yellow Bile</span><span className="font-bold">{playerStats.humors.yellowBile}</span></div>
+                  <div className="flex justify-between"><span>Black Bile</span><span className="font-bold">{playerStats.humors.blackBile}</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

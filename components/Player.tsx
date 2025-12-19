@@ -3,8 +3,10 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle } f
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, PointerLockControls } from '@react-three/drei';
-import { CameraMode } from '../types';
+import { CameraMode, BuildingMetadata, PlayerStats } from '../types';
 import { Humanoid } from './Humanoid';
+import { isBlockedByBuildings } from '../utils/collision';
+import { SpatialHash } from '../utils/spatial';
 
 const PLAYER_SPEED = 6;
 const RUN_SPEED = 11;
@@ -20,19 +22,32 @@ interface PlayerProps {
   targetPosition?: THREE.Vector3 | null;
   setTargetPosition: (v: THREE.Vector3 | null) => void;
   cameraMode: CameraMode;
+  buildings?: BuildingMetadata[];
+  buildingHash?: SpatialHash<BuildingMetadata> | null;
+  timeOfDay?: number;
+  playerStats?: PlayerStats;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({ 
   initialPosition = [0, 0, 0], 
-  cameraMode
+  cameraMode,
+  buildings = [],
+  buildingHash = null,
+  timeOfDay = 12,
+  playerStats
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
+  const pointerRef = useRef<any>(null);
   const markerRef = useRef<THREE.Mesh>(null);
   const lastPlayerPos = useRef(new THREE.Vector3());
+  const fpYaw = useRef(0);
+  const fpPitch = useRef(0);
   const { camera } = useThree();
   const [isWalking, setIsWalking] = useState(false);
   const [isSprinting, setIsSprinting] = useState(false);
+  const walkingRef = useRef(false);
+  const sprintingRef = useRef(false);
   
   // Physics states
   const velV = useRef(0);
@@ -92,8 +107,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
     // 1. Camera Adjustment Logic (WASD)
     if (cameraMode === CameraMode.FIRST_PERSON) {
-      if (keys.a) group.current.rotation.y += CAMERA_SENSITIVITY * delta;
-      if (keys.d) group.current.rotation.y -= CAMERA_SENSITIVITY * delta;
+      fpYaw.current += (keys.a ? CAMERA_SENSITIVITY * delta : 0);
+      fpYaw.current -= (keys.d ? CAMERA_SENSITIVITY * delta : 0);
+      fpPitch.current += (keys.w ? CAMERA_SENSITIVITY * delta : 0);
+      fpPitch.current -= (keys.s ? CAMERA_SENSITIVITY * delta : 0);
+      fpPitch.current = THREE.MathUtils.clamp(fpPitch.current, -1.2, 1.2);
     } else if (cameraMode === CameraMode.OVERHEAD && orbitRef.current) {
       const angle = OVERHEAD_ROTATE_SPEED * delta;
       if (keys.a) orbitRef.current.setAzimuthalAngle(orbitRef.current.getAzimuthalAngle() + angle);
@@ -138,27 +156,47 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
     // 3. Movement Logic (Arrow Keys)
     let moveVec = new THREE.Vector3();
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(group.current.quaternion);
-    if (cameraMode !== CameraMode.FIRST_PERSON) {
-        forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    const forward = new THREE.Vector3();
+    if (cameraMode === CameraMode.FIRST_PERSON) {
+      camera.getWorldDirection(forward);
+    } else {
+      forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
     }
     forward.y = 0; forward.normalize();
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(cameraMode === CameraMode.FIRST_PERSON ? group.current.quaternion : camera.quaternion);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
     right.y = 0; right.normalize();
 
     if (keys.up) moveVec.add(forward);
     if (keys.down) moveVec.sub(forward);
     if (keys.right) moveVec.add(right);
     if (keys.left) moveVec.sub(right);
+    if (cameraMode === CameraMode.FIRST_PERSON) {
+      // WASD controls look in first person; movement uses arrow keys.
+    }
 
     const moving = moveVec.lengthSq() > 0.01;
-    setIsWalking(moving);
-    setIsSprinting(moving && keys.shift);
+    if (walkingRef.current !== moving) {
+      walkingRef.current = moving;
+      setIsWalking(moving);
+    }
+    const sprinting = moving && keys.shift;
+    if (sprintingRef.current !== sprinting) {
+      sprintingRef.current = sprinting;
+      setIsSprinting(sprinting);
+    }
 
     if (moving) {
       moveVec.normalize();
       const speed = keys.shift ? RUN_SPEED : PLAYER_SPEED;
-      group.current.position.add(moveVec.multiplyScalar(speed * delta));
+      const moveDelta = moveVec.multiplyScalar(speed * delta);
+      const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
+      if (!isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined)) {
+        group.current.position.x = nextX.x;
+      }
+      const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
+      if (!isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined)) {
+        group.current.position.z = nextZ.z;
+      }
       
       if (cameraMode !== CameraMode.FIRST_PERSON) {
         const targetRot = Math.atan2(moveVec.x, moveVec.z);
@@ -168,8 +206,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
     // 4. Camera Positioning
     if (cameraMode === CameraMode.FIRST_PERSON) {
-      camera.position.set(group.current.position.x, 1.75 + group.current.position.y, group.current.position.z);
-      camera.rotation.y = group.current.rotation.y;
+      camera.position.set(group.current.position.x, 1.7 + group.current.position.y, group.current.position.z);
+      camera.rotation.set(fpPitch.current, fpYaw.current, 0);
+      group.current.rotation.y = fpYaw.current;
     } else if (cameraMode === CameraMode.OVERHEAD && orbitRef.current) {
       const playerPos = group.current.position;
       if (playerPos.distanceToSquared(lastPlayerPos.current) > 0.0001) {
@@ -209,16 +248,47 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           mouseButtons={cameraMode === CameraMode.OVERHEAD ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN } : undefined}
         />
       ) : (
-        <PointerLockControls />
+        <PointerLockControls ref={pointerRef} makeDefault />
       )}
       <group ref={group} position={initialPosition}>
-        <Humanoid 
-          color="#2a3b55" 
-          turbanColor="#ffffff" 
-          isWalking={isWalking} 
-          isSprinting={isSprinting}
-        />
+        {cameraMode !== CameraMode.FIRST_PERSON && (
+          <Humanoid 
+            color={playerStats?.robeBaseColor || (playerStats?.gender === 'Female' ? playerStats.robeColor : '#2a3b55')} 
+            headColor={playerStats?.skinTone}
+            turbanColor={playerStats?.headwearColor || playerStats?.hairColor || '#ffffff'} 
+            headscarfColor={playerStats?.headscarfColor}
+            gender={playerStats?.gender}
+            hairColor={playerStats?.hairColor}
+            scale={playerStats ? [playerStats.weight, playerStats.height, playerStats.weight] : undefined}
+            enableArmSwing
+            armSwingMode={(timeOfDay >= 19 || timeOfDay < 5) ? 'left' : 'both'}
+            robeAccentColor={playerStats?.robeAccentColor}
+            robeHasSash={playerStats?.robeHasSash}
+            robeSleeves={playerStats?.robeSleeves}
+            robeHasTrim={playerStats?.robeHasTrim ?? true}
+            robeHemBand={playerStats?.robeHemBand}
+            robeSpread={playerStats?.robeSpread}
+            robeOverwrap={playerStats?.robeOverwrap}
+            isWalking={isWalking} 
+            isSprinting={isSprinting}
+          />
+        )}
         
+        {/* Player Torch */}
+        {(cameraMode !== CameraMode.FIRST_PERSON) && (timeOfDay >= 19 || timeOfDay < 5) && (
+          <group position={[0.35, 1.05, 0.25]}>
+            <mesh castShadow>
+              <cylinderGeometry args={[0.04, 0.06, 0.4, 8]} />
+              <meshStandardMaterial color="#3b2a1a" roughness={0.9} />
+            </mesh>
+            <mesh position={[0, 0.25, 0]}>
+              <sphereGeometry args={[0.1, 10, 10]} />
+              <meshStandardMaterial color="#ffb347" emissive="#ff7a18" emissiveIntensity={0.9} />
+            </mesh>
+            <pointLight intensity={1.1} distance={16} decay={2} color="#ffb347" />
+          </group>
+        )}
+
         {/* Glowing Marker */}
         <mesh ref={markerRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
           <ringGeometry args={[0.8, 1.0, 32]} />
