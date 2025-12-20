@@ -5,7 +5,21 @@ const FIRST_NAMES_MALE = ['Ahmad', 'Yusuf', 'Ibrahim', 'Umar', 'Hassan', 'Mahmud
 const FIRST_NAMES_FEMALE = ['Fatima', 'Zaynab', 'Maryam', 'Aisha', 'Khadija', 'Layla', 'Salma', 'Hafsa', 'Raya', 'Nura'];
 const LAST_NAMES = ['Al-Dimashqi', 'Al-Halabi', 'Al-Baghdadi', 'Al-Suri', 'Al-Farsi', 'Al-Andalusi', 'Al-Misri', 'Ibn Khaldun', 'Al-Bakri'];
 
-const COMMERCIAL_PROFESSIONS = ['Spice Merchant', 'Draper', 'Baker', 'Blacksmith', 'Coppersmith', 'Weaver', 'Carpenter', 'Potter'];
+const COMMERCIAL_PROFESSIONS = [
+  'Spice Merchant',
+  'Draper',
+  'Baker',
+  'Blacksmith',
+  'Coppersmith',
+  'Weaver',
+  'Carpenter',
+  'Potter',
+  'Innkeeper',
+  'Khan Warden',
+  'Sherbet Seller',
+  'Sherbet House Keeper',
+  'Caravanserai Keeper'
+];
 const RESIDENTIAL_PROFESSIONS = ['Day-Laborer', 'Water-Carrier', 'Copyist', 'Tanner', 'Unemployed', 'Retired Guard'];
 const MOODS = ['Fearful', 'Anxious', 'Determined', 'Exhausted', 'Pious', 'Sullen', 'Grateful', 'Stoic'];
 const FAMILY_STRUCTURES = [
@@ -53,11 +67,30 @@ export const generateNPCStats = (seed: number): NPCStats => {
     : socialClass === SocialClass.CLERGY ? 0.95
     : 0.9;
   const robeSpread = gender === 'Female'
-    ? clamp(robeSpreadBase + (weightBase - 0.8) * 0.5 + (rand() - 0.5) * 0.08, 0.75, 1.2)
+    ? (() => {
+        const roll = rand();
+        const narrowBias = socialClass === SocialClass.PEASANT ? 0.7 : socialClass === SocialClass.MERCHANT ? 0.6 : socialClass === SocialClass.NOBILITY ? 0.45 : 0.55;
+        const wideBias = socialClass === SocialClass.NOBILITY ? 0.18 : 0.08;
+        if (roll < narrowBias) {
+          const extraNarrow = rand() < 0.6;
+          return extraNarrow
+            ? clamp(0.52 + rand() * 0.12 + (weightBase - 0.8) * 0.12, 0.5, 0.7)
+            : clamp(0.62 + rand() * 0.16 + (weightBase - 0.8) * 0.18, 0.58, 0.85);
+        }
+        if (roll > 1 - wideBias) {
+          return clamp(1.02 + rand() * 0.2 + (weightBase - 0.8) * 0.35, 0.95, 1.25);
+        }
+        return clamp(0.78 + rand() * 0.16 + (weightBase - 0.8) * 0.2, 0.72, 1.0);
+      })()
     : 1.0;
   const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.4);
   const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.4 : 0.6);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.75 : 0.4);
+  const robePattern: 'none' | 'damask' = gender === 'Female'
+    ? (socialClass === SocialClass.NOBILITY ? (rand() > 0.4 ? 'damask' : 'none')
+      : socialClass === SocialClass.MERCHANT ? (rand() > 0.75 ? 'damask' : 'none')
+      : 'none')
+    : 'none';
   const sleeveCoverage: 'full' | 'lower' | 'none' =
     socialClass === SocialClass.NOBILITY ? (rand() > 0.35 ? 'full' : 'lower')
     : socialClass === SocialClass.MERCHANT ? (rand() > 0.45 ? 'full' : 'lower')
@@ -72,13 +105,16 @@ export const generateNPCStats = (seed: number): NPCStats => {
         : socialClass === SocialClass.NOBILITY ? (rand() > 0.4 ? 'medium' : 'long')
         : socialClass === SocialClass.CLERGY ? (rand() > 0.6 ? 'short' : 'medium')
         : rand() > 0.5 ? 'medium' : 'short');
-  const headwearStyle: 'scarf' | 'cap' | 'turban' | 'none' = gender === 'Female'
+  const headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none' = gender === 'Female'
     ? 'scarf'
-    : socialClass === SocialClass.NOBILITY
-      ? (rand() > 0.2 ? 'turban' : 'cap')
-      : socialClass === SocialClass.CLERGY
-        ? (rand() > 0.4 ? 'turban' : 'cap')
-        : rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
+    : (() => {
+        const roll = rand();
+        if (roll < 0.2) return 'fez';
+        if (roll < 0.3 && socialClass === SocialClass.PEASANT) return 'straw';
+        if (socialClass === SocialClass.NOBILITY) return rand() > 0.2 ? 'turban' : 'cap';
+        if (socialClass === SocialClass.CLERGY) return rand() > 0.4 ? 'turban' : 'cap';
+        return rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
+      })();
   const footwearStyle: 'sandals' | 'shoes' | 'bare' =
     socialClass === SocialClass.NOBILITY ? (rand() > 0.2 ? 'shoes' : 'sandals')
     : socialClass === SocialClass.MERCHANT ? (rand() > 0.3 ? 'shoes' : 'sandals')
@@ -109,6 +145,7 @@ export const generateNPCStats = (seed: number): NPCStats => {
     robeHasTrim,
     robeHemBand,
     robeOverwrap,
+    robePattern,
     hairStyle,
     headwearStyle,
     sleeveCoverage,
@@ -156,24 +193,55 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
       { desc: 'threadbare linen qamis in beige', base: '#c8b892', accent: '#e6d8b7', sash: false, sleeves: false },
       { desc: 'patched wool qaba in earth tones', base: '#8a6b4f', accent: '#c8b892', sash: true, sleeves: true },
       { desc: 'undyed flax thawb with a simple izar belt', base: '#d6c8a8', accent: '#cdbb9a', sash: false, sleeves: false },
+      { desc: 'washed linen thawb in pale sand', base: '#d9cdb2', accent: '#c8b892', sash: false, sleeves: false },
+      { desc: 'rough wool qabāʾ in walnut brown', base: '#7a5a3f', accent: '#bfae8a', sash: true, sleeves: true },
     ],
     [SocialClass.MERCHANT]: [
       { desc: 'dyed wool qaba in muted olive with a beige izar', base: '#6f6a3f', accent: '#e1d3b3', sash: true, sleeves: true },
       { desc: 'well-kept linen thawb in warm tan', base: '#b89b6a', accent: '#d9c9a8', sash: true, sleeves: true },
       { desc: 'trimmed qaba with a woven izar', base: '#7b5a4a', accent: '#e3d2ad', sash: true, sleeves: true },
+      { desc: 'dyed linen thawb in soft ochre', base: '#c2a46a', accent: '#ead8b8', sash: true, sleeves: true },
+      { desc: 'muted indigo qabāʾ with pale trim', base: '#4b5666', accent: '#c7b9a1', sash: true, sleeves: true },
     ],
     [SocialClass.CLERGY]: [
       { desc: 'dark wool qaba with plain trim', base: '#3d3a34', accent: '#8b7f70', sash: false, sleeves: true },
       { desc: 'plain thawb with a faded izar', base: '#51473c', accent: '#9a8a75', sash: true, sleeves: true },
       { desc: 'modest wool qaba in slate tones', base: '#4a4f59', accent: '#7a6f63', sash: false, sleeves: true },
+      { desc: 'faded wool thawb in ash brown', base: '#5b5247', accent: '#9b8e7a', sash: false, sleeves: true },
     ],
     [SocialClass.NOBILITY]: [
       { desc: 'fine woven qaba with subtle embroidery', base: '#6a5b4a', accent: '#bfa57e', sash: true, sleeves: true },
       { desc: 'well-tailored thawb in rich cloth', base: '#70523f', accent: '#cbb58c', sash: true, sleeves: true },
       { desc: 'layered qaba with ornate trim', base: '#5c4a3f', accent: '#d0b992', sash: true, sleeves: true },
+      { desc: 'dyed wool qabāʾ in deep madder', base: '#6a4038', accent: '#d6c2a4', sash: true, sleeves: true },
+      { desc: 'muted indigo thawb with woven trim', base: '#394252', accent: '#cdbb9a', sash: true, sleeves: true },
     ],
   };
-  const robePick = robeOptionsByClass[socialClass][Math.floor(rand() * robeOptionsByClass[socialClass].length)];
+  const robePickBase = robeOptionsByClass[socialClass][Math.floor(rand() * robeOptionsByClass[socialClass].length)];
+  const adjustHex = (hex: string, factor: number) => {
+    const clean = hex.replace('#', '');
+    const num = parseInt(clean, 16);
+    const r = Math.min(255, Math.max(0, Math.round(((num >> 16) & 0xff) * factor)));
+    const g = Math.min(255, Math.max(0, Math.round(((num >> 8) & 0xff) * factor)));
+    const b = Math.min(255, Math.max(0, Math.round((num & 0xff) * factor)));
+    return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  };
+  const robePick = {
+    ...robePickBase,
+    base: adjustHex(robePickBase.base, 0.94 + rand() * 0.12),
+    accent: adjustHex(robePickBase.accent, 0.9 + rand() * 0.18)
+  };
+
+  const headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none' = gender === 'Female'
+    ? 'scarf'
+    : (() => {
+        const roll = rand();
+        if (roll < 0.2) return 'fez';
+        if (roll < 0.3 && socialClass === SocialClass.PEASANT) return 'straw';
+        if (socialClass === SocialClass.NOBILITY) return rand() > 0.2 ? 'turban' : 'cap';
+        if (socialClass === SocialClass.CLERGY) return rand() > 0.4 ? 'turban' : 'cap';
+        return rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
+      })();
 
   const headwearByGender = gender === 'Female'
     ? [
@@ -182,11 +250,23 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
         { desc: 'light khimar with a simple band', color: '#c7b08c' }
       ]
     : [
-        { desc: 'plain imamah (turban) of undyed cloth', color: '#d9c9a8' },
-        { desc: 'wrapped imamah in light cotton', color: '#cdbb9a' },
-        { desc: 'headwrap with a narrow band', color: '#bfa57e' }
+        { desc: 'deep red imamah (turban) with white striping', color: '#8b2e2e' },
+        { desc: 'dark indigo imamah with pale striping', color: '#3f5d7a' },
+        { desc: 'black wool headwrap with white banding', color: '#1f1f1f' },
+        { desc: 'brown wool imamah with lighter wrap', color: '#7b5a4a' },
+        { desc: 'tan cotton headwrap in plain weave', color: '#cbb48a' },
+        { desc: 'brown wool imamah with pale striping', color: '#7b5a4a' }
       ];
-  const headwearPick = headwearByGender[Math.floor(rand() * headwearByGender.length)];
+  let headwearPick = headwearByGender[Math.floor(rand() * headwearByGender.length)];
+  if (gender === 'Male') {
+    if (headwearStyle === 'fez') {
+      headwearPick = rand() > 0.5
+        ? { desc: 'felt fez cap in deep red', color: '#8b2e2e' }
+        : { desc: 'felt fez cap in pale tan', color: '#cbb48a' };
+    } else if (headwearStyle === 'straw') {
+      headwearPick = { desc: 'woven straw brimmed cap', color: '#cbb48a' };
+    }
+  }
 
   const clothing = [
     robePick.desc,
@@ -226,11 +306,30 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
     : socialClass === SocialClass.CLERGY ? 0.95
     : 0.9;
   const robeSpread = gender === 'Female'
-    ? clamp(robeSpreadBase + (weight - 0.8) * 0.5 + (rand() - 0.5) * 0.08, 0.75, 1.2)
+    ? (() => {
+        const roll = rand();
+        const narrowBias = socialClass === SocialClass.PEASANT ? 0.7 : socialClass === SocialClass.MERCHANT ? 0.6 : socialClass === SocialClass.NOBILITY ? 0.45 : 0.55;
+        const wideBias = socialClass === SocialClass.NOBILITY ? 0.18 : 0.08;
+        if (roll < narrowBias) {
+          const extraNarrow = rand() < 0.6;
+          return extraNarrow
+            ? clamp(0.52 + rand() * 0.12 + (weight - 0.8) * 0.12, 0.5, 0.7)
+            : clamp(0.62 + rand() * 0.16 + (weight - 0.8) * 0.18, 0.58, 0.85);
+        }
+        if (roll > 1 - wideBias) {
+          return clamp(1.02 + rand() * 0.2 + (weight - 0.8) * 0.35, 0.95, 1.25);
+        }
+        return clamp(0.78 + rand() * 0.16 + (weight - 0.8) * 0.2, 0.72, 1.0);
+      })()
     : 1.0;
   const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.65 : 0.4);
   const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.35 : 0.6);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.35);
+  const robePattern: 'none' | 'damask' = gender === 'Female'
+    ? (socialClass === SocialClass.NOBILITY ? (rand() > 0.35 ? 'damask' : 'none')
+      : socialClass === SocialClass.MERCHANT ? (rand() > 0.7 ? 'damask' : 'none')
+      : 'none')
+    : 'none';
   const sleeveCoverage: 'full' | 'lower' | 'none' = robePick.sleeves
     ? (rand() > 0.6 ? 'full' : 'lower')
     : 'none';
@@ -242,13 +341,6 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
         : socialClass === SocialClass.NOBILITY ? (rand() > 0.4 ? 'medium' : 'long')
         : socialClass === SocialClass.CLERGY ? (rand() > 0.6 ? 'short' : 'medium')
         : rand() > 0.5 ? 'medium' : 'short');
-  const headwearStyle: 'scarf' | 'cap' | 'turban' | 'none' = gender === 'Female'
-    ? 'scarf'
-    : socialClass === SocialClass.NOBILITY
-      ? (rand() > 0.2 ? 'turban' : 'cap')
-      : socialClass === SocialClass.CLERGY
-        ? (rand() > 0.4 ? 'turban' : 'cap')
-        : rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
   const footwearStyle: 'sandals' | 'shoes' | 'bare' =
     socialClass === SocialClass.NOBILITY ? (rand() > 0.2 ? 'shoes' : 'sandals')
     : socialClass === SocialClass.MERCHANT ? (rand() > 0.3 ? 'shoes' : 'sandals')
@@ -293,6 +385,7 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
     robeHemBand,
     robeSpread,
     robeOverwrap,
+    robePattern,
     hairStyle,
     headwearStyle,
     sleeveCoverage,

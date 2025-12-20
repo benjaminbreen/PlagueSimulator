@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle } from '../types';
+import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats } from '../types';
 import { generateNPCStats } from '../utils/procedural';
 import { NPC } from './NPC';
 import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
@@ -15,19 +15,40 @@ interface AgentsProps {
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   obstacles?: Obstacle[];
   maxAgents?: number;
+  agentHashRef?: React.MutableRefObject<SpatialHash<AgentSnapshot> | null>;
+  impactMapRef?: React.MutableRefObject<Map<string, { time: number; intensity: number }>>;
+  playerRef?: React.RefObject<THREE.Group>;
+  onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
+  selectedNpcId?: string | null;
 }
 
-export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, buildings, buildingHash = null, obstacles = [], maxAgents = 30 }) => {
+export const Agents: React.FC<AgentsProps> = ({
+  params,
+  simTime,
+  onStatsUpdate,
+  buildings,
+  buildingHash = null,
+  obstacles = [],
+  maxAgents = 30,
+  agentHashRef: externalAgentHashRef,
+  impactMapRef,
+  playerRef,
+  onNpcSelect,
+  selectedNpcId = null
+}) => {
   const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3 }>>(new Map());
-  const agentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
+  const localAgentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
   const statsTickRef = useRef(0);
 
   const npcPool = useMemo(() => {
+    const sampleRing = (minR: number, maxR: number) => {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = minR + Math.random() * (maxR - minR);
+      return new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
+    };
     return Array.from({ length: maxAgents }).map((_, i) => {
       const stats = generateNPCStats(i * 1337);
-      const angle = (i / CONSTANTS.AGENT_COUNT) * Math.PI * 2;
-      const rad = 15 + Math.random() * 35;
-      const initialPos = new THREE.Vector3(Math.cos(angle) * rad, 0, Math.sin(angle) * rad);
+      const initialPos = sampleRing(10, 30);
       const initialTarget = new THREE.Vector3((Math.random() - 0.5) * 80, 0, (Math.random() - 0.5) * 80);
       return { stats, initialPos, initialTarget };
     });
@@ -43,7 +64,8 @@ export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, 
     if (time >= 18 && time < 22) return 10 - Math.round(((time - 18) / 4) * 8);
     return 2;
   };
-  const activeCount = Math.min(maxAgents, getActiveCount());
+  const minVisible = params.timeOfDay >= 6 && params.timeOfDay <= 22 ? 8 : 4;
+  const activeCount = Math.min(maxAgents, Math.max(minVisible, getActiveCount()));
 
   const handleUpdate = (id: string, state: AgentState, pos: THREE.Vector3) => {
     agentRegistry.current.set(id, { state, pos });
@@ -60,7 +82,11 @@ export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, 
       else deceased++;
     });
 
-    agentHashRef.current = buildAgentHash(snapshots);
+    const builtHash = buildAgentHash(snapshots);
+    localAgentHashRef.current = builtHash;
+    if (externalAgentHashRef) {
+      externalAgentHashRef.current = builtHash;
+    }
 
     statsTickRef.current += 1;
     if (statsTickRef.current % 8 === 0) {
@@ -76,11 +102,11 @@ export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, 
   return (
     <group>
       {npcPool.slice(0, activeCount).map((npc, i) => (
-        <NPC 
-          key={npc.stats.id} 
-          stats={npc.stats} 
-          position={npc.initialPos} 
-          target={npc.initialTarget} 
+        <NPC
+          key={npc.stats.id}
+          stats={npc.stats}
+          position={npc.initialPos}
+          target={npc.initialTarget}
           getSimTime={() => simTime}
           onUpdate={handleUpdate}
           infectionRate={params.infectionRate}
@@ -89,8 +115,13 @@ export const Agents: React.FC<AgentsProps> = ({ params, simTime, onStatsUpdate, 
           buildings={buildings}
           buildingHash={buildingHash || undefined}
           obstacles={obstacles}
-          agentHash={agentHashRef.current || undefined}
+          agentHash={localAgentHashRef.current || undefined}
+          impactMapRef={impactMapRef}
+          playerRef={playerRef}
+          timeOfDay={params.timeOfDay}
           initialState={i === 0 ? AgentState.INCUBATING : AgentState.HEALTHY}
+          onSelect={onNpcSelect}
+          isSelected={selectedNpcId === npc.stats.id}
         />
       ))}
     </group>

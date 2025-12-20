@@ -32,8 +32,21 @@ const roomCountForClass = (socialClass: SocialClass): number => {
   return 1;
 };
 
-const defaultRoomTypes = (socialClass: SocialClass, profession: string): InteriorRoomType[] => {
+const defaultRoomTypes = (socialClass: SocialClass, profession: string, buildingType: BuildingType): InteriorRoomType[] => {
   const types: InteriorRoomType[] = [InteriorRoomType.ENTRY];
+  const prof = profession.toLowerCase();
+
+  if (buildingType === BuildingType.COMMERCIAL) {
+    if (prof.includes('inn') || prof.includes('sherbet')) {
+      types.push(InteriorRoomType.HALL, InteriorRoomType.PRIVATE);
+    } else if (prof.includes('khan') || prof.includes('caravanserai')) {
+      types.push(InteriorRoomType.HALL, InteriorRoomType.STORAGE);
+    } else {
+      types.push(InteriorRoomType.HALL, InteriorRoomType.STORAGE);
+    }
+    return types;
+  }
+
   if (socialClass === SocialClass.NOBILITY) {
     types.push(InteriorRoomType.HALL, InteriorRoomType.PRIVATE, InteriorRoomType.COURTYARD);
   } else if (socialClass === SocialClass.MERCHANT) {
@@ -141,33 +154,367 @@ const roomPropBudget = (socialClass: SocialClass): number => {
   return 11;
 };
 
-const pickProps = (rooms: InteriorRoom[], socialClass: SocialClass, seed: number): InteriorProp[] => {
+const addProp = (
+  props: InteriorProp[],
+  room: InteriorRoom,
+  type: InteriorPropType,
+  label: string,
+  position: [number, number, number],
+  rotation: [number, number, number] = [0, 0, 0],
+  scale: [number, number, number] = [1, 1, 1]
+) => {
+  props.push({
+    id: `prop-${type}-${room.id}-${props.length}`,
+    type,
+    roomId: room.id,
+    position,
+    rotation,
+    scale,
+    label,
+  });
+};
+
+const wallAnchor = (
+  room: InteriorRoom,
+  side: 'north' | 'south' | 'east' | 'west',
+  inset = 0.9,
+  offset = 0
+): [number, number, number] => {
+  const [cx, , cz] = room.center;
+  const halfW = room.size[0] / 2;
+  const halfD = room.size[2] / 2;
+  if (side === 'north') return [cx + offset, 0, cz + halfD - inset];
+  if (side === 'south') return [cx + offset, 0, cz - halfD + inset];
+  if (side === 'east') return [cx + halfW - inset, 0, cz + offset];
+  return [cx - halfW + inset, 0, cz + offset];
+};
+
+const addCommercialLayout = (
+  props: InteriorProp[],
+  rooms: InteriorRoom[],
+  profession: string,
+  seed: number
+) => {
+  let s = seed;
+  const rand = () => seededRandom(s++);
+  const profLower = profession.toLowerCase();
+  const hall = rooms.find((room) => room.type === InteriorRoomType.HALL) ?? rooms[0];
+
+  if (profLower.includes('inn') || profLower.includes('sherbet')) {
+    const tableCount = hall.size[0] > 14 ? 3 : 2;
+    for (let i = 0; i < tableCount; i += 1) {
+      const offsetX = (i - (tableCount - 1) / 2) * 3.2;
+      const basePos: [number, number, number] = [hall.center[0] + offsetX, 0, hall.center[2] + (i % 2 === 0 ? 1.0 : -1.0)];
+      addProp(props, hall, InteriorPropType.LOW_TABLE, 'Low table', basePos);
+      const pillows = [
+        [basePos[0] + 1.0, 0, basePos[2]],
+        [basePos[0] - 1.0, 0, basePos[2]],
+        [basePos[0], 0, basePos[2] + 1.0],
+        [basePos[0], 0, basePos[2] - 1.0],
+      ];
+      pillows.forEach((pos) => {
+        addProp(props, hall, InteriorPropType.FLOOR_PILLOWS, 'Floor pillows', pos, [0, rand() * Math.PI * 2, 0]);
+      });
+      addProp(props, hall, InteriorPropType.TRAY, 'Serving tray', [basePos[0] + 0.2, 0.78, basePos[2] - 0.1]);
+      addProp(props, hall, InteriorPropType.TEA_SET, 'Sherbet service', [basePos[0] - 0.2, 0.78, basePos[2] + 0.1]);
+      if (rand() > 0.4) {
+        addProp(props, hall, InteriorPropType.HOOKAH, 'Hookah', [basePos[0] + 1.2, 0, basePos[2] + 0.6]);
+      }
+    }
+    addProp(props, hall, InteriorPropType.BRAZIER, 'Charcoal brazier', wallAnchor(hall, 'south', 0.7));
+    if (rand() > 0.4) {
+      addProp(props, hall, InteriorPropType.BENCH, 'Low bench', wallAnchor(hall, 'east', 0.7, -2.0), [0, Math.PI / 2, 0]);
+    }
+    if (rand() > 0.3) {
+      addProp(props, hall, InteriorPropType.CHAIR, 'Wooden chair', wallAnchor(hall, 'west', 0.7, 1.4), [0, Math.PI / 2, 0]);
+    }
+    return;
+  }
+
+  if (profLower.includes('khan') || profLower.includes('caravanserai')) {
+    addProp(props, hall, InteriorPropType.COUNTER, 'Reception counter', wallAnchor(hall, 'south', 0.8));
+    return;
+  }
+
+  addProp(props, hall, InteriorPropType.COUNTER, 'Sales counter', wallAnchor(hall, 'south', 0.8));
+  const displaySide = rand() > 0.5 ? 'east' : 'west';
+  addProp(props, hall, InteriorPropType.DISPLAY, 'Display shelf', wallAnchor(hall, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4), [0, displaySide === 'east' ? -Math.PI / 2 : Math.PI / 2, 0]);
+  addProp(props, hall, InteriorPropType.BASKET, 'Market baskets', [hall.center[0], 0, hall.center[2] - hall.size[2] / 2 + 2.2], [0, rand() * Math.PI, 0]);
+  addProp(props, hall, InteriorPropType.BOLT_OF_CLOTH, 'Bolts of cloth', [hall.center[0] + 1.4, 0.75, hall.center[2] - hall.size[2] / 2 + 0.8], [0, 0, 0]);
+  addProp(props, hall, InteriorPropType.SCALE, 'Balance scale', [hall.center[0] - 0.4, 0.85, hall.center[2] - hall.size[2] / 2 + 0.85]);
+  addProp(props, hall, InteriorPropType.LEDGER, 'Account ledger', [hall.center[0] + 0.4, 0.85, hall.center[2] - hall.size[2] / 2 + 0.85]);
+};
+
+const placePropPosition = (
+  type: InteriorPropType,
+  room: InteriorRoom,
+  rand: () => number
+): { position: [number, number, number]; rotation: [number, number, number] } => {
+  const [cx, , cz] = room.center;
+  const halfW = room.size[0] / 2;
+  const halfD = room.size[2] / 2;
+  const wallInset = 0.6;
+  const wallPick = Math.floor(rand() * 4);
+  const wallOffset = () => (rand() - 0.5) * (room.size[0] * 0.5);
+  const wallZOffset = () => (rand() - 0.5) * (room.size[2] * 0.5);
+  const centerOffset = () => (rand() - 0.5) * (Math.min(room.size[0], room.size[2]) * 0.3);
+
+  const wallAligned = () => {
+    if (wallPick === 0) {
+      return { position: [cx + wallOffset(), 0, cz - halfD + wallInset], rotation: [0, 0, 0] };
+    }
+    if (wallPick === 1) {
+      return { position: [cx + wallOffset(), 0, cz + halfD - wallInset], rotation: [0, Math.PI, 0] };
+    }
+    if (wallPick === 2) {
+      return { position: [cx - halfW + wallInset, 0, cz + wallZOffset()], rotation: [0, Math.PI / 2, 0] };
+    }
+    return { position: [cx + halfW - wallInset, 0, cz + wallZOffset()], rotation: [0, -Math.PI / 2, 0] };
+  };
+
+  switch (type) {
+    case InteriorPropType.BEDROLL:
+    case InteriorPropType.CHEST:
+    case InteriorPropType.DESK:
+    case InteriorPropType.SHELF:
+    case InteriorPropType.WATER_BASIN:
+    case InteriorPropType.EWER:
+    case InteriorPropType.SCREEN:
+    case InteriorPropType.CHAIR:
+    case InteriorPropType.COUNTER:
+    case InteriorPropType.DISPLAY:
+    case InteriorPropType.BOLT_OF_CLOTH:
+      return wallAligned();
+    case InteriorPropType.BASKET:
+      return { position: [cx + (rand() - 0.5) * 2, 0, cz + halfD * 0.1], rotation: [0, rand() * Math.PI * 2, 0] };
+    case InteriorPropType.TRAY:
+    case InteriorPropType.TEA_SET:
+    case InteriorPropType.SCALE:
+    case InteriorPropType.LEDGER:
+      return { position: [cx + (rand() - 0.5) * 2, 0.75, cz + halfD * 0.1], rotation: [0, rand() * Math.PI * 2, 0] };
+    case InteriorPropType.FIRE_PIT:
+    case InteriorPropType.BRAZIER:
+      return { position: [cx + centerOffset(), 0, cz + centerOffset()], rotation: [0, rand() * Math.PI * 2, 0] };
+    case InteriorPropType.HOOKAH:
+      return { position: [cx + (rand() - 0.5) * 2.4, 0, cz + (rand() - 0.5) * 2.4], rotation: [0, rand() * Math.PI * 2, 0] };
+    case InteriorPropType.WALL_HANGING:
+      return { position: [cx + wallOffset(), 0, cz - halfD + 0.15], rotation: [0, 0, 0] };
+    case InteriorPropType.RUG:
+    case InteriorPropType.PRAYER_RUG:
+    case InteriorPropType.FLOOR_MAT:
+    case InteriorPropType.FLOOR_PILLOWS:
+      return { position: [cx + centerOffset(), 0, cz + centerOffset()], rotation: [0, rand() * Math.PI, 0] };
+    case InteriorPropType.LOW_TABLE:
+      return { position: [cx + centerOffset(), 0, cz + centerOffset()], rotation: [0, rand() * Math.PI * 2, 0] };
+    default:
+      return wallAligned();
+  }
+};
+
+const pickProps = (
+  rooms: InteriorRoom[],
+  socialClass: SocialClass,
+  buildingType: BuildingType,
+  profession: string,
+  seed: number
+): InteriorProp[] => {
   let s = seed;
   const rand = () => seededRandom(s++);
   const props: InteriorProp[] = [];
   const budget = Math.max(roomPropBudget(socialClass), rooms.length * 5);
+  const profLower = profession.toLowerCase();
+  const extraTemplates: typeof propTemplates = [];
+  const uniqueTypes = new Set([
+    InteriorPropType.COUNTER,
+    InteriorPropType.DISPLAY,
+    InteriorPropType.SCALE,
+    InteriorPropType.LEDGER,
+    InteriorPropType.BOLT_OF_CLOTH,
+    InteriorPropType.DESK,
+    InteriorPropType.SHELF,
+    InteriorPropType.BRAZIER,
+    InteriorPropType.FIRE_PIT,
+    InteriorPropType.BEDROLL,
+    InteriorPropType.LAMP,
+    InteriorPropType.HOOKAH,
+  ]);
+
+  if (buildingType === BuildingType.COMMERCIAL) {
+    addCommercialLayout(props, rooms, profession, seed + 17);
+  }
+
+  if (socialClass === SocialClass.NOBILITY) {
+    extraTemplates.push(
+      { room: [InteriorRoomType.HALL], type: InteriorPropType.RUG, label: 'Knotted wool rug', minClass: SocialClass.NOBILITY },
+      { room: [InteriorRoomType.HALL], type: InteriorPropType.SCREEN, label: 'Carved screen', minClass: SocialClass.NOBILITY },
+      { room: [InteriorRoomType.PRIVATE], type: InteriorPropType.WALL_HANGING, label: 'Silk wall hanging', minClass: SocialClass.NOBILITY },
+    );
+  }
+  if (socialClass === SocialClass.PEASANT) {
+    extraTemplates.push(
+      { room: [InteriorRoomType.HALL, InteriorRoomType.PRIVATE], type: InteriorPropType.FIRE_PIT, label: 'Cooking hearth' },
+      { room: [InteriorRoomType.HALL], type: InteriorPropType.WATER_BASIN, label: 'Water basin' },
+      { room: [InteriorRoomType.HALL], type: InteriorPropType.EWER, label: 'Water ewer' },
+    );
+  }
+  if (buildingType === BuildingType.RELIGIOUS || profLower.includes('qur')) {
+    extraTemplates.push(
+      { room: [InteriorRoomType.PRIVATE, InteriorRoomType.HALL], type: InteriorPropType.PRAYER_RUG, label: 'Prayer rug' },
+      { room: [InteriorRoomType.WORKSHOP, InteriorRoomType.HALL], type: InteriorPropType.DESK, label: 'Study desk' },
+      { room: [InteriorRoomType.WORKSHOP, InteriorRoomType.HALL], type: InteriorPropType.BOOKS, label: 'Manuscripts' },
+    );
+  }
+  if (buildingType === BuildingType.CIVIC || profLower.includes('scribe')) {
+    extraTemplates.push(
+      { room: [InteriorRoomType.HALL, InteriorRoomType.WORKSHOP], type: InteriorPropType.DESK, label: 'Writing desk' },
+      { room: [InteriorRoomType.HALL, InteriorRoomType.WORKSHOP], type: InteriorPropType.BOOKS, label: 'Ledgers' },
+      { room: [InteriorRoomType.HALL], type: InteriorPropType.CHAIR, label: 'Carved chair', minClass: SocialClass.MERCHANT },
+    );
+  }
+  if (buildingType === BuildingType.COMMERCIAL) {
+    if (profLower.includes('inn') || profLower.includes('sherbet')) {
+      extraTemplates.push(
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.FLOOR_PILLOWS, label: 'Floor pillows' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.TRAY, label: 'Serving tray' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.TEA_SET, label: 'Sherbet service' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.HOOKAH, label: 'Hookah' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.BRAZIER, label: 'Charcoal brazier' },
+      );
+    } else if (profLower.includes('khan') || profLower.includes('caravanserai')) {
+      extraTemplates.push(
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.COUNTER, label: 'Reception counter' },
+        { room: [InteriorRoomType.STORAGE], type: InteriorPropType.CRATE, label: 'Cargo crates' },
+        { room: [InteriorRoomType.STORAGE], type: InteriorPropType.AMPHORA, label: 'Oil amphorae' },
+      );
+    } else {
+      extraTemplates.push(
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.COUNTER, label: 'Sales counter' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.DISPLAY, label: 'Display shelf' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.BASKET, label: 'Market baskets' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.BOLT_OF_CLOTH, label: 'Bolts of cloth', minClass: SocialClass.MERCHANT },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.SCALE, label: 'Balance scale' },
+        { room: [InteriorRoomType.HALL], type: InteriorPropType.LEDGER, label: 'Account ledger' },
+      );
+    }
+  }
 
   rooms.forEach((room) => {
-    const candidates = propTemplates.filter((template) => template.room.includes(room.type) && (!template.minClass || socialClass === template.minClass || socialClass === SocialClass.NOBILITY));
+    const candidates = [...propTemplates, ...extraTemplates].filter((template) => {
+      if (!template.room.includes(room.type)) return false;
+      if (template.minClass && socialClass !== template.minClass && socialClass !== SocialClass.NOBILITY) return false;
+      if (uniqueTypes.has(template.type) && props.some((prop) => prop.roomId === room.id && prop.type === template.type)) return false;
+      return true;
+    });
     const count = Math.min(candidates.length, 5 + Math.floor(rand() * 2));
     for (let i = 0; i < count && props.length < budget; i += 1) {
       const template = candidates[Math.floor(rand() * candidates.length)];
-      const margin = 1.2;
-      let x = room.center[0] + (rand() - 0.5) * (room.size[0] - margin * 2);
-      let z = room.center[2] + (rand() - 0.5) * (room.size[2] - margin * 2);
-      if (template.type === InteriorPropType.WALL_HANGING) {
-        z = room.center[2] - room.size[2] / 2 + 0.15;
-      }
+      const placement = placePropPosition(template.type, room, rand);
       props.push({
         id: `prop-${room.id}-${props.length}`,
         type: template.type,
         roomId: room.id,
-        position: [x, 0, z],
-        rotation: [0, rand() * Math.PI * 2, 0],
+        position: placement.position,
+        rotation: placement.rotation,
         scale: [1, 1, 1],
         label: template.label,
       });
     }
+  });
+
+  if (socialClass !== SocialClass.PEASANT) {
+    const hall = rooms.find((room) => room.type === InteriorRoomType.HALL) ?? rooms[0];
+    const hasRug = props.some((prop) => prop.type === InteriorPropType.RUG);
+    if (!hasRug) {
+      const placement = placePropPosition(InteriorPropType.RUG, hall, rand);
+      props.push({
+        id: `prop-rug-${hall.id}`,
+        type: InteriorPropType.RUG,
+        roomId: hall.id,
+        position: placement.position,
+        rotation: placement.rotation,
+        scale: [1, 1, 1],
+        label: 'Knotted rug',
+      });
+    }
+  }
+
+  rooms.forEach((room) => {
+    if (room.type === InteriorRoomType.HALL) {
+      const hasTable = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.LOW_TABLE);
+      if (!hasTable) {
+        const placement = placePropPosition(InteriorPropType.LOW_TABLE, room, rand);
+        props.push({
+          id: `prop-table-${room.id}`,
+          type: InteriorPropType.LOW_TABLE,
+          roomId: room.id,
+          position: placement.position,
+          rotation: placement.rotation,
+          scale: [1, 1, 1],
+          label: 'Low table',
+        });
+      }
+    }
+    if (room.type === InteriorRoomType.PRIVATE) {
+      const hasBed = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.BEDROLL);
+      if (!hasBed) {
+        const placement = placePropPosition(InteriorPropType.BEDROLL, room, rand);
+        props.push({
+          id: `prop-bed-${room.id}`,
+          type: InteriorPropType.BEDROLL,
+          roomId: room.id,
+          position: placement.position,
+          rotation: placement.rotation,
+          scale: [1, 1, 1],
+          label: 'Sleeping pallet',
+        });
+      }
+    }
+    if (room.type === InteriorRoomType.WORKSHOP) {
+      const hasDesk = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.DESK);
+      if (!hasDesk) {
+        const placement = placePropPosition(InteriorPropType.DESK, room, rand);
+        props.push({
+          id: `prop-desk-${room.id}`,
+          type: InteriorPropType.DESK,
+          roomId: room.id,
+          position: placement.position,
+          rotation: placement.rotation,
+          scale: [1, 1, 1],
+          label: 'Work desk',
+        });
+      }
+    }
+    if (room.type === InteriorRoomType.COURTYARD) {
+      const hasBasin = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.WATER_BASIN);
+      if (!hasBasin) {
+        const placement = placePropPosition(InteriorPropType.WATER_BASIN, room, rand);
+        props.push({
+          id: `prop-basin-${room.id}`,
+          type: InteriorPropType.WATER_BASIN,
+          roomId: room.id,
+          position: placement.position,
+          rotation: placement.rotation,
+          scale: [1, 1, 1],
+          label: 'Water basin',
+        });
+      }
+    }
+  });
+
+  rooms.forEach((room) => {
+    const table = props.find((prop) => prop.roomId === room.id && prop.type === InteriorPropType.LOW_TABLE);
+    if (!table) return;
+    const cluster = props.filter((prop) => prop.roomId === room.id && (prop.type === InteriorPropType.CUSHION || prop.type === InteriorPropType.FLOOR_PILLOWS));
+    const positions: Array<[number, number, number]> = [
+      [table.position[0] + 1.0, 0, table.position[2]],
+      [table.position[0] - 1.0, 0, table.position[2]],
+      [table.position[0], 0, table.position[2] + 1.0],
+      [table.position[0], 0, table.position[2] - 1.0],
+    ];
+    cluster.forEach((prop, index) => {
+      const pos = positions[index % positions.length];
+      prop.position = [pos[0], 0, pos[2]];
+    });
   });
 
   return props;
@@ -232,13 +579,13 @@ export const generateInteriorSpec = (
   let s = seed;
   const socialClass = inferSocialClass(building);
   const profession = building.ownerProfession;
-  const baseRoomTypes = overrides?.roomTypes ?? defaultRoomTypes(socialClass, profession);
+  const baseRoomTypes = overrides?.roomTypes ?? defaultRoomTypes(socialClass, profession, building.type);
   const roomCount = overrides?.roomCount ?? baseRoomTypes.length;
   const size = roomSizeForClass(socialClass);
 
   const rooms = placeRooms(s, baseRoomTypes.slice(0, roomCount), size);
   s += 50;
-  const props = pickProps(rooms, socialClass, s);
+  const props = pickProps(rooms, socialClass, building.type, profession, s);
   s += 80;
   const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? rooms[0];
   const hasLightSource = props.some((prop) => prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER);
@@ -258,6 +605,7 @@ export const generateInteriorSpec = (
   ensureEntryProp(InteriorPropType.CHEST, 'Storage chest', [-1.6, 0, 1.2]);
   ensureEntryProp(InteriorPropType.LOW_TABLE, 'Low table', [1.2, 0, -0.6]);
   ensureEntryProp(InteriorPropType.CUSHION, 'Cushion', [1.6, 0, 0.2]);
+  ensureEntryProp(InteriorPropType.LAMP, 'Oil lamp', [-0.8, 0, -0.8]);
   if (!hasLightSource) {
     props.push({
       id: `prop-lamp-${building.id}`,
@@ -303,6 +651,7 @@ export const generateInteriorSpec = (
   const spec: InteriorSpec = {
     id: `interior-${building.id}`,
     buildingId: building.id,
+    buildingType: building.type,
     seed,
     socialClass,
     profession,
@@ -349,7 +698,15 @@ export const generateInteriorObstacles = (spec: InteriorSpec): Obstacle[] => {
   });
 
   spec.props.forEach((prop) => {
-    const radius = prop.type === InteriorPropType.BENCH ? 1.0 : prop.type === InteriorPropType.LOW_TABLE ? 0.8 : 0.6;
+    const radius = prop.type === InteriorPropType.COUNTER
+      ? 1.4
+      : prop.type === InteriorPropType.DISPLAY
+        ? 1.1
+        : prop.type === InteriorPropType.BENCH
+          ? 1.0
+          : prop.type === InteriorPropType.LOW_TABLE
+            ? 0.8
+            : 0.6;
     obstacles.push({ position: prop.position, radius });
   });
 

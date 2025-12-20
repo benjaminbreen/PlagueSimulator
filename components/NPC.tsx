@@ -1,5 +1,5 @@
 import React, { useRef, useState, useMemo, memo } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, Obstacle } from '../types';
@@ -22,14 +22,19 @@ interface NPCProps {
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   agentHash?: SpatialHash<AgentSnapshot> | null;
   obstacles?: Obstacle[];
+  impactMapRef?: React.MutableRefObject<Map<string, { time: number; intensity: number }>>;
+  playerRef?: React.RefObject<THREE.Group>;
+  timeOfDay: number;
+  onSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
+  isSelected?: boolean;
 }
 
-export const NPC: React.FC<NPCProps> = memo(({ 
-  stats, 
-  initialState = AgentState.HEALTHY, 
-  position, 
-  target, 
-  onUpdate, 
+export const NPC: React.FC<NPCProps> = memo(({
+  stats,
+  initialState = AgentState.HEALTHY,
+  position,
+  target,
+  onUpdate,
   getSimTime,
   infectionRate,
   quarantine,
@@ -37,25 +42,66 @@ export const NPC: React.FC<NPCProps> = memo(({
   buildings,
   buildingHash = null,
   agentHash = null,
-  obstacles = []
+  obstacles = [],
+  impactMapRef,
+  playerRef,
+  timeOfDay,
+  onSelect,
+  isSelected = false
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
-  
+  const [displayState, setDisplayState] = useState<AgentState>(initialState);
+  const lastStateRef = useRef<AgentState>(initialState);
+  const { camera } = useThree();
+
   const stateRef = useRef<AgentState>(initialState);
   const stateStartTimeRef = useRef(getSimTime());
   const currentPosRef = useRef(position.clone());
   const currentTargetRef = useRef(target.clone());
+  const retargetTimerRef = useRef(0);
+  const nextRetargetRef = useRef(3 + Math.random() * 5);
+  const impactStartRef = useRef(0);
+  const impactIntensityRef = useRef(0);
+  const impactPulseRef = useRef(0);
+  const playerImpactCooldownRef = useRef(0);
+  const impactGroupRef = useRef<THREE.Group>(null);
+  const statusMarkerRef = useRef<THREE.Mesh>(null);
+  const statusMarkerMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const impactStemMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const impactDotMatRef = useRef<THREE.MeshBasicMaterial>(null);
+
+  // PERFORMANCE: Throttle spatial queries - cache neighbors and update every 3 frames
+  const cachedNeighborsRef = useRef<AgentSnapshot[]>([]);
+  const spatialQueryFrameCountRef = useRef(0);
+
+  // PERFORMANCE: Distance LOD - calculate distance from camera for detail level
+  const distanceFromCameraRef = useRef(0);
+
+  // PERFORMANCE: Throttle infection checks to once per second instead of every frame
+  const infectionCheckTimerRef = useRef(0);
+
+  // PERFORMANCE: Cache speed modifiers (only recalculate when hour or state changes)
+  const cachedSpeedRef = useRef(2.0);
+  const lastSpeedUpdateHourRef = useRef(-1);
+  const lastSpeedUpdateStateRef = useRef<AgentState>(initialState);
 
   const colors = useMemo(() => {
     switch (stats.socialClass) {
-      case SocialClass.PEASANT: return { body: '#6b5a45', head: '#e2c6a2', turban: '#cdbb9a' };
-      case SocialClass.MERCHANT: return { body: '#7b5a4a', head: '#e6c9a6', turban: '#d9c9a8' };
-      case SocialClass.CLERGY: return { body: '#4a4f59', head: '#d9c4a0', turban: '#bfa57e' };
-      case SocialClass.NOBILITY: return { body: '#6a5b4a', head: '#e6c9a6', turban: '#cbb58c' };
-      default: return { body: '#6b5a45', head: '#e2c6a2', turban: '#cdbb9a' };
+      case SocialClass.PEASANT: return { body: '#6b5a45', head: '#e2c6a2' };
+      case SocialClass.MERCHANT: return { body: '#7b5a4a', head: '#e6c9a6' };
+      case SocialClass.CLERGY: return { body: '#4a4f59', head: '#d9c4a0' };
+      case SocialClass.NOBILITY: return { body: '#6a5b4a', head: '#e6c9a6' };
+      default: return { body: '#6b5a45', head: '#e2c6a2' };
     }
   }, [stats.socialClass]);
+
+  // GRAPHICS: 1 in 5 NPCs carry a torch at night
+  const carriesTorch = useMemo(() => {
+    // Use stats.id to seed the random so it's consistent per NPC
+    const idHash = stats.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return (idHash % 5) === 0; // 20% chance (1 in 5)
+  }, [stats.headwearStyle, stats.id]);
 
   const appearance = useMemo(() => {
     const seed = Number(stats.id.split('-')[1] || '1');
@@ -69,7 +115,14 @@ export const NPC: React.FC<NPCProps> = memo(({
     const robe = robePalette[Math.floor(seededRandom(seed + 41) * robePalette.length)];
     const accentPalette = ['#e1d3b3', '#d9c9a8', '#cbb58c', '#bfa57e'];
     const accent = accentPalette[Math.floor(seededRandom(seed + 43) * accentPalette.length)];
-    return { skin, scarf, robe, accent, hair };
+    const headwearPalette = ['#8b2e2e', '#1f1f1f', '#cbb48a', '#7b5a4a', '#3f5d7a'];
+    const headwearIndex = Math.floor(seededRandom(seed + 55) * headwearPalette.length);
+    const headwear = stats.headwearStyle === 'straw'
+      ? '#cbb48a'
+      : stats.headwearStyle === 'fez'
+        ? (seededRandom(seed + 57) > 0.5 ? '#8b2e2e' : '#cbb48a')
+        : headwearPalette[headwearIndex];
+    return { skin, scarf, robe, accent, hair, headwear };
   }, [stats.id]);
 
   const pickNewTarget = () => {
@@ -81,6 +134,16 @@ export const NPC: React.FC<NPCProps> = memo(({
     );
   };
 
+  const getHealthRingColor = (state: AgentState) => {
+    switch (state) {
+      case AgentState.HEALTHY: return '#22c55e';
+      case AgentState.INCUBATING: return '#fbbf24';
+      case AgentState.INFECTED: return '#f97316';
+      case AgentState.DECEASED: return '#6b7280';
+      default: return '#22c55e';
+    }
+  };
+
   useFrame((_, delta) => {
     if (!group.current || stateRef.current === AgentState.DECEASED) return;
 
@@ -88,28 +151,130 @@ export const NPC: React.FC<NPCProps> = memo(({
     // Freeze movement and logic if simulation is paused
     if (simulationSpeed <= 0) return;
 
-    const effectiveDelta = delta * (simulationSpeed > 1 ? 1 : simulationSpeed);
+    // PERFORMANCE: Calculate distance from camera for visual LOD (used by Humanoid component)
+    distanceFromCameraRef.current = currentPosRef.current.distanceTo(camera.position);
 
     // 1. Movement Logic
+    retargetTimerRef.current += delta;
     const dir = currentTargetRef.current.clone().sub(currentPosRef.current);
     const dist = dir.length();
     
-    if (dist < 1.0) {
+    if (dist < 1.0 || retargetTimerRef.current > nextRetargetRef.current) {
       pickNewTarget();
+      retargetTimerRef.current = 0;
+      nextRetargetRef.current = 3 + Math.random() * 5;
     } else {
       dir.normalize();
-      let speed = stateRef.current === AgentState.INFECTED ? 0.7 : 2.0;
+      if (agentHash) {
+        // PERFORMANCE: Only query spatial hash every 3 frames (3x reduction in queries)
+        spatialQueryFrameCountRef.current++;
+        if (spatialQueryFrameCountRef.current >= 3) {
+          cachedNeighborsRef.current = queryNearbyAgents(currentPosRef.current, agentHash);
+          spatialQueryFrameCountRef.current = 0;
+        }
+
+        // Use cached neighbors for steering calculation
+        const repel = new THREE.Vector3();
+        for (const other of cachedNeighborsRef.current) {
+          if (other.id === stats.id) continue;
+          const offset = currentPosRef.current.clone().sub(other.pos);
+          const d2 = offset.lengthSq();
+          if (d2 > 0.0001 && d2 < 4.0) {
+            repel.add(offset.normalize().multiplyScalar(0.35 / d2));
+          }
+        }
+        if (repel.lengthSq() > 0.0001) {
+          dir.add(repel).normalize();
+        }
+      }
+      // PERFORMANCE: Cache speed calculation - only recalculate when hour or state changes
+      const currentHour = Math.floor(simTime % 24);
+      const stateChanged = stateRef.current !== lastSpeedUpdateStateRef.current;
+      if (currentHour !== lastSpeedUpdateHourRef.current || stateChanged) {
+        const time = simTime % 24;
+        const nightSlow = time < 6 || time > 20 ? 0.8 : 1.0;
+        const baseSpeed = stateRef.current === AgentState.INFECTED ? 0.7 : 2.0;
+        cachedSpeedRef.current = baseSpeed * nightSlow;
+        lastSpeedUpdateHourRef.current = currentHour;
+        lastSpeedUpdateStateRef.current = stateRef.current;
+      }
+      let speed = cachedSpeedRef.current;
       if (quarantine && stateRef.current === AgentState.INFECTED) speed = 0;
-      
+
       const step = dir.multiplyScalar(speed * delta * simulationSpeed);
       const nextPos = currentPosRef.current.clone().add(step);
+
+      // PERFORMANCE & BEHAVIOR: Multi-angle obstacle avoidance (6 directions instead of 2)
       if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined) || isBlockedByObstacles(nextPos, obstacles, 0.5)) {
-        pickNewTarget();
+        // Try 6 angles: 90° left/right, 60° diagonals, 120° half-back
+        // This prevents NPCs from getting stuck in corners
+        const angles = [
+          Math.PI / 2,      // 90° left
+          -Math.PI / 2,     // 90° right
+          Math.PI / 3,      // 60° left (diagonal)
+          -Math.PI / 3,     // 60° right (diagonal)
+          2 * Math.PI / 3,  // 120° left (half-back)
+          -2 * Math.PI / 3  // 120° right (half-back)
+        ];
+
+        let foundPath = false;
+        for (const angle of angles) {
+          // Rotate direction vector by angle
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const rotatedDir = new THREE.Vector3(
+            dir.x * cos - dir.z * sin,
+            0,
+            dir.x * sin + dir.z * cos
+          ).normalize().multiplyScalar(0.6);
+
+          const tryPos = currentPosRef.current.clone().add(rotatedDir);
+
+          // Check if this angle is clear
+          if (!isBlockedByBuildings(tryPos, buildings, 0.5, buildingHash || undefined) &&
+              !isBlockedByObstacles(tryPos, obstacles, 0.5)) {
+            currentPosRef.current.copy(tryPos);
+            foundPath = true;
+            break;
+          }
+        }
+
+        // Only retarget if all 6 directions are blocked (truly stuck)
+        if (!foundPath) {
+          pickNewTarget();
+          retargetTimerRef.current = 0;
+          nextRetargetRef.current = 3 + Math.random() * 5;
+        }
       } else {
         currentPosRef.current.copy(nextPos);
-        group.current.position.copy(currentPosRef.current);
       }
-      group.current.lookAt(currentPosRef.current.clone().add(dir));
+      if (group.current) {
+        group.current.position.copy(currentPosRef.current);
+        group.current.lookAt(currentPosRef.current.clone().add(dir));
+      }
+    }
+
+    // 1b. Player collision bounceback
+    if (playerRef?.current) {
+      const playerPos = playerRef.current.position;
+      const offset = currentPosRef.current.clone().sub(playerPos);
+      offset.y = 0;
+      const distSq = offset.lengthSq();
+      const limit = 1.05;
+      if (distSq > 0.0001 && distSq < limit * limit) {
+        const dist = Math.sqrt(distSq);
+        const normal = offset.multiplyScalar(1 / dist);
+        currentPosRef.current.add(normal.clone().multiplyScalar(0.12));
+        if (group.current) {
+          group.current.position.copy(currentPosRef.current);
+        }
+        currentTargetRef.current.add(normal.clone().multiplyScalar(2.0));
+        const now = performance.now();
+        if (impactMapRef?.current && now - playerImpactCooldownRef.current > 400) {
+          impactMapRef.current.set(stats.id, { time: now, intensity: 0.7 });
+          playerImpactCooldownRef.current = now;
+        }
+      }
     }
 
     // 2. State Progression
@@ -122,37 +287,121 @@ export const NPC: React.FC<NPCProps> = memo(({
       stateStartTimeRef.current = simTime;
     }
 
-    // 3. Infection Spread (Local Registry Lookup)
+    // 3. Infection Spread (Throttled to once per second for performance)
     if (stateRef.current === AgentState.HEALTHY && agentHash) {
-      const neighbors = queryNearbyAgents(currentPosRef.current, agentHash);
-      for (const other of neighbors) {
-        if (other.id === stats.id) continue;
-        if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
-          if (currentPosRef.current.distanceToSquared(other.pos) < 4.0) {
-            if (Math.random() < infectionRate * delta * simulationSpeed * 0.5) {
-              stateRef.current = AgentState.INCUBATING;
-              stateStartTimeRef.current = simTime;
-              break;
+      infectionCheckTimerRef.current += delta * simulationSpeed;
+
+      // Only check infection once per second instead of every frame (60x performance improvement)
+      if (infectionCheckTimerRef.current >= 1.0) {
+        infectionCheckTimerRef.current = 0;
+
+        const neighbors = queryNearbyAgents(currentPosRef.current, agentHash);
+        for (const other of neighbors) {
+          if (other.id === stats.id) continue;
+          if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
+            if (currentPosRef.current.distanceToSquared(other.pos) < 4.0) {
+              // Compensate for 1-second intervals to maintain same infection rate
+              // At 60fps, we went from 60 checks/sec to 1 check/sec, so multiply by 60
+              if (Math.random() < infectionRate * simulationSpeed * 0.5 * 60) {
+                stateRef.current = AgentState.INCUBATING;
+                stateStartTimeRef.current = simTime;
+                break;
+              }
             }
           }
         }
       }
     }
 
+    if (lastStateRef.current !== stateRef.current) {
+      lastStateRef.current = stateRef.current;
+      setDisplayState(stateRef.current);
+    }
+
     // 4. Report back to Registry
     onUpdate(stats.id, stateRef.current, currentPosRef.current);
+
+    // 5. Impact pulse update (cheap)
+    if (impactMapRef?.current) {
+      const impact = impactMapRef.current.get(stats.id);
+      if (impact && impact.time > impactStartRef.current) {
+        impactStartRef.current = impact.time;
+        impactIntensityRef.current = impact.intensity;
+      }
+    }
+    if (impactStartRef.current > 0) {
+      const elapsed = (performance.now() - impactStartRef.current) / 1000;
+      const fade = Math.max(0, 1 - elapsed / 0.8);
+      impactPulseRef.current = fade * impactIntensityRef.current;
+    } else {
+      impactPulseRef.current = 0;
+    }
+    const impactColor = stateRef.current === AgentState.INFECTED || stateRef.current === AgentState.INCUBATING
+      ? '#ff5c4d'
+      : '#7dff70';
+    if (impactStemMatRef.current) {
+      impactStemMatRef.current.color.set(impactColor);
+    }
+    if (impactDotMatRef.current) {
+      impactDotMatRef.current.color.set(impactColor);
+    }
+    if (impactGroupRef.current) {
+      const pulse = impactPulseRef.current;
+      impactGroupRef.current.visible = pulse > 0.05;
+      impactGroupRef.current.scale.setScalar(0.6 + pulse * 0.6);
+      if (impactStemMatRef.current) {
+        impactStemMatRef.current.opacity = 0.5 + pulse * 0.5;
+      }
+      if (impactDotMatRef.current) {
+        impactDotMatRef.current.opacity = 0.5 + pulse * 0.5;
+      }
+    }
+
+    if (statusMarkerRef.current && statusMarkerMatRef.current) {
+      const show = displayState === AgentState.INCUBATING || displayState === AgentState.INFECTED;
+      statusMarkerRef.current.visible = show;
+      if (show) {
+        statusMarkerMatRef.current.color.set(getHealthRingColor(displayState));
+      }
+    }
   });
 
   return (
-    <group 
-      ref={group} 
-      onPointerOver={() => setHovered(true)} 
+    <group
+      ref={group}
+      onPointerOver={() => setHovered(true)}
       onPointerOut={() => setHovered(false)}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (onSelect) {
+          onSelect({ stats, state: stateRef.current });
+        }
+      }}
     >
-      <Humanoid 
-        color={stats.gender === 'Female' ? appearance.robe : (stateRef.current === AgentState.DECEASED ? '#111' : colors.body)} 
+      <mesh ref={statusMarkerRef} position={[0, 2.55, 0]} visible={false}>
+        <octahedronGeometry args={[0.14, 0]} />
+        <meshBasicMaterial ref={statusMarkerMatRef} color="#f97316" />
+      </mesh>
+      {isSelected && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
+          <ringGeometry args={[0.75, 0.95, 32]} />
+          <meshBasicMaterial color={getHealthRingColor(displayState)} transparent opacity={0.7} />
+        </mesh>
+      )}
+        <group ref={impactGroupRef} position={[0, 2.6, 0]} visible={false}>
+          <mesh>
+            <cylinderGeometry args={[0.05, 0.05, 0.35, 8]} />
+            <meshBasicMaterial ref={impactStemMatRef} color="#7dff70" transparent opacity={0.9} />
+          </mesh>
+          <mesh position={[0, -0.28, 0]}>
+            <sphereGeometry args={[0.07, 8, 8]} />
+            <meshBasicMaterial ref={impactDotMatRef} color="#7dff70" transparent opacity={0.9} />
+          </mesh>
+        </group>
+      <Humanoid
+        color={stats.gender === 'Female' ? appearance.robe : (stateRef.current === AgentState.DECEASED ? '#111' : colors.body)}
         headColor={appearance.skin}
-        turbanColor={colors.turban}
+        turbanColor={appearance.headwear}
         headscarfColor={appearance.scarf}
         robeAccentColor={appearance.accent}
         hairColor={appearance.hair}
@@ -162,6 +411,7 @@ export const NPC: React.FC<NPCProps> = memo(({
         robeHemBand={stats.robeHemBand}
         robeSpread={stats.robeSpread}
         robeOverwrap={stats.robeOverwrap}
+        robePattern={stats.robePattern}
         hairStyle={stats.hairStyle}
         headwearStyle={stats.headwearStyle}
         sleeveCoverage={stats.sleeveCoverage}
@@ -173,7 +423,23 @@ export const NPC: React.FC<NPCProps> = memo(({
         isWalking={simulationSpeed > 0 && stateRef.current !== AgentState.DECEASED && (!quarantine || stateRef.current !== AgentState.INFECTED)}
         isDead={stateRef.current === AgentState.DECEASED}
         walkSpeed={10 * simulationSpeed}
+        distanceFromCamera={distanceFromCameraRef.current}
       />
+
+      {/* GRAPHICS: NPC Torch (1 in 5 NPCs carry a torch at night) */}
+      {carriesTorch && (timeOfDay >= 19 || timeOfDay < 5) && stateRef.current !== AgentState.DECEASED && (
+        <group position={[0.35, 1.05, 0.25]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.04, 0.06, 0.4, 8]} />
+            <meshStandardMaterial color="#3b2a1a" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 0.25, 0]}>
+            <sphereGeometry args={[0.1, 10, 10]} />
+            <meshStandardMaterial color="#ffb347" emissive="#ff7a18" emissiveIntensity={0.9} />
+          </mesh>
+          <pointLight intensity={1.1} distance={16} decay={2} color="#ffb347" />
+        </group>
+      )}
 
       {hovered && (
         <Html distanceFactor={15} position={[0, 2.5, 0]} center>

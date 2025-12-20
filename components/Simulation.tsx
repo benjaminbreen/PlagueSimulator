@@ -1,15 +1,17 @@
 
-import React, { useRef, useState, useMemo, useEffect } from 'react';
+import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
-import { Environment as DreiEnvironment, Stars } from '@react-three/drei';
+import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents } from './Agents';
 import { Rats, Rat } from './Rats';
 import { Player } from './Player';
-import { SpatialHash, buildBuildingHash } from '../utils/spatial';
+import { AgentSnapshot, SpatialHash, buildBuildingHash } from '../utils/spatial';
+import { PushableObject, createPushable } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
+import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -19,6 +21,8 @@ interface SimulationProps {
   onStatsUpdate: (stats: SimulationCounts) => void;
   onMapChange: (dx: number, dy: number) => void;
   onNearBuilding: (building: BuildingMetadata | null) => void;
+  onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
+  selectedNpcId?: string | null;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -61,6 +65,101 @@ const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
       <sphereGeometry args={[1, 8, 8]} />
       <meshBasicMaterial color="#4d5d1a" transparent opacity={0.15} />
     </instancedMesh>
+  );
+};
+
+
+// GRAPHICS: Dust particles for sunny hot days - warm sun-baked atmosphere
+const DustParticles: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
+  const pointsRef = useRef<THREE.Points>(null);
+  const count = 150;
+
+  const particles = useMemo(() => {
+    const positions = new Float32Array(count * 3);
+    const velocities: THREE.Vector3[] = [];
+
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+      // Spread particles across the scene
+      positions[i3] = (Math.random() - 0.5) * 100;
+      positions[i3 + 1] = Math.random() * 15 + 2; // Between 2-17 units high
+      positions[i3 + 2] = (Math.random() - 0.5) * 100;
+
+      // Random drift velocities
+      velocities.push(new THREE.Vector3(
+        (Math.random() - 0.5) * 0.015,
+        0.008 + Math.random() * 0.012, // Upward drift
+        (Math.random() - 0.5) * 0.015
+      ));
+    }
+
+    return { positions, velocities };
+  }, []);
+
+  useFrame((state, delta) => {
+    if (!pointsRef.current) return;
+
+    // Calculate day factor - same as in Simulation
+    const sunAngle = (timeOfDay / 24) * Math.PI * 2;
+    const sunElevation = Math.sin(sunAngle - Math.PI / 2);
+    const dayFactor = smoothstep(-0.1, 0.35, sunElevation);
+
+    // Only show during daytime
+    const isVisible = dayFactor > 0.5;
+    pointsRef.current.visible = isVisible;
+
+    if (!isVisible) return;
+
+    // Peak sun visibility (10am-2pm when dayFactor > 0.7)
+    const peakSunFactor = dayFactor > 0.7 ? (dayFactor - 0.7) / 0.3 : 0;
+    const opacity = 0.15 + peakSunFactor * 0.1; // More visible at peak sun
+
+    const positions = pointsRef.current.geometry.attributes.position.array as Float32Array;
+
+    // Animate particles
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+      const vel = particles.velocities[i];
+
+      // Apply drift
+      positions[i3] += vel.x * delta * 60;
+      positions[i3 + 1] += vel.y * delta * 60;
+      positions[i3 + 2] += vel.z * delta * 60;
+
+      // Wrap particles that drift too far
+      if (positions[i3] > 50) positions[i3] = -50;
+      if (positions[i3] < -50) positions[i3] = 50;
+      if (positions[i3 + 1] > 20) positions[i3 + 1] = 2;
+      if (positions[i3 + 2] > 50) positions[i3 + 2] = -50;
+      if (positions[i3 + 2] < -50) positions[i3 + 2] = 50;
+    }
+
+    pointsRef.current.geometry.attributes.position.needsUpdate = true;
+
+    // Update material opacity
+    const material = pointsRef.current.material as THREE.PointsMaterial;
+    material.opacity = opacity;
+  });
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          count={count}
+          array={particles.positions}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <pointsMaterial
+        size={0.08}
+        color="#d4b894"
+        transparent
+        opacity={0.15}
+        sizeAttenuation
+        depthWrite={false}
+      />
+    </points>
   );
 };
 
@@ -139,26 +238,113 @@ const smoothstep = (edge0: number, edge1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
-const Moon: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
+const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, simTime }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const earthshineRef = useRef<THREE.Mesh>(null);
+  const lightRef = useRef<THREE.PointLight>(null);
+
+  // Moon phase cycles every 29.5 days
+  const moonPhase = (simTime / 29.5) % 1; // 0-1, where 0=new, 0.5=full
+
+  const moonMaterial = useMemo(() => {
+    const mat = new THREE.MeshBasicMaterial({ color: '#fffbe6' });
+
+    // GRAPHICS: Moon phases using shader modification
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.moonPhase = { value: 0.0 };
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+        uniform float moonPhase;`
+      );
+
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+        // Moon phase shadow: phase 0 = new moon (full shadow), 0.5 = full moon (no shadow)
+        vec3 moonNormal = normalize(vNormal);
+        float phase = moonPhase * 2.0 - 1.0; // Convert to -1 to 1
+        float terminator = moonNormal.x;
+
+        // Create shadow based on phase
+        float shadow = smoothstep(phase - 0.1, phase + 0.1, terminator);
+        if (phase < 0.0) {
+          // Waxing (0 to 0.5) - shadow from right
+          shadow = 1.0 - shadow;
+        }
+        // Waning (0.5 to 1) - shadow from left
+
+        gl_FragColor.rgb *= shadow;
+        // Darken shadowed areas more for realism
+        gl_FragColor.rgb = mix(gl_FragColor.rgb * 0.15, gl_FragColor.rgb, shadow);`
+      );
+
+      mat.userData.shader = shader;
+    };
+
+    return mat;
+  }, []);
 
   useFrame(() => {
     if (!meshRef.current) return;
     const moonAngle = ((timeOfDay + 6) % 24 / 12) * Math.PI;
+    const moonElevation = Math.sin(moonAngle);
+
     meshRef.current.position.set(
       Math.cos(moonAngle) * 90,
       Math.sin(moonAngle) * 90,
       -30
     );
     meshRef.current.lookAt(0, 0, 0);
+
+    // GRAPHICS: Horizon size scaling - moon appears larger near horizon
+    const horizonFactor = smoothstep(0.3, -0.05, moonElevation);
+    const sizeScale = 1 + horizonFactor * 0.3; // Up to 1.3x larger at horizon
+    meshRef.current.scale.setScalar(sizeScale);
+
+    // Update moon phase in shader
+    const shader = moonMaterial.userData.shader;
+    if (shader) {
+      shader.uniforms.moonPhase.value = moonPhase;
+    }
+
+    // GRAPHICS: Moon light intensity varies with phase (full moon brighter)
+    if (lightRef.current) {
+      const phaseIntensity = Math.sin(moonPhase * Math.PI); // 0 at new/full cycle, 1 at full
+      lightRef.current.intensity = 0.9 * phaseIntensity;
+    }
+
+    // GRAPHICS: Earthshine - subtle blue glow on dark side during crescent
+    if (earthshineRef.current) {
+      const crescentFactor = moonPhase < 0.3 || moonPhase > 0.7 ? 1 : 0; // Show during crescent
+      const intensity = crescentFactor * (1 - Math.abs(moonPhase - 0.5) * 2) * 0.4;
+      (earthshineRef.current.material as THREE.MeshBasicMaterial).opacity = intensity;
+      earthshineRef.current.scale.setScalar(sizeScale * 1.1);
+    }
   });
 
   return (
-    <mesh ref={meshRef}>
-      <sphereGeometry args={[5.5, 32, 32]} />
-      <meshBasicMaterial color="#fffbe6" />
-      <pointLight intensity={0.9} distance={240} color="#d5e2ff" />
-    </mesh>
+    <group>
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[5.5, 32, 32]} />
+        <primitive object={moonMaterial} />
+        <pointLight ref={lightRef} intensity={0.9} distance={240} color="#d5e2ff" />
+      </mesh>
+
+      {/* GRAPHICS: Earthshine - subtle glow on dark side */}
+      <mesh ref={earthshineRef} position={[0, 0, 0]}>
+        <sphereGeometry args={[5.8, 16, 16]} />
+        <meshBasicMaterial
+          color="#6a8fbb"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          side={THREE.BackSide}
+        />
+      </mesh>
+    </group>
   );
 };
 
@@ -459,43 +645,97 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
 
 const SunDisc: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
   const meshRef = useRef<THREE.Mesh>(null);
-  const haloRef = useRef<THREE.Mesh>(null);
+  const innerGlowRef = useRef<THREE.Mesh>(null);
+  const outerGlowRef = useRef<THREE.Mesh>(null);
+  const coronaRef = useRef<THREE.Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
+
   useFrame(() => {
-    if (!meshRef.current) return;
+    if (!meshRef.current || !groupRef.current) return;
     const sunAngle = (timeOfDay / 24) * Math.PI * 2;
     const elevation = Math.sin(sunAngle - Math.PI / 2);
     const radius = 120;
-    meshRef.current.visible = elevation > -0.1;
-    meshRef.current.position.set(
+    const visible = elevation > -0.1;
+
+    groupRef.current.visible = visible;
+    if (!visible) return;
+
+    const sunPos = new THREE.Vector3(
       Math.cos(sunAngle - Math.PI / 2) * radius,
       Math.max(-10, elevation * 90),
       60
     );
-    meshRef.current.lookAt(0, 0, 0);
-    if (haloRef.current) {
-      haloRef.current.visible = elevation > -0.1;
-      haloRef.current.position.copy(meshRef.current.position);
-      haloRef.current.lookAt(0, 0, 0);
+    groupRef.current.position.copy(sunPos);
+    groupRef.current.lookAt(0, 0, 0);
+
+    // GRAPHICS: Horizon size scaling - sun appears larger near horizon (atmospheric magnification)
+    const horizonFactor = smoothstep(0.3, -0.05, elevation); // 0 at zenith, 1 at horizon
+    const sizeScale = 1 + horizonFactor * 0.4; // Up to 1.4x larger at horizon
+
+    meshRef.current.scale.setScalar(sizeScale);
+    if (innerGlowRef.current) innerGlowRef.current.scale.setScalar(sizeScale);
+    if (outerGlowRef.current) outerGlowRef.current.scale.setScalar(sizeScale);
+
+    // GRAPHICS: Atmospheric corona - intensifies near horizon (sunset/sunrise glow)
+    if (coronaRef.current) {
+      const coronaIntensity = smoothstep(0.2, -0.05, elevation); // Stronger at horizon
+      (coronaRef.current.material as THREE.MeshBasicMaterial).opacity = coronaIntensity * 0.22;
+      coronaRef.current.scale.setScalar(sizeScale * 1.5);
     }
   });
+
   return (
-    <group>
+    <group ref={groupRef}>
+      {/* Main sun disc - smooth circular */}
       <mesh ref={meshRef}>
-        <circleGeometry args={[6, 32]} />
-        <meshBasicMaterial color="#ffd39a" transparent opacity={0.85} />
+        <circleGeometry args={[6, 64]} />
+        <meshBasicMaterial color="#ffd39a" transparent opacity={0.9} />
       </mesh>
-      <mesh ref={haloRef}>
-        <circleGeometry args={[10, 32]} />
-        <meshBasicMaterial color="#ffcc88" transparent opacity={0.25} />
+
+      {/* Inner glow - soft white halo */}
+      <mesh ref={innerGlowRef}>
+        <circleGeometry args={[9, 64]} />
+        <meshBasicMaterial
+          color="#fffef0"
+          transparent
+          opacity={0.18}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Outer glow - warm yellow */}
+      <mesh ref={outerGlowRef}>
+        <circleGeometry args={[13, 64]} />
+        <meshBasicMaterial
+          color="#ffcc88"
+          transparent
+          opacity={0.1}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* GRAPHICS: Atmospheric corona (sunset/sunrise orange glow) */}
+      <mesh ref={coronaRef}>
+        <circleGeometry args={[20, 64]} />
+        <meshBasicMaterial
+          color="#ff9944"
+          transparent
+          opacity={0}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
       </mesh>
     </group>
   );
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNpcSelect, selectedNpcId }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
+  const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
   const ambientRef = useRef<THREE.AmbientLight>(null);
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const marketBounceRef = useRef<THREE.PointLight>(null);
@@ -504,6 +744,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const playerRef = useRef<THREE.Group>(null);
   const { scene, gl } = useThree();
   const buildingHashRef = useRef<SpatialHash<BuildingMetadata> | null>(null);
+  const agentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
+  const impactMapRef = useRef<Map<string, { time: number; intensity: number }>>(new Map());
+  const impactPuffsRef = useRef<ImpactPuffSlot[]>(Array.from({ length: MAX_PUFFS }, () => null));
+  const impactPuffIndexRef = useRef(0);
   const atmosphereTickRef = useRef(0);
   
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
@@ -513,18 +757,33 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const playerSpawn = useMemo<[number, number, number]>(() => {
     return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0];
   }, [params.mapX, params.mapY]);
+  const pushables = useMemo<PushableObject[]>(() => {
+    if (params.mapX !== 0 || params.mapY !== 0) return [];
+    const roll = seededRandom(params.mapX * 1000 + params.mapY * 13 + 101);
+    const items: PushableObject[] = [
+      createPushable('bench-north', 'bench', [-12, 0.2, 9], 1.1, 2.6, Math.PI / 6, 'stone'),
+      createPushable('bench-south', 'bench', [12, 0.2, -9], 1.1, 2.6, -Math.PI / 8, 'stone'),
+      createPushable('jar-west', 'clayJar', [-3.2, 0.3, -3.2], 0.65, 0.9, 0, 'ceramic'),
+      createPushable('jar-east', 'clayJar', [3.4, 0.3, 3.3], 0.65, 0.9, 0, 'ceramic')
+    ];
+    if (roll > 0.4) {
+      items.push(
+        createPushable('geranium-east', 'geranium', [6.2, 0.2, -5.0], 0.85, 1.2, 0, 'ceramic'),
+        createPushable('geranium-west', 'geranium', [-5.6, 0.2, 6.0], 0.85, 1.2, 0, 'ceramic')
+      );
+    }
+    return items;
+  }, [params.mapX, params.mapY]);
+  const pushablesRef = useRef<PushableObject[]>(pushables);
+  useEffect(() => {
+    pushablesRef.current = pushables;
+  }, [pushables]);
   const obstacles = useMemo<Obstacle[]>(() => {
     if (params.mapX !== 0 || params.mapY !== 0) return [];
     return [
       { position: [0, 0, 0], radius: 4.2 },
       { position: [-6, 0, 0], radius: 0.9 },
-      { position: [6, 0, 0], radius: 0.9 },
-      { position: [-12, 0, 9], radius: 1.4 },
-      { position: [12, 0, -9], radius: 1.4 },
-      { position: [-3.2, 0, -3.2], radius: 0.6 },
-      { position: [3.4, 0, 3.3], radius: 0.6 },
-      { position: [6.2, 0, -5.0], radius: 0.5 },
-      { position: [-5.6, 0, 6.0], radius: 0.5 }
+      { position: [6, 0, 0], radius: 0.9 }
     ];
   }, [params.mapX, params.mapY]);
   const weather = useRef<WeatherState>({
@@ -539,6 +798,19 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     weatherBlend: 0,
   });
   const envPreset = params.timeOfDay < 6 || params.timeOfDay > 18 ? 'night' : 'sunset';
+  const handleAgentImpact = useCallback((id: string, intensity: number) => {
+    impactMapRef.current.set(id, { time: performance.now(), intensity });
+  }, []);
+  const handleImpactPuff = useCallback((position: THREE.Vector3, intensity: number) => {
+    const idx = impactPuffIndexRef.current++ % MAX_PUFFS;
+    impactPuffsRef.current[idx] = {
+      position: position.clone(),
+      start: performance.now(),
+      intensity,
+      jitter: [(Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2],
+      duration: 0.5 + intensity * 0.4
+    };
+  }, []);
 
   useEffect(() => {
     gl.shadowMap.enabled = true;
@@ -600,14 +872,18 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
         // Tier 2: Harsher sun for intense midday heat
         const sunIntensity = Math.pow(Math.max(0, sunElevation), 0.45) * 5.2 * (1 - cloudCover * 0.4);
-        let ambientIntensity = 0.06 + dayFactor * 0.42 + cloudCover * 0.08;
-        let hemiIntensity = 0.18 + dayFactor * 0.5 + cloudCover * 0.16;
+        // Tier 1: Reduced ambient for darker, more vivid shadows
+        let ambientIntensity = 0.04 + dayFactor * 0.35 + cloudCover * 0.08;
+        // Tier 1: Boosted hemisphere for warm ground bounce
+        let hemiIntensity = 0.22 + dayFactor * 0.6 + cloudCover * 0.16;
 
-        // Tier 2: Bleached highlights during peak sun (10am-2pm)
+        // GRAPHICS: Peak sun shadow enrichment - darker, more saturated shadows at noon
+        // Reduce ambient during peak day for higher contrast shadows
         if (dayFactor > 0.7) {
           const noonIntensity = (dayFactor - 0.7) / 0.3; // 0-1 from 10am-2pm
-          ambientIntensity += noonIntensity * 0.15;
-          hemiIntensity += noonIntensity * 0.2;
+          ambientIntensity += noonIntensity * 0.05; // Reduced from 0.15 for darker shadows
+          // Tier 2: Increased ground hemisphere for warm fill during peak sun
+          hemiIntensity += noonIntensity * 0.35;
         }
 
         // Sun-baked: Warmer, golden sun color for Mediterranean heat
@@ -618,19 +894,20 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           .lerp(new THREE.Color("#d6b49c"), twilightFactor)
           .lerp(new THREE.Color("#2b3250"), nightFactor);
         // Sun-baked: Warm ground bounce from hot sand/stone
-        const hemiGround = new THREE.Color("#d4b894")
+        // Tier 1: Warmer ground color for better ambient bounce (#a6917a instead of gray)
+        const hemiGround = new THREE.Color("#e8c4a0")
           .lerp(new THREE.Color("#5c4b3a"), twilightFactor)
           .lerp(new THREE.Color("#1f1c1b"), nightFactor);
 
         // Sky colors matching the SkyGradientDome for atmospheric perspective
         const skyMid = new THREE.Color('#162341')
           .lerp(new THREE.Color('#49a6ef'), dayFactor)
-          .lerp(new THREE.Color('#a05044'), twilightFactor)
+          .lerp(new THREE.Color('#8b6f5a'), twilightFactor * 0.7) // Toned down from #a05044, less intense
           .lerp(new THREE.Color('#1b2438'), nightFactor);
         const skyHorizon = new THREE.Color('#1c2a4a')
           .lerp(new THREE.Color('#2f95ee'), dayFactor)
-          .lerp(new THREE.Color('#f7b25a'), twilightFactor)
-          .lerp(new THREE.Color('#0f1829'), nightFactor); // Dark blue at night, not peachy!
+          .lerp(new THREE.Color('#e8b878'), twilightFactor * 0.8) // Softer golden instead of bright orange
+          .lerp(new THREE.Color('#0f1829'), nightFactor);
 
         // HORIZON ATMOSPHERIC COLOR SYSTEM
         // Base: use sky horizon color for seamless blending
@@ -650,10 +927,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           fogColor.lerp(dawnPeach, dawnFactor * 0.2);
         }
 
-        // Daytime: SUBTLE atmospheric blue (was too strong!)
-        if (dayFactor > 0.5) {
-          const rayleighBlue = new THREE.Color('#c5ddf5'); // Lighter, less saturated
-          fogColor.lerp(rayleighBlue, dayFactor * 0.15); // Reduced from 0.35
+        // Daytime: VERY SUBTLE atmospheric perspective (realistic haze)
+        if (dayFactor > 0.6) {
+          // Much less saturated, more neutral atmospheric color
+          const atmosphericHaze = new THREE.Color('#d8e3ed'); // Pale, barely blue
+          fogColor.lerp(atmosphericHaze, (dayFactor - 0.6) * 0.12); // Very subtle
 
           // Peak sun heat haze (10am-2pm) - warm golden shimmer
           if (dayFactor > 0.7) {
@@ -662,13 +940,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           }
         }
 
-        // Twilight/Dusk: Vibrant atmospheric glow at horizon
+        // Twilight/Dusk: Subtle atmospheric glow at horizon (toned down)
         const duskFactor = smoothstep(0.05, -0.2, -sunElevation) * (1 - dayFactor);
         if (duskFactor > 0.1) {
-          const twilightGold = new THREE.Color('#f5b25a');
-          const twilightPurple = new THREE.Color('#c896d4');
-          fogColor.lerp(twilightGold, duskFactor * 0.4);
-          fogColor.lerp(twilightPurple, duskFactor * 0.2);
+          const twilightGold = new THREE.Color('#e8c488'); // Softer peachy-gold
+          const twilightPurple = new THREE.Color('#b8a8c4'); // Less saturated lavender
+          fogColor.lerp(twilightGold, duskFactor * 0.25); // Reduced from 0.4
+          fogColor.lerp(twilightPurple, duskFactor * 0.12); // Reduced from 0.2
         }
 
         // Night: Cool deep blue atmosphere
@@ -677,8 +955,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           fogColor.lerp(nightAtmo, (nightFactor - 0.5) * 0.5);
         }
 
+        // GRAPHICS: Toned down twilight color - subtle warm glow instead of strong pink-red flash
         let skyColor = new THREE.Color("#87ceeb")
-          .lerp(new THREE.Color("#ff7e5f"), twilightFactor)
+          .lerp(new THREE.Color("#d8a475"), twilightFactor * 0.6) // Muted peachy-tan, reduced intensity
           .lerp(new THREE.Color("#02040a"), nightFactor);
 
         if (weatherType === WeatherType.OVERCAST) {
@@ -717,7 +996,23 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
         lightRef.current.intensity = THREE.MathUtils.lerp(lightRef.current.intensity, sunIntensity, 0.08);
         lightRef.current.color.lerp(sunColor, 0.05);
+
+        // GRAPHICS: Dynamic shadow softness based on sun elevation
+        // Dawn/dusk = softer shadows (scattered light), noon = sharper shadows (direct light)
+        const shadowSoftness = THREE.MathUtils.lerp(
+          -0.002,  // Soft shadows at dawn/dusk
+          -0.0002, // Sharp shadows at noon
+          dayFactor // 0 at dawn/dusk, 1 at noon
+        );
+        if (lightRef.current.shadow) {
+          lightRef.current.shadow.bias = shadowSoftness;
+        }
+
         ambientRef.current.intensity = THREE.MathUtils.lerp(ambientRef.current.intensity, ambientIntensity, 0.08);
+        // GRAPHICS: Desaturated ambient color during day for richer shadow saturation
+        // Less saturated ambient = more saturated shadows by contrast
+        const ambientColor = new THREE.Color("#b9c4e6").lerp(new THREE.Color("#e8e4dc"), dayFactor * 0.35);
+        ambientRef.current.color.lerp(ambientColor, 0.05);
         hemiRef.current.intensity = THREE.MathUtils.lerp(hemiRef.current.intensity, hemiIntensity, 0.08);
         hemiRef.current.color.lerp(hemiSky, 0.05);
         hemiRef.current.groundColor.lerp(hemiGround, 0.05);
@@ -729,9 +1024,24 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           const rimColor = dayFactor > 0.5 ? new THREE.Color('#fff0d8') : new THREE.Color('#f2b27a');
           rimLightRef.current.color.lerp(rimColor, 0.05);
         }
+        // GRAPHICS: Shadow fill light - adds saturated blue tint to shadows during day (scattered skylight)
+        if (shadowFillLightRef.current) {
+          // Only active during day - simulates blue sky light scattering into shadows
+          // Boosted intensity for richer, more saturated shadows
+          const shadowFillIntensity = dayFactor * 0.4;
+          shadowFillLightRef.current.intensity = THREE.MathUtils.lerp(
+            shadowFillLightRef.current.intensity,
+            shadowFillIntensity,
+            0.08
+          );
+          // More saturated blue for richer shadow color (Rayleigh scattering)
+          const shadowFillColor = new THREE.Color('#5a8fd8');
+          shadowFillLightRef.current.color.lerp(shadowFillColor, 0.05);
+        }
         if (marketBounceRef.current) {
           const isMarket = params.mapX === 0 && params.mapY === 0;
-          const bounceTarget = isMarket ? dayFactor * 0.45 : 0;
+          // Tier 2: Boosted market bounce for warmer fill light
+          const bounceTarget = isMarket ? dayFactor * 0.75 : 0;
           marketBounceRef.current.intensity = THREE.MathUtils.lerp(marketBounceRef.current.intensity, bounceTarget, 0.05);
         }
 
@@ -753,32 +1063,35 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             baseFog = 0.006; // Misty atmosphere
             horizonHaze = 0.005; // Soft horizon blending
           } else {
-            // CLEAR WEATHER - subtle horizon haze
+            // CLEAR WEATHER - atmospheric perspective for distance
             if (dayFactor > 0.5) {
-              // Hot day: SUBTLE heat shimmer (reduced from 0.006)
-              baseFog = 0.001;
-              horizonHaze = 0.004;
+              // Hot day: Rayleigh scattering + heat shimmer
+              baseFog = 0.00011; // Increased from 0.001 for better distance fade
+              horizonHaze = 0.0001; // Increased from 0.004 for atmospheric depth
             } else if (twilightFactor > 0.3) {
               // Twilight: atmospheric glow at horizon
-              baseFog = 0.003;
-              horizonHaze = 0.006; // Beautiful atmospheric blending
+              baseFog = 0.001; 
+              horizonHaze = 0.006; // Increased from 0.006 for beautiful blending
             } else if (dawnFactor > 0.1) {
               // Dawn: rosy atmospheric glow
-              baseFog = 0.002;
-              horizonHaze = 0.005; // Soft rosy haze
+              baseFog = 0.0003; // Increased from 0.002
+              horizonHaze = 0.009; // Increased from 0.005 for soft rosy haze
             } else {
               // Night: clearest atmosphere for starry sky
-              baseFog = 0.001;
-              horizonHaze = 0.002; // Minimal haze for stars
+              baseFog = 0.0001; // Slight increase from 0.001
+              horizonHaze = 0.003; // Increased from 0.002 for depth
             }
           }
 
           // Night atmosphere - very subtle for star visibility
           const nightAtmosphere = nightFactor * 0.002;
 
+          // Realistic physics: add altitude-based density (more fog near ground)
+          const altitudeFactor = 0.0008; // Ground-level fog accumulation
+
           fogRef.current.density = THREE.MathUtils.lerp(
             fogRef.current.density,
-            (baseFog + horizonHaze + humidity * 0.004 + cloudCover * 0.003 + nightAtmosphere) * devSettings.fogDensityScale,
+            (baseFog + horizonHaze + altitudeFactor + humidity * 0.004 + cloudCover * 0.003 + nightAtmosphere) * devSettings.fogDensityScale,
             0.02
           );
           fogRef.current.color.lerp(fogColor, 0.05);
@@ -819,9 +1132,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
   return (
     <>
-      <ambientLight ref={ambientRef} intensity={0.18} color="#b9c4e6" />
+      {/* Tier 1: Reduced ambient for darker, more vivid shadows */}
+      <ambientLight ref={ambientRef} intensity={0.12} color="#b9c4e6" />
       <pointLight ref={marketBounceRef} position={[0, 6, 0]} intensity={0} color="#f3cfa0" distance={36} decay={2} />
-      <hemisphereLight ref={hemiRef} intensity={0.28} color="#c7d2f0" groundColor="#6f6a7a" />
+      {/* Tier 1: Warmer ground color for sun-baked ambient bounce */}
+      <hemisphereLight ref={hemiRef} intensity={0.28} color="#c7d2f0" groundColor="#a6917a" />
       <directionalLight
         ref={lightRef}
         position={[50, 50, 20]}
@@ -842,14 +1157,22 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         intensity={0}
         color="#f2b27a"
       />
-      
+      {/* GRAPHICS: Shadow fill light - adds saturated blue tint to shadows during day (scattered skylight) */}
+      <directionalLight
+        ref={shadowFillLightRef}
+        position={[-30, 30, -30]}
+        intensity={0}
+        color="#5a8fd8"
+      />
+
       <SkyGradientDome timeOfDay={params.timeOfDay} />
       <SunDisc timeOfDay={params.timeOfDay} />
+      {/* Tier 1: Boosted environment intensity for richer reflections and ambient color */}
       <DreiEnvironment
         preset={envPreset}
         background={false}
         blur={0.6}
-        environmentIntensity={(0.25 + dayFactor * 0.65) * (1 - nightFactor * 0.7)}
+        environmentIntensity={(0.35 + dayFactor * 0.75) * (1 - nightFactor * 0.7)}
       />
       <Stars
         radius={180}
@@ -860,17 +1183,17 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         fade
         speed={0.6}
       />
-      <Moon timeOfDay={params.timeOfDay} />
+      <Moon timeOfDay={params.timeOfDay} simTime={simTime} />
       <MilkyWay visible={dayFactor <= 0.2} />
 
       {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#c5ddf5', 0.004]} />}
       {devSettings.showClouds && <CloudLayer weather={weather} />}
 
-      <WorldEnvironment 
-        mapX={params.mapX} 
-        mapY={params.mapY} 
-        onGroundClick={setPlayerTarget} 
-        onBuildingsGenerated={(b) => { 
+      <WorldEnvironment
+        mapX={params.mapX}
+        mapY={params.mapY}
+        onGroundClick={setPlayerTarget}
+        onBuildingsGenerated={(b) => {
           buildingsRef.current = b;
           buildingHashRef.current = buildBuildingHash(b);
           setBuildingsState(b);
@@ -879,10 +1202,29 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         timeOfDay={params.timeOfDay}
         enableHoverWireframe={enableHoverWireframe}
         enableHoverLabel={enableHoverLabel}
+        pushables={pushables}
       />
-      
+
+      {/* Tier 3: Contact Shadows - adds depth and grounding to buildings */}
+      {devSettings.showShadows && (
+        <ContactShadows
+          position={[0, 0.01, 0]}
+          opacity={dayFactor * 0.5}
+          scale={150}
+          blur={2.5}
+          far={20}
+          resolution={512}
+          color="#000000"
+        />
+      )}
+
       {/* Updated MiasmaFog to use infectionRate prop */}
       {devSettings.showMiasma && <MiasmaFog infectionRate={params.infectionRate} />}
+
+      {/* GRAPHICS: Dust particles for warm sun-baked atmosphere during sunny days */}
+      <DustParticles timeOfDay={params.timeOfDay} />
+
+      <ImpactPuffs puffsRef={impactPuffsRef} />
       
       {devSettings.showNPCs && (
         <Agents 
@@ -894,6 +1236,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           buildingHash={buildingHashRef.current}
           obstacles={obstacles}
           maxAgents={30}
+          agentHashRef={agentHashRef}
+          impactMapRef={impactMapRef}
+          playerRef={playerRef}
+          onNpcSelect={onNpcSelect}
+          selectedNpcId={selectedNpcId}
         />
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
@@ -911,6 +1258,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         obstacles={obstacles}
         timeOfDay={params.timeOfDay}
         playerStats={playerStats}
+        agentHashRef={agentHashRef}
+        onAgentImpact={handleAgentImpact}
+        pushablesRef={pushablesRef}
+        onImpactPuff={handleImpactPuff}
       />
     </>
   );

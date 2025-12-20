@@ -40,8 +40,9 @@ export interface NPCStats {
   robeHasTrim?: boolean;
   robeHemBand?: boolean;
   robeOverwrap?: boolean;
+  robePattern?: 'none' | 'damask';
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
-  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'none';
+  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
   footwearColor?: string;
@@ -74,8 +75,9 @@ export interface PlayerStats {
   robeHemBand: boolean;
   robeSpread: number;
   robeOverwrap: boolean;
+  robePattern: 'none' | 'damask';
   hairStyle: 'short' | 'medium' | 'long' | 'covered';
-  headwearStyle: 'scarf' | 'cap' | 'turban' | 'none';
+  headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
   sleeveCoverage: 'full' | 'lower' | 'none';
   footwearStyle: 'sandals' | 'shoes' | 'bare';
   footwearColor: string;
@@ -128,6 +130,16 @@ export enum InteriorPropType {
   PRAYER_RUG = 'PRAYER_RUG',
   LOW_TABLE = 'LOW_TABLE',
   BENCH = 'BENCH',
+  COUNTER = 'COUNTER',
+  DISPLAY = 'DISPLAY',
+  BASKET = 'BASKET',
+  BOLT_OF_CLOTH = 'BOLT_OF_CLOTH',
+  SCALE = 'SCALE',
+  LEDGER = 'LEDGER',
+  TRAY = 'TRAY',
+  TEA_SET = 'TEA_SET',
+  FLOOR_PILLOWS = 'FLOOR_PILLOWS',
+  HOOKAH = 'HOOKAH',
   BEDROLL = 'BEDROLL',
   CHEST = 'CHEST',
   SHELF = 'SHELF',
@@ -187,6 +199,7 @@ export interface InteriorNarratorState {
 export interface InteriorSpec {
   id: string;
   buildingId: string;
+  buildingType: BuildingType;
   seed: number;
   socialClass: SocialClass;
   profession: string;

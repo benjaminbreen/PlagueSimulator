@@ -1,6 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, getLocationLabel } from '../types';
+import { Canvas, useThree } from '@react-three/fiber';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, getLocationLabel, NPCStats, AgentState } from '../types';
+import { Humanoid } from './Humanoid';
+import { seededRandom } from '../utils/procedural';
 import { 
   Pause, 
   Play, 
@@ -33,6 +36,7 @@ interface UIProps {
   setDevSettings: React.Dispatch<React.SetStateAction<DevSettings>>;
   nearBuilding: BuildingMetadata | null;
   onFastTravel: (x: number, y: number) => void;
+  selectedNpc: { stats: NPCStats; state: AgentState } | null;
 }
 
 const MapModal: React.FC<{
@@ -157,7 +161,79 @@ const MapModal: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel }) => {
+const PortraitRenderOnce: React.FC = () => {
+  const { invalidate } = useThree();
+  useEffect(() => {
+    invalidate();
+  }, [invalidate]);
+  return null;
+};
+
+const NpcPortrait: React.FC<{ npc: NPCStats }> = ({ npc }) => {
+  const seed = Number(npc.id.split('-')[1] || '1');
+  const tone = seededRandom(seed + 11);
+  const skin = `hsl(${26 + Math.round(tone * 8)}, ${28 + Math.round(tone * 18)}%, ${30 + Math.round(tone * 18)}%)`;
+  const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
+  const hair = hairPalette[Math.floor(seededRandom(seed + 17) * hairPalette.length)];
+  const scarfPalette = ['#d6c2a4', '#c7b08c', '#c2a878', '#bfa57e'];
+  const scarf = scarfPalette[Math.floor(seededRandom(seed + 29) * scarfPalette.length)];
+  const robePalette = ['#6f6a3f', '#7b5a4a', '#6b5a45', '#5c4b3a', '#4a4f59'];
+  const robe = robePalette[Math.floor(seededRandom(seed + 41) * robePalette.length)];
+  const accentPalette = ['#e1d3b3', '#d9c9a8', '#cbb58c', '#bfa57e'];
+  const accent = accentPalette[Math.floor(seededRandom(seed + 43) * accentPalette.length)];
+  const headwearPalette = ['#8b2e2e', '#1f1f1f', '#cbb48a', '#7b5a4a', '#3f5d7a'];
+  const headwearIndex = Math.floor(seededRandom(seed + 55) * headwearPalette.length);
+  const headwear = npc.headwearStyle === 'straw'
+    ? '#cbb48a'
+    : npc.headwearStyle === 'fez'
+      ? (seededRandom(seed + 57) > 0.5 ? '#8b2e2e' : '#cbb48a')
+      : headwearPalette[headwearIndex];
+
+  return (
+    <div className="w-12 h-12 rounded-full border border-amber-800/50 bg-black/40 overflow-hidden">
+      <Canvas
+        frameloop="demand"
+        camera={{ position: [0, 1.4, 2.3], fov: 24 }}
+        dpr={1}
+        gl={{ alpha: true, antialias: true }}
+        onCreated={({ camera }) => {
+          camera.lookAt(0, 1.4, 0);
+        }}
+      >
+        <PortraitRenderOnce />
+        <ambientLight intensity={0.9} />
+        <directionalLight position={[1, 2, 2]} intensity={0.7} />
+        <group position={[0, -1.45, 0]}>
+          <Humanoid
+            color={npc.gender === 'Female' ? robe : '#5c4b3a'}
+            headColor={skin}
+            turbanColor={headwear}
+            headscarfColor={scarf}
+            robeAccentColor={accent}
+            hairColor={hair}
+            gender={npc.gender}
+            hairStyle={npc.hairStyle}
+            headwearStyle={npc.headwearStyle}
+            robeHasTrim={npc.robeHasTrim}
+            robeHemBand={npc.robeHemBand}
+            robeSpread={npc.robeSpread}
+            robeOverwrap={npc.robeOverwrap}
+            robePattern={npc.robePattern}
+            sleeveCoverage={npc.sleeveCoverage}
+            footwearStyle={npc.footwearStyle}
+            footwearColor={npc.footwearColor}
+            accessories={npc.accessories}
+            enableArmSwing={false}
+            showGroundShadow={false}
+            distanceFromCamera={0}
+          />
+        </group>
+      </Canvas>
+    </div>
+  );
+};
+
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [reportTab, setReportTab] = useState<'epidemic' | 'player'>('epidemic');
@@ -210,6 +286,23 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
       case BuildingType.CIVIC: return 'Governor\'s Office';
       default: return 'Structure';
     }
+  };
+
+  const getNpcHealthMeta = (state: AgentState) => {
+    switch (state) {
+      case AgentState.HEALTHY: return { label: 'Sound', color: 'text-green-400', dot: 'bg-green-500' };
+      case AgentState.INCUBATING: return { label: 'Incubating', color: 'text-yellow-300', dot: 'bg-yellow-500' };
+      case AgentState.INFECTED: return { label: 'Afflicted', color: 'text-orange-400', dot: 'bg-orange-500' };
+      case AgentState.DECEASED: return { label: 'Fallen', color: 'text-gray-500', dot: 'bg-gray-600' };
+      default: return { label: 'Unknown', color: 'text-gray-400', dot: 'bg-gray-500' };
+    }
+  };
+
+  const getNpcInitials = (name: string) => {
+    const parts = name.split(' ').filter(Boolean);
+    if (parts.length === 0) return 'NPC';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
   };
 
   const getDateStr = () => {
@@ -546,6 +639,60 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             )}
           </div>
         </div>
+        {selectedNpc && (
+          <div className="self-end md:self-start mt-4 w-full md:w-[360px]">
+            <div className="bg-black/80 backdrop-blur-md p-4 rounded-lg border border-amber-800/50 shadow-lg pointer-events-auto">
+              <div className="flex items-center justify-between mb-3 border-b border-amber-900/40 pb-2">
+                <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">NPC Profile</h4>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[9px] uppercase tracking-widest font-bold ${getNpcHealthMeta(selectedNpc.state).color}`}>
+                    {getNpcHealthMeta(selectedNpc.state).label}
+                  </span>
+                  <div className={`w-2 h-2 rounded-full ${getNpcHealthMeta(selectedNpc.state).dot}`}></div>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <NpcPortrait npc={selectedNpc.stats} />
+                <div className="flex-1">
+                  <div className="text-amber-100 font-semibold">{selectedNpc.stats.name}</div>
+                  <div className="text-[10px] text-amber-500/70 uppercase tracking-widest mt-1">
+                    {selectedNpc.stats.profession}
+                  </div>
+                  <div className="text-[10px] text-amber-100/70 mt-1">
+                    {selectedNpc.stats.gender}, {selectedNpc.stats.age} years · {selectedNpc.stats.socialClass}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mt-4 text-[10px] text-amber-100/80">
+                <div>
+                  <div className="uppercase tracking-widest text-amber-500/60">Mood</div>
+                  <div className="font-semibold">{selectedNpc.stats.mood}</div>
+                </div>
+                <div>
+                  <div className="uppercase tracking-widest text-amber-500/60">Footwear</div>
+                  <div className="font-semibold">{selectedNpc.stats.footwearStyle ?? '—'}</div>
+                </div>
+                <div>
+                  <div className="uppercase tracking-widest text-amber-500/60">Headwear</div>
+                  <div className="font-semibold">{selectedNpc.stats.headwearStyle ?? 'none'}</div>
+                </div>
+                <div>
+                  <div className="uppercase tracking-widest text-amber-500/60">Sleeves</div>
+                  <div className="font-semibold">{selectedNpc.stats.sleeveCoverage ?? '—'}</div>
+                </div>
+              </div>
+
+              {selectedNpc.stats.accessories && selectedNpc.stats.accessories.length > 0 && (
+                <div className="border-t border-amber-900/40 pt-3 mt-3 text-[10px] text-amber-100/70">
+                  <span className="uppercase tracking-widest text-amber-500/60">Accessories</span>
+                  <div className="mt-1">{selectedNpc.stats.accessories.join(', ')}</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Bottom Controls */}
         <div className="flex flex-col md:flex-row gap-4 items-end pointer-events-auto">

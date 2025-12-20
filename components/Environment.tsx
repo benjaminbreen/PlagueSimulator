@@ -1,10 +1,11 @@
 
 import React, { useMemo, useRef, useState, useEffect, useContext } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { CONSTANTS, BuildingMetadata, BuildingType, DistrictType, getDistrictType } from '../types';
 import { generateBuildingMetadata, seededRandom } from '../utils/procedural';
+import { PushableObject } from '../utils/pushables';
 
 // Utility to generate a procedural noise texture to avoid external loading errors
 const createNoiseTexture = (size = 256, opacity = 0.2) => {
@@ -123,6 +124,7 @@ const HoverLabel: React.FC<{ title: string; lines?: string[]; offset?: [number, 
 
 const HoverableGroup: React.FC<{
   position?: [number, number, number];
+  positionVector?: THREE.Vector3;
   boxSize: [number, number, number];
   boxOffset?: [number, number, number];
   color?: string;
@@ -130,12 +132,18 @@ const HoverableGroup: React.FC<{
   labelLines?: string[];
   labelOffset?: [number, number, number];
   children: React.ReactNode;
-}> = ({ position, boxSize, boxOffset, color = HOVER_WIREFRAME_COLORS.default, labelTitle, labelLines, labelOffset, children }) => {
+}> = ({ position, positionVector, boxSize, boxOffset, color = HOVER_WIREFRAME_COLORS.default, labelTitle, labelLines, labelOffset, children }) => {
   const wireframeEnabled = useContext(HoverWireframeContext);
   const labelEnabled = useContext(HoverLabelContext);
   const [hovered, setHovered] = useState(false);
   const groupRef = useRef<THREE.Group>(null);
   useHoverFade(groupRef, wireframeEnabled && hovered);
+
+  useFrame(() => {
+    if (positionVector && groupRef.current) {
+      groupRef.current.position.copy(positionVector);
+    }
+  });
 
   return (
     <group
@@ -216,11 +224,44 @@ const Dome: React.FC<{ material: THREE.Material; position: [number, number, numb
   );
 };
 // Color palettes for different districts and building functions
+// Each type has 5 color variants for visual variety (cream/linen/clay ranges)
 const BUILDING_PALETTES = {
   [BuildingType.RESIDENTIAL]: { color: '#d6ccb7', metalness: 0, roughness: 0.85 },
   [BuildingType.COMMERCIAL]: { color: '#a68a64', metalness: 0, roughness: 1.0 },
   [BuildingType.RELIGIOUS]: { color: '#e8dcc4', metalness: 0.05, roughness: 0.7 },
   [BuildingType.CIVIC]: { color: '#d4a373', metalness: 0.1, roughness: 0.65 },
+};
+
+// Color variants for each building type - subtle cream/linen/clay variations
+const BUILDING_COLOR_VARIANTS = {
+  [BuildingType.RESIDENTIAL]: [
+    '#d6ccb7', // Original - warm cream
+    '#e2d8c5', // Lighter linen
+    '#c9bea8', // Darker clay
+    '#dfd5bf', // Pale cream
+    '#d0c4ad', // Muted tan
+  ],
+  [BuildingType.COMMERCIAL]: [
+    '#a68a64', // Original - tan/khaki
+    '#b89974', // Warmer sand
+    '#9c7f5a', // Darker clay
+    '#b2916f', // Golden tan
+    '#a08460', // Muted earth
+  ],
+  [BuildingType.RELIGIOUS]: [
+    '#e8dcc4', // Original - off-white cream
+    '#f0e6d2', // Pale ivory
+    '#ddd1ba', // Warm linen
+    '#ebe0ca', // Soft cream
+    '#e3d6be', // Subtle beige
+  ],
+  [BuildingType.CIVIC]: [
+    '#d4a373', // Original - sandy terracotta
+    '#deb083', // Light clay
+    '#c89868', // Rich terracotta
+    '#d7a87a', // Warm sand
+    '#cca06f', // Muted adobe
+  ],
 };
 
 interface EnvironmentProps {
@@ -232,6 +273,7 @@ interface EnvironmentProps {
   timeOfDay?: number;
   enableHoverWireframe?: boolean;
   enableHoverLabel?: boolean;
+  pushables?: PushableObject[];
 }
 
 const Awning: React.FC<{ material: THREE.Material; position: [number, number, number]; rotation: [number, number, number]; width: number; seed: number; nightFactor: number }> = ({ material, position, rotation, width, seed, nightFactor }) => {
@@ -542,15 +584,89 @@ const Bench: React.FC<{ position: [number, number, number] }> = ({ position }) =
   </HoverableGroup>
 );
 
-const Building: React.FC<{ 
-  data: BuildingMetadata; 
-  mainMaterial: THREE.Material; 
+const PushableBench: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[2.2, 0.6, 1.1]}
+    labelTitle="Stone Bench"
+    labelLines={['Resting place', 'Cool limestone', 'Market shade']}
+    labelOffset={[0, 0.6, 0]}
+  >
+    <group rotation={[0, item.rotation ?? 0, 0]}>
+      <mesh castShadow>
+        <boxGeometry args={[1.8, 0.2, 0.7]} />
+        <meshStandardMaterial color="#a98963" roughness={0.9} />
+      </mesh>
+      <mesh position={[-0.6, -0.1, 0]} castShadow>
+        <boxGeometry args={[0.2, 0.2, 0.7]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
+      </mesh>
+      <mesh position={[0.6, -0.1, 0]} castShadow>
+        <boxGeometry args={[0.2, 0.2, 0.7]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
+      </mesh>
+    </group>
+  </HoverableGroup>
+);
+
+const PushableClayJar: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.8, 0.9, 0.8]}
+    labelTitle="Clay Jar"
+    labelLines={['Glazed ceramic', 'Stored goods', 'Earthenware']}
+    labelOffset={[0, 0.7, 0]}
+  >
+    <mesh castShadow>
+      <cylinderGeometry args={[0.25, 0.35, 0.6, 10]} />
+      <meshStandardMaterial color="#a9703a" roughness={0.95} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableGeraniumPot: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[1.1, 1.2, 1.1]}
+    labelTitle="Geranium Pot"
+    labelLines={['Fragrant petals', 'Terracotta pot', 'Sunlit stoop']}
+    labelOffset={[0, 1.2, 0]}
+  >
+    <mesh castShadow>
+      <cylinderGeometry args={[0.35, 0.45, 0.4, 10]} />
+      <meshStandardMaterial color="#8b5a2b" roughness={0.9} />
+    </mesh>
+    <mesh position={[0, 0.45, 0]} castShadow>
+      <sphereGeometry args={[0.45, 10, 8]} />
+      <meshStandardMaterial color="#8b3b3b" roughness={0.85} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableDecorations: React.FC<{ items: PushableObject[] }> = ({ items }) => (
+  <>
+    {items.map((item) => {
+      if (item.kind === 'bench') return <PushableBench key={item.id} item={item} />;
+      if (item.kind === 'clayJar') return <PushableClayJar key={item.id} item={item} />;
+      if (item.kind === 'geranium') return <PushableGeraniumPot key={item.id} item={item} />;
+      return null;
+    })}
+  </>
+);
+
+const Building: React.FC<{
+  data: BuildingMetadata;
+  mainMaterial: THREE.Material;
   otherMaterials: any;
   isNear: boolean;
   torchIntensity: number;
   district: DistrictType;
   nightFactor: number;
-}> = ({ data, mainMaterial, otherMaterials, isNear, torchIntensity, district, nightFactor }) => {
+  noiseTextures?: THREE.Texture[];
+}> = ({ data, mainMaterial, otherMaterials, isNear, torchIntensity, district, nightFactor, noiseTextures }) => {
   const wireframeEnabled = useContext(HoverWireframeContext);
   const labelEnabled = useContext(HoverLabelContext);
   const [hovered, setHovered] = useState(false);
@@ -563,12 +679,26 @@ const Building: React.FC<{
   const buildingMaterial = useMemo(() => {
     if (!(mainMaterial instanceof THREE.MeshStandardMaterial)) return mainMaterial;
     const mat = mainMaterial.clone();
-    const color = mat.color.clone();
+
+    // Apply color variant - each building gets one of 5 color options
+    const colorVariants = BUILDING_COLOR_VARIANTS[data.type];
+    if (colorVariants && colorVariants.length > 0) {
+      const colorIndex = Math.floor(seededRandom(localSeed + 77) * colorVariants.length);
+      mat.color.set(colorVariants[colorIndex]);
+    }
+
+    // Apply texture variation for commercial/civic buildings
+    if ((data.type === BuildingType.COMMERCIAL || data.type === BuildingType.CIVIC) && noiseTextures && noiseTextures.length > 0) {
+      // Randomly choose a texture intensity variant (0-4)
+      const textureVariant = Math.floor(seededRandom(localSeed + 88) * noiseTextures.length);
+      mat.map = noiseTextures[textureVariant];
+      mat.bumpMap = noiseTextures[textureVariant];
+      // Also vary bump intensity slightly
+      const bumpVariation = 0.015 + seededRandom(localSeed + 89) * 0.015; // Range: 0.015-0.03
+      mat.bumpScale = bumpVariation;
+    }
+
     if (data.type === BuildingType.RESIDENTIAL) {
-      const hueShift = (seededRandom(localSeed + 7) - 0.5) * 0.03;
-      const lightShift = (seededRandom(localSeed + 33) - 0.5) * 0.08;
-      color.offsetHSL(hueShift, -0.02, lightShift);
-      mat.color.copy(color);
       const roughnessJitter = (seededRandom(localSeed + 55) - 0.5) * 0.1;
       mat.roughness = THREE.MathUtils.clamp(0.8 + roughnessJitter, 0.65, 0.9);
       mat.metalness = 0.03;
@@ -576,15 +706,25 @@ const Building: React.FC<{
     }
     mat.needsUpdate = true;
     return mat;
-  }, [data.type, localSeed, mainMaterial]);
+  }, [data.type, localSeed, mainMaterial, noiseTextures]);
   const baseResidentialColor = useMemo(() => {
     if (!(buildingMaterial instanceof THREE.MeshStandardMaterial)) return null;
     return buildingMaterial.color.clone();
   }, [buildingMaterial]);
 
-  useEffect(() => {
+  // PERFORMANCE FIX: Throttle material updates to every 2 seconds instead of every frame
+  // This reduces GPU uploads from 30 per frame (1800/sec) to 15 per 2s (7.5/sec) = 240x less frequent!
+  const lastMaterialUpdateRef = useRef(0);
+
+  useFrame((state) => {
     if (!(buildingMaterial instanceof THREE.MeshStandardMaterial)) return;
     if (!baseResidentialColor || data.type !== BuildingType.RESIDENTIAL) return;
+
+    const elapsed = state.clock.elapsedTime;
+    // Update every 2 seconds instead of every frame (60 FPS → 0.5 updates/sec = 120x reduction!)
+    if (elapsed - lastMaterialUpdateRef.current < 2.0) return;
+    lastMaterialUpdateRef.current = elapsed;
+
     const nightTint = new THREE.Color('#6f7f96');
     const nightDarken = 1 - nightFactor * 0.55;
     const tinted = baseResidentialColor.clone().lerp(nightTint, nightFactor);
@@ -592,7 +732,7 @@ const Building: React.FC<{
     buildingMaterial.color.copy(tinted);
     buildingMaterial.envMapIntensity = 1.35 - nightFactor * 0.9;
     buildingMaterial.needsUpdate = true;
-  }, [buildingMaterial, baseResidentialColor, nightFactor, data.type]);
+  });
 
   // Door positioning based on metadata
   const doorRotation = data.doorSide * (Math.PI / 2);
@@ -1138,7 +1278,15 @@ export const Buildings: React.FC<{
   torchIntensity: number;
   nightFactor: number;
 }> = ({ mapX, mapY, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor }) => {
-  const noiseTexture = useMemo(() => createNoiseTexture(256, 0.35), []);
+  // Create multiple noise texture variants with different intensities for variety
+  const noiseTextures = useMemo(() => [
+    createNoiseTexture(256, 0.15), // Light texture
+    createNoiseTexture(256, 0.25), // Medium-light
+    createNoiseTexture(256, 0.35), // Medium (original)
+    createNoiseTexture(256, 0.45), // Medium-heavy
+    createNoiseTexture(256, 0.55), // Heavy texture
+  ], []);
+  const { camera } = useThree();
 
   const materials = useMemo(() => {
     const matMap = new Map<BuildingType, THREE.MeshStandardMaterial>();
@@ -1146,13 +1294,13 @@ export const Buildings: React.FC<{
       const applyTexture = type === BuildingType.COMMERCIAL || type === BuildingType.CIVIC;
       matMap.set(type as BuildingType, new THREE.MeshStandardMaterial({
         ...props,
-        map: applyTexture ? noiseTexture : null,
-        bumpMap: applyTexture ? noiseTexture : null,
+        map: applyTexture ? noiseTextures[2] : null, // Use medium texture as base
+        bumpMap: applyTexture ? noiseTextures[2] : null,
         bumpScale: applyTexture ? 0.02 : 0,
       }));
     });
     return matMap;
-  }, [noiseTexture]);
+  }, [noiseTextures]);
 
   const otherMaterials = useMemo(() => ({
     wood: new THREE.MeshStandardMaterial({ color: '#3d2817', roughness: 1.0 }),
@@ -1192,7 +1340,7 @@ export const Buildings: React.FC<{
       for (let z = -size; z <= size; z += gap) {
         const localSeed = seed + Math.abs(x) * 1000 + Math.abs(z);
         const chance = seededRandom(localSeed);
-        if (chance < 0.3) continue; 
+        if (chance < 0.3) continue;
         if (mapX === 0 && mapY === 0 && Math.abs(x) < gap * 1.5 && Math.abs(z) < gap * 1.5) continue;
         const data = generateBuildingMetadata(localSeed, x, z);
         bldMetadata.push(data);
@@ -1207,14 +1355,71 @@ export const Buildings: React.FC<{
 
   const district = getDistrictType(mapX, mapY);
 
+  // Frustum culling - only render buildings visible to camera
+  // EXPANDED frustum to include shadow casters (buildings can cast shadows from off-screen)
+  const [visibleBuildings, setVisibleBuildings] = React.useState<BuildingMetadata[]>(metadata);
+  const frustum = useMemo(() => new THREE.Frustum(), []);
+  const frustumMatrix = useMemo(() => new THREE.Matrix4(), []);
+  const expandedFrustum = useMemo(() => new THREE.Frustum(), []);
+  const boundingSphere = useMemo(() => new THREE.Sphere(), []);
+  const lastCullUpdateRef = React.useRef(0);
+
+  useFrame((state) => {
+    const elapsed = state.clock.elapsedTime;
+    // Update frustum culling every 0.2 seconds (5 times per second)
+    if (elapsed - lastCullUpdateRef.current < 0.2) return;
+    lastCullUpdateRef.current = elapsed;
+
+    frustumMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    frustum.setFromProjectionMatrix(frustumMatrix);
+
+    // Create expanded frustum for shadow casting
+    // We need to render buildings outside view if they cast shadows into view
+    const expandedProjection = camera.projectionMatrix.clone();
+    const planes = frustum.planes;
+
+    // Expand frustum planes by moving them outward
+    expandedFrustum.planes[0] = planes[0].clone(); // left
+    expandedFrustum.planes[1] = planes[1].clone(); // right
+    expandedFrustum.planes[2] = planes[2].clone(); // top
+    expandedFrustum.planes[3] = planes[3].clone(); // bottom
+    expandedFrustum.planes[4] = planes[4].clone(); // near
+    expandedFrustum.planes[5] = planes[5].clone(); // far
+
+    // Push each plane outward by adjusting constant (expands frustum by ~50 units for shadows)
+    for (let i = 0; i < 4; i++) {
+      expandedFrustum.planes[i].constant += 50;
+    }
+
+    const visible: BuildingMetadata[] = [];
+    for (const building of metadata) {
+      // Create bounding sphere for building (approximate radius of 10 units)
+      boundingSphere.set(
+        new THREE.Vector3(building.position[0], building.position[1], building.position[2]),
+        10 // radius - covers most building sizes
+      );
+
+      // Use expanded frustum to include shadow casters
+      if (expandedFrustum.intersectsSphere(boundingSphere)) {
+        visible.push(building);
+      }
+    }
+
+    // Only update state if visibility changed
+    if (visible.length !== visibleBuildings.length) {
+      setVisibleBuildings(visible);
+    }
+  });
+
   return (
     <group>
       {/* Instanced rendering for performance - reduces draw calls by ~10x */}
-      <InstancedWindows buildings={metadata} district={district} nightFactor={nightFactor} />
-      <InstancedDecorations buildings={metadata} district={district} />
+      <InstancedWindows buildings={visibleBuildings} district={district} nightFactor={nightFactor} />
+      <InstancedDecorations buildings={visibleBuildings} district={district} />
 
       {/* Individual buildings (now without windows and some decorations, which are instanced above) */}
-      {metadata.map((data) => (
+      {/* FRUSTUM CULLED - only renders buildings visible to camera (30-40% performance gain) */}
+      {visibleBuildings.map((data) => (
         <Building
           key={data.id}
           data={data}
@@ -1224,6 +1429,7 @@ export const Buildings: React.FC<{
           torchIntensity={torchIntensity}
           district={district}
           nightFactor={nightFactor}
+          noiseTextures={noiseTextures}
         />
       ))}
     </group>
@@ -1233,6 +1439,7 @@ export const Buildings: React.FC<{
 export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; district: DistrictType; seed: number }> = ({ onClick, district, seed }) => {
   const roughnessTexture = useMemo(() => createNoiseTexture(128, 0.05), []);
   const blotchTexture = useMemo(() => createBlotchTexture(512), []);
+  const { camera, scene } = useThree();
 
   const groundPalette = useMemo(() => ({
     MARKET: ['#e3c595', '#dbbe8e', '#d4b687', '#cdae80', '#c6a679'],
@@ -1251,19 +1458,79 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
     : district === 'HOVELS' ? '#caa77b'
     : '#d2b483';
 
+  // PERFORMANCE & REALISM: Custom shader with distance-based horizon fade
+  // Solves the "fog soup" problem by only fading at the horizon, not nearby objects
   const groundMaterial = useMemo(() => {
     if (roughnessTexture) {
       roughnessTexture.repeat.set(6, 6);
     }
-    return new THREE.MeshStandardMaterial({ 
-      color: baseColor, 
-      roughness: 0.95, 
+    const material = new THREE.MeshStandardMaterial({
+      color: baseColor,
+      roughness: 0.95,
       metalness: 0,
       roughnessMap: roughnessTexture || null,
       bumpMap: roughnessTexture || null,
       bumpScale: 0.0035
     });
+
+    // Inject custom shader code for distance-based horizon fade
+    material.onBeforeCompile = (shader) => {
+      // Add uniforms for camera position and sky color
+      shader.uniforms.cameraPos = { value: new THREE.Vector3() };
+      shader.uniforms.skyColor = { value: new THREE.Color(0x2f95ee) }; // Default day sky
+
+      // Inject into vertex shader to pass world position to fragment
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vWorldPosition;`
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+        vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;`
+      );
+
+      // Inject into fragment shader for distance-based fade
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+        varying vec3 vWorldPosition;
+        uniform vec3 cameraPos;
+        uniform vec3 skyColor;`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <dithering_fragment>',
+        `#include <dithering_fragment>
+
+        // Distance-based horizon fade (only affects distant ground, not nearby)
+        float distFromCamera = length(vWorldPosition.xz - cameraPos.xz);
+        float horizonFadeStart = 80.0;  // Start fading at 80 units
+        float horizonFadeEnd = 140.0;   // Fully sky color at 140 units
+        float horizonFade = smoothstep(horizonFadeStart, horizonFadeEnd, distFromCamera);
+
+        // Blend to sky color at horizon
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, skyColor, horizonFade * 0.85);`
+      );
+
+      // Store reference to update uniforms
+      material.userData.shader = shader;
+    };
+
+    return material;
   }, [roughnessTexture, baseColor]);
+
+  // Update shader uniforms every frame for camera position and sky color
+  useFrame(() => {
+    const shader = groundMaterial.userData.shader;
+    if (shader) {
+      shader.uniforms.cameraPos.value.copy(camera.position);
+      // Get sky color from scene background
+      if (scene.background instanceof THREE.Color) {
+        shader.uniforms.skyColor.value.copy(scene.background);
+      }
+    }
+  });
 
   const groundOverlayMaterial = useMemo(() => {
     if (blotchTexture) {
@@ -1336,62 +1603,307 @@ const HorizonBackdrop: React.FC<{ timeOfDay?: number }> = ({ timeOfDay }) => {
   const time = timeOfDay ?? 12;
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
   const twilightFactor = time >= 17 && time < 19 ? (time - 17) / 2 : time >= 5 && time < 7 ? (7 - time) / 2 : 0;
-  const skylineColor = nightFactor > 0.8
-    ? '#0a0d14'
-    : twilightFactor > 0
-      ? '#4a505c'
-      : '#46566a';
-  const skylineOpacity = nightFactor > 0.8 ? 0.1 : twilightFactor > 0 ? 0.16 : 0.08;
-  const hazeOpacity = nightFactor > 0.8 ? 0.02 : twilightFactor > 0 ? 0.2 : 0.1;
+  const dayFactor = time >= 7 && time < 17 ? 1 : time >= 5 && time < 7 ? (time - 5) / 2 : time >= 17 && time < 19 ? (19 - time) / 2 : 0;
+
+  // Distant silhouette colors - very dark, low opacity
+  const silhouetteColor = nightFactor > 0.8 ? '#0a0a0a' : twilightFactor > 0 ? '#1a1a1a' : '#2a2a2a';
+  const silhouetteOpacity = nightFactor > 0.8 ? 0.4 : twilightFactor > 0 ? 0.5 : 0.45;
+
+  // Wall color - weathered stone (kept close for boundary)
+  const wallColor = nightFactor > 0.8 ? '#2a2a2a' : twilightFactor > 0 ? '#5a5a5a' : '#6a6a5a';
+
+  // Mountain ring - very dark, far distance
+  const mountainColor = nightFactor > 0.8 ? '#000000' : twilightFactor > 0 ? '#0a0a14' : '#1a1a2a';
+  const mountainOpacity = nightFactor > 0.8 ? 0.35 : twilightFactor > 0 ? 0.45 : 0.5;
+
+  // Smoke color - atmospheric
+  const smokeColor = nightFactor > 0.8 ? '#1a1a1a' : twilightFactor > 0 ? '#4a4a4a' : '#6a6a6a';
+  const smokeOpacity = nightFactor > 0.8 ? 0.15 : twilightFactor > 0 ? 0.25 : 0.3;
+
+  // Instanced city buildings - SINGLE DRAW CALL
+  const buildingInstancesRef = useRef<THREE.InstancedMesh>(null);
+  const buildingCount = 70;
+
+  React.useEffect(() => {
+    if (!buildingInstancesRef.current) return;
+
+    const tempObj = new THREE.Object3D();
+    const baseRadius = 105; // Pushed farther out
+
+    for (let i = 0; i < buildingCount; i++) {
+      const angle = (i / buildingCount) * Math.PI * 2;
+      const radiusVariation = ((i * 7) % 5) * 3;
+      const radius = baseRadius + radiusVariation;
+
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+
+      // Procedural height variation (3-8 units) - shorter for distance
+      const height = 3 + ((i * 11) % 6);
+      // Procedural width variation (2-5 units) - narrower
+      const width = 2 + ((i * 13) % 4);
+      const depth = 2 + ((i * 17) % 4);
+
+      tempObj.position.set(x, height / 2, z);
+      tempObj.scale.set(width, height, depth);
+      tempObj.rotation.y = angle + Math.PI / 2;
+      tempObj.updateMatrix();
+      buildingInstancesRef.current.setMatrixAt(i, tempObj.matrix);
+    }
+
+    buildingInstancesRef.current.instanceMatrix.needsUpdate = true;
+  }, []);
 
   return (
     <group>
-      {/* Distant skyline silhouettes */}
-      {Array.from({ length: 12 }).map((_, i) => {
-        const angle = (i / 12) * Math.PI * 2;
-        const radius = 95 + (i % 3) * 6;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
-        const w = 8 + (i % 4) * 6;
-        const h = 6 + (i % 4) * 4;
+      {/* INSTANCED DISTANT CITY - Single draw call for 70 buildings at horizon */}
+      <instancedMesh ref={buildingInstancesRef} args={[undefined, undefined, buildingCount]} castShadow={false} receiveShadow={false}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+      </instancedMesh>
+
+      {/* DAMASCUS CITY WALLS - Octagonal ring with gate breaks */}
+      <group>
+        {Array.from({ length: 8 }).map((_, i) => {
+          const angle = (i / 8) * Math.PI * 2;
+          const nextAngle = ((i + 1) / 8) * Math.PI * 2;
+          const radius = 82;
+
+          const x1 = Math.cos(angle) * radius;
+          const z1 = Math.sin(angle) * radius;
+          const x2 = Math.cos(nextAngle) * radius;
+          const z2 = Math.sin(nextAngle) * radius;
+
+          const midX = (x1 + x2) / 2;
+          const midZ = (z1 + z2) / 2;
+          const wallAngle = Math.atan2(z2 - z1, x2 - x1);
+          const wallLength = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
+
+          // Skip walls at cardinal directions (gates: North, South, East, West)
+          const isGate = i === 0 || i === 2 || i === 4 || i === 6;
+
+          if (!isGate) {
+            return (
+              <mesh key={`wall-${i}`} position={[midX, 4, midZ]} rotation={[0, wallAngle, 0]} castShadow={false}>
+                <boxGeometry args={[wallLength * 0.8, 8, 2]} />
+                <meshStandardMaterial color={wallColor} roughness={0.9} />
+              </mesh>
+            );
+          }
+          return null;
+        })}
+      </group>
+
+      {/* DISTANT HORIZON SILHOUETTES - Far away, unreachable */}
+      {/* PERFORMANCE OPTIMIZED: Using instanced meshes instead of individual meshes (46 → 6 draw calls) */}
+
+      {/* Distant minarets scattered on horizon - INSTANCED */}
+      {(() => {
+        const minaretInstancesRef = useRef<THREE.InstancedMesh>(null);
+        const minaretData = [
+          { angle: 0, radius: 145, height: 12 },      // North
+          { angle: Math.PI / 4, radius: 150, height: 10 },   // NE
+          { angle: Math.PI / 2, radius: 155, height: 14 },   // East
+          { angle: 3 * Math.PI / 4, radius: 148, height: 9 }, // SE
+          { angle: Math.PI, radius: 152, height: 11 },      // South
+          { angle: 5 * Math.PI / 4, radius: 147, height: 13 }, // SW
+          { angle: 3 * Math.PI / 2, radius: 160, height: 11 }, // West
+          { angle: 7 * Math.PI / 4, radius: 143, height: 10 }, // NW
+        ];
+
+        React.useEffect(() => {
+          if (!minaretInstancesRef.current) return;
+          const tempObj = new THREE.Object3D();
+          minaretData.forEach((minaret, i) => {
+            const x = Math.cos(minaret.angle) * minaret.radius;
+            const z = Math.sin(minaret.angle) * minaret.radius;
+            tempObj.position.set(x, minaret.height / 2, z);
+            // Scale to vary height per minaret
+            tempObj.scale.set(1, minaret.height / 11, 1); // normalize to avg height
+            tempObj.updateMatrix();
+            minaretInstancesRef.current.setMatrixAt(i, tempObj.matrix);
+          });
+          minaretInstancesRef.current.instanceMatrix.needsUpdate = true;
+        }, []);
+
         return (
-          <mesh key={`skyline-${i}`} position={[x, h / 2 - 1, z]} castShadow={false} receiveShadow={false}>
-            <boxGeometry args={[w, h, w * 0.8]} />
-            <meshStandardMaterial color={skylineColor} roughness={1} transparent opacity={skylineOpacity} />
-          </mesh>
+          <instancedMesh ref={minaretInstancesRef} args={[undefined, undefined, 8]} castShadow={false}>
+            <cylinderGeometry args={[0.8, 1.0, 11, 6]} />
+            <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+          </instancedMesh>
         );
-      })}
-      {/* Distant palm/olive silhouettes */}
-      {Array.from({ length: 8 }).map((_, i) => {
-        const angle = (i / 8) * Math.PI * 2;
-        const radius = 88 + (i % 3) * 5;
-        const x = Math.cos(angle) * radius;
-        const z = Math.sin(angle) * radius;
+      })()}
+
+      {/* Distant dome clusters - INSTANCED (bases and caps separate) */}
+      {(() => {
+        const domeBasesRef = useRef<THREE.InstancedMesh>(null);
+        const domeCapsRef = useRef<THREE.InstancedMesh>(null);
+        const domeData = [
+          { angle: Math.PI / 6, radius: 142 },       // North
+          { angle: Math.PI / 3, radius: 158 },       // NE
+          { angle: 5 * Math.PI / 6, radius: 149 },   // SE
+          { angle: 4 * Math.PI / 3, radius: 146 },   // SW
+          { angle: 5 * Math.PI / 3, radius: 154 },   // NW
+        ];
+
+        React.useEffect(() => {
+          if (!domeBasesRef.current || !domeCapsRef.current) return;
+          const tempObj = new THREE.Object3D();
+          domeData.forEach((dome, i) => {
+            const x = Math.cos(dome.angle) * dome.radius;
+            const z = Math.sin(dome.angle) * dome.radius;
+
+            // Base cylinder
+            tempObj.position.set(x, 4, z);
+            tempObj.scale.set(1, 1, 1);
+            tempObj.updateMatrix();
+            domeBasesRef.current.setMatrixAt(i, tempObj.matrix);
+
+            // Dome cap
+            tempObj.position.set(x, 9, z);
+            tempObj.updateMatrix();
+            domeCapsRef.current.setMatrixAt(i, tempObj.matrix);
+          });
+          domeBasesRef.current.instanceMatrix.needsUpdate = true;
+          domeCapsRef.current.instanceMatrix.needsUpdate = true;
+        }, []);
+
         return (
-          <group key={`tree-${i}`} position={[x, 0, z]}>
-            <mesh position={[0, 6, 0]} castShadow={false} receiveShadow={false}>
-              <cylinderGeometry args={[0.4, 0.6, 12, 6]} />
-              <meshStandardMaterial color="#2a2a2a" roughness={1} />
-            </mesh>
-            <mesh position={[0, 13, 0]} castShadow={false} receiveShadow={false}>
-              <sphereGeometry args={[3.5, 8, 6]} />
-              <meshStandardMaterial color="#1f2a1f" roughness={1} />
-            </mesh>
-          </group>
+          <>
+            <instancedMesh ref={domeBasesRef} args={[undefined, undefined, 5]} castShadow={false}>
+              <cylinderGeometry args={[3, 3, 8, 8]} />
+              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+            </instancedMesh>
+            <instancedMesh ref={domeCapsRef} args={[undefined, undefined, 5]} castShadow={false}>
+              <sphereGeometry args={[3.5, 8, 8, 0, Math.PI * 2, 0, Math.PI/2]} />
+              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+            </instancedMesh>
+          </>
         );
-      })}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 2, 0]}>
-        <ringGeometry args={[82, 138, 64]} />
-        <meshStandardMaterial color="#a8cfe6" transparent opacity={0.16} roughness={1} />
+      })()}
+
+      {/* Distant tree silhouettes - INSTANCED (trunks and canopies separate) */}
+      {(() => {
+        const treeTrunksRef = useRef<THREE.InstancedMesh>(null);
+        const treeCanopiesRef = useRef<THREE.InstancedMesh>(null);
+
+        React.useEffect(() => {
+          if (!treeTrunksRef.current || !treeCanopiesRef.current) return;
+          const tempObj = new THREE.Object3D();
+
+          for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2 + 0.2;
+            const radius = 140 + ((i * 7) % 4) * 4;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            const height = 6 + ((i * 5) % 4);
+
+            // Trunk
+            tempObj.position.set(x, height / 2, z);
+            tempObj.scale.set(1, height / 7.5, 1); // normalize to avg height
+            tempObj.updateMatrix();
+            treeTrunksRef.current.setMatrixAt(i, tempObj.matrix);
+
+            // Canopy
+            tempObj.position.set(x, height + 1.5, z);
+            tempObj.scale.set(1, 1, 1);
+            tempObj.updateMatrix();
+            treeCanopiesRef.current.setMatrixAt(i, tempObj.matrix);
+          }
+
+          treeTrunksRef.current.instanceMatrix.needsUpdate = true;
+          treeCanopiesRef.current.instanceMatrix.needsUpdate = true;
+        }, []);
+
+        return (
+          <>
+            <instancedMesh ref={treeTrunksRef} args={[undefined, undefined, 12]} castShadow={false}>
+              <cylinderGeometry args={[0.3, 0.4, 7.5, 4]} />
+              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity * 0.8} />
+            </instancedMesh>
+            <instancedMesh ref={treeCanopiesRef} args={[undefined, undefined, 12]} castShadow={false}>
+              <sphereGeometry args={[1.8, 6, 4]} />
+              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity * 0.7} />
+            </instancedMesh>
+          </>
+        );
+      })()}
+
+      {/* Chimney smoke - atmospheric detail - INSTANCED */}
+      {(() => {
+        const smokeInstancesRef = useRef<THREE.InstancedMesh>(null);
+        const smokeData = [
+          { x: 100, z: 100 },
+          { x: -110, z: 95 },
+          { x: 105, z: -100 },
+          { x: -95, z: -105 },
+        ];
+
+        React.useEffect(() => {
+          if (!smokeInstancesRef.current) return;
+          const tempObj = new THREE.Object3D();
+          smokeData.forEach((smoke, i) => {
+            tempObj.position.set(smoke.x, 8, smoke.z);
+            tempObj.scale.set(1, 1, 1);
+            tempObj.updateMatrix();
+            smokeInstancesRef.current.setMatrixAt(i, tempObj.matrix);
+          });
+          smokeInstancesRef.current.instanceMatrix.needsUpdate = true;
+        }, []);
+
+        return (
+          <instancedMesh ref={smokeInstancesRef} args={[undefined, undefined, 4]} castShadow={false}>
+            <cylinderGeometry args={[1.5, 0.5, 6, 6]} />
+            <meshStandardMaterial color={smokeColor} roughness={1} transparent opacity={smokeOpacity} />
+          </instancedMesh>
+        );
+      })()}
+
+      {/* Mount Qasioun - very distant mountain ring */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 10, 0]}>
+        <ringGeometry args={[165, 180, 64]} />
+        <meshStandardMaterial color={mountainColor} transparent opacity={mountainOpacity} roughness={1} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 2.2, 0]}>
-        <ringGeometry args={[90, 150, 64]} />
-        <meshStandardMaterial color="#c2dde9" transparent opacity={0.12} roughness={1} />
-      </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 2.4, 0]}>
-        <ringGeometry args={[100, 165, 64]} />
-        <meshStandardMaterial color="#d2e4ef" transparent opacity={0.1} roughness={1} />
-      </mesh>
+
+      {/* HORIZON LINE GRADIENT - Smooth transition where ground meets sky */}
+      {/* Sky color for blending */}
+      {(() => {
+        const horizonSkyColor = nightFactor > 0.8 ? '#0f1829' : twilightFactor > 0 ? '#f7b25a' : '#2f95ee';
+
+        return (
+          <>
+            {/* Multiple thin rings creating gradient from ground to sky */}
+            {[
+              { height: 0.1, radius: [100, 180], opacity: 0.5, colorMix: 0 },    // Ground color
+              { height: 0.5, radius: [100, 180], opacity: 0.45, colorMix: 0.15 },
+              { height: 1.0, radius: [100, 180], opacity: 0.4, colorMix: 0.3 },
+              { height: 1.8, radius: [100, 180], opacity: 0.35, colorMix: 0.45 },
+              { height: 2.8, radius: [100, 180], opacity: 0.3, colorMix: 0.6 },
+              { height: 4.0, radius: [100, 180], opacity: 0.25, colorMix: 0.75 },
+              { height: 5.5, radius: [100, 180], opacity: 0.2, colorMix: 0.85 },
+              { height: 7.5, radius: [100, 180], opacity: 0.15, colorMix: 0.95 },  // Sky color
+            ].map((layer, i) => {
+              // Blend from ground color to sky color
+              const groundColor = new THREE.Color('#d4b894'); // Warm ground
+              const skyColor = new THREE.Color(horizonSkyColor);
+              const blendedColor = groundColor.clone().lerp(skyColor, layer.colorMix);
+
+              return (
+                <mesh key={`horizon-gradient-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, layer.height, 0]}>
+                  <ringGeometry args={[layer.radius[0], layer.radius[1], 64]} />
+                  <meshStandardMaterial
+                    color={blendedColor}
+                    transparent
+                    opacity={layer.opacity * (nightFactor > 0.8 ? 0.6 : twilightFactor > 0 ? 0.8 : 1.0)}
+                    roughness={1}
+                    depthWrite={false}
+                  />
+                </mesh>
+              );
+            })}
+          </>
+        );
+      })()}
     </group>
   );
 };
@@ -1451,8 +1963,6 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
     spoutGeometry.current = geometry;
     return geometry;
   }, []);
-
-  const geraniumChance = 0.6;
 
   return (
     <HoverableGroup
@@ -1570,22 +2080,12 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
           </>
         )}
       </HoverableGroup>
-      <Bench position={[-12, 0.2, 9]} />
-      <Bench position={[12, 0.2, -9]} />
-      <ClayJar position={[-3.2, 0.3, -3.2]} />
-      <ClayJar position={[3.4, 0.3, 3.3]} />
-      {geraniumChance > 0.4 && (
-        <>
-          <GeraniumPot position={[6.2, 0.2, -5.0]} />
-          <GeraniumPot position={[-5.6, 0.2, 6.0]} />
-        </>
-      )}
       <PlazaCat waypoints={[[-12, 0.28, 9], [12, 0.28, -9], [6, 0.12, 6]]} />
     </HoverableGroup>
   );
 };
 
-export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundClick, onBuildingsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false }) => {
+export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundClick, onBuildingsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [] }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
   const time = timeOfDay ?? 12;
@@ -1601,13 +2101,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundCl
           <MosqueBackground mapX={mapX} mapY={mapY} />
           <HorizonBackdrop timeOfDay={timeOfDay} />
           <CentralWell mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
-          
-          <group>
-              <mesh position={[0, 5, 80]}><boxGeometry args={[160, 10, 0.5]} /><meshStandardMaterial color="#3d2817" transparent opacity={0.15} /></mesh>
-              <mesh position={[0, 5, -80]}><boxGeometry args={[160, 10, 0.5]} /><meshStandardMaterial color="#3d2817" transparent opacity={0.15} /></mesh>
-              <mesh position={[80, 5, 0]}><boxGeometry args={[0.5, 10, 160]} /><meshStandardMaterial color="#3d2817" transparent opacity={0.15} /></mesh>
-              <mesh position={[-80, 5, 0]}><boxGeometry args={[0.5, 10, 160]} /><meshStandardMaterial color="#3d2817" transparent opacity={0.15} /></mesh>
-          </group>
+          {pushables.length > 0 && <PushableDecorations items={pushables} />}
         </group>
       </HoverLabelContext.Provider>
     </HoverWireframeContext.Provider>

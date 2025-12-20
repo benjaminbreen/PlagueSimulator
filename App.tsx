@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { Simulation } from './components/Simulation';
 import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState } from './types';
 import { generatePlayerStats } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
 
@@ -38,6 +38,8 @@ function App() {
   const [sceneMode, setSceneMode] = useState<'outdoor' | 'interior'>('outdoor');
   const [interiorSpec, setInteriorSpec] = useState<InteriorSpec | null>(null);
   const [interiorNarrator, setInteriorNarrator] = useState<InteriorNarratorState | null>(null);
+  const [interiorBuilding, setInteriorBuilding] = useState<BuildingMetadata | null>(null);
+  const [selectedNpc, setSelectedNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
   const playerStats = useMemo<PlayerStats>(() => generatePlayerStats(playerSeed), [playerSeed]);
@@ -100,9 +102,10 @@ function App() {
         setSceneMode('outdoor');
         setInteriorSpec(null);
         setInteriorNarrator(null);
+        setInteriorBuilding(null);
         return;
       }
-      if (e.key === ' ' && sceneMode === 'outdoor' && nearBuilding && nearBuilding.isOpen && !showEnterModal) {
+      if (e.key === 'Enter' && sceneMode === 'outdoor' && nearBuilding && nearBuilding.isOpen && !showEnterModal) {
         setShowEnterModal(true);
       }
     };
@@ -151,6 +154,7 @@ function App() {
     const spec = generateInteriorSpec(building, seed);
     setInteriorSpec(spec);
     setInteriorNarrator(spec.narratorState);
+    setInteriorBuilding(building);
     lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
     setNearBuilding(null);
     setSceneMode('interior');
@@ -171,6 +175,24 @@ function App() {
       default: return 'Structure';
     }
   };
+  const interiorInfo = useMemo(() => {
+    if (sceneMode !== 'interior' || !interiorSpec) return null;
+    const building = interiorBuilding;
+    const location = getLocationLabel(params.mapX, params.mapY);
+    const ownerName = building?.ownerName ?? 'Resident';
+    const profession = building?.ownerProfession ?? interiorSpec.profession;
+    const type = building?.type ?? interiorSpec.buildingType;
+    const lowerProf = profession.toLowerCase();
+    let placeLabel = getBuildingLabel(type);
+    if (type === BuildingType.COMMERCIAL) {
+      if (lowerProf.includes('inn') || lowerProf.includes('sherbet')) placeLabel = 'Cafe';
+      else if (lowerProf.includes('khan') || lowerProf.includes('caravanserai')) placeLabel = 'Caravanserai';
+      else placeLabel = 'Shop';
+    }
+    const guestCount = Math.max(0, interiorSpec.npcs.filter((npc) => npc.role !== 'owner').length);
+    const guestLabel = guestCount === 0 ? 'No other customers present' : `Other customers present: ${guestCount}`;
+    return `${placeLabel} of ${ownerName} in the ${location} district. ${guestLabel}.`;
+  }, [sceneMode, interiorSpec, interiorBuilding, params.mapX, params.mapY]);
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden select-none">
@@ -189,6 +211,7 @@ function App() {
         setDevSettings={setDevSettings}
         nearBuilding={nearBuilding}
         onFastTravel={handleFastTravel}
+        selectedNpc={selectedNpc}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -238,9 +261,14 @@ function App() {
         </div>
       )}
 
+      {sceneMode === 'interior' && interiorInfo && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[11px] tracking-wide z-50 pointer-events-none max-w-[88vw] text-center">
+          {interiorInfo}
+        </div>
+      )}
       {sceneMode === 'interior' && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[10px] uppercase tracking-widest z-50 pointer-events-none">
-          Interior — Press Esc to Exit
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[10px] uppercase tracking-widest z-50 pointer-events-none">
+          Press Esc to Exit
         </div>
       )}
 
@@ -249,6 +277,7 @@ function App() {
         camera={{ position: [20, 20, 20], fov: 45 }}
         dpr={[1, 2]}
         gl={{ toneMappingExposure: 1.05 }}
+        onPointerMissed={() => setSelectedNpc(null)}
         onCreated={({ gl }) => {
           gl.shadowMap.enabled = true;
           gl.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -281,6 +310,8 @@ function App() {
               onStatsUpdate={handleStatsUpdate}
               onMapChange={handleMapChange}
               onNearBuilding={setNearBuilding}
+              onNpcSelect={setSelectedNpc}
+              selectedNpcId={selectedNpc?.stats.id ?? null}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
