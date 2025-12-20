@@ -110,6 +110,97 @@ export interface BuildingMetadata {
   hasSymmetricalWindows: boolean;
   isPointOfInterest?: boolean;
   isQuarantined?: boolean;
+  isOpen?: boolean;
+}
+
+export enum InteriorRoomType {
+  ENTRY = 'ENTRY',
+  HALL = 'HALL',
+  PRIVATE = 'PRIVATE',
+  STORAGE = 'STORAGE',
+  WORKSHOP = 'WORKSHOP',
+  COURTYARD = 'COURTYARD',
+}
+
+export enum InteriorPropType {
+  FLOOR_MAT = 'FLOOR_MAT',
+  RUG = 'RUG',
+  PRAYER_RUG = 'PRAYER_RUG',
+  LOW_TABLE = 'LOW_TABLE',
+  BENCH = 'BENCH',
+  BEDROLL = 'BEDROLL',
+  CHEST = 'CHEST',
+  SHELF = 'SHELF',
+  LAMP = 'LAMP',
+  BRAZIER = 'BRAZIER',
+  FIRE_PIT = 'FIRE_PIT',
+  AMPHORA = 'AMPHORA',
+  SCREEN = 'SCREEN',
+  LOOM = 'LOOM',
+  WATER_BASIN = 'WATER_BASIN',
+  EWER = 'EWER',
+  CUSHION = 'CUSHION',
+  DESK = 'DESK',
+  INK_SET = 'INK_SET',
+  BOOKS = 'BOOKS',
+  CHAIR = 'CHAIR',
+  WALL_HANGING = 'WALL_HANGING',
+  CRATE = 'CRATE',
+}
+
+export interface InteriorRoom {
+  id: string;
+  type: InteriorRoomType;
+  center: [number, number, number];
+  size: [number, number, number];
+}
+
+export interface InteriorProp {
+  id: string;
+  type: InteriorPropType;
+  roomId: string;
+  position: [number, number, number];
+  rotation: [number, number, number];
+  scale: [number, number, number];
+  label: string;
+  tags?: string[];
+}
+
+export interface InteriorNPC {
+  id: string;
+  role: 'owner' | 'family' | 'guest' | 'servant' | 'apprentice';
+  position: [number, number, number];
+  rotation: [number, number, number];
+  stats: NPCStats;
+}
+
+export interface InteriorNarratorState {
+  buildingId: string;
+  roomCount: number;
+  socialClass: SocialClass;
+  profession: string;
+  rooms: Array<{ id: string; type: InteriorRoomType; size: [number, number, number] }>;
+  objects: Array<{ id: string; type: InteriorPropType; roomId: string; label: string }>;
+  npcs: Array<{ id: string; role: string; name: string; profession: string }>;
+}
+
+export interface InteriorSpec {
+  id: string;
+  buildingId: string;
+  seed: number;
+  socialClass: SocialClass;
+  profession: string;
+  rooms: InteriorRoom[];
+  props: InteriorProp[];
+  npcs: InteriorNPC[];
+  narratorState: InteriorNarratorState;
+}
+
+export interface InteriorOverrides {
+  roomCount?: number;
+  roomTypes?: InteriorRoomType[];
+  extraProps?: Array<Partial<InteriorProp> & { type: InteriorPropType }>;
+  extraNPCs?: Array<Partial<InteriorNPC> & { role: InteriorNPC['role'] }>;
 }
 
 export interface Obstacle {

@@ -1,11 +1,14 @@
 
-import React, { useState, Suspense, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
+import { AdaptiveDpr, AdaptiveEvents, PerformanceMonitor } from '@react-three/drei';
 import * as THREE from 'three';
 import { Simulation } from './components/Simulation';
+import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState } from './types';
 import { generatePlayerStats } from './utils/procedural';
+import { generateInteriorSpec } from './utils/interior';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -32,6 +35,10 @@ function App() {
   const [transitioning, setTransitioning] = useState(false);
   const [nearBuilding, setNearBuilding] = useState<BuildingMetadata | null>(null);
   const [showEnterModal, setShowEnterModal] = useState(false);
+  const [sceneMode, setSceneMode] = useState<'outdoor' | 'interior'>('outdoor');
+  const [interiorSpec, setInteriorSpec] = useState<InteriorSpec | null>(null);
+  const [interiorNarrator, setInteriorNarrator] = useState<InteriorNarratorState | null>(null);
+  const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
   const playerStats = useMemo<PlayerStats>(() => generatePlayerStats(playerSeed), [playerSeed]);
   const [devSettings, setDevSettings] = useState<DevSettings>({
@@ -50,6 +57,9 @@ function App() {
     showRats: true,
     showMiasma: true,
   });
+
+  // Performance tracking for adaptive resolution
+  const [performanceDegraded, setPerformanceDegraded] = useState(false);
 
   // Time tracking
   useEffect(() => {
@@ -86,13 +96,19 @@ function App() {
   // Global Key Listener for Interaction
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === ' ' && nearBuilding && !showEnterModal) {
+      if (sceneMode === 'interior' && e.key === 'Escape') {
+        setSceneMode('outdoor');
+        setInteriorSpec(null);
+        setInteriorNarrator(null);
+        return;
+      }
+      if (e.key === ' ' && sceneMode === 'outdoor' && nearBuilding && nearBuilding.isOpen && !showEnterModal) {
         setShowEnterModal(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal]);
+  }, [nearBuilding, showEnterModal, sceneMode]);
 
   const handleMapChange = useCallback((dx: number, dy: number) => {
     setTransitioning(true);
@@ -122,6 +138,30 @@ function App() {
     setStats(prev => ({ ...prev, ...counts }));
   }, []);
 
+  const hashToSeed = useCallback((input: string) => {
+    let hash = 0;
+    for (let i = 0; i < input.length; i += 1) {
+      hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+    }
+    return hash;
+  }, []);
+
+  const enterInterior = useCallback((building: BuildingMetadata) => {
+    const seed = hashToSeed(building.id);
+    const spec = generateInteriorSpec(building, seed);
+    setInteriorSpec(spec);
+    setInteriorNarrator(spec.narratorState);
+    lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
+    setNearBuilding(null);
+    setSceneMode('interior');
+  }, [hashToSeed, params.mapX, params.mapY]);
+
+  useEffect(() => {
+    if (interiorNarrator) {
+      (window as any).__interiorState = interiorNarrator;
+    }
+  }, [interiorNarrator]);
+
   const getBuildingLabel = (type: BuildingType) => {
     switch (type) {
       case BuildingType.RESIDENTIAL: return 'Private Residence';
@@ -140,17 +180,24 @@ function App() {
         }`} 
       />
 
-      <UI 
-        params={params} 
-        setParams={setParams} 
-        stats={stats} 
+      <UI
+        params={params}
+        setParams={setParams}
+        stats={stats}
         playerStats={playerStats}
         devSettings={devSettings}
         setDevSettings={setDevSettings}
-        nearBuilding={nearBuilding} 
+        nearBuilding={nearBuilding}
         onFastTravel={handleFastTravel}
       />
-      
+
+      {/* Subtle Performance Indicator - only shows when adjusting */}
+      {performanceDegraded && devSettings.showPerfPanel && (
+        <div className="absolute top-2 right-2 bg-black/60 text-yellow-400 text-xs px-3 py-1.5 rounded-md border border-yellow-600/30 backdrop-blur-sm font-mono z-50">
+          ⚡ Adaptive Quality Active
+        </div>
+      )}
+
       {/* Interaction Modal */}
       {showEnterModal && nearBuilding && (
         <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
@@ -168,7 +215,10 @@ function App() {
             
             <div className="flex gap-4 justify-center">
               <button 
-                onClick={() => setShowEnterModal(false)}
+                onClick={() => {
+                  setShowEnterModal(false);
+                  enterInterior(nearBuilding);
+                }}
                 className="bg-amber-900 hover:bg-amber-800 text-white px-10 py-3 rounded-full tracking-widest transition-all shadow-lg active:scale-95"
               >
                 YES
@@ -188,10 +238,16 @@ function App() {
         </div>
       )}
 
+      {sceneMode === 'interior' && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[10px] uppercase tracking-widest z-50 pointer-events-none">
+          Interior — Press Esc to Exit
+        </div>
+      )}
+
       <Canvas
         shadows
         camera={{ position: [20, 20, 20], fov: 45 }}
-        dpr={[1, 1.5]}
+        dpr={[1, 2]}
         gl={{ toneMappingExposure: 1.05 }}
         onCreated={({ gl }) => {
           gl.shadowMap.enabled = true;
@@ -200,18 +256,40 @@ function App() {
           gl.outputColorSpace = THREE.SRGBColorSpace;
         }}
       >
+        {/* Adaptive Performance - automatically adjusts resolution based on FPS */}
+        <AdaptiveDpr pixelated />
+        <AdaptiveEvents />
+        <PerformanceMonitor
+          onIncline={() => setPerformanceDegraded(false)}
+          onDecline={() => setPerformanceDegraded(true)}
+          flipflops={3}
+          onChange={({ factor }) => {
+            // Log performance changes in dev mode
+            if (devSettings.enabled && devSettings.showPerfPanel) {
+              console.log(`Performance factor: ${factor.toFixed(2)}x`);
+            }
+          }}
+        />
+
         <Suspense fallback={null}>
-            {!transitioning && (
-              <Simulation 
-                params={params} 
-                simTime={stats.simTime}
-                devSettings={devSettings}
-                playerStats={playerStats}
-                onStatsUpdate={handleStatsUpdate} 
-                onMapChange={handleMapChange}
-                onNearBuilding={setNearBuilding}
-              />
-            )}
+          {!transitioning && sceneMode === 'outdoor' && (
+            <Simulation
+              params={params}
+              simTime={stats.simTime}
+              devSettings={devSettings}
+              playerStats={playerStats}
+              onStatsUpdate={handleStatsUpdate}
+              onMapChange={handleMapChange}
+              onNearBuilding={setNearBuilding}
+            />
+          )}
+          {!transitioning && sceneMode === 'interior' && interiorSpec && (
+            <InteriorScene
+              spec={interiorSpec}
+              params={params}
+              playerStats={playerStats}
+            />
+          )}
         </Suspense>
       </Canvas>
     </div>

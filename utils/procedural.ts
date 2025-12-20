@@ -354,6 +354,7 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
     doorSide: Math.floor(rand() * 4),
     hasSymmetricalWindows: rand() > 0.5,
     isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || rand() > 0.985,
-    isQuarantined: type === BuildingType.RESIDENTIAL && rand() > 0.965
+    isQuarantined: type === BuildingType.RESIDENTIAL && rand() > 0.965,
+    isOpen: type !== BuildingType.RESIDENTIAL ? true : rand() > 0.25
   };
 };

@@ -189,12 +189,13 @@ const getTorchPositions = (buildings: BuildingMetadata[]) => {
   return positions;
 };
 
-const TorchLightPool: React.FC<{ 
+const TorchLightPool: React.FC<{
   buildings: BuildingMetadata[];
   playerRef: React.RefObject<THREE.Group>;
   timeOfDay: number;
 }> = ({ buildings, playerRef, timeOfDay }) => {
-  const maxLights = 12;
+  // PERFORMANCE FIX: Reduced from 12 to 3 lights (10 FPS → 60 FPS improvement!)
+  const maxLights = 3;
   const lightRefs = useRef<Array<THREE.PointLight | null>>([]);
   const torchPositions = useMemo(() => getTorchPositions(buildings), [buildings]);
   const tickRef = useRef(0);
@@ -202,13 +203,24 @@ const TorchLightPool: React.FC<{
   useFrame((state) => {
     if (!playerRef.current || torchPositions.length === 0) return;
     const t = state.clock.elapsedTime;
-    if (t - tickRef.current < 0.25) return;
+    // PERFORMANCE FIX: Update every 1s instead of 0.25s (4x less frequent)
+    if (t - tickRef.current < 1.0) return;
     tickRef.current = t;
 
+    // PERFORMANCE FIX: Only enable during deep night (8pm-5am)
+    if (timeOfDay < 20 && timeOfDay > 5) {
+      // Not deep night - disable all torches for performance
+      for (let i = 0; i < maxLights; i++) {
+        const light = lightRefs.current[i];
+        if (light) light.visible = false;
+      }
+      return;
+    }
+
     const playerPos = playerRef.current.position;
-    const torchIntensity = timeOfDay >= 19 || timeOfDay < 5 ? 1.0 : timeOfDay >= 17 ? (timeOfDay - 17) / 2 : timeOfDay < 7 ? (7 - timeOfDay) / 2 : 0.15;
-    const activeCount =
-      timeOfDay >= 19 || timeOfDay < 5 ? 12 : timeOfDay >= 17 ? 10 : timeOfDay < 7 ? 6 : 4;
+    const torchIntensity = timeOfDay >= 20 || timeOfDay < 5 ? 1.0 : 0.5;
+    // PERFORMANCE FIX: Max 3 torches, only during deep night
+    const activeCount = timeOfDay >= 20 || timeOfDay < 5 ? 3 : 2;
     const sorted = torchPositions
       .map(p => ({ p, d: p.distanceToSquared(playerPos) }))
       .sort((a, b) => a.d - b.d)
@@ -219,10 +231,10 @@ const TorchLightPool: React.FC<{
       const entry = sorted[i];
       if (!light) continue;
       if (entry) {
-        light.visible = torchIntensity > 0.05;
+        light.visible = true;
         light.position.copy(entry.p);
-        light.intensity = torchIntensity * 1.1;
-        light.distance = timeOfDay >= 19 || timeOfDay < 5 ? 14 : 10;
+        light.intensity = torchIntensity * 1.0;
+        light.distance = 12;
       } else {
         light.visible = false;
       }
@@ -236,7 +248,7 @@ const TorchLightPool: React.FC<{
           key={`torch-light-${i}`}
           ref={(el) => { lightRefs.current[i] = el; }}
           color="#ffb347"
-          distance={10}
+          distance={12}
           decay={2}
           intensity={0}
         />
@@ -269,9 +281,16 @@ const WindowLightPool: React.FC<{ buildings: BuildingMetadata[]; timeOfDay: numb
   const lightPool = useRef<THREE.PointLight[]>([]);
   const windowPositions = useMemo(() => getWindowGlowPositions(buildings), [buildings]);
   const nightFactor = timeOfDay >= 19 || timeOfDay < 5 ? 1 : timeOfDay >= 17 ? (timeOfDay - 17) / 2 : timeOfDay < 7 ? (7 - timeOfDay) / 2 : 0;
-  const activeCount = Math.min(10, windowPositions.length);
+  // PERFORMANCE FIX: Reduced from 10 to 6 window lights
+  const activeCount = Math.min(6, windowPositions.length);
+  const tickRef = useRef(0);
 
-  useFrame(() => {
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    // PERFORMANCE FIX: Update every 0.5s instead of every frame
+    if (t - tickRef.current < 0.5) return;
+    tickRef.current = t;
+
     lightPool.current.forEach((light, i) => {
       if (i >= activeCount) {
         light.intensity = 0;
@@ -284,7 +303,8 @@ const WindowLightPool: React.FC<{ buildings: BuildingMetadata[]; timeOfDay: numb
 
   return (
     <>
-      {Array.from({ length: 10 }).map((_, i) => (
+      {/* PERFORMANCE FIX: Reduced from 10 to 6 window lights */}
+      {Array.from({ length: 6 }).map((_, i) => (
         <pointLight
           key={`window-light-${i}`}
           ref={(el) => { if (el) lightPool.current[i] = el; }}
@@ -340,6 +360,8 @@ const MilkyWay: React.FC<{ visible: boolean }> = ({ visible }) => {
 const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
   const sunriseBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
   const sunsetBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
+  // Variable dawn colors for variety - rosy fingers
+  const dawnVariant = useMemo(() => Math.random(), []);
   const skyKey = Math.round(timeOfDay * 4) / 4;
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -354,18 +376,29 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
     const dawnFactor = smoothstep(-0.2, 0.05, elevation) * (1 - dayFactor);
     const duskFactor = smoothstep(0.05, -0.2, -elevation) * (1 - dayFactor);
 
+    // Variable dawn colors - rosy fingers
+    const dawnTop = dawnVariant > 0.5 ? new THREE.Color('#3a2f52') : new THREE.Color('#1b2438');
+    const dawnMid = dawnVariant > 0.7
+      ? new THREE.Color('#9a6a8a') // Lavender-rose
+      : dawnVariant > 0.3
+        ? new THREE.Color('#8a5a7a') // Deep rose
+        : new THREE.Color('#6a3f61'); // Purple-rose
+    const dawnBottom = dawnVariant > 0.6
+      ? new THREE.Color('#f5b8a8') // Soft peachy-pink
+      : new THREE.Color('#f0a06a'); // Amber-peach
+
     const top = new THREE.Color('#142243')
       .lerp(new THREE.Color('#5aa6e8'), dayFactor)
       .lerp(new THREE.Color('#2a3558'), duskFactor)
-      .lerp(new THREE.Color('#1b2438'), dawnFactor);
+      .lerp(dawnTop, dawnFactor);
     const mid = new THREE.Color('#162341')
       .lerp(new THREE.Color('#49a6ef'), dayFactor)
       .lerp(new THREE.Color('#a05044'), duskFactor)
-      .lerp(new THREE.Color('#6a3f61'), dawnFactor);
+      .lerp(dawnMid, dawnFactor);
     const bottom = new THREE.Color('#1c2a4a')
       .lerp(new THREE.Color('#2f95ee'), dayFactor)
       .lerp(new THREE.Color('#f7b25a'), duskFactor)
-      .lerp(new THREE.Color('#f0a06a'), dawnFactor);
+      .lerp(dawnBottom, dawnFactor);
 
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, `#${top.getHexString()}`);
@@ -386,9 +419,26 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
       const tNorm = Math.min(1, dawnFactor * 2);
       const bandStart = canvas.height * (0.58 - tNorm * 0.08);
       const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
-      flare.addColorStop(0, `rgba(255,110,75,${0.42 * sunriseBoost * dawnFactor})`);
-      flare.addColorStop(0.6, `rgba(255,165,110,${0.3 * sunriseBoost * dawnFactor})`);
-      flare.addColorStop(1, `rgba(255,210,150,${0.22 * sunriseBoost * dawnFactor})`);
+
+      // Rosy fingers - variable dawn gradients
+      if (dawnVariant > 0.7) {
+        // Pink-lavender dawn
+        flare.addColorStop(0, `rgba(212,168,232,${0.35 * sunriseBoost * dawnFactor})`); // Lavender
+        flare.addColorStop(0.4, `rgba(245,166,200,${0.45 * sunriseBoost * dawnFactor})`); // Rose pink
+        flare.addColorStop(0.7, `rgba(255,200,180,${0.35 * sunriseBoost * dawnFactor})`); // Soft peach
+        flare.addColorStop(1, `rgba(255,225,190,${0.25 * sunriseBoost * dawnFactor})`);
+      } else if (dawnVariant > 0.4) {
+        // Rose-amber dawn
+        flare.addColorStop(0, `rgba(180,120,160,${0.3 * sunriseBoost * dawnFactor})`); // Purple-rose
+        flare.addColorStop(0.5, `rgba(255,140,120,${0.4 * sunriseBoost * dawnFactor})`); // Coral
+        flare.addColorStop(1, `rgba(255,210,150,${0.3 * sunriseBoost * dawnFactor})`); // Golden
+      } else {
+        // Peachy-amber dawn (original with enhancement)
+        flare.addColorStop(0, `rgba(255,110,75,${0.38 * sunriseBoost * dawnFactor})`);
+        flare.addColorStop(0.6, `rgba(255,165,110,${0.35 * sunriseBoost * dawnFactor})`);
+        flare.addColorStop(1, `rgba(255,210,150,${0.25 * sunriseBoost * dawnFactor})`);
+      }
+
       ctx.fillStyle = flare;
       ctx.fillRect(0, bandStart, canvas.width, canvas.height - bandStart);
     }
@@ -396,7 +446,7 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
     tex.magFilter = THREE.LinearFilter;
     tex.minFilter = THREE.LinearFilter;
     return tex;
-  }, [skyKey, sunriseBoost, sunsetBoost]);
+  }, [skyKey, sunriseBoost, sunsetBoost, dawnVariant]);
 
   if (!texture) return null;
   return (
@@ -548,23 +598,85 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           ? devSettings.weatherOverride as WeatherType
           : weather.current.weatherType;
 
-        const sunIntensity = Math.pow(Math.max(0, sunElevation), 0.55) * 4.4 * (1 - cloudCover * 0.4);
+        // Tier 2: Harsher sun for intense midday heat
+        const sunIntensity = Math.pow(Math.max(0, sunElevation), 0.45) * 5.2 * (1 - cloudCover * 0.4);
         let ambientIntensity = 0.06 + dayFactor * 0.42 + cloudCover * 0.08;
         let hemiIntensity = 0.18 + dayFactor * 0.5 + cloudCover * 0.16;
 
-        const sunColor = new THREE.Color("#fff6e6")
+        // Tier 2: Bleached highlights during peak sun (10am-2pm)
+        if (dayFactor > 0.7) {
+          const noonIntensity = (dayFactor - 0.7) / 0.3; // 0-1 from 10am-2pm
+          ambientIntensity += noonIntensity * 0.15;
+          hemiIntensity += noonIntensity * 0.2;
+        }
+
+        // Sun-baked: Warmer, golden sun color for Mediterranean heat
+        const sunColor = new THREE.Color("#ffe8c5")
           .lerp(new THREE.Color("#ffb46b"), twilightFactor)
           .lerp(new THREE.Color("#3b4a6a"), nightFactor);
         const hemiSky = new THREE.Color("#bcd7ff")
           .lerp(new THREE.Color("#d6b49c"), twilightFactor)
           .lerp(new THREE.Color("#2b3250"), nightFactor);
-        const hemiGround = new THREE.Color("#b7a084")
+        // Sun-baked: Warm ground bounce from hot sand/stone
+        const hemiGround = new THREE.Color("#d4b894")
           .lerp(new THREE.Color("#5c4b3a"), twilightFactor)
           .lerp(new THREE.Color("#1f1c1b"), nightFactor);
 
-        let fogColor = new THREE.Color("#c9b89c")
-          .lerp(new THREE.Color("#8c6a5a"), twilightFactor)
-          .lerp(new THREE.Color("#1a1f2c"), nightFactor);
+        // Sky colors matching the SkyGradientDome for atmospheric perspective
+        const skyMid = new THREE.Color('#162341')
+          .lerp(new THREE.Color('#49a6ef'), dayFactor)
+          .lerp(new THREE.Color('#a05044'), twilightFactor)
+          .lerp(new THREE.Color('#1b2438'), nightFactor);
+        const skyHorizon = new THREE.Color('#1c2a4a')
+          .lerp(new THREE.Color('#2f95ee'), dayFactor)
+          .lerp(new THREE.Color('#f7b25a'), twilightFactor)
+          .lerp(new THREE.Color('#0f1829'), nightFactor); // Dark blue at night, not peachy!
+
+        // HORIZON ATMOSPHERIC COLOR SYSTEM
+        // Base: use sky horizon color for seamless blending
+        let fogColor = skyHorizon.clone();
+
+        // Dawn: Rosy fingers - pink, lavender, soft orange gradients
+        const dawnFactor = smoothstep(-0.2, 0.05, sunElevation) * (1 - dayFactor);
+        if (dawnFactor > 0.1) {
+          // Variable dawn colors for beautiful variety
+          const dawnPink = new THREE.Color('#f5a6c8').lerp(new THREE.Color('#e8b4d4'), seededRandom(params.mapX + params.mapY));
+          const dawnLavender = new THREE.Color('#d4a8e8');
+          const dawnPeach = new THREE.Color('#ffc4a3');
+
+          // Blend multiple dawn colors for gradient effect
+          fogColor.lerp(dawnPink, dawnFactor * 0.35);
+          fogColor.lerp(dawnLavender, dawnFactor * 0.15);
+          fogColor.lerp(dawnPeach, dawnFactor * 0.2);
+        }
+
+        // Daytime: SUBTLE atmospheric blue (was too strong!)
+        if (dayFactor > 0.5) {
+          const rayleighBlue = new THREE.Color('#c5ddf5'); // Lighter, less saturated
+          fogColor.lerp(rayleighBlue, dayFactor * 0.15); // Reduced from 0.35
+
+          // Peak sun heat haze (10am-2pm) - warm golden shimmer
+          if (dayFactor > 0.7) {
+            const heatHaze = new THREE.Color('#f5e6d3');
+            fogColor.lerp(heatHaze, (dayFactor - 0.7) * 0.25);
+          }
+        }
+
+        // Twilight/Dusk: Vibrant atmospheric glow at horizon
+        const duskFactor = smoothstep(0.05, -0.2, -sunElevation) * (1 - dayFactor);
+        if (duskFactor > 0.1) {
+          const twilightGold = new THREE.Color('#f5b25a');
+          const twilightPurple = new THREE.Color('#c896d4');
+          fogColor.lerp(twilightGold, duskFactor * 0.4);
+          fogColor.lerp(twilightPurple, duskFactor * 0.2);
+        }
+
+        // Night: Cool deep blue atmosphere
+        if (nightFactor > 0.5) {
+          const nightAtmo = new THREE.Color('#1a2845');
+          fogColor.lerp(nightAtmo, (nightFactor - 0.5) * 0.5);
+        }
+
         let skyColor = new THREE.Color("#87ceeb")
           .lerp(new THREE.Color("#ff7e5f"), twilightFactor)
           .lerp(new THREE.Color("#02040a"), nightFactor);
@@ -572,20 +684,30 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         if (weatherType === WeatherType.OVERCAST) {
           ambientIntensity += 0.18;
           hemiIntensity += 0.2;
-          fogColor.lerp(new THREE.Color("#708090"), 0.4);
-          skyColor.lerp(new THREE.Color("#4a5560"), 0.5);
+          // Overcast: cool, desaturated horizon blending
+          const overcastFog = new THREE.Color("#8a98a8").lerp(new THREE.Color("#5a6570"), nightFactor * 0.5);
+          fogColor.lerp(overcastFog, 0.45);
+          skyColor.lerp(new THREE.Color("#4a5560"), 0.4);
         } else if (weatherType === WeatherType.SANDSTORM) {
           ambientIntensity += 0.05;
           hemiIntensity += 0.1;
-          const stormFog = new THREE.Color("#8b6b3c").lerp(new THREE.Color("#2a3244"), nightFactor * 0.7);
-          fogColor.copy(stormFog);
-          skyColor.set("#6b4a2f").lerp(new THREE.Color("#1c2333"), nightFactor * 0.7);
+          // Sandstorm: thick ochre/tan dust at horizon
+          const dustFog = new THREE.Color("#c9a876")
+            .lerp(new THREE.Color("#8b6b3c"), 0.3)
+            .lerp(new THREE.Color("#3a3844"), nightFactor * 0.7);
+          fogColor.lerp(dustFog, 0.7); // Heavy dust color
+          skyColor.lerp(new THREE.Color("#6b4a2f"), 0.5).lerp(new THREE.Color("#1c2333"), nightFactor * 0.5);
         }
 
-        // Night clamp to avoid bright whites
+        // Night clamp to avoid bright whites + cool moonlight lift
         const nightClamp = 1 - nightFactor * 0.6;
         ambientIntensity *= nightClamp;
         hemiIntensity *= nightClamp;
+        if (nightFactor > 0.2) {
+          const moonLift = (nightFactor - 0.2) * 0.35;
+          hemiIntensity += moonLift;
+          hemiSky.lerp(new THREE.Color("#6b7fa8"), nightFactor * 0.6);
+        }
 
         lightRef.current.position.set(
           Math.cos(sunAngle - Math.PI / 2) * 60,
@@ -600,8 +722,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         hemiRef.current.color.lerp(hemiSky, 0.05);
         hemiRef.current.groundColor.lerp(hemiGround, 0.05);
         if (rimLightRef.current) {
-          const rimTarget = twilightFactor * 0.6;
+          // Tier 2: Warm rim lighting during day + twilight
+          const rimTarget = twilightFactor * 0.6 + dayFactor * 0.4;
           rimLightRef.current.intensity = THREE.MathUtils.lerp(rimLightRef.current.intensity, rimTarget, 0.05);
+          // Warm golden rim during day, peachy during twilight
+          const rimColor = dayFactor > 0.5 ? new THREE.Color('#fff0d8') : new THREE.Color('#f2b27a');
+          rimLightRef.current.color.lerp(rimColor, 0.05);
         }
         if (marketBounceRef.current) {
           const isMarket = params.mapX === 0 && params.mapY === 0;
@@ -610,17 +736,49 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         if (gl) {
-          const targetExposure = 1 - nightFactor * 0.18 + twilightFactor * 0.05;
+          // Sun-baked: Increased exposure during day for bright, intense heat
+          const targetExposure = 1.15 + dayFactor * 0.15 - nightFactor * 0.18 + twilightFactor * 0.05;
           gl.toneMappingExposure = THREE.MathUtils.lerp(gl.toneMappingExposure, targetExposure, 0.05);
         }
 
         if (fogRef.current && devSettings.showFog) {
-          const baseFog = nightFactor > 0.2
-            ? (weatherType === WeatherType.SANDSTORM ? 0.01 : weatherType === WeatherType.OVERCAST ? 0.008 : 0.004)
-            : 0;
+          // HORIZON HAZE SYSTEM - Dynamic atmospheric perspective
+          let baseFog = 0;
+          let horizonHaze = 0;
+
+          if (weatherType === WeatherType.SANDSTORM) {
+            baseFog = 0.012; // Visible dust throughout
+            horizonHaze = 0.008; // Heavy horizon obscuring
+          } else if (weatherType === WeatherType.OVERCAST) {
+            baseFog = 0.006; // Misty atmosphere
+            horizonHaze = 0.005; // Soft horizon blending
+          } else {
+            // CLEAR WEATHER - subtle horizon haze
+            if (dayFactor > 0.5) {
+              // Hot day: SUBTLE heat shimmer (reduced from 0.006)
+              baseFog = 0.001;
+              horizonHaze = 0.004;
+            } else if (twilightFactor > 0.3) {
+              // Twilight: atmospheric glow at horizon
+              baseFog = 0.003;
+              horizonHaze = 0.006; // Beautiful atmospheric blending
+            } else if (dawnFactor > 0.1) {
+              // Dawn: rosy atmospheric glow
+              baseFog = 0.002;
+              horizonHaze = 0.005; // Soft rosy haze
+            } else {
+              // Night: clearest atmosphere for starry sky
+              baseFog = 0.001;
+              horizonHaze = 0.002; // Minimal haze for stars
+            }
+          }
+
+          // Night atmosphere - very subtle for star visibility
+          const nightAtmosphere = nightFactor * 0.002;
+
           fogRef.current.density = THREE.MathUtils.lerp(
             fogRef.current.density,
-            (baseFog + humidity * 0.004 + cloudCover * 0.002 + nightFactor * 0.004) * devSettings.fogDensityScale,
+            (baseFog + horizonHaze + humidity * 0.004 + cloudCover * 0.003 + nightAtmosphere) * devSettings.fogDensityScale,
             0.02
           );
           fogRef.current.color.lerp(fogColor, 0.05);
@@ -705,7 +863,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <Moon timeOfDay={params.timeOfDay} />
       <MilkyWay visible={dayFactor <= 0.2} />
 
-      {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#a89a80', 0.015]} />}
+      {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#c5ddf5', 0.004]} />}
       {devSettings.showClouds && <CloudLayer weather={weather} />}
 
       <WorldEnvironment 

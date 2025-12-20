@@ -179,6 +179,42 @@ const createStripeTexture = (colorA: string, colorB: string, stripeCount = 10) =
   texture.repeat.set(1, 1);
   return texture;
 };
+
+const useNightTintedMaterial = (
+  baseMaterial: THREE.Material,
+  nightFactor: number,
+  tintColor: string,
+  darkenScale = 0.6
+) => {
+  const material = useMemo(() => {
+    if (baseMaterial instanceof THREE.MeshStandardMaterial) {
+      return baseMaterial.clone();
+    }
+    return baseMaterial;
+  }, [baseMaterial]);
+
+  useEffect(() => {
+    if (!(material instanceof THREE.MeshStandardMaterial) || !(baseMaterial instanceof THREE.MeshStandardMaterial)) return;
+    const baseColor = baseMaterial.color.clone();
+    const nightTint = new THREE.Color(tintColor);
+    const tinted = baseColor.clone().lerp(nightTint, nightFactor);
+    tinted.multiplyScalar(1 - nightFactor * darkenScale);
+    material.color.copy(tinted);
+    material.needsUpdate = true;
+  }, [material, baseMaterial, nightFactor, tintColor, darkenScale]);
+
+  return material;
+};
+
+const Dome: React.FC<{ material: THREE.Material; position: [number, number, number]; radius: number; nightFactor: number }> = ({ material, position, radius, nightFactor }) => {
+  const tintedMaterial = useNightTintedMaterial(material, nightFactor, '#647489', 0.75);
+  return (
+    <mesh position={position} castShadow receiveShadow>
+      <sphereGeometry args={[radius, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
+      <primitive object={tintedMaterial} />
+    </mesh>
+  );
+};
 // Color palettes for different districts and building functions
 const BUILDING_PALETTES = {
   [BuildingType.RESIDENTIAL]: { color: '#d6ccb7', metalness: 0, roughness: 0.85 },
@@ -198,8 +234,9 @@ interface EnvironmentProps {
   enableHoverLabel?: boolean;
 }
 
-const Awning: React.FC<{ material: THREE.Material; position: [number, number, number]; rotation: [number, number, number]; width: number; seed: number }> = ({ material, position, rotation, width, seed }) => {
+const Awning: React.FC<{ material: THREE.Material; position: [number, number, number]; rotation: [number, number, number]; width: number; seed: number; nightFactor: number }> = ({ material, position, rotation, width, seed, nightFactor }) => {
   const ref = useRef<THREE.Mesh>(null);
+  const tintedMaterial = useNightTintedMaterial(material, nightFactor, '#657183', 0.7);
   useFrame((state) => {
     if (ref.current) {
       ref.current.rotation.x = rotation[0] + Math.sin(state.clock.elapsedTime + seed) * 0.05;
@@ -209,7 +246,7 @@ const Awning: React.FC<{ material: THREE.Material; position: [number, number, nu
   return (
     <mesh ref={ref} position={position} rotation={rotation} castShadow receiveShadow>
        <planeGeometry args={[width, 3]} />
-       <primitive object={material} />
+       <primitive object={tintedMaterial} />
     </mesh>
   );
 };
@@ -663,10 +700,12 @@ const Building: React.FC<{
       
       {/* Dome for Religious/Civic */}
       {(data.type === BuildingType.RELIGIOUS || seededRandom(localSeed + 2) > 0.85) && (
-        <mesh position={[0, height / 2, 0]} castShadow>
-          <sphereGeometry args={[buildingSize / 2.2, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2]} />
-          <primitive object={otherMaterials.dome[Math.floor(seededRandom(localSeed + 73) * otherMaterials.dome.length)]} />
-        </mesh>
+        <Dome
+          position={[0, height / 2, 0]}
+          radius={buildingSize / 2.2}
+          nightFactor={nightFactor}
+          material={otherMaterials.dome[Math.floor(seededRandom(localSeed + 73) * otherMaterials.dome.length)]}
+        />
       )}
       {/* Subtle roof caps / parapet ring */}
       {hasRoofCap && (
@@ -774,70 +813,8 @@ const Building: React.FC<{
         </>
       )}
 
-      {/* WINDOWS (Mashrabiya-style visual) */}
-      {[0, 1, 2, 3].map((side) => {
-        if (side === data.doorSide && seededRandom(localSeed + side) < 0.8) return null;
-        
-        const sideRand = seededRandom(localSeed + side + 10);
-        if (sideRand < 0.3) return null;
+      {/* WINDOWS - Now rendered with instanced meshes for better performance */}
 
-        const rot = side * (Math.PI / 2);
-        const off = buildingSize / 2 + 0.05;
-        const wPos: [number, number, number] = [0, height / 2 - 2, 0];
-        if (side === 0) wPos[2] = off;
-        else if (side === 1) wPos[0] = off;
-        else if (side === 2) wPos[2] = -off;
-        else if (side === 3) wPos[0] = -off;
-
-        const windowGlowRoll = seededRandom(localSeed + side + 120);
-        const hasGlow = windowGlowRoll > 0.5 && nightFactor > 0.2;
-        const glowIntensity = windowGlowRoll > 0.9 ? 0.5 : 0.25;
-        return (
-          <group key={side} position={wPos} rotation={[0, rot, 0]}>
-            <mesh position={[0, 0, -0.08]} receiveShadow>
-              <boxGeometry args={[data.hasSymmetricalWindows ? 2.6 : 1.4, 2.1, 0.08]} />
-              <meshStandardMaterial color="#1f140a" roughness={1} />
-            </mesh>
-            <mesh position={data.hasSymmetricalWindows ? [-1, 0, 0] : [0, 0, 0]}>
-               <boxGeometry args={[1.2, 1.8, 0.1]} />
-               <meshStandardMaterial color="#2a1a0a" roughness={1} />
-            </mesh>
-            {data.hasSymmetricalWindows && (
-              <mesh position={[1, 0, 0]}>
-                <boxGeometry args={[1.2, 1.8, 0.1]} />
-                <meshStandardMaterial color="#2a1a0a" roughness={1} />
-              </mesh>
-            )}
-            {hasGlow && (
-              <>
-                <mesh position={[0, 0, 0.06]}>
-                  <boxGeometry args={[1.0, 1.5, 0.02]} />
-                  <meshStandardMaterial color="#f5d7a3" emissive="#f2b760" emissiveIntensity={glowIntensity} roughness={0.9} metalness={0.05} />
-                </mesh>
-                {data.hasSymmetricalWindows && (
-                  <mesh position={[1, 0, 0.06]}>
-                    <boxGeometry args={[1.0, 1.5, 0.02]} />
-                    <meshStandardMaterial color="#f5d7a3" emissive="#f2b760" emissiveIntensity={glowIntensity} roughness={0.9} metalness={0.05} />
-                  </mesh>
-                )}
-              </>
-            )}
-            {hasWealthyWindowTrim && (
-              <mesh position={[0, 0, 0.08]} castShadow>
-                <boxGeometry args={[1.6, 2.2, 0.08]} />
-                <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
-              </mesh>
-            )}
-            {district === 'MARKET' && seededRandom(localSeed + side + 22) > 0.7 && (
-              <mesh position={[0, 0, 0.08]} castShadow>
-                <boxGeometry args={[1.4, 2.0, 0.08]} />
-                <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
-              </mesh>
-            )}
-          </group>
-        );
-      })}
-      
       {/* Animated Awnings */}
       {(data.type === BuildingType.COMMERCIAL || seededRandom(localSeed + 3) > 0.6) && (
         <Awning 
@@ -849,10 +826,11 @@ const Building: React.FC<{
                     (district === 'WEALTHY' ? otherMaterials.awning.length : 4)
                 )
               ]}
-          position={[0, -height / 2 + height * 0.4, buildingSize / 2 + 1.5]}
-          rotation={[0.3, 0, 0]}
-          width={buildingSize * 0.8}
+          position={[0, -height / 2 + height * 0.42, buildingSize / 2 + 0.2]}
+          rotation={[0.35 + seededRandom(localSeed + 15) * 1.15, 0, 0]}
+          width={buildingSize * (0.72 + seededRandom(localSeed + 16) * 0.12)}
           seed={localSeed}
+          nightFactor={nightFactor}
         />
       )}
 
@@ -867,10 +845,11 @@ const Building: React.FC<{
                     (district === 'WEALTHY' ? otherMaterials.awning.length : 4)
                 )
               ]}
-          position={[0, -height / 2 + height * 0.55, -buildingSize / 2 - 1.2]}
-          rotation={[0.25, Math.PI, 0]}
-          width={buildingSize * 0.6}
+          position={[0, -height / 2 + height * 0.58, -buildingSize / 2 - 0.2]}
+          rotation={[0.3 + seededRandom(localSeed + 66) * 1.0, Math.PI, 0]}
+          width={buildingSize * (0.55 + seededRandom(localSeed + 67) * 0.1)}
           seed={localSeed + 2}
+          nightFactor={nightFactor}
         />
       )}
       {seededRandom(localSeed + 71) > 0.6 && (
@@ -884,21 +863,10 @@ const Building: React.FC<{
         </group>
       )}
 
-      {hasMarketOrnaments && (
-        <group position={[0, -height / 2, 0]}>
-          {ornamentType === 0 && <PotTree position={[buildingSize / 2 + 0.8, 0.2, 1.2]} />}
-          {ornamentType === 1 && (
-            <>
-              <ClayJar position={[buildingSize / 2 + 0.7, 0.3, 1]} />
-              <ClayJar position={[buildingSize / 2 + 1.1, 0.3, 1.3]} />
-            </>
-          )}
-          {ornamentType === 2 && <PotTree position={[-buildingSize / 2 - 0.8, 0.2, -1.2]} />}
-        </group>
-      )}
+      {/* Market ornaments - now rendered with instanced meshes */}
       {hasResidentialClutter && (
         <group position={[0, -height / 2, 0]}>
-          {clutterType === 0 && <Amphora position={[buildingSize / 2 + 0.9, 0.25, -1.1]} />}
+          {/* Amphora/ClayJar (clutterType === 0) - now instanced */}
           {clutterType === 1 && <PotTree position={[-buildingSize / 2 - 0.9, 0.2, 1.1]} />}
           {clutterType === 2 && <StoneSculpture position={[buildingSize / 2 + 0.7, 0.2, 1.3]} />}
         </group>
@@ -935,9 +903,236 @@ const Building: React.FC<{
   );
 };
 
-export const Buildings: React.FC<{ 
-  mapX: number, 
-  mapY: number, 
+// Instanced Decorative Elements - renders pots, jars, benches with single draw calls
+const InstancedDecorations: React.FC<{
+  buildings: BuildingMetadata[];
+  district: DistrictType;
+}> = ({ buildings, district }) => {
+  const clayJarMeshRef = useRef<THREE.InstancedMesh>(null);
+  const potTreeBaseMeshRef = useRef<THREE.InstancedMesh>(null);
+  const potTreeFoliageMeshRef = useRef<THREE.InstancedMesh>(null);
+  const tempObj = useMemo(() => new THREE.Object3D(), []);
+
+  const decorationData = useMemo(() => {
+    const clayJars: THREE.Matrix4[] = [];
+    const potTreeBases: THREE.Matrix4[] = [];
+    const potTreeFoliage: THREE.Matrix4[] = [];
+    const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.7 : district === 'CIVIC' ? 1.2 : 1.0;
+    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale;
+
+    buildings.forEach((building) => {
+      const localSeed = building.position[0] * 1000 + building.position[2];
+      const baseHeight = building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
+      const height = baseHeight * districtScale;
+
+      const hasMarketOrnaments = district === 'MARKET' && seededRandom(localSeed + 81) > 0.6;
+      const hasResidentialClutter = district !== 'MARKET' && seededRandom(localSeed + 83) > 0.5;
+      const clutterType = Math.floor(seededRandom(localSeed + 84) * 3);
+      const ornamentType = Math.floor(seededRandom(localSeed + 82) * 3);
+
+      if (hasMarketOrnaments) {
+        if (ornamentType === 0) {
+          // PotTree
+          tempObj.position.set(building.position[0] + buildingSize / 2 + 0.8, building.position[1] + 0.2, building.position[2] + 1.2);
+          tempObj.scale.set(1, 1, 1);
+          tempObj.updateMatrix();
+          potTreeBases.push(tempObj.matrix.clone());
+          tempObj.position.y += 0.45;
+          tempObj.updateMatrix();
+          potTreeFoliage.push(tempObj.matrix.clone());
+        } else if (ornamentType === 1) {
+          // Clay Jars
+          tempObj.position.set(building.position[0] + buildingSize / 2 + 0.7, building.position[1] + 0.3, building.position[2] + 1);
+          tempObj.scale.set(1, 1, 1);
+          tempObj.updateMatrix();
+          clayJars.push(tempObj.matrix.clone());
+
+          tempObj.position.set(building.position[0] + buildingSize / 2 + 1.1, building.position[1] + 0.3, building.position[2] + 1.3);
+          tempObj.updateMatrix();
+          clayJars.push(tempObj.matrix.clone());
+        } else if (ornamentType === 2) {
+          // PotTree
+          tempObj.position.set(building.position[0] - buildingSize / 2 - 0.8, building.position[1] + 0.2, building.position[2] - 1.2);
+          tempObj.scale.set(1, 1, 1);
+          tempObj.updateMatrix();
+          potTreeBases.push(tempObj.matrix.clone());
+          tempObj.position.y += 0.45;
+          tempObj.updateMatrix();
+          potTreeFoliage.push(tempObj.matrix.clone());
+        }
+      }
+
+      if (hasResidentialClutter && clutterType === 0) {
+        // Amphora - rendered as clay jar for simplicity in instanced version
+        tempObj.position.set(building.position[0] + buildingSize / 2 + 0.9, building.position[1] + 0.25, building.position[2] - 1.1);
+        tempObj.scale.set(1, 1, 1);
+        tempObj.updateMatrix();
+        clayJars.push(tempObj.matrix.clone());
+      }
+    });
+
+    return { clayJars, potTreeBases, potTreeFoliage };
+  }, [buildings, district]);
+
+  useEffect(() => {
+    if (clayJarMeshRef.current && decorationData.clayJars.length > 0) {
+      decorationData.clayJars.forEach((matrix, i) => {
+        clayJarMeshRef.current!.setMatrixAt(i, matrix);
+      });
+      clayJarMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    if (potTreeBaseMeshRef.current && decorationData.potTreeBases.length > 0) {
+      decorationData.potTreeBases.forEach((matrix, i) => {
+        potTreeBaseMeshRef.current!.setMatrixAt(i, matrix);
+      });
+      potTreeBaseMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    if (potTreeFoliageMeshRef.current && decorationData.potTreeFoliage.length > 0) {
+      decorationData.potTreeFoliage.forEach((matrix, i) => {
+        potTreeFoliageMeshRef.current!.setMatrixAt(i, matrix);
+      });
+      potTreeFoliageMeshRef.current.instanceMatrix.needsUpdate = true;
+    }
+  }, [decorationData]);
+
+  return (
+    <>
+      {/* Clay Jars */}
+      {decorationData.clayJars.length > 0 && (
+        <instancedMesh ref={clayJarMeshRef} args={[undefined, undefined, decorationData.clayJars.length]} castShadow>
+          <cylinderGeometry args={[0.25, 0.35, 0.6, 10]} />
+          <meshStandardMaterial color="#a9703a" roughness={0.95} />
+        </instancedMesh>
+      )}
+
+      {/* Pot Tree Bases */}
+      {decorationData.potTreeBases.length > 0 && (
+        <instancedMesh ref={potTreeBaseMeshRef} args={[undefined, undefined, decorationData.potTreeBases.length]} castShadow>
+          <cylinderGeometry args={[0.35, 0.45, 0.4, 10]} />
+          <meshStandardMaterial color="#8b5a2b" roughness={0.9} />
+        </instancedMesh>
+      )}
+
+      {/* Pot Tree Foliage */}
+      {decorationData.potTreeFoliage.length > 0 && (
+        <instancedMesh ref={potTreeFoliageMeshRef} args={[undefined, undefined, decorationData.potTreeFoliage.length]} castShadow>
+          <sphereGeometry args={[0.45, 10, 8]} />
+          <meshStandardMaterial color="#4b6b3a" roughness={0.9} />
+        </instancedMesh>
+      )}
+    </>
+  );
+};
+
+// Instanced Window System - renders all windows with a single draw call
+const InstancedWindows: React.FC<{
+  buildings: BuildingMetadata[];
+  district: DistrictType;
+  nightFactor: number;
+}> = ({ buildings, district, nightFactor }) => {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const glowMeshRef = useRef<THREE.InstancedMesh>(null);
+  const tempObj = useMemo(() => new THREE.Object3D(), []);
+
+  const windowData = useMemo(() => {
+    const data: Array<{ matrix: THREE.Matrix4; hasGlow: boolean; glowIntensity: number }> = [];
+    const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.7 : district === 'CIVIC' ? 1.2 : 1.0;
+
+    buildings.forEach((building) => {
+      const localSeed = building.position[0] * 1000 + building.position[2];
+      const baseHeight = building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
+      const height = baseHeight * districtScale;
+      const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale;
+
+      // Create windows for each side
+      [0, 1, 2, 3].forEach((side) => {
+        if (side === building.doorSide && seededRandom(localSeed + side) < 0.8) return;
+        const sideRand = seededRandom(localSeed + side + 10);
+        if (sideRand < 0.3) return;
+
+        const rot = side * (Math.PI / 2);
+        const off = buildingSize / 2 + 0.05;
+        const wPos = new THREE.Vector3(building.position[0], height / 2 - 2 + building.position[1], building.position[2]);
+        if (side === 0) wPos.z += off;
+        else if (side === 1) wPos.x += off;
+        else if (side === 2) wPos.z -= off;
+        else if (side === 3) wPos.x -= off;
+
+        tempObj.position.copy(wPos);
+        tempObj.rotation.set(0, rot, 0);
+        tempObj.scale.set(1, 1, 1);
+        tempObj.updateMatrix();
+
+        const windowGlowRoll = seededRandom(localSeed + side + 120);
+        const hasGlow = windowGlowRoll > 0.5 && nightFactor > 0.2;
+        const glowIntensity = windowGlowRoll > 0.9 ? 0.5 : 0.25;
+
+        data.push({
+          matrix: tempObj.matrix.clone(),
+          hasGlow,
+          glowIntensity
+        });
+      });
+    });
+
+    return data;
+  }, [buildings, district, nightFactor]);
+
+  useEffect(() => {
+    if (!meshRef.current) return;
+
+    windowData.forEach((data, i) => {
+      meshRef.current!.setMatrixAt(i, data.matrix);
+    });
+    meshRef.current.instanceMatrix.needsUpdate = true;
+
+    if (glowMeshRef.current) {
+      let glowIndex = 0;
+      windowData.forEach((data) => {
+        if (data.hasGlow) {
+          glowMeshRef.current!.setMatrixAt(glowIndex, data.matrix);
+          glowIndex++;
+        }
+      });
+      if (glowIndex > 0) {
+        glowMeshRef.current.count = glowIndex;
+        glowMeshRef.current.instanceMatrix.needsUpdate = true;
+      }
+    }
+  }, [windowData]);
+
+  const glowCount = useMemo(() => windowData.filter(d => d.hasGlow).length, [windowData]);
+
+  return (
+    <>
+      {/* Window frames */}
+      <instancedMesh ref={meshRef} args={[undefined, undefined, windowData.length]} receiveShadow>
+        <boxGeometry args={[1.4, 2.1, 0.08]} />
+        <meshStandardMaterial color="#1f140a" roughness={1} />
+      </instancedMesh>
+
+      {/* Window glow for lit windows at night */}
+      {glowCount > 0 && (
+        <instancedMesh ref={glowMeshRef} args={[undefined, undefined, glowCount]}>
+          <boxGeometry args={[1.0, 1.5, 0.02]} />
+          <meshStandardMaterial
+            color="#f5d7a3"
+            emissive="#f2b760"
+            emissiveIntensity={nightFactor > 0.2 ? 0.3 : 0}
+            roughness={0.9}
+            metalness={0.05}
+          />
+        </instancedMesh>
+      )}
+    </>
+  );
+};
+
+export const Buildings: React.FC<{
+  mapX: number,
+  mapY: number,
   onBuildingsGenerated?: (buildings: BuildingMetadata[]) => void,
   nearBuildingId?: string | null,
   torchIntensity: number;
@@ -968,19 +1163,19 @@ export const Buildings: React.FC<{
       new THREE.MeshStandardMaterial({ color: '#b8c3c9', roughness: 0.7 }) // pale blue
     ],
     awning: [
-      new THREE.MeshStandardMaterial({ color: '#d9c9a8', side: THREE.DoubleSide }), // cream
-      new THREE.MeshStandardMaterial({ color: '#cdbb9a', side: THREE.DoubleSide }), // light tan
-      new THREE.MeshStandardMaterial({ color: '#c3ab85', side: THREE.DoubleSide }), // earth
-      new THREE.MeshStandardMaterial({ color: '#e4d6b5', side: THREE.DoubleSide }), // light linen
-      new THREE.MeshStandardMaterial({ color: '#3b4f6b', side: THREE.DoubleSide }), // indigo (wealthy)
-      new THREE.MeshStandardMaterial({ color: '#4a356a', side: THREE.DoubleSide }), // purple (wealthy)
-      new THREE.MeshStandardMaterial({ color: '#2f4f7a', side: THREE.DoubleSide }), // blue (wealthy)
-      new THREE.MeshStandardMaterial({ color: '#b0813a', side: THREE.DoubleSide }), // ochre (wealthy)
+      new THREE.MeshStandardMaterial({ color: '#d8c39a', roughness: 0.95, side: THREE.DoubleSide }), // linen
+      new THREE.MeshStandardMaterial({ color: '#c8b08a', roughness: 0.95, side: THREE.DoubleSide }), // tan
+      new THREE.MeshStandardMaterial({ color: '#b79a74', roughness: 0.95, side: THREE.DoubleSide }), // earth
+      new THREE.MeshStandardMaterial({ color: '#e0cfa6', roughness: 0.95, side: THREE.DoubleSide }), // pale linen
+      new THREE.MeshStandardMaterial({ color: '#3b4f6b', roughness: 0.9, side: THREE.DoubleSide }), // indigo (wealthy)
+      new THREE.MeshStandardMaterial({ color: '#4a356a', roughness: 0.9, side: THREE.DoubleSide }), // purple (wealthy)
+      new THREE.MeshStandardMaterial({ color: '#2f4f7a', roughness: 0.9, side: THREE.DoubleSide }), // blue (wealthy)
+      new THREE.MeshStandardMaterial({ color: '#b0813a', roughness: 0.9, side: THREE.DoubleSide }), // ochre (wealthy)
     ],
     awningStriped: [
-      new THREE.MeshStandardMaterial({ map: createStripeTexture('#f3ead6', '#d9c9a8'), side: THREE.DoubleSide }),
-      new THREE.MeshStandardMaterial({ map: createStripeTexture('#e6d6b8', '#bfae8d'), side: THREE.DoubleSide }),
-      new THREE.MeshStandardMaterial({ map: createStripeTexture('#e6d6b8', '#c6cdb2'), side: THREE.DoubleSide })
+      new THREE.MeshStandardMaterial({ map: createStripeTexture('#ead9b7', '#cdb68f'), color: '#ead9b7', roughness: 0.95, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ map: createStripeTexture('#e0cdaa', '#bca888'), color: '#e0cdaa', roughness: 0.95, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ map: createStripeTexture('#e2d3b2', '#b7b79a'), color: '#e2d3b2', roughness: 0.95, side: THREE.DoubleSide })
     ]
   }), []);
 
@@ -1010,17 +1205,24 @@ export const Buildings: React.FC<{
     onBuildingsGenerated?.(metadata);
   }, [metadata, onBuildingsGenerated]);
 
+  const district = getDistrictType(mapX, mapY);
+
   return (
     <group>
+      {/* Instanced rendering for performance - reduces draw calls by ~10x */}
+      <InstancedWindows buildings={metadata} district={district} nightFactor={nightFactor} />
+      <InstancedDecorations buildings={metadata} district={district} />
+
+      {/* Individual buildings (now without windows and some decorations, which are instanced above) */}
       {metadata.map((data) => (
-        <Building 
-          key={data.id} 
-          data={data} 
+        <Building
+          key={data.id}
+          data={data}
           mainMaterial={materials.get(data.type) || materials.get(BuildingType.RESIDENTIAL)!}
           otherMaterials={otherMaterials}
           isNear={nearBuildingId === data.id}
           torchIntensity={torchIntensity}
-          district={getDistrictType(mapX, mapY)}
+          district={district}
           nightFactor={nightFactor}
         />
       ))}
