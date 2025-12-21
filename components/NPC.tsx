@@ -8,6 +8,41 @@ import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 import { seededRandom } from '../utils/procedural';
 
+// Helper function to calculate door position from building metadata
+const getDoorPosition = (building: BuildingMetadata): THREE.Vector3 => {
+  const half = CONSTANTS.BUILDING_SIZE / 2;
+  const [x, y, z] = building.position;
+
+  switch (building.doorSide) {
+    case 0: return new THREE.Vector3(x, 0, z + half + 0.5);  // North (+ a bit outside)
+    case 1: return new THREE.Vector3(x, 0, z - half - 0.5);  // South
+    case 2: return new THREE.Vector3(x + half + 0.5, 0, z);  // East
+    case 3: return new THREE.Vector3(x - half - 0.5, 0, z);  // West
+    default: return new THREE.Vector3(x, 0, z + half + 0.5);
+  }
+};
+
+// Helper function to find nearest building to a position
+const findNearestBuilding = (
+  pos: THREE.Vector3,
+  buildings: BuildingMetadata[],
+  maxDist = 15
+): BuildingMetadata | null => {
+  let nearest = null;
+  let minDist = maxDist;
+
+  for (const building of buildings) {
+    const doorPos = getDoorPosition(building);
+    const dist = pos.distanceTo(doorPos);
+    if (dist < minDist) {
+      minDist = dist;
+      nearest = building;
+    }
+  }
+
+  return nearest;
+};
+
 interface NPCProps {
   stats: NPCStats;
   initialState?: AgentState;
@@ -86,6 +121,12 @@ export const NPC: React.FC<NPCProps> = memo(({
   const lastSpeedUpdateHourRef = useRef(-1);
   const lastSpeedUpdateStateRef = useRef<AgentState>(initialState);
 
+  // BUILDING ENTRY/EXIT: Track when NPCs go inside buildings
+  const activityStateRef = useRef<'WANDERING' | 'INSIDE_BUILDING'>('WANDERING');
+  const targetBuildingRef = useRef<string | null>(null);
+  const insideBuildingIdRef = useRef<string | null>(null);
+  const buildingExitTimeRef = useRef(0);
+
   const colors = useMemo(() => {
     switch (stats.socialClass) {
       case SocialClass.PEASANT: return { body: '#6b5a45', head: '#e2c6a2' };
@@ -112,26 +153,88 @@ export const NPC: React.FC<NPCProps> = memo(({
     const scarfPalette = ['#d6c2a4', '#c7b08c', '#c2a878', '#bfa57e'];
     const scarf = scarfPalette[Math.floor(seededRandom(seed + 29) * scarfPalette.length)];
     const robePalette = ['#6f6a3f', '#7b5a4a', '#6b5a45', '#5c4b3a', '#4a4f59'];
-    const robe = robePalette[Math.floor(seededRandom(seed + 41) * robePalette.length)];
+    let robe = robePalette[Math.floor(seededRandom(seed + 41) * robePalette.length)];
     const accentPalette = ['#e1d3b3', '#d9c9a8', '#cbb58c', '#bfa57e'];
-    const accent = accentPalette[Math.floor(seededRandom(seed + 43) * accentPalette.length)];
+    let accent = accentPalette[Math.floor(seededRandom(seed + 43) * accentPalette.length)];
     const headwearPalette = ['#8b2e2e', '#1f1f1f', '#cbb48a', '#7b5a4a', '#3f5d7a'];
     const headwearIndex = Math.floor(seededRandom(seed + 55) * headwearPalette.length);
-    const headwear = stats.headwearStyle === 'straw'
+    let headwear = stats.headwearStyle === 'straw'
       ? '#cbb48a'
       : stats.headwearStyle === 'fez'
         ? (seededRandom(seed + 57) > 0.5 ? '#8b2e2e' : '#cbb48a')
         : headwearPalette[headwearIndex];
+    const isReligiousLeader = /Imam|Qadi|Mufti|Muezzin|Qur'an|Madrasa/i.test(stats.profession);
+    const isSoldier = /Guard|Soldier|Mamluk/i.test(stats.profession);
+    const isOfficer = /Officer/i.test(stats.profession);
+    if (isReligiousLeader) {
+      robe = '#2f2b26';
+      accent = '#c8b892';
+      headwear = '#e8dfcf';
+    } else if (isSoldier) {
+      robe = isOfficer ? '#3b2f2b' : '#2f3438';
+      accent = isOfficer ? '#b59b6a' : '#8b5e3c';
+      headwear = isOfficer ? '#8b2e2e' : '#3a3a3a';
+    }
     return { skin, scarf, robe, accent, hair, headwear };
-  }, [stats.id]);
+  }, [stats.headwearStyle, stats.id, stats.profession]);
 
-  const pickNewTarget = () => {
+  const pickNewTarget = (avoidDirection?: THREE.Vector3, isStuck = false) => {
     const range = CONSTANTS.MARKET_SIZE - 12;
+
+    // STUCK BEHAVIOR: Target nearest building door to escape
+    if (isStuck) {
+      const nearestBuilding = findNearestBuilding(currentPosRef.current, buildings);
+      if (nearestBuilding) {
+        const doorPos = getDoorPosition(nearestBuilding);
+        currentTargetRef.current.copy(doorPos);
+        targetBuildingRef.current = nearestBuilding.id;
+        return;
+      }
+    }
+
+    // OCCASIONAL BUILDING VISITS: 20% chance to target a building door
+    if (Math.random() < 0.2) {
+      const eligibleBuildings = buildings.filter(b => {
+        // Clergy prefer religious buildings
+        if (stats.socialClass === SocialClass.CLERGY && b.type === BuildingType.RELIGIOUS) return true;
+        // Merchants prefer commercial
+        if (stats.socialClass === SocialClass.MERCHANT && b.type === BuildingType.COMMERCIAL) return true;
+        // Everyone can enter residential
+        if (b.type === BuildingType.RESIDENTIAL) return true;
+        return false;
+      });
+
+      if (eligibleBuildings.length > 0) {
+        const randomBuilding = eligibleBuildings[Math.floor(Math.random() * eligibleBuildings.length)];
+        const doorPos = getDoorPosition(randomBuilding);
+        currentTargetRef.current.copy(doorPos);
+        targetBuildingRef.current = randomBuilding.id;
+        return;
+      }
+    }
+
+    // UNSTUCK WITH DIRECTIONAL BIAS: Move away from the obstacle
+    if (avoidDirection) {
+      const avoidAngle = Math.atan2(avoidDirection.z, avoidDirection.x);
+      const escapeAngle = avoidAngle + Math.PI + (Math.random() - 0.5) * Math.PI / 2; // 180° ± 45°
+      const distance = range * (0.5 + Math.random() * 0.5); // 50-100% of range
+
+      currentTargetRef.current.set(
+        currentPosRef.current.x + Math.cos(escapeAngle) * distance,
+        0,
+        currentPosRef.current.z + Math.sin(escapeAngle) * distance
+      );
+      targetBuildingRef.current = null;
+      return;
+    }
+
+    // NORMAL RANDOM TARGETING
     currentTargetRef.current.set(
       (Math.random() - 0.5) * 2 * range,
       0,
       (Math.random() - 0.5) * 2 * range
     );
+    targetBuildingRef.current = null;
   };
 
   const getHealthRingColor = (state: AgentState) => {
@@ -150,6 +253,48 @@ export const NPC: React.FC<NPCProps> = memo(({
     const simTime = getSimTime();
     // Freeze movement and logic if simulation is paused
     if (simulationSpeed <= 0) return;
+
+    // BUILDING ENTRY/EXIT: Handle NPCs inside buildings
+    if (activityStateRef.current === 'INSIDE_BUILDING') {
+      // NPC is inside a building - don't render or run movement AI
+      if (group.current) {
+        group.current.visible = false;
+      }
+
+      // Check if it's time to exit
+      if (simTime >= buildingExitTimeRef.current) {
+        const building = buildings.find(b => b.id === insideBuildingIdRef.current);
+        if (building) {
+          const doorPos = getDoorPosition(building);
+          // Spawn just outside the door with a small random offset
+          const exitOffset = new THREE.Vector3(
+            (Math.random() - 0.5) * 2,
+            0,
+            (Math.random() - 0.5) * 2
+          ).normalize().multiplyScalar(1.5);
+          currentPosRef.current.copy(doorPos).add(exitOffset);
+          if (group.current) {
+            group.current.position.copy(currentPosRef.current);
+            group.current.visible = true;
+          }
+        }
+
+        // Reset to wandering state
+        activityStateRef.current = 'WANDERING';
+        insideBuildingIdRef.current = null;
+        targetBuildingRef.current = null;
+        pickNewTarget(); // Pick new destination after exiting
+        retargetTimerRef.current = 0;
+        nextRetargetRef.current = 3 + Math.random() * 5;
+      }
+
+      return; // Skip all other logic while inside
+    }
+
+    // Ensure NPC is visible when wandering
+    if (group.current && !group.current.visible) {
+      group.current.visible = true;
+    }
 
     // PERFORMANCE: Calculate distance from camera for visual LOD (used by Humanoid component)
     distanceFromCameraRef.current = currentPosRef.current.distanceTo(camera.position);
@@ -241,7 +386,7 @@ export const NPC: React.FC<NPCProps> = memo(({
 
         // Only retarget if all 6 directions are blocked (truly stuck)
         if (!foundPath) {
-          pickNewTarget();
+          pickNewTarget(dir, true); // Pass direction to avoid and isStuck=true
           retargetTimerRef.current = 0;
           nextRetargetRef.current = 3 + Math.random() * 5;
         }
@@ -251,6 +396,30 @@ export const NPC: React.FC<NPCProps> = memo(({
       if (group.current) {
         group.current.position.copy(currentPosRef.current);
         group.current.lookAt(currentPosRef.current.clone().add(dir));
+      }
+
+      // BUILDING ENTRY: Check if NPC reached their target building door
+      if (targetBuildingRef.current) {
+        const building = buildings.find(b => b.id === targetBuildingRef.current);
+        if (building) {
+          const doorPos = getDoorPosition(building);
+          const distToDoor = currentPosRef.current.distanceTo(doorPos);
+
+          if (distToDoor < 1.5) {
+            // Enter the building!
+            activityStateRef.current = 'INSIDE_BUILDING';
+            insideBuildingIdRef.current = building.id;
+            buildingExitTimeRef.current = simTime + (1 + Math.random() * 4); // 1-5 sim minutes inside
+            targetBuildingRef.current = null;
+
+            // Hide the NPC
+            if (group.current) {
+              group.current.visible = false;
+            }
+
+            return; // Stop processing this frame
+          }
+        }
       }
     }
 

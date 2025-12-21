@@ -5,6 +5,7 @@ import * as THREE from 'three';
 
 const damaskCache = new Map<string, THREE.CanvasTexture>();
 const strawCache = new Map<string, THREE.CanvasTexture>();
+const motifCache = new Map<string, THREE.CanvasTexture>();
 
 const getDamaskTexture = (baseHex: string, accentHex: string, alpha: number) => {
   const key = `${baseHex}_${accentHex}_${alpha}`;
@@ -87,6 +88,61 @@ const getStrawTexture = (baseHex: string, accentHex: string) => {
   return texture;
 };
 
+const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron', baseHex: string, accentHex: string) => {
+  const key = `${pattern}_${baseHex}_${accentHex}`;
+  const cached = motifCache.get(key);
+  if (cached) return cached;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = baseHex;
+  ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = accentHex;
+  ctx.globalAlpha = 0.55;
+  if (pattern === 'stripe') {
+    for (let y = 0; y < size; y += 8) {
+      ctx.fillRect(0, y, size, 3);
+    }
+  } else if (pattern === 'chevron') {
+    for (let y = 0; y < size; y += 12) {
+      for (let x = 0; x < size; x += 12) {
+        ctx.beginPath();
+        ctx.moveTo(x, y + 6);
+        ctx.lineTo(x + 6, y);
+        ctx.lineTo(x + 12, y + 6);
+        ctx.lineTo(x + 6, y + 12);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  } else {
+    const step = 20;
+    for (let x = 0; x < size; x += step) {
+      for (let y = 0; y < size; y += step) {
+        ctx.beginPath();
+        ctx.moveTo(x + step / 2, y + 3);
+        ctx.lineTo(x + step - 3, y + step / 2);
+        ctx.lineTo(x + step / 2, y + step - 3);
+        ctx.lineTo(x + 3, y + step / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3, 3);
+  texture.minFilter = THREE.LinearMipMapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  motifCache.set(key, texture);
+  return texture;
+};
+
 interface HumanoidProps {
   color?: string;
   headColor?: string;
@@ -116,7 +172,7 @@ interface HumanoidProps {
   robeHemBand?: boolean;
   robeSpread?: number;
   robeOverwrap?: boolean;
-  robePattern?: 'none' | 'damask';
+  robePattern?: 'none' | 'damask' | 'stripe' | 'chevron';
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
   sleeveCoverage?: 'full' | 'lower' | 'none';
@@ -247,14 +303,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     if (headwearStyle !== 'straw') return null;
     return getStrawTexture('#d2b889', '#b7925e') ?? null;
   }, [headwearStyle]);
-  const damaskMap = useMemo(() => {
-    if (!isFemale || robePattern !== 'damask') return null;
+  const motifMap = useMemo(() => {
+    if (robePattern === 'none' || distanceFromCamera > 25) return null;
     const hash = (color + robeAccentColor).split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
     const contrast = hash % 3 === 0;
-    const motif = contrast ? adjustColor(robeAccentColor, 1.35) : adjustColor(color, 1.15);
-    const alpha = contrast ? 0.55 : 0.28;
-    return getDamaskTexture(color, motif, alpha) ?? null;
-  }, [color, isFemale, robeAccentColor, robePattern]);
+    const motif = contrast ? adjustColor(robeAccentColor, 1.35) : adjustColor(color, 1.2);
+    return getMotifTexture(robePattern, '#000000', motif) ?? null;
+  }, [color, robeAccentColor, robePattern, distanceFromCamera]);
   const eyeColor = useMemo(() => {
     const roll = Math.random();
     if (roll > 0.98) return '#6aa0c8'; // rare blue
@@ -441,11 +496,24 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           <group>
             <mesh position={[0, 1.05, 0]} castShadow>
               <coneGeometry args={[0.55 * femaleRobeSpread, 1.2, 10]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} map={damaskMap ?? undefined} />
+              <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
+            {motifMap && (
+              <mesh position={[0, 1.05, 0.01]} castShadow>
+                <coneGeometry args={[0.56 * femaleRobeSpread, 1.19, 10]} />
+                <meshStandardMaterial
+                  color={robeAccentColor}
+                  alphaMap={motifMap}
+                  transparent
+                  opacity={0.55}
+                  roughness={accentRoughness}
+                  depthWrite={false}
+                />
+              </mesh>
+            )}
             <mesh position={[0, 1.35, 0]} castShadow>
               <cylinderGeometry args={[0.22, 0.28, 0.35, 10]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} map={damaskMap ?? undefined} />
+              <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
             <mesh position={[0, 1.05, 0]} castShadow>
               <cylinderGeometry args={[0.24, 0.24, 0.7, 10]} />
@@ -467,7 +535,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             </mesh>
             <mesh position={[0, 0.6, 0]} castShadow>
               <coneGeometry args={[0.75 * femaleRobeSpread, 0.9, 12]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} map={damaskMap ?? undefined} />
+              <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
             <mesh position={[0, 0.2, 0]} castShadow>
               <cylinderGeometry args={[0.78 * femaleRobeSpread, 0.78 * femaleRobeSpread, 0.1, 12]} />
@@ -558,6 +626,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <cylinderGeometry args={[0.25, 0.35, 0.9, 8]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
+            {motifMap && (
+              <mesh position={[0, 1.1, 0.01]} castShadow>
+                <cylinderGeometry args={[0.26, 0.36, 0.88, 8]} />
+                <meshStandardMaterial
+                  color={robeAccentColor}
+                  alphaMap={motifMap}
+                  transparent
+                  opacity={0.5}
+                  roughness={accentRoughness}
+                  depthWrite={false}
+                />
+              </mesh>
+            )}
             <mesh position={[0, 0.7, 0]} castShadow>
               <boxGeometry args={[0.5, 0.5, 0.3]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />

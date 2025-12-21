@@ -40,7 +40,7 @@ export interface NPCStats {
   robeHasTrim?: boolean;
   robeHemBand?: boolean;
   robeOverwrap?: boolean;
-  robePattern?: 'none' | 'damask';
+  robePattern?: 'none' | 'damask' | 'stripe' | 'chevron';
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
   sleeveCoverage?: 'full' | 'lower' | 'none';
@@ -75,7 +75,7 @@ export interface PlayerStats {
   robeHemBand: boolean;
   robeSpread: number;
   robeOverwrap: boolean;
-  robePattern: 'none' | 'damask';
+  robePattern: 'none' | 'damask' | 'stripe' | 'chevron';
   hairStyle: 'short' | 'medium' | 'long' | 'covered';
   headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
   sleeveCoverage: 'full' | 'lower' | 'none';
@@ -219,6 +219,28 @@ export interface InteriorOverrides {
 export interface Obstacle {
   position: [number, number, number];
   radius: number;
+}
+
+export enum MarketStallType {
+  SPICES = 'SPICES',           // Saffron, cumin, pepper
+  TEXTILES = 'TEXTILES',       // Damask fabric, silk
+  POTTERY = 'POTTERY',         // Ceramic bowls, plates
+  METALWORK = 'METALWORK',     // Brass, copper goods
+  RUGS = 'RUGS',              // Carpets, prayer rugs
+  FOOD = 'FOOD',              // Dates, olives, bread
+  PERFUMES = 'PERFUMES',      // Oils, incense
+  GLASSWARE = 'GLASSWARE'     // Damascus glasswork
+}
+
+export interface MarketStall {
+  id: string;
+  type: MarketStallType;
+  position: [number, number, number];
+  rotation: number; // 0, 90, 180, 270 degrees
+  size: 'small' | 'medium' | 'large';
+  awningColor: string;
+  woodColor: string;
+  goodsColor: string; // Primary color of displayed goods
 }
 
 export interface SimulationParams {

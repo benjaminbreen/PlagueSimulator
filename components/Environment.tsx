@@ -2021,7 +2021,7 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
           <meshStandardMaterial color="#3d2817" roughness={1.0} />
       </mesh>
       <HoverableGroup
-        position={[-6, 0, 0]}
+        position={[-9, 0, 0]}
         boxSize={[1.4, 4.2, 1.4]}
         color={HOVER_WIREFRAME_COLORS.poi}
         labelTitle="Lamp Column"
@@ -2051,7 +2051,7 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
         )}
       </HoverableGroup>
       <HoverableGroup
-        position={[6, 0, 0]}
+        position={[9, 0, 0]}
         boxSize={[1.4, 4.2, 1.4]}
         color={HOVER_WIREFRAME_COLORS.poi}
         labelTitle="Lamp Column"

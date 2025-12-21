@@ -3,11 +3,12 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents } from './Agents';
 import { Rats, Rat } from './Rats';
 import { Player } from './Player';
+import { MarketStall } from './MarketStall';
 import { AgentSnapshot, SpatialHash, buildBuildingHash } from '../utils/spatial';
 import { PushableObject, createPushable } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
@@ -778,14 +779,119 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   useEffect(() => {
     pushablesRef.current = pushables;
   }, [pushables]);
+
+  // Procedurally generate 1-3 market stalls in the main marketplace
+  const marketStalls = useMemo<MarketStallData[]>(() => {
+    if (params.mapX !== 0 || params.mapY !== 0) return [];
+
+    const seed = params.mapX * 1000 + params.mapY * 100;
+    let randCounter = 0;
+    const rand = () => seededRandom(seed + randCounter++ * 137);
+
+    const stallCount = 1 + Math.floor(rand() * 3); // 1-3 stalls
+    const stalls: MarketStallData[] = [];
+
+    // Available stall types
+    const stallTypes = Object.values(MarketStallType);
+
+    // Awning color palettes (period-appropriate)
+    const awningColors = [
+      '#8b0000', '#dc143c', '#b8860b', '#daa520', // Reds and golds (wealthy merchants)
+      '#4169e1', '#1e90ff', '#2e8b57', '#228b22', // Blues and greens
+      '#d2691e', '#cd853f', '#deb887', '#f5deb3'  // Earth tones (common)
+    ];
+
+    const woodColors = ['#8b4513', '#a0522d', '#6b4423', '#3e2723'];
+
+    // Keep track of occupied positions to avoid overlaps
+    const occupiedZones: { x: number; z: number; radius: number }[] = [
+      { x: 0, z: 0, radius: 6 },    // Fountain
+      { x: -9, z: 0, radius: 2 },   // Left column
+      { x: 9, z: 0, radius: 2 }     // Right column
+    ];
+
+    for (let i = 0; i < stallCount; i++) {
+      let position: [number, number, number] | null = null;
+      let attempts = 0;
+      const maxAttempts = 20;
+
+      // Try to find a valid position
+      while (!position && attempts < maxAttempts) {
+        const x = (rand() - 0.5) * 30; // Random position in ~30 unit radius
+        const z = (rand() - 0.5) * 30;
+
+        // Check if position is far enough from occupied zones
+        const tooClose = occupiedZones.some(zone => {
+          const dist = Math.sqrt((x - zone.x) ** 2 + (z - zone.z) ** 2);
+          return dist < zone.radius + 4; // 4 unit clearance
+        });
+
+        if (!tooClose) {
+          position = [x, 0, z];
+          occupiedZones.push({ x, z, radius: 4 }); // Mark as occupied
+        }
+
+        attempts++;
+      }
+
+      if (!position) continue; // Skip if couldn't find valid position
+
+      const type = stallTypes[Math.floor(rand() * stallTypes.length)];
+      const size = rand() < 0.2 ? 'small' : rand() < 0.7 ? 'medium' : 'large';
+      const rotation = [0, 90, 180, 270][Math.floor(rand() * 4)];
+      const awningColor = awningColors[Math.floor(rand() * awningColors.length)];
+      const woodColor = woodColors[Math.floor(rand() * woodColors.length)];
+
+      // Goods color based on type
+      const goodsColorMap: Record<MarketStallType, string> = {
+        [MarketStallType.SPICES]: '#ff8c00',
+        [MarketStallType.TEXTILES]: '#4169e1',
+        [MarketStallType.POTTERY]: '#d2691e',
+        [MarketStallType.METALWORK]: '#cd7f32',
+        [MarketStallType.RUGS]: '#8b0000',
+        [MarketStallType.FOOD]: '#daa520',
+        [MarketStallType.PERFUMES]: '#9370db',
+        [MarketStallType.GLASSWARE]: '#20b2aa'
+      };
+
+      stalls.push({
+        id: `stall-${i}`,
+        type,
+        position,
+        rotation,
+        size,
+        awningColor,
+        woodColor,
+        goodsColor: goodsColorMap[type]
+      });
+    }
+
+    return stalls;
+  }, [params.mapX, params.mapY]);
+
+  // Obstacles including market stalls for NPC collision detection
   const obstacles = useMemo<Obstacle[]>(() => {
     if (params.mapX !== 0 || params.mapY !== 0) return [];
-    return [
-      { position: [0, 0, 0], radius: 4.2 },
-      { position: [-6, 0, 0], radius: 0.9 },
-      { position: [6, 0, 0], radius: 0.9 }
+
+    const baseObstacles: Obstacle[] = [
+      { position: [0, 0, 0], radius: 4.2 },      // Fountain
+      { position: [-9, 0, 0], radius: 0.9 },     // Left column
+      { position: [9, 0, 0], radius: 0.9 }       // Right column
     ];
-  }, [params.mapX, params.mapY]);
+
+    // Add market stall obstacles
+    const stallObstacles: Obstacle[] = marketStalls.map(stall => {
+      // Size-based collision radius
+      const radiusMap = { small: 2.0, medium: 2.8, large: 3.5 };
+      return {
+        position: stall.position,
+        radius: radiusMap[stall.size]
+      };
+    });
+
+    return [...baseObstacles, ...stallObstacles];
+  }, [params.mapX, params.mapY, marketStalls]);
+
   const weather = useRef<WeatherState>({
     cloudCover: 0.25,
     humidity: 0.2,
@@ -1204,6 +1310,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         enableHoverLabel={enableHoverLabel}
         pushables={pushables}
       />
+
+      {/* Market Stalls - procedurally generated with variety */}
+      {marketStalls.map((stall) => (
+        <MarketStall key={stall.id} stall={stall} nightFactor={nightFactor} />
+      ))}
 
       {/* Tier 3: Contact Shadows - adds depth and grounding to buildings */}
       {devSettings.showShadows && (
