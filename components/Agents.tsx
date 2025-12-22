@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats } from '../types';
+import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats, DistrictType, getDistrictType } from '../types';
 import { generateNPCStats } from '../utils/procedural';
 import { NPC } from './NPC';
 import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
@@ -20,6 +20,8 @@ interface AgentsProps {
   playerRef?: React.RefObject<THREE.Group>;
   onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   selectedNpcId?: string | null;
+  district?: DistrictType;
+  terrainSeed?: number;
 }
 
 export const Agents: React.FC<AgentsProps> = ({
@@ -34,25 +36,28 @@ export const Agents: React.FC<AgentsProps> = ({
   impactMapRef,
   playerRef,
   onNpcSelect,
-  selectedNpcId = null
+  selectedNpcId = null,
+  district,
+  terrainSeed
 }) => {
   const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3 }>>(new Map());
   const localAgentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
   const statsTickRef = useRef(0);
 
   const npcPool = useMemo(() => {
+    const districtType = district ?? getDistrictType(params.mapX, params.mapY);
     const sampleRing = (minR: number, maxR: number) => {
       const angle = Math.random() * Math.PI * 2;
       const radius = minR + Math.random() * (maxR - minR);
       return new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
     };
     return Array.from({ length: maxAgents }).map((_, i) => {
-      const stats = generateNPCStats(i * 1337);
+      const stats = generateNPCStats(i * 1337, { districtType });
       const initialPos = sampleRing(10, 30);
       const initialTarget = new THREE.Vector3((Math.random() - 0.5) * 80, 0, (Math.random() - 0.5) * 80);
       return { stats, initialPos, initialTarget };
     });
-  }, [maxAgents]);
+  }, [maxAgents, params.mapX, params.mapY]);
 
   const getActiveCount = () => {
     const time = params.timeOfDay;
@@ -122,6 +127,8 @@ export const Agents: React.FC<AgentsProps> = ({
           initialState={i === 0 ? AgentState.INCUBATING : AgentState.HEALTHY}
           onSelect={onNpcSelect}
           isSelected={selectedNpcId === npc.stats.id}
+          district={district ?? getDistrictType(params.mapX, params.mapY)}
+          terrainSeed={terrainSeed}
         />
       ))}
     </group>

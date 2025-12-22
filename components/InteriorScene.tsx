@@ -13,6 +13,7 @@ interface InteriorSceneProps {
   spec: InteriorSpec;
   params: SimulationParams;
   playerStats: PlayerStats;
+  onPickupPrompt?: (label: string | null) => void;
 }
 
 const createRugTexture = (base: string, accent: string, pattern: 'stripe' | 'diamond') => {
@@ -881,7 +882,7 @@ const InteriorRoomMesh: React.FC<{
   );
 };
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, playerStats }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, playerStats, onPickupPrompt }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | null>(null);
@@ -1281,6 +1282,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
         initialPosition={playerSpawn}
         pushablesRef={pushablesRef}
         onImpactPuff={handleImpactPuff}
+        onPickupPrompt={onPickupPrompt}
       />
     </group>
   );

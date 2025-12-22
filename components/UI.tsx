@@ -1,19 +1,20 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, getLocationLabel, NPCStats, AgentState } from '../types';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, MiniMapData, getLocationLabel, NPCStats, AgentState } from '../types';
 import { Humanoid } from './Humanoid';
 import { seededRandom } from '../utils/procedural';
-import { 
-  Pause, 
-  Play, 
-  FastForward, 
-  Skull, 
-  ShieldAlert, 
-  Sun, 
-  Moon, 
-  Camera, 
-  Layers, 
+import { getItemDetailsByItemId } from '../utils/merchantItems';
+import {
+  Pause,
+  Play,
+  FastForward,
+  Skull,
+  ShieldAlert,
+  Sun,
+  Moon,
+  Camera,
+  Layers,
   Eye,
   Info,
   MapPin,
@@ -24,7 +25,9 @@ import {
   MousePointer2,
   Keyboard,
   Map as MapIcon,
-  Navigation
+  Navigation,
+  Package,
+  ArrowUpDown
 } from 'lucide-react';
 
 interface UIProps {
@@ -37,6 +40,10 @@ interface UIProps {
   nearBuilding: BuildingMetadata | null;
   onFastTravel: (x: number, y: number) => void;
   selectedNpc: { stats: NPCStats; state: AgentState } | null;
+  minimapData: MiniMapData | null;
+  sceneMode: 'outdoor' | 'interior';
+  pickupPrompt: string | null;
+  pickupToast: string | null;
 }
 
 const MapModal: React.FC<{
@@ -48,9 +55,12 @@ const MapModal: React.FC<{
   const locations = [
     { name: "Main Road (Al-Buzuriyah)", x: 0, y: 0, type: "Road", desc: "The bustling spine of the city, lined with spices and silks." },
     { name: "Narrow Alleys (Bab Sharqi)", x: 1, y: 1, type: "Alley", desc: "Claustrophobic streets where the miasma lingers longest." },
+    { name: "Al-Salihiyya (Hillside Quarter)", x: -2, y: 1, type: "Hillside", desc: "A terraced quarter on the slopes, gardens and stone steps rising above the city." },
     { name: "Wealthy Quarter (Al-Qaymariyya)", x: -1, y: 2, type: "Wealthy", desc: "Ornate mansions behind high walls. The plague spares few." },
     { name: "Poor Hovels (Al-Shaghour)", x: 0, y: -2, type: "Hovels", desc: "Density and decay make this a breeding ground for death." },
     { name: "Player's Home", x: 1, y: -1, type: "Home", desc: "A modest courtyard house. Your only sanctuary." },
+    { name: "Outskirts (Rural Fringe)", x: 2, y: 2, type: "Outskirts", desc: "Sparse dwellings and palms where the city thins into fields and hills." },
+    { name: "Caravanserai (Pilgrims' Road)", x: -2, y: -2, type: "Caravanserai", desc: "A fortified inn for caravans and merchants outside the city walls." },
     { name: "Mamluk Citadel", x: 2, y: -1, type: "Civic", desc: "Seat of the governor. Heavily guarded against the frantic crowds." },
   ];
 
@@ -161,6 +171,200 @@ const MapModal: React.FC<{
   );
 };
 
+const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior' }> = ({ data, sceneMode }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    if (!data || sceneMode !== 'outdoor') return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const size = 220;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    canvas.style.width = `${size}px`;
+    canvas.style.height = `${size}px`;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size, size);
+
+    const center = size / 2;
+    const radius = size / 2 - 8;
+
+    ctx.save();
+    ctx.translate(center, center);
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.clip();
+
+    const bg = ctx.createRadialGradient(0, 0, radius * 0.2, 0, 0, radius);
+    bg.addColorStop(0, '#0b0f14');
+    bg.addColorStop(1, '#06080b');
+    ctx.fillStyle = bg;
+    ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
+
+    ctx.strokeStyle = 'rgba(102, 133, 160, 0.15)';
+    ctx.lineWidth = 1;
+    [0.3, 0.55, 0.8].forEach((t) => {
+      ctx.beginPath();
+      ctx.arc(0, 0, radius * t, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+    ctx.beginPath();
+    ctx.moveTo(-radius, 0);
+    ctx.lineTo(radius, 0);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -radius);
+    ctx.lineTo(0, radius);
+    ctx.stroke();
+
+    const scale = radius / data.radius;
+    const viewYaw = Number.isFinite(data.player.cameraYaw) ? data.player.cameraYaw : data.player.yaw;
+    const cos = Math.cos(-viewYaw);
+    const sin = Math.sin(-viewYaw);
+    const project = (x: number, z: number) => {
+      const dx = x - data.player.x;
+      const dz = z - data.player.z;
+      const rx = dx * cos - dz * sin;
+      const rz = dx * sin + dz * cos;
+      return { x: rx * scale, y: rz * scale };
+    };
+
+    data.buildings.forEach((b) => {
+      const p = project(b.x, b.z);
+      const distSq = p.x * p.x + p.y * p.y;
+      if (distSq > radius * radius) return;
+      const dist = Math.sqrt(distSq) / radius;
+      // Exponential fade for buildings - more aggressive
+      const alpha = Math.pow(1 - dist, 2.2);
+      if (alpha < 0.15) return; // Cull very faint buildings
+
+      let color = '#58616b';
+      if (b.type === BuildingType.COMMERCIAL) color = '#8a6a3e';
+      else if (b.type === BuildingType.RELIGIOUS) color = '#6d8a97';
+      else if (b.type === BuildingType.CIVIC) color = '#8b6a5a';
+
+      const size = Math.max(6, Math.min(24, b.size * scale));
+
+      // Fill the building footprint for better visibility
+      ctx.fillStyle = color;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = color;
+      ctx.globalAlpha = alpha * 0.35; // Semi-transparent fill
+      ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+
+      // Stroke for definition
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = alpha * 0.85; // Stronger stroke
+      ctx.lineWidth = 1.6;
+      ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
+
+      // Door notch
+      const notch = Math.max(3, size * 0.18);
+      const half = size / 2;
+      let nx = 0;
+      let ny = 0;
+      if (b.doorSide === 0) ny = half;
+      else if (b.doorSide === 1) ny = -half;
+      else if (b.doorSide === 2) nx = half;
+      else nx = -half;
+      ctx.globalAlpha = alpha * 0.9;
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(p.x + nx - (ny !== 0 ? notch : 0), p.y + ny - (nx !== 0 ? notch : 0));
+      ctx.lineTo(p.x + nx + (ny !== 0 ? notch : 0), p.y + ny + (nx !== 0 ? notch : 0));
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+
+    // Sort NPCs by distance and limit to closest 15 (like Witcher 3/Skyrim)
+    const maxNpcsShown = 15;
+    const npcFadeStartRadius = 0.5; // Start fading at 50% of radius
+    const npcCullRadius = 0.75; // Don't show beyond 75% of radius
+
+    const sortedNpcs = data.npcs
+      .map((npc) => {
+        const p = project(npc.x, npc.z);
+        const distSq = p.x * p.x + p.y * p.y;
+        const dist = Math.sqrt(distSq) / radius;
+        return { npc, p, dist, distSq };
+      })
+      .filter(({ dist }) => dist < npcCullRadius) // Cull distant NPCs
+      .sort((a, b) => a.distSq - b.distSq) // Sort by distance
+      .slice(0, maxNpcsShown); // Limit to closest N
+
+    sortedNpcs.forEach(({ npc, p, dist }) => {
+      // Exponential fade - aggressive falloff beyond fade start
+      let alpha = 1.0;
+      if (dist > npcFadeStartRadius) {
+        const fadeRange = npcCullRadius - npcFadeStartRadius;
+        const fadeProgress = (dist - npcFadeStartRadius) / fadeRange;
+        alpha = Math.pow(1 - fadeProgress, 2.5); // Cubic falloff
+      }
+      alpha = Math.max(0.2, alpha);
+
+      const glow = npc.state === AgentState.INFECTED ? '#ef4444'
+        : npc.state === AgentState.INCUBATING ? '#f59e0b'
+        : '#8fe3ff';
+
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = glow;
+      ctx.fillStyle = glow;
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = '#f7c66a';
+    ctx.fillStyle = '#f7c66a';
+    ctx.beginPath();
+    ctx.moveTo(0, -8);
+    ctx.lineTo(5, 6);
+    ctx.lineTo(-5, 6);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+  }, [data, sceneMode]);
+
+  if (!data || sceneMode !== 'outdoor') return null;
+
+  const districtLabel = data.district === 'MARKET' ? 'Market' :
+    data.district === 'WEALTHY' ? 'Wealthy Quarter' :
+    data.district === 'HOVELS' ? 'Poor Hovels' :
+    data.district === 'CIVIC' ? 'Civic District' :
+    data.district === 'ALLEYS' ? 'Narrow Alleys' :
+    data.district === 'SALHIYYA' ? 'Al-Salihiyya' :
+    data.district === 'OUTSKIRTS' ? 'Outskirts' :
+    data.district === 'CARAVANSERAI' ? 'Caravanserai' :
+    'Residential';
+
+  return (
+    <div className="absolute top-20 right-6 pointer-events-none">
+      <div
+        className="rounded-full p-[3px]"
+        style={{ background: 'linear-gradient(135deg, #7a5a2e, #d3a45a 45%, #6b4b22)' }}
+      >
+        <div className="relative rounded-full p-[6px] bg-black/80 border border-amber-900/40 shadow-[0_0_24px_rgba(210,164,90,0.35)]">
+          <canvas ref={canvasRef} className="rounded-full block" />
+          <div
+            className="absolute inset-0 rounded-full pointer-events-none"
+            style={{ background: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.12), transparent 55%)' }}
+          />
+        </div>
+      </div>
+      <div className="mt-2 text-[9px] uppercase tracking-[0.3em] text-amber-200/60 text-center">
+        {districtLabel}
+      </div>
+    </div>
+  );
+};
+
 const PortraitRenderOnce: React.FC = () => {
   const { invalidate } = useThree();
   useEffect(() => {
@@ -233,7 +437,7 @@ const NpcPortrait: React.FC<{ npc: NPCStats }> = ({ npc }) => {
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [reportTab, setReportTab] = useState<'epidemic' | 'player'>('epidemic');
@@ -241,6 +445,38 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [showPerspective, setShowPerspective] = useState(true);
   const [fps, setFps] = useState(0);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
+  const [inventorySortBy, setInventorySortBy] = useState<'name' | 'rarity' | 'quantity'>('name');
+  const inventoryEntries = useMemo(() => {
+    const rarityRank: Record<'common' | 'uncommon' | 'rare', number> = {
+      common: 0,
+      uncommon: 1,
+      rare: 2,
+    };
+    const entries = playerStats.inventory.map((item) => {
+      const details = getItemDetailsByItemId(item.itemId);
+      return {
+        ...item,
+        name: details?.name ?? item.itemId,
+        description: details?.description ?? 'No description available.',
+        rarity: details?.rarity ?? 'common',
+        category: details?.category ?? 'Unknown',
+      };
+    });
+    entries.sort((a, b) => {
+      if (inventorySortBy === 'quantity') {
+        if (b.quantity !== a.quantity) return b.quantity - a.quantity;
+      } else if (inventorySortBy === 'rarity') {
+        if (rarityRank[b.rarity] !== rarityRank[a.rarity]) {
+          return rarityRank[b.rarity] - rarityRank[a.rarity];
+        }
+      } else {
+        const nameOrder = a.name.localeCompare(b.name);
+        if (nameOrder !== 0) return nameOrder;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return entries;
+  }, [playerStats.inventory, inventorySortBy]);
 
   React.useEffect(() => {
     if (!devSettings.showPerfPanel) return;
@@ -298,6 +534,28 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     }
   };
 
+  const getHeldItemLabel = (item?: NPCStats['heldItem']) => {
+    switch (item) {
+      case 'staff': return 'Shepherd’s staff';
+      case 'hammer': return 'Smithing hammer';
+      case 'waterskin': return 'Waterskin';
+      case 'ledger': return 'Ledger';
+      case 'spear': return 'Spear';
+      case 'tray': return 'Bread tray';
+      case 'plank': return 'Wood plank';
+      case 'sack': return 'Sack';
+      default: return '—';
+    }
+  };
+
+  const getRarityMeta = (rarity: 'common' | 'uncommon' | 'rare') => {
+    switch (rarity) {
+      case 'rare': return { label: 'Rare', color: 'text-amber-300' };
+      case 'uncommon': return { label: 'Uncommon', color: 'text-emerald-300' };
+      default: return { label: 'Common', color: 'text-amber-100/60' };
+    }
+  };
+
   const getNpcInitials = (name: string) => {
     const parts = name.split(' ').filter(Boolean);
     if (parts.length === 0) return 'NPC';
@@ -340,6 +598,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col z-10 text-amber-50">
+      <MiniMap data={minimapData} sceneMode={sceneMode} />
       
       {/* TOP NAV BAR */}
       <div 
@@ -571,69 +830,121 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 </div>
               </div>
             ) : (
-              <div className="space-y-3 text-[11px] text-amber-50/90">
+              <div className="space-y-3 text-[12px] text-amber-50/90">
                 <div className="flex items-center justify-between">
                   <div className="historical-font text-amber-400 text-sm uppercase tracking-widest">Player Report</div>
                   <button
                     onClick={() => setShowPlayerModal(true)}
-                    className="text-[9px] text-amber-100/40 uppercase tracking-[0.2em] hover:text-amber-100/70 transition-colors"
+                    className="text-[10px] text-amber-100/40 uppercase tracking-[0.2em] hover:text-amber-100/70 transition-colors"
                   >
                     More Info
                   </button>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Name</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Name</div>
                     <div className="font-bold">{playerStats.name}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Profession</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Profession</div>
                     <div className="font-bold">{playerStats.profession}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Class</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Class</div>
                     <div className="font-bold">{playerStats.socialClass}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Age</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Age</div>
                     <div className="font-bold">{playerStats.age} Years</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Gender</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Gender</div>
                     <div className="font-bold">{playerStats.gender}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Health</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Health</div>
                     <div className="font-bold text-emerald-300">{playerStats.healthStatus}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Height</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Height</div>
                     <div className="font-bold">{formatHeight(playerStats.height)}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Weight</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Weight</div>
                     <div className="font-bold">{formatWeight(playerStats.weight)}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Skin</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Skin</div>
                     <div className="font-bold">{playerStats.skinDescription}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Hair</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Hair</div>
                     <div className="font-bold">{playerStats.hairDescription}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Robe</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Robe</div>
                     <div className="font-bold">{playerStats.robeDescription}</div>
                   </div>
                   <div>
-                    <div className="text-[9px] uppercase tracking-widest text-amber-500/60">Headwear</div>
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Headwear</div>
                     <div className="font-bold">{playerStats.headwearDescription}</div>
                   </div>
                 </div>
-                <div className="border-t border-amber-900/40 pt-3 text-[10px] text-amber-100/70">
+                <div className="border-t border-amber-900/40 pt-3 text-[11px] text-amber-100/70">
                   <span className="uppercase tracking-widest text-amber-500/60">Family</span>
                   <div className="mt-1">{playerStats.family}</div>
+                </div>
+                <div className="border-t border-amber-900/40 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-amber-500/70">
+                      <Package size={12} className="text-amber-500/70" />
+                      Inventory
+                      <span className="text-amber-100/40">{playerStats.inventory.length}/{playerStats.maxInventorySlots}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-[9px] text-amber-100/50">
+                      <ArrowUpDown size={12} className="text-amber-500/60" />
+                      <button
+                        onClick={() => setInventorySortBy('name')}
+                        className={inventorySortBy === 'name' ? 'text-amber-200' : 'hover:text-amber-200'}
+                      >
+                        Name
+                      </button>
+                      <span className="text-amber-500/40">·</span>
+                      <button
+                        onClick={() => setInventorySortBy('rarity')}
+                        className={inventorySortBy === 'rarity' ? 'text-amber-200' : 'hover:text-amber-200'}
+                      >
+                        Rarity
+                      </button>
+                      <span className="text-amber-500/40">·</span>
+                      <button
+                        onClick={() => setInventorySortBy('quantity')}
+                        className={inventorySortBy === 'quantity' ? 'text-amber-200' : 'hover:text-amber-200'}
+                      >
+                        Qty
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-40 overflow-auto pr-1 space-y-2 text-[11px]">
+                    {inventoryEntries.length === 0 ? (
+                      <div className="text-amber-100/50 italic">No items carried.</div>
+                    ) : (
+                      inventoryEntries.map((item) => (
+                        <div key={item.id} className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-amber-100">{item.name}</div>
+                            <div className="text-[10px] text-amber-100/50">{item.description}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className={`text-[9px] uppercase tracking-widest ${getRarityMeta(item.rarity).color}`}>
+                              {getRarityMeta(item.rarity).label}
+                            </div>
+                            <div className="text-[11px] font-mono text-amber-200/80">x{item.quantity}</div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -671,6 +982,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   <div className="font-semibold">{selectedNpc.stats.mood}</div>
                 </div>
                 <div>
+                  <div className="uppercase tracking-widest text-amber-500/60">Carrying</div>
+                  <div className="font-semibold">{getHeldItemLabel(selectedNpc.stats.heldItem)}</div>
+                </div>
+                <div>
                   <div className="uppercase tracking-widest text-amber-500/60">Footwear</div>
                   <div className="font-semibold">{selectedNpc.stats.footwearStyle ?? '—'}</div>
                 </div>
@@ -684,6 +999,13 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 </div>
               </div>
 
+              {selectedNpc.stats.goalOfDay && (
+                <div className="border-t border-amber-900/40 pt-3 mt-3 text-[10px] text-amber-100/70">
+                  <span className="uppercase tracking-widest text-amber-500/60">Goal</span>
+                  <div className="mt-1">{selectedNpc.stats.goalOfDay}</div>
+                </div>
+              )}
+
               {selectedNpc.stats.accessories && selectedNpc.stats.accessories.length > 0 && (
                 <div className="border-t border-amber-900/40 pt-3 mt-3 text-[10px] text-amber-100/70">
                   <span className="uppercase tracking-widest text-amber-500/60">Accessories</span>
@@ -691,6 +1013,17 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {pickupPrompt && (
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-amber-700/50 text-amber-200 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_20px_rgba(245,158,11,0.25)]">
+            {pickupPrompt}
+          </div>
+        )}
+        {pickupToast && (
+          <div className="absolute bottom-36 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-950/90 via-black/80 to-amber-950/90 backdrop-blur-md px-5 py-2 rounded-full border border-amber-500/50 text-amber-100 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_30px_rgba(245,158,11,0.35)]">
+            {pickupToast}
           </div>
         )}
 

@@ -36,13 +36,15 @@ export interface NPCStats {
   height: number;
   weight: number;
   mood: string;
+  goalOfDay?: string;
+  heldItem?: 'staff' | 'hammer' | 'waterskin' | 'ledger' | 'spear' | 'tray' | 'plank' | 'sack' | 'none';
   robeSpread?: number;
   robeHasTrim?: boolean;
   robeHemBand?: boolean;
   robeOverwrap?: boolean;
   robePattern?: 'none' | 'damask' | 'stripe' | 'chevron';
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
-  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
+  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
   footwearColor?: string;
@@ -77,7 +79,7 @@ export interface PlayerStats {
   robeOverwrap: boolean;
   robePattern: 'none' | 'damask' | 'stripe' | 'chevron';
   hairStyle: 'short' | 'medium' | 'long' | 'covered';
-  headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
+  headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
   sleeveCoverage: 'full' | 'lower' | 'none';
   footwearStyle: 'sandals' | 'shoes' | 'bare';
   footwearColor: string;
@@ -98,6 +100,9 @@ export interface PlayerStats {
     blackBile: number;
   };
   humoralBalance: number;
+  currency: number;         // Dirhams (Islamic currency)
+  inventory: PlayerItem[];
+  maxInventorySlots: number; // Start with 20
 }
 
 export interface BuildingMetadata {
@@ -108,6 +113,7 @@ export interface BuildingMetadata {
   ownerProfession: string;
   ownerGender: 'Male' | 'Female';
   position: [number, number, number];
+  sizeScale?: number;
   doorSide: number; // 0: North, 1: South, 2: East, 3: West
   hasSymmetricalWindows: boolean;
   isPointOfInterest?: boolean;
@@ -243,6 +249,65 @@ export interface MarketStall {
   goodsColor: string; // Primary color of displayed goods
 }
 
+export enum MerchantType {
+  TEXTILE = 'TEXTILE',        // Fabrics, robes, clothing
+  APOTHECARY = 'APOTHECARY',  // Medicines, spices, herbs
+  METALSMITH = 'METALSMITH',  // Weapons, tools, brass goods
+  TRADER = 'TRADER'           // General goods, food, misc
+}
+
+export interface ItemEffect {
+  type: 'heal' | 'buff' | 'debuff';
+  value: number;
+  duration?: number; // For temporary effects
+}
+
+export interface MerchantItem {
+  id: string;
+  name: string;
+  description: string;
+  category: MerchantType;
+  basePrice: number; // In dirhams (Islamic currency)
+  quantity: number;  // How many merchant has
+  rarity: 'common' | 'uncommon' | 'rare';
+  icon?: string;     // For future icon system
+  effects?: ItemEffect[]; // For consumables (healing, etc)
+}
+
+export interface MerchantInventory {
+  merchantId: string;
+  items: MerchantItem[];
+  lastRestockTime: number;  // Sim time when inventory last refreshed
+  restockInterval: number;  // Hours between restocks (24-48)
+}
+
+export interface MerchantNPC {
+  id: string;
+  type: MerchantType;
+  stats: NPCStats;          // Name, age, appearance (reuse existing)
+  locationId: string;       // Either stall ID or building ID
+  locationType: 'STALL' | 'INTERIOR';
+  position: [number, number, number];
+  inventory: MerchantInventory;
+  haggleModifier: number;   // 0.8-1.2 (affects final prices)
+  greeting: string;         // Procedurally generated flavor text
+}
+
+export interface PlayerItem {
+  id: string;
+  itemId: string;    // Reference to base MerchantItem
+  quantity: number;
+  acquiredAt: number; // Sim time
+}
+
+export interface MiniMapData {
+  player: { x: number; z: number; yaw: number; cameraYaw: number };
+  buildings: Array<{ x: number; z: number; type: BuildingType; size: number; doorSide: number }>;
+  npcs: Array<{ x: number; z: number; state: AgentState }>;
+  district: DistrictType;
+  radius: number;
+}
+
 export interface SimulationParams {
   infectionRate: number; 
   hygieneLevel: number; 
@@ -313,6 +378,9 @@ export const getLocationLabel = (x: number, y: number) => {
   if (x === 0 && y === -2) return "Al-Shaghour (Poor Hovels)";
   if (x === 2 && y === -1) return "The Mamluk Citadel (Civic Quarter)";
   if (x === 1 && y === -1) return "Player's Home (Residential)";
+  if (x === -2 && y === 1) return "Al-Salihiyya (Hillside Quarter)";
+  if (x === 2 && y === 2) return "Outskirts (Rural Fringe)";
+  if (x === -2 && y === -2) return "Caravanserai (Pilgrims' Road)";
   
   // Procedural names for other blocks
   const prefixes = ["Lower", "Upper", "North", "South", "East", "West"];
@@ -323,7 +391,7 @@ export const getLocationLabel = (x: number, y: number) => {
   return `${p} ${d} Block — ${x}, ${y}`;
 };
 
-export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS';
+export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS' | 'CARAVANSERAI';
 
 export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 0 && y === 0) return 'MARKET';
@@ -331,5 +399,8 @@ export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 0 && y === -2) return 'HOVELS';
   if (x === 2 && y === -1) return 'CIVIC';
   if (x === 1 && y === 1) return 'ALLEYS';
+  if (x === -2 && y === 1) return 'SALHIYYA';
+  if (x === 2 && y === 2) return 'OUTSKIRTS';
+  if (x === -2 && y === -2) return 'CARAVANSERAI';
   return 'RESIDENTIAL';
 };

@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 
-export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'interior';
+export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior';
 export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth';
+
+export interface PickupInfo {
+  type: 'coin' | 'item' | 'produce';
+  label: string;
+  itemId?: string;
+  value?: number;
+}
 
 export interface PushableObject {
   id: string;
@@ -13,6 +20,7 @@ export interface PushableObject {
   mass: number;
   rotation?: number;
   sourceId?: string;
+  pickup?: PickupInfo;
 }
 
 export const createPushable = (

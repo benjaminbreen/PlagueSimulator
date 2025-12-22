@@ -5,6 +5,7 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { CONSTANTS, BuildingMetadata, BuildingType, DistrictType, getDistrictType } from '../types';
 import { generateBuildingMetadata, seededRandom } from '../utils/procedural';
+import { getTerrainHeight } from '../utils/terrain';
 import { PushableObject } from '../utils/pushables';
 
 // Utility to generate a procedural noise texture to avoid external loading errors
@@ -646,12 +647,210 @@ const PushableGeraniumPot: React.FC<{ item: PushableObject }> = ({ item }) => (
   </HoverableGroup>
 );
 
+const PushableBasket: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.9, 0.6, 0.9]}
+    labelTitle="Wicker Basket"
+    labelLines={['Woven reeds', 'Market goods', 'Handmade']}
+    labelOffset={[0, 0.6, 0]}
+  >
+    <mesh castShadow>
+      <cylinderGeometry args={[0.35, 0.4, 0.35, 12]} />
+      <meshStandardMaterial color="#a67c52" roughness={0.95} />
+    </mesh>
+    <mesh position={[0, 0.2, 0]} castShadow>
+      <torusGeometry args={[0.32, 0.03, 8, 18]} />
+      <meshStandardMaterial color="#8b6a3e" roughness={0.95} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableOlivePot: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[1.2, 1.6, 1.2]}
+    labelTitle="Olive Tree Pot"
+    labelLines={['Terracotta planter', 'Olive sapling', 'Courtyard decor']}
+    labelOffset={[0, 1.2, 0]}
+  >
+    <mesh castShadow>
+      <cylinderGeometry args={[0.45, 0.55, 0.45, 12]} />
+      <meshStandardMaterial color="#9b5c2e" roughness={0.9} />
+    </mesh>
+    <mesh position={[0, 0.55, 0]} castShadow>
+      <cylinderGeometry args={[0.05, 0.08, 0.5, 8]} />
+      <meshStandardMaterial color="#6b4a2a" roughness={0.95} />
+    </mesh>
+    <mesh position={[0, 0.9, 0]} castShadow>
+      <sphereGeometry args={[0.55, 10, 8]} />
+      <meshStandardMaterial color="#3f5d3a" roughness={0.85} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableLemonPot: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[1.2, 1.6, 1.2]}
+    labelTitle="Lemon Tree Pot"
+    labelLines={['Terracotta planter', 'Citrus sapling', 'Courtyard decor']}
+    labelOffset={[0, 1.2, 0]}
+  >
+    <mesh castShadow>
+      <cylinderGeometry args={[0.45, 0.55, 0.45, 12]} />
+      <meshStandardMaterial color="#9b5c2e" roughness={0.9} />
+    </mesh>
+    <mesh position={[0, 0.55, 0]} castShadow>
+      <cylinderGeometry args={[0.05, 0.08, 0.5, 8]} />
+      <meshStandardMaterial color="#6b4a2a" roughness={0.95} />
+    </mesh>
+    <mesh position={[0.05, 0.88, 0]} castShadow>
+      <sphereGeometry args={[0.55, 10, 8]} />
+      <meshStandardMaterial color="#4a6b3a" roughness={0.85} />
+    </mesh>
+    <mesh position={[0.25, 0.72, 0.12]} castShadow>
+      <sphereGeometry args={[0.08, 8, 8]} />
+      <meshStandardMaterial color="#d6b43f" roughness={0.75} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableCoin: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.6, 0.4, 0.6]}
+    labelTitle={item.pickup?.label ?? 'Coin'}
+    labelLines={['Lost in the dust']}
+    labelOffset={[0, 0.4, 0]}
+  >
+    <mesh rotation={[-Math.PI / 2, 0, item.rotation || 0]} castShadow>
+      <cylinderGeometry args={[0.14, 0.14, 0.03, 12]} />
+      <meshStandardMaterial color="#c8a54a" roughness={0.35} metalness={0.6} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableOlive: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.5, 0.4, 0.5]}
+    labelTitle={item.pickup?.label ?? 'Olives'}
+    labelLines={['Freshly fallen']}
+    labelOffset={[0, 0.35, 0]}
+  >
+    <mesh castShadow>
+      <sphereGeometry args={[0.08, 8, 6]} />
+      <meshStandardMaterial color="#54683f" roughness={0.75} />
+    </mesh>
+    <mesh position={[0.12, 0.02, 0.06]} castShadow>
+      <sphereGeometry args={[0.07, 8, 6]} />
+      <meshStandardMaterial color="#4a5f3a" roughness={0.75} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableLemon: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.5, 0.4, 0.5]}
+    labelTitle={item.pickup?.label ?? 'Lemon'}
+    labelLines={['Bright citrus']}
+    labelOffset={[0, 0.35, 0]}
+  >
+    <mesh castShadow>
+      <sphereGeometry args={[0.1, 10, 8]} />
+      <meshStandardMaterial color="#d9b443" roughness={0.7} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushablePotteryShard: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.6, 0.4, 0.6]}
+    labelTitle={item.pickup?.label ?? 'Pottery Shard'}
+    labelLines={['Broken earthenware']}
+    labelOffset={[0, 0.35, 0]}
+  >
+    <mesh rotation={[-Math.PI / 2, 0, item.rotation || 0]} castShadow>
+      <boxGeometry args={[0.22, 0.18, 0.03]} />
+      <meshStandardMaterial color="#9c5f3a" roughness={0.9} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableLinenScrap: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.6, 0.4, 0.6]}
+    labelTitle={item.pickup?.label ?? 'Linen Scrap'}
+    labelLines={['Frayed cloth']}
+    labelOffset={[0, 0.35, 0]}
+  >
+    <mesh rotation={[-Math.PI / 2, 0, item.rotation || 0]} castShadow>
+      <planeGeometry args={[0.28, 0.22]} />
+      <meshStandardMaterial color="#d8cbb0" roughness={0.85} side={THREE.DoubleSide} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableCandleStub: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.5, 0.4, 0.5]}
+    labelTitle={item.pickup?.label ?? 'Candle Stub'}
+    labelLines={['Beeswax remnant']}
+    labelOffset={[0, 0.35, 0]}
+  >
+    <mesh castShadow>
+      <cylinderGeometry args={[0.06, 0.08, 0.12, 8]} />
+      <meshStandardMaterial color="#e7d7a8" roughness={0.8} />
+    </mesh>
+  </HoverableGroup>
+);
+
+const PushableTwine: React.FC<{ item: PushableObject }> = ({ item }) => (
+  <HoverableGroup
+    position={[item.position.x, item.position.y, item.position.z]}
+    positionVector={item.position}
+    boxSize={[0.6, 0.4, 0.6]}
+    labelTitle={item.pickup?.label ?? 'Twine'}
+    labelLines={['Palm fiber']}
+    labelOffset={[0, 0.35, 0]}
+  >
+    <mesh rotation={[-Math.PI / 2, 0, item.rotation || 0]} castShadow>
+      <torusGeometry args={[0.12, 0.02, 6, 12]} />
+      <meshStandardMaterial color="#bfa373" roughness={0.9} />
+    </mesh>
+  </HoverableGroup>
+);
+
 const PushableDecorations: React.FC<{ items: PushableObject[] }> = ({ items }) => (
   <>
     {items.map((item) => {
       if (item.kind === 'bench') return <PushableBench key={item.id} item={item} />;
       if (item.kind === 'clayJar') return <PushableClayJar key={item.id} item={item} />;
       if (item.kind === 'geranium') return <PushableGeraniumPot key={item.id} item={item} />;
+      if (item.kind === 'basket') return <PushableBasket key={item.id} item={item} />;
+      if (item.kind === 'olivePot') return <PushableOlivePot key={item.id} item={item} />;
+      if (item.kind === 'lemonPot') return <PushableLemonPot key={item.id} item={item} />;
+      if (item.kind === 'coin') return <PushableCoin key={item.id} item={item} />;
+      if (item.kind === 'olive') return <PushableOlive key={item.id} item={item} />;
+      if (item.kind === 'lemon') return <PushableLemon key={item.id} item={item} />;
+      if (item.kind === 'potteryShard') return <PushablePotteryShard key={item.id} item={item} />;
+      if (item.kind === 'linenScrap') return <PushableLinenScrap key={item.id} item={item} />;
+      if (item.kind === 'candleStub') return <PushableCandleStub key={item.id} item={item} />;
+      if (item.kind === 'twine') return <PushableTwine key={item.id} item={item} />;
       return null;
     })}
   </>
@@ -672,10 +871,12 @@ const Building: React.FC<{
   const [hovered, setHovered] = useState(false);
   const groupRef = useRef<THREE.Group>(null);
   const localSeed = data.position[0] * 1000 + data.position[2];
-  const baseHeight = data.type === BuildingType.RELIGIOUS || data.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
-  const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.7 : district === 'CIVIC' ? 1.2 : 1.0;
+  const baseHeight = district === 'HOVELS' && data.type !== BuildingType.RELIGIOUS && data.type !== BuildingType.CIVIC
+    ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
+    : data.type === BuildingType.RELIGIOUS || data.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
+  const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
   const height = baseHeight * districtScale;
-  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale;
+  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (data.sizeScale ?? 1);
   const buildingMaterial = useMemo(() => {
     if (!(mainMaterial instanceof THREE.MeshStandardMaterial)) return mainMaterial;
     const mat = mainMaterial.clone();
@@ -839,13 +1040,34 @@ const Building: React.FC<{
       </mesh>
       
       {/* Dome for Religious/Civic */}
-      {(data.type === BuildingType.RELIGIOUS || seededRandom(localSeed + 2) > 0.85) && (
+      {(data.type === BuildingType.RELIGIOUS || (district !== 'HOVELS' && seededRandom(localSeed + 2) > 0.85)) && (
         <Dome
           position={[0, height / 2, 0]}
           radius={buildingSize / 2.2}
           nightFactor={nightFactor}
           material={otherMaterials.dome[Math.floor(seededRandom(localSeed + 73) * otherMaterials.dome.length)]}
         />
+      )}
+      {/* Poor hovel roof detailing */}
+      {district === 'HOVELS' && data.type === BuildingType.RESIDENTIAL && (
+        <group position={[0, height / 2 + 0.08, 0]}>
+          <mesh castShadow>
+            <boxGeometry args={[buildingSize * 0.95, 0.12, buildingSize * 0.95]} />
+            <meshStandardMaterial color="#6b5a42" roughness={0.98} />
+          </mesh>
+          <mesh position={[-0.3, 0.1, 0.1]} rotation={[0, 0.2, 0.05]} castShadow>
+            <cylinderGeometry args={[0.04, 0.05, buildingSize * 0.8, 6]} />
+            <meshStandardMaterial color="#4b3b2a" roughness={0.95} />
+          </mesh>
+          <mesh position={[0.2, 0.1, -0.15]} rotation={[0, -0.15, -0.04]} castShadow>
+            <cylinderGeometry args={[0.04, 0.05, buildingSize * 0.7, 6]} />
+            <meshStandardMaterial color="#4f3d2a" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, 0.14, 0.2]} rotation={[0.1, 0, 0.08]} castShadow>
+            <boxGeometry args={[buildingSize * 0.5, 0.06, 0.25]} />
+            <meshStandardMaterial color="#5a4936" roughness={0.96} />
+          </mesh>
+        </group>
       )}
       {/* Subtle roof caps / parapet ring */}
       {hasRoofCap && (
@@ -1057,16 +1279,18 @@ const InstancedDecorations: React.FC<{
     const clayJars: THREE.Matrix4[] = [];
     const potTreeBases: THREE.Matrix4[] = [];
     const potTreeFoliage: THREE.Matrix4[] = [];
-    const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.7 : district === 'CIVIC' ? 1.2 : 1.0;
-    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale;
+    const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
 
     buildings.forEach((building) => {
+      const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
       const localSeed = building.position[0] * 1000 + building.position[2];
-      const baseHeight = building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
+      const baseHeight = district === 'HOVELS' && building.type !== BuildingType.RELIGIOUS && building.type !== BuildingType.CIVIC
+        ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
+        : building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
       const height = baseHeight * districtScale;
 
       const hasMarketOrnaments = district === 'MARKET' && seededRandom(localSeed + 81) > 0.6;
-      const hasResidentialClutter = district !== 'MARKET' && seededRandom(localSeed + 83) > 0.5;
+      const hasResidentialClutter = district !== 'MARKET' && seededRandom(localSeed + 83) > (district === 'HOVELS' ? 0.25 : 0.5);
       const clutterType = Math.floor(seededRandom(localSeed + 84) * 3);
       const ornamentType = Math.floor(seededRandom(localSeed + 82) * 3);
 
@@ -1108,6 +1332,21 @@ const InstancedDecorations: React.FC<{
         tempObj.scale.set(1, 1, 1);
         tempObj.updateMatrix();
         clayJars.push(tempObj.matrix.clone());
+      }
+      if (district === 'HOVELS' && seededRandom(localSeed + 88) > 0.6) {
+        tempObj.position.set(building.position[0] - buildingSize / 2 - 0.6, building.position[1] + 0.25, building.position[2] + 0.9);
+        tempObj.scale.set(1, 1, 1);
+        tempObj.updateMatrix();
+        clayJars.push(tempObj.matrix.clone());
+      }
+      if (district === 'WEALTHY' && seededRandom(localSeed + 90) > 0.5) {
+        tempObj.position.set(building.position[0] + buildingSize / 2 + 1.1, building.position[1] + 0.2, building.position[2] + 1.5);
+        tempObj.scale.set(1, 1, 1);
+        tempObj.updateMatrix();
+        potTreeBases.push(tempObj.matrix.clone());
+        tempObj.position.y += 0.45;
+        tempObj.updateMatrix();
+        potTreeFoliage.push(tempObj.matrix.clone());
       }
     });
 
@@ -1178,13 +1417,15 @@ const InstancedWindows: React.FC<{
 
   const windowData = useMemo(() => {
     const data: Array<{ matrix: THREE.Matrix4; hasGlow: boolean; glowIntensity: number }> = [];
-    const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.7 : district === 'CIVIC' ? 1.2 : 1.0;
+    const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
 
     buildings.forEach((building) => {
       const localSeed = building.position[0] * 1000 + building.position[2];
-      const baseHeight = building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
+      const baseHeight = district === 'HOVELS' && building.type !== BuildingType.RELIGIOUS && building.type !== BuildingType.CIVIC
+        ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
+        : building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
       const height = baseHeight * districtScale;
-      const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale;
+    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
 
       // Create windows for each side
       [0, 1, 2, 3].forEach((side) => {
@@ -1330,19 +1571,120 @@ export const Buildings: React.FC<{
   const metadata = useMemo(() => {
     const bldMetadata: BuildingMetadata[] = [];
     const district = getDistrictType(mapX, mapY);
-    const size = CONSTANTS.MARKET_SIZE * (district === 'WEALTHY' ? 1.1 : district === 'HOVELS' ? 0.9 : 1.0);
-    const baseBuilding = CONSTANTS.BUILDING_SIZE * (district === 'WEALTHY' ? 1.2 : district === 'HOVELS' ? 0.75 : 1.0);
-    const street = CONSTANTS.STREET_WIDTH * (district === 'WEALTHY' ? 1.6 : district === 'HOVELS' ? 0.7 : 1.0);
-    const gap = baseBuilding + street;
+    const terrainSeed = mapX * 1000 + mapY * 13 + 19;
     let seed = (mapX * 100) + mapY;
+
+    if (district === 'ALLEYS') {
+      const cellSize = 7;
+      const halfCells = 4;
+      const openCells = new Set<string>();
+      let pathX = 0;
+      for (let z = -halfCells; z <= halfCells; z++) {
+        const stepRoll = seededRandom(seed + z * 31);
+        if (stepRoll > 0.66 && pathX < halfCells - 1) pathX += 1;
+        else if (stepRoll < 0.33 && pathX > -halfCells + 1) pathX -= 1;
+        openCells.add(`${pathX},${z}`);
+        openCells.add(`${pathX + 1},${z}`);
+      }
+
+      const branchCount = seededRandom(seed + 99) > 0.5 ? 3 : 2;
+      for (let i = 0; i < branchCount; i++) {
+        const z = Math.floor(seededRandom(seed + 120 + i) * (halfCells * 2 - 2)) - (halfCells - 1);
+        const baseX = Math.round(Math.sin(z * 0.7 + seed) * 1.6);
+        const dir = seededRandom(seed + 160 + i) > 0.5 ? 1 : -1;
+        const length = seededRandom(seed + 180 + i) > 0.5 ? 2 : 1;
+        for (let l = 1; l <= length; l++) {
+          openCells.add(`${baseX + dir * l},${z}`);
+        }
+      }
+
+      for (let x = -halfCells; x <= halfCells; x++) {
+        for (let z = -halfCells; z <= halfCells; z++) {
+          const key = `${x},${z}`;
+          if (openCells.has(key)) continue;
+          const worldX = x * cellSize;
+          const worldZ = z * cellSize;
+          const localSeed = seed + Math.abs(worldX) * 1000 + Math.abs(worldZ);
+          if (seededRandom(localSeed) < 0.05) continue;
+          const data = generateBuildingMetadata(localSeed, worldX, worldZ);
+          bldMetadata.push(data);
+        }
+      }
+      return bldMetadata;
+    }
+    if (district === 'OUTSKIRTS') {
+      const positions: Array<[number, number, number]> = [
+        [-12, 0, -8],
+        [14, 0, 6],
+        [-6, 0, 12],
+        [8, 0, -14],
+        [0, 0, 4],
+        [18, 0, -4],
+      ];
+      const terrainSeed = mapX * 1000 + mapY * 13 + 19;
+      positions.forEach((pos, idx) => {
+        const [x, y, z] = pos;
+        const localSeed = seed + idx * 1337;
+        const data = generateBuildingMetadata(localSeed, x, z);
+        if (idx === 0) {
+          data.type = BuildingType.COMMERCIAL;
+          data.ownerProfession = 'Trader';
+        }
+        if (idx === 1) {
+          data.type = BuildingType.RESIDENTIAL;
+          data.ownerProfession = 'Water-Carrier';
+        }
+        const h = getTerrainHeight(district, x, z, terrainSeed);
+        data.position = [x, h, z];
+        bldMetadata.push(data);
+      });
+      return bldMetadata;
+    }
+    if (district === 'CARAVANSERAI') {
+      const positions: Array<[number, number, number]> = [
+        [-10, 0, -6],
+        [12, 0, -6],
+        [-12, 0, 8],
+        [10, 0, 10],
+        [0, 0, -12],
+        [0, 0, 14],
+      ];
+      positions.forEach((pos, idx) => {
+        const [x, y, z] = pos;
+        const localSeed = seed + idx * 1337;
+        const data = generateBuildingMetadata(localSeed, x, z);
+        if (idx === 0) {
+          data.type = BuildingType.COMMERCIAL;
+          data.ownerProfession = 'Caravan Trader';
+        }
+        if (idx === 1) {
+          data.type = BuildingType.RESIDENTIAL;
+          data.ownerProfession = 'Stable Keeper';
+        }
+        data.position = [x, y, z];
+        bldMetadata.push(data);
+      });
+      return bldMetadata;
+    }
+
+    const size = CONSTANTS.MARKET_SIZE * (district === 'WEALTHY' ? 1.15 : district === 'HOVELS' ? 0.9 : district === 'CIVIC' ? 1.1 : 1.0);
+    const baseBuilding = CONSTANTS.BUILDING_SIZE * (district === 'WEALTHY' ? 1.25 : district === 'HOVELS' ? 0.75 : district === 'CIVIC' ? 1.1 : 1.0);
+    const street = CONSTANTS.STREET_WIDTH * (district === 'WEALTHY' ? 2.2 : district === 'HOVELS' ? 0.85 : district === 'CIVIC' ? 2.6 : 1.0);
+    const gap = baseBuilding + street;
 
     for (let x = -size; x <= size; x += gap) {
       for (let z = -size; z <= size; z += gap) {
         const localSeed = seed + Math.abs(x) * 1000 + Math.abs(z);
         const chance = seededRandom(localSeed);
-        if (chance < 0.3) continue;
+        const skipChance = district === 'WEALTHY' ? 0.55 : district === 'HOVELS' ? 0.2 : district === 'CIVIC' ? 0.7 : 0.3;
+        if (chance < skipChance) continue;
+        if (district === 'CIVIC' && (x * x + z * z) < (gap * 2.2) * (gap * 2.2)) continue;
         if (mapX === 0 && mapY === 0 && Math.abs(x) < gap * 1.5 && Math.abs(z) < gap * 1.5) continue;
         const data = generateBuildingMetadata(localSeed, x, z);
+        if (district === 'SALHIYYA' || district === 'OUTSKIRTS') {
+          const h = getTerrainHeight(district, x, z, terrainSeed);
+          data.position = [x, h, z];
+        }
         bldMetadata.push(data);
       }
     }
@@ -1436,26 +1778,59 @@ export const Buildings: React.FC<{
   );
 };
 
-export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; district: DistrictType; seed: number }> = ({ onClick, district, seed }) => {
+export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; district: DistrictType; seed: number; terrainSeed: number }> = ({ onClick, district, seed, terrainSeed }) => {
   const roughnessTexture = useMemo(() => createNoiseTexture(128, 0.05), []);
   const blotchTexture = useMemo(() => createBlotchTexture(512), []);
   const { camera, scene } = useThree();
+  const buildTerrain = (size: number, segments: number) => {
+    const geom = new THREE.PlaneGeometry(size, size, segments, segments);
+    const pos = geom.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < pos.count; i += 1) {
+      const x = pos.getX(i);
+      const y = pos.getY(i);
+      const height = getTerrainHeight(district, x, y, terrainSeed);
+      pos.setZ(i, height);
+    }
+    geom.computeVertexNormals();
+    return geom;
+  };
+  const terrainGeometry = useMemo(() => {
+    if (district !== 'SALHIYYA' && district !== 'OUTSKIRTS') return null;
+    return buildTerrain(250, 120);
+  }, [district, terrainSeed]);
+  const innerTerrainGeometry = useMemo(() => {
+    if (district !== 'SALHIYYA' && district !== 'OUTSKIRTS') return null;
+    return buildTerrain(60, 40);
+  }, [district, terrainSeed]);
+  const baseGeometry = useMemo(() => new THREE.PlaneGeometry(250, 250, 1, 1), []);
+  const innerBaseGeometry = useMemo(() => new THREE.PlaneGeometry(60, 60, 1, 1), []);
 
-  const groundPalette = useMemo(() => ({
-    MARKET: ['#e3c595', '#dbbe8e', '#d4b687', '#cdae80', '#c6a679'],
-    WEALTHY: ['#d7d1c4', '#cfc7b6'],
-    HOVELS: ['#d7b68e', '#cfad86'],
-    CIVIC: ['#d8c2a0', '#d1b896'],
-    DEFAULT: ['#e2c8a2', '#dbc29a']
-  }), []);
+    const groundPalette = useMemo(() => ({
+      MARKET: ['#e3c595', '#dbbe8e', '#d4b687', '#cdae80', '#c6a679'],
+      WEALTHY: ['#d7d1c4', '#cfc7b6'],
+      HOVELS: ['#b68a5f', '#a47b54', '#9a734d'],
+      ALLEYS: ['#b68a5f', '#a47b54', '#9a734d'],
+      SALHIYYA: ['#b4a27a', '#a8956f', '#9f8c69'],
+      OUTSKIRTS: ['#b7a987', '#aa9a77', '#9f8f6c'],
+      CARAVANSERAI: ['#c8a86f', '#c19d64', '#b7935d'],
+      CIVIC: ['#d8c2a0', '#d1b896'],
+      DEFAULT: ['#e2c8a2', '#dbc29a']
+    }), []);
   const pick = (list: string[]) => list[Math.floor(seed * list.length) % list.length];
   const baseColor = district === 'MARKET' ? pick(groundPalette.MARKET)
     : district === 'WEALTHY' ? pick(groundPalette.WEALTHY)
     : district === 'HOVELS' ? pick(groundPalette.HOVELS)
+    : district === 'ALLEYS' ? pick(groundPalette.ALLEYS)
+    : district === 'SALHIYYA' ? pick(groundPalette.SALHIYYA)
+    : district === 'OUTSKIRTS' ? pick(groundPalette.OUTSKIRTS)
+    : district === 'CARAVANSERAI' ? pick(groundPalette.CARAVANSERAI)
     : district === 'CIVIC' ? pick(groundPalette.CIVIC)
     : pick(groundPalette.DEFAULT);
   const overlayColor = district === 'WEALTHY' ? '#c3b9a9'
-    : district === 'HOVELS' ? '#caa77b'
+    : district === 'HOVELS' || district === 'ALLEYS' ? '#9a734d'
+    : district === 'SALHIYYA' ? '#917f5f'
+    : district === 'OUTSKIRTS' ? '#8f7f5f'
+    : district === 'CARAVANSERAI' ? '#b08a52'
     : '#d2b483';
 
   // PERFORMANCE & REALISM: Custom shader with distance-based horizon fade
@@ -1558,17 +1933,17 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
           onClick?.(e.point);
         }}
       >
-        <planeGeometry args={[250, 250]} />
+        <primitive object={terrainGeometry ?? baseGeometry} attach="geometry" />
         <primitive object={groundMaterial} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.095, 0]}>
-        <planeGeometry args={[250, 250]} />
+        <primitive object={terrainGeometry ?? baseGeometry} attach="geometry" />
         <primitive object={groundOverlayMaterial} />
       </mesh>
 
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.05, 0]} receiveShadow>
-        <planeGeometry args={[60, 60]} />
+        <primitive object={innerTerrainGeometry ?? innerBaseGeometry} attach="geometry" />
         <meshStandardMaterial color={baseColor} roughness={1} opacity={0.18} transparent />
       </mesh>
     </group>
@@ -2085,9 +2460,336 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
   );
 };
 
+const WealthyGarden: React.FC<{ mapX: number; mapY: number; timeOfDay?: number }> = ({ mapX, mapY }) => {
+  const district = getDistrictType(mapX, mapY);
+  if (district !== 'WEALTHY') return null;
+  const seed = seededRandom(mapX * 1000 + mapY * 31 + 17);
+  const fountainSpots = [
+    [-10, 0, 8],
+    [10, 0, -8],
+  ] as Array<[number, number, number]>;
+  const treeSpots = [
+    [-14, 0, -2],
+    [14, 0, 2],
+    [0, 0, -14],
+  ] as Array<[number, number, number]>;
+  const flowerSpots = [
+    [-6, 0, 12],
+    [6, 0, -12],
+    [-12, 0, -10],
+    [12, 0, 10],
+  ] as Array<[number, number, number]>;
+
+  return (
+    <group>
+      {fountainSpots.map((spot, i) => (
+        <group key={`wealthy-fountain-${i}`} position={spot}>
+          <mesh position={[0, 0.35, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[1.4, 1.6, 0.7, 18]} />
+            <meshStandardMaterial color="#c9c1b3" roughness={0.75} />
+          </mesh>
+          <mesh position={[0, 0.7, 0]} castShadow>
+            <cylinderGeometry args={[1.2, 1.2, 0.2, 18]} />
+            <meshStandardMaterial color="#d8d0c2" roughness={0.7} />
+          </mesh>
+          <mesh position={[0, 0.55, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <circleGeometry args={[1.05, 18]} />
+            <meshStandardMaterial color="#2b6b8f" roughness={0.2} metalness={0.4} />
+          </mesh>
+        </group>
+      ))}
+      {treeSpots.map((spot, i) => (
+        <group key={`wealthy-tree-${i}`} position={spot}>
+          <mesh position={[0, 0.7, 0]} castShadow>
+            <cylinderGeometry args={[0.2, 0.25, 1.4, 6]} />
+            <meshStandardMaterial color="#7b5a3c" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 1.7, 0]} castShadow>
+            <sphereGeometry args={[0.9, 10, 8]} />
+            <meshStandardMaterial color="#3f6b3c" roughness={0.85} />
+          </mesh>
+        </group>
+      ))}
+      {flowerSpots.map((spot, i) => (
+        <group key={`wealthy-flower-${i}`} position={spot}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]} receiveShadow>
+            <circleGeometry args={[2.2, 18]} />
+            <meshStandardMaterial color={seed > 0.5 ? '#4f7b4a' : '#5a874f'} roughness={1} />
+          </mesh>
+          <mesh position={[0, 0.2, 0]} castShadow>
+            <sphereGeometry args={[0.4, 8, 6]} />
+            <meshStandardMaterial color={seed > 0.5 ? '#c26b6b' : '#b86f4a'} roughness={0.9} />
+          </mesh>
+        </group>
+      ))}
+    </group>
+  );
+};
+
+const CitadelComplex: React.FC<{ mapX: number; mapY: number }> = ({ mapX, mapY }) => {
+  const district = getDistrictType(mapX, mapY);
+  if (district !== 'CIVIC') return null;
+
+  return (
+    <group position={[0, 0, 0]}>
+      {/* Outer walls */}
+      <mesh position={[0, 3.5, -18]} castShadow receiveShadow>
+        <boxGeometry args={[50, 7, 3]} />
+        <meshStandardMaterial color="#8d8273" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 3.5, 18]} castShadow receiveShadow>
+        <boxGeometry args={[50, 7, 3]} />
+        <meshStandardMaterial color="#8d8273" roughness={0.9} />
+      </mesh>
+      <mesh position={[-24, 3.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 7, 36]} />
+        <meshStandardMaterial color="#85796a" roughness={0.92} />
+      </mesh>
+      <mesh position={[24, 3.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 7, 36]} />
+        <meshStandardMaterial color="#85796a" roughness={0.92} />
+      </mesh>
+
+      {/* Corner towers */}
+      {[
+        [-24, 5.2, -18],
+        [24, 5.2, -18],
+        [-24, 5.2, 18],
+        [24, 5.2, 18],
+      ].map((pos, i) => (
+        <mesh key={`tower-${i}`} position={pos as [number, number, number]} castShadow receiveShadow>
+          <cylinderGeometry args={[3.2, 3.6, 10.5, 10]} />
+          <meshStandardMaterial color="#7e7265" roughness={0.9} />
+        </mesh>
+      ))}
+
+      {/* Gatehouse */}
+      <group position={[0, 0, -18]}>
+        <mesh position={[0, 3.8, -2.2]} castShadow receiveShadow>
+          <boxGeometry args={[12, 7.6, 6]} />
+          <meshStandardMaterial color="#7a6e5f" roughness={0.88} />
+        </mesh>
+        <mesh position={[0, 1.2, -5]} castShadow>
+          <boxGeometry args={[5, 2.4, 0.6]} />
+          <meshStandardMaterial color="#5a3f2a" roughness={0.9} />
+        </mesh>
+      </group>
+
+      {/* Inner keep */}
+      <mesh position={[0, 7.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[16, 15, 16]} />
+        <meshStandardMaterial color="#8b8073" roughness={0.88} />
+      </mesh>
+      <mesh position={[0, 15.5, 0]} castShadow>
+        <boxGeometry args={[18, 1.4, 18]} />
+        <meshStandardMaterial color="#9a8e7f" roughness={0.9} />
+      </mesh>
+
+      {/* Courtyard outbuildings */}
+      <mesh position={[-10, 1.6, 8]} castShadow receiveShadow>
+        <boxGeometry args={[8, 3.2, 6]} />
+        <meshStandardMaterial color="#7c6f60" roughness={0.92} />
+      </mesh>
+      <mesh position={[12, 1.4, 6]} castShadow receiveShadow>
+        <boxGeometry args={[6, 2.8, 5]} />
+        <meshStandardMaterial color="#706457" roughness={0.92} />
+      </mesh>
+      <mesh position={[8, 1.2, -6]} castShadow receiveShadow>
+        <boxGeometry args={[5, 2.4, 4]} />
+        <meshStandardMaterial color="#6a5e52" roughness={0.93} />
+      </mesh>
+    </group>
+  );
+};
+
+const OutskirtsDecor: React.FC<{ mapX: number; mapY: number }> = ({ mapX, mapY }) => {
+  const district = getDistrictType(mapX, mapY);
+  if (district !== 'OUTSKIRTS') return null;
+  const palms = [
+    [-18, 0, -10],
+    [16, 0, -6],
+    [-8, 0, 16],
+    [10, 0, 14]
+  ] as Array<[number, number, number]>;
+  const jars = [
+    [-4, 0, -6],
+    [6, 0, 4]
+  ] as Array<[number, number, number]>;
+
+  return (
+    <group>
+      {palms.map((pos, i) => (
+        <group key={`palm-${i}`} position={pos}>
+          <mesh position={[0, 2.2, 0]} castShadow>
+            <cylinderGeometry args={[0.3, 0.4, 4.4, 6]} />
+            <meshStandardMaterial color="#8b6a4a" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 4.6, 0]} castShadow>
+            <sphereGeometry args={[1.4, 8, 6]} />
+            <meshStandardMaterial color="#3f6b3c" roughness={0.85} />
+          </mesh>
+          <mesh position={[0.9, 4.2, 0]} rotation={[0.3, 0, 0]} castShadow>
+            <boxGeometry args={[2.4, 0.15, 0.6]} />
+            <meshStandardMaterial color="#3c6a3a" roughness={0.85} />
+          </mesh>
+          <mesh position={[-0.9, 4.2, 0]} rotation={[-0.3, 0, 0]} castShadow>
+            <boxGeometry args={[2.4, 0.15, 0.6]} />
+            <meshStandardMaterial color="#3c6a3a" roughness={0.85} />
+          </mesh>
+        </group>
+      ))}
+      {jars.map((pos, i) => (
+        <mesh key={`outskirt-jar-${i}`} position={pos} castShadow>
+          <cylinderGeometry args={[0.35, 0.45, 0.8, 10]} />
+          <meshStandardMaterial color="#a9703a" roughness={0.95} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
+const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfDay?: number }> = ({ mapX, mapY, timeOfDay }) => {
+  const district = getDistrictType(mapX, mapY);
+  if (district !== 'CARAVANSERAI') return null;
+  const time = timeOfDay ?? 12;
+  const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
+
+  const lanterns: Array<[number, number, number]> = [
+    [-12, 4.2, -10],
+    [12, 4.2, -10],
+    [-12, 4.2, 10],
+    [12, 4.2, 10],
+    [0, 4.2, -14],
+    [0, 4.2, 14],
+  ];
+
+  const camels: Array<[number, number, number]> = [
+    [-6, 0, -2],
+    [6, 0, 2],
+  ];
+
+  return (
+    <group>
+      {/* Outer walls */}
+      <mesh position={[0, 4, -18]} castShadow receiveShadow>
+        <boxGeometry args={[60, 8, 3]} />
+        <meshStandardMaterial color="#8b6a4a" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 4, 18]} castShadow receiveShadow>
+        <boxGeometry args={[60, 8, 3]} />
+        <meshStandardMaterial color="#8b6a4a" roughness={0.9} />
+      </mesh>
+      <mesh position={[-28, 4, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 8, 36]} />
+        <meshStandardMaterial color="#7f5f44" roughness={0.92} />
+      </mesh>
+      <mesh position={[28, 4, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 8, 36]} />
+        <meshStandardMaterial color="#7f5f44" roughness={0.92} />
+      </mesh>
+
+      {/* Gatehouse */}
+      <mesh position={[0, 4, -18]} castShadow receiveShadow>
+        <boxGeometry args={[14, 8, 6]} />
+        <meshStandardMaterial color="#7a5a40" roughness={0.88} />
+      </mesh>
+      <mesh position={[0, 2, -21]} castShadow>
+        <boxGeometry args={[6, 4, 1]} />
+        <meshStandardMaterial color="#5a3b26" roughness={0.9} />
+      </mesh>
+
+      {/* Inner arcade blocks */}
+      <mesh position={[0, 2, -8]} castShadow receiveShadow>
+        <boxGeometry args={[36, 4, 6]} />
+        <meshStandardMaterial color="#9b7a52" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, 2, 8]} castShadow receiveShadow>
+        <boxGeometry args={[36, 4, 6]} />
+        <meshStandardMaterial color="#9b7a52" roughness={0.9} />
+      </mesh>
+
+      {/* Central fountain */}
+      <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[3.2, 3.6, 1, 18]} />
+        <meshStandardMaterial color="#a98b62" roughness={0.85} />
+      </mesh>
+      <mesh position={[0, 1.2, 0]} castShadow>
+        <cylinderGeometry args={[1.1, 1.4, 0.35, 12]} />
+        <meshStandardMaterial color="#bfa27a" roughness={0.8} />
+      </mesh>
+      <mesh position={[0, 0.85, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[2.5, 20]} />
+        <meshStandardMaterial color="#2a6f8d" roughness={0.2} metalness={0.5} />
+      </mesh>
+
+      {/* Camels */}
+      {camels.map((pos, i) => (
+        <group key={`camel-${i}`} position={pos}>
+          <mesh position={[0, 0.8, 0]} castShadow>
+            <boxGeometry args={[2.2, 1.2, 0.8]} />
+            <meshStandardMaterial color="#b58a5a" roughness={0.9} />
+          </mesh>
+          <mesh position={[0.6, 1.4, 0]} castShadow>
+            <boxGeometry args={[0.8, 0.8, 0.6]} />
+            <meshStandardMaterial color="#b08a5a" roughness={0.9} />
+          </mesh>
+          <mesh position={[1.4, 1.6, 0]} castShadow>
+            <boxGeometry args={[0.5, 0.5, 0.5]} />
+            <meshStandardMaterial color="#b08a5a" roughness={0.9} />
+          </mesh>
+          {[-0.8, 0.8].map((lx) => (
+            <mesh key={`camel-leg-${i}-${lx}`} position={[lx, 0.2, 0]} castShadow>
+              <boxGeometry args={[0.2, 0.8, 0.2]} />
+              <meshStandardMaterial color="#8a6a4a" roughness={0.95} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+
+      {/* Hanging lanterns */}
+      {lanterns.map((pos, i) => (
+        <group key={`lantern-${i}`} position={pos}>
+          <mesh castShadow>
+            <sphereGeometry args={[0.22, 10, 10]} />
+            <meshStandardMaterial color="#ffd188" emissive="#ff9a3c" emissiveIntensity={0.6 * nightFactor} />
+          </mesh>
+          <mesh position={[0, -0.3, 0]} castShadow>
+            <boxGeometry args={[0.5, 0.4, 0.5]} />
+            <meshStandardMaterial color="#7a5a3a" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, -0.45, 0.35]} castShadow>
+            <boxGeometry args={[0.6, 0.15, 0.05]} />
+            <meshStandardMaterial color="#5a4028" roughness={0.95} />
+          </mesh>
+          {nightFactor > 0.05 && (
+            <>
+              <spotLight
+                position={[0, -0.1, 0]}
+                intensity={2.2 * nightFactor}
+                distance={28}
+                angle={0.7}
+                penumbra={0.7}
+                decay={2}
+                color="#ffb65a"
+                castShadow
+                shadow-mapSize={[512, 512]}
+              />
+              <mesh position={[0, -0.3, 0]} rotation={[Math.PI / 4, 0, 0]} castShadow>
+                <boxGeometry args={[0.9, 0.9, 0.05]} />
+                <meshStandardMaterial color="#6b4a2d" roughness={0.95} />
+              </mesh>
+            </>
+          )}
+        </group>
+      ))}
+    </group>
+  );
+};
+
 export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundClick, onBuildingsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [] }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
+  const terrainSeed = mapX * 1000 + mapY * 13 + 19;
   const time = timeOfDay ?? 12;
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
   const torchIntensity = 0.3 + nightFactor * 1.2;
@@ -2096,11 +2798,15 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundCl
     <HoverWireframeContext.Provider value={enableHoverWireframe}>
       <HoverLabelContext.Provider value={enableHoverLabel}>
         <group>
-          <Ground onClick={onGroundClick} district={district} seed={groundSeed} />
+          <Ground onClick={onGroundClick} district={district} seed={groundSeed} terrainSeed={terrainSeed} />
           <Buildings mapX={mapX} mapY={mapY} onBuildingsGenerated={onBuildingsGenerated} nearBuildingId={nearBuildingId} torchIntensity={torchIntensity} nightFactor={nightFactor} />
           <MosqueBackground mapX={mapX} mapY={mapY} />
           <HorizonBackdrop timeOfDay={timeOfDay} />
           <CentralWell mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+          <WealthyGarden mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+          <CitadelComplex mapX={mapX} mapY={mapY} />
+          <OutskirtsDecor mapX={mapX} mapY={mapY} />
+          <CaravanseraiComplex mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
           {pushables.length > 0 && <PushableDecorations items={pushables} />}
         </group>
       </HoverLabelContext.Provider>

@@ -182,6 +182,24 @@ export const MarketStall: React.FC<MarketStallProps> = ({ stall, nightFactor }) 
 
   return (
     <group position={position} rotation={[0, rotationRadians, 0]}>
+      {/* Torch lighting at night */}
+      {nightFactor > 0.05 && (
+        <group position={[sizeConfig.width / 2 + 0.25, sizeConfig.awningHeight - 0.2, sizeConfig.depth / 2]}>
+          <mesh position={[0, -0.18, -0.08]} castShadow>
+            <cylinderGeometry args={[0.03, 0.05, 0.36, 8]} />
+            <meshStandardMaterial color="#3b2a1a" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, -0.3, -0.16]} castShadow>
+            <boxGeometry args={[0.08, 0.08, 0.3]} />
+            <meshStandardMaterial color="#5a3b26" roughness={0.9} />
+          </mesh>
+          <mesh>
+            <sphereGeometry args={[0.12, 10, 10]} />
+            <meshStandardMaterial color="#ffb347" emissive="#ff7a18" emissiveIntensity={0.9 * nightFactor} />
+          </mesh>
+          <pointLight intensity={1.2 * nightFactor} distance={16} decay={2} color="#ffb347" />
+        </group>
+      )}
       {/* Wooden frame - posts */}
       <mesh position={[-sizeConfig.width/2, sizeConfig.height/2, -sizeConfig.depth/2]} castShadow>
         <boxGeometry args={[0.12, sizeConfig.height, 0.12]} />

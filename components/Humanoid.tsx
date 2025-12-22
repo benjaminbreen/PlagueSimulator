@@ -165,6 +165,7 @@ interface HumanoidProps {
   walkSpeed?: number;
   enableArmSwing?: boolean;
   armSwingMode?: 'both' | 'left' | 'right' | 'none';
+  interactionSwingRef?: React.MutableRefObject<number>;
   robeAccentColor?: string;
   robeHasSash?: boolean;
   robeSleeves?: boolean;
@@ -174,7 +175,7 @@ interface HumanoidProps {
   robeOverwrap?: boolean;
   robePattern?: 'none' | 'damask' | 'stripe' | 'chevron';
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
-  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none';
+  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
   footwearColor?: string;
@@ -205,6 +206,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   walkSpeed = 10,
   enableArmSwing = false,
   armSwingMode = 'both',
+  interactionSwingRef,
   robeAccentColor = '#d0b992',
   robeHasSash = false,
   robeSleeves = true,
@@ -235,8 +237,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const leftFoot = useRef<THREE.Group>(null);
   const rightFoot = useRef<THREE.Group>(null);
   const bodyGroup = useRef<THREE.Group>(null);
+  const hipGroup = useRef<THREE.Group>(null);
+  const headGroup = useRef<THREE.Group>(null);
+  const leftShoulder = useRef<THREE.Group>(null);
+  const rightShoulder = useRef<THREE.Group>(null);
   const isFemale = gender === 'Female';
   const faceShadowColor = useMemo(() => new THREE.Color(headColor).multiplyScalar(0.85).getStyle(), [headColor]);
+  const faceHighlightColor = useMemo(() => new THREE.Color(headColor).multiplyScalar(1.08).getStyle(), [headColor]);
   const lipColor = useMemo(() => {
     const color = new THREE.Color(headColor);
     const hsl = { h: 0, s: 0, l: 0 };
@@ -262,6 +269,17 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     return isFemale ? 'scarf' : 'none';
   }, [headwearStyleProp, isFemale]);
   const hasShortHair = hairStyle === 'short';
+  const faceVariant = useMemo(() => {
+    return {
+      eyeSpacing: 0.055 + (Math.random() - 0.5) * 0.012,
+      eyeYOffset: (Math.random() - 0.5) * 0.008,
+      eyeScaleY: 0.9 + Math.random() * 0.2,
+      browYOffset: (Math.random() - 0.5) * 0.01,
+      browHeightScale: 0.85 + Math.random() * 0.3,
+      mouthWidthScale: 0.9 + Math.random() * 0.2,
+      mouthYOffset: (Math.random() - 0.5) * 0.01,
+    };
+  }, []);
   const lipWidthScale = useMemo(() => 0.95 + Math.random() * 0.15, []);
   const lipLowerScale = useMemo(() => 1.08 + Math.random() * 0.18, []);
   const lipGap = useMemo(() => 0.006 + Math.random() * 0.004, []);
@@ -271,20 +289,25 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const hash = turbanColor.split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
     if (headwearStyle === 'turban' || headwearStyle === 'fez') {
       if (hash % 3 === 0) return '#f4efe6'; // white stripe option
-      if (hash % 5 === 0) return new THREE.Color(turbanColor).multiplyScalar(0.7).getStyle();
+      if (hash % 5 === 0) return new THREE.Color(turbanColor).multiplyScalar(0.65).getStyle();
     }
-    return new THREE.Color(turbanColor).multiplyScalar(1.08).getStyle();
+    return new THREE.Color(turbanColor).multiplyScalar(1.18).getStyle();
   }, [turbanColor, headwearStyle]);
   const femaleRobeSpread = useMemo(() => robeSpread ?? (0.75 + Math.random() * 0.18), [robeSpread]);
   const femaleRobeBand = useMemo(() => robeHemBand ?? (Math.random() > 0.5), [robeHemBand]);
-  const eyeScale = useMemo(() => (isFemale ? [1.7, 0.85, 0.7] : [1.4, 0.7, 0.7]) as [number, number, number], [isFemale]);
-  const eyeY = isFemale ? 0.03 : 0.02;
+  const eyeScale = useMemo(() => {
+    const base = isFemale ? [1.7, 0.85, 0.7] : [1.4, 0.7, 0.7];
+    return [base[0], base[1] * faceVariant.eyeScaleY, base[2]] as [number, number, number];
+  }, [isFemale, faceVariant.eyeScaleY]);
+  const eyeY = (isFemale ? 0.03 : 0.02) + faceVariant.eyeYOffset;
   const browColor = isFemale ? faceShadowColor : '#3a2a1a';
-  const browHeight = isFemale ? 0.03 : 0.04;
+  const browHeight = Math.max(0.02, (isFemale ? 0.03 : 0.04) * faceVariant.browHeightScale);
+  const browY = eyeY + 0.045 + faceVariant.browYOffset;
+  const browX = faceVariant.eyeSpacing - 0.008;
   const noseLength = isFemale ? 0.09 : 0.1;
   const noseRadius = isFemale ? 0.015 : 0.017;
   const mouthWidth = isFemale ? 0.045 : 0.05;
-  const mouthY = isFemale ? -0.095 : -0.09;
+  const mouthY = (isFemale ? -0.095 : -0.09) + faceVariant.mouthYOffset;
   const upperArmColor = sleeveCoverage === 'full' ? color : sleeveCoverage === 'lower' ? headColor : headColor;
   const lowerArmColor = sleeveCoverage === 'none' ? headColor : color;
   const hasAccessory = (value: string) => accessories.includes(value);
@@ -349,16 +372,46 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const rightPhase = Math.sin(t + Math.PI);
     if (leftLeg.current) leftLeg.current.rotation.x = leftPhase * amp;
     if (rightLeg.current) rightLeg.current.rotation.x = rightPhase * amp;
+
+    // Hip counter-rotation for natural weight shift
+    if (hipGroup.current && isWalking) {
+      const hipRotation = Math.sin(t) * amp * 0.15;
+      hipGroup.current.rotation.y = hipRotation;
+    } else if (hipGroup.current) {
+      hipGroup.current.rotation.y = THREE.MathUtils.lerp(hipGroup.current.rotation.y, 0, 0.1);
+    }
+
     const footBaseY = isFemale ? 0.05 : -0.45;
     const footBaseZ = 0.1;
+    // Foot rotation for heel-to-toe movement
     if (leftFoot.current) {
       leftFoot.current.position.z = footBaseZ + leftPhase * (isSprinting ? 0.12 : 0.08);
       leftFoot.current.position.y = footBaseY + Math.max(0, -leftPhase) * (isSprinting ? 0.06 : 0.04);
+      leftFoot.current.rotation.x = leftPhase * 0.3; // Heel up when leg swings back
     }
     if (rightFoot.current) {
       rightFoot.current.position.z = footBaseZ + rightPhase * (isSprinting ? 0.12 : 0.08);
       rightFoot.current.position.y = footBaseY + Math.max(0, -rightPhase) * (isSprinting ? 0.06 : 0.04);
+      rightFoot.current.rotation.x = rightPhase * 0.3; // Heel up when leg swings back
     }
+    // Shoulder movement drives arm swing
+    if (leftShoulder.current && isWalking) {
+      const shoulderSwing = leftPhase * amp * 0.2;
+      leftShoulder.current.rotation.z = shoulderSwing;
+      leftShoulder.current.rotation.x = leftPhase * amp * 0.15;
+    } else if (leftShoulder.current) {
+      leftShoulder.current.rotation.z = THREE.MathUtils.lerp(leftShoulder.current.rotation.z, 0, 0.1);
+      leftShoulder.current.rotation.x = THREE.MathUtils.lerp(leftShoulder.current.rotation.x, 0, 0.1);
+    }
+    if (rightShoulder.current && isWalking) {
+      const shoulderSwing = rightPhase * amp * 0.2;
+      rightShoulder.current.rotation.z = -shoulderSwing;
+      rightShoulder.current.rotation.x = rightPhase * amp * 0.15;
+    } else if (rightShoulder.current) {
+      rightShoulder.current.rotation.z = THREE.MathUtils.lerp(rightShoulder.current.rotation.z, 0, 0.1);
+      rightShoulder.current.rotation.x = THREE.MathUtils.lerp(rightShoulder.current.rotation.x, 0, 0.1);
+    }
+
     if (enableArmSwing) {
       if (!jumping) {
         const armDrive = isSprinting ? 1.1 : 1.0;
@@ -390,6 +443,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           }
           if (rightForearm.current) rightForearm.current.rotation.x = 0;
         }
+        if (interactionSwingRef?.current && interactionSwingRef.current > 0 && rightArm.current && rightForearm.current) {
+          const swing = interactionSwingRef.current;
+          rightArm.current.rotation.x = -1.05 - swing * 0.35;
+          rightArm.current.rotation.z = 0.35 + swing * 0.25;
+          rightForearm.current.rotation.x = -0.8 - swing * 0.3;
+          if (leftArm.current) {
+            leftArm.current.rotation.x = 0.25 + swing * 0.15;
+            leftArm.current.rotation.z = -0.1;
+          }
+          if (leftForearm.current) {
+            leftForearm.current.rotation.x = -0.2;
+          }
+        }
       }
     }
     
@@ -412,6 +478,23 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       const landTilt = -landing * 0.18;
       bodyGroup.current.rotation.x = THREE.MathUtils.lerp(bodyGroup.current.rotation.x, targetRotationX + idleLean + jumpTilt + crouchTilt + landTilt, 0.12);
       bodyGroup.current.rotation.z = THREE.MathUtils.lerp(bodyGroup.current.rotation.z, sway, 0.1);
+      const interaction = interactionSwingRef?.current ?? 0;
+      if (interaction > 0) {
+        bodyGroup.current.rotation.x = THREE.MathUtils.lerp(bodyGroup.current.rotation.x, bodyGroup.current.rotation.x + interaction * 0.22, 0.25);
+        bodyGroup.current.rotation.z = THREE.MathUtils.lerp(bodyGroup.current.rotation.z, bodyGroup.current.rotation.z + interaction * 0.16, 0.25);
+        if (leftLeg.current) leftLeg.current.rotation.x = -0.1 - interaction * 0.15;
+        if (rightLeg.current) rightLeg.current.rotation.x = 0.2 + interaction * 0.2;
+      }
+    }
+
+    // Head lag/bob for natural independent movement
+    if (headGroup.current) {
+      const headBob = isWalking ? Math.sin(t * 2) * 0.015 : 0;
+      const headLag = bodyGroup.current ? bodyGroup.current.rotation.x * -0.2 : 0; // Counter body lean
+      const headSway = isWalking ? Math.sin(t) * 0.02 : 0;
+      headGroup.current.position.y = 1.75 + headBob;
+      headGroup.current.rotation.x = headLag;
+      headGroup.current.rotation.z = -headSway * 0.5; // Subtle opposite sway
     }
 
     if (jumping) {
@@ -664,16 +747,36 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           </group>
         )}
         {robeHasSash && (
-          <mesh position={[0, 0.95, 0]} castShadow>
-            <torusGeometry args={[isFemale ? 0.42 : 0.28, 0.04, 8, 16]} />
-            <meshStandardMaterial color={robeAccentColor} roughness={0.9} />
-          </mesh>
+          <group>
+            {/* Main sash belt - thicker and more visible */}
+            <mesh position={[0, 0.95, 0]} castShadow>
+              <torusGeometry args={[isFemale ? 0.42 : 0.28, 0.06, 10, 18]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+            </mesh>
+            {/* Sash hanging ends */}
+            <mesh ref={sashFrontRef} position={[0, 0.95, 0.22]} castShadow>
+              <boxGeometry args={[isFemale ? 0.28 : 0.22, 0.18, 0.03]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
+            </mesh>
+            {/* Sash knot detail */}
+            <mesh position={[0.02, 0.95, 0.24]} castShadow>
+              <sphereGeometry args={[0.055, 10, 10]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.82} />
+            </mesh>
+          </group>
         )}
-        {robeHasSash && (
-          <mesh ref={sashFrontRef} position={[0, 0.95, 0.2]} castShadow>
-            <boxGeometry args={[isFemale ? 0.25 : 0.2, 0.15, 0.02]} />
-            <meshStandardMaterial color={robeAccentColor} roughness={0.9} />
-          </mesh>
+        {/* Tiraz decorative bands on upper chest/shoulders */}
+        {robeHasTrim && (
+          <group>
+            <mesh position={[0, 1.35, 0.01]} castShadow>
+              <cylinderGeometry args={[isFemale ? 0.38 : 0.26, isFemale ? 0.40 : 0.28, 0.08, 16]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} transparent opacity={0.85} />
+            </mesh>
+            <mesh position={[0, 1.25, 0.01]} castShadow>
+              <cylinderGeometry args={[isFemale ? 0.36 : 0.24, isFemale ? 0.38 : 0.26, 0.05, 16]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} transparent opacity={0.7} />
+            </mesh>
+          </group>
         )}
         <mesh position={[0, 1.55, 0]} castShadow>
           <cylinderGeometry args={[0.07, 0.08, 0.12, 10]} />
@@ -685,8 +788,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         </mesh>
         
         {/* Head */}
-        <group position={[0, 1.75, 0]}>
-          <mesh castShadow scale={[1.15, 1.1, 0.9]}>
+        <group ref={headGroup} position={[0, 1.75, 0]}>
+          <mesh castShadow scale={[0.95, 1.1, 0.9]}>
             <sphereGeometry args={[0.2, 12, 12]} />
             <meshStandardMaterial color={headColor} />
           </mesh>
@@ -694,16 +797,45 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             <sphereGeometry args={[0.16, 12, 10]} />
             <meshStandardMaterial color={headColor} />
           </mesh>
-          {hasShortHair && (
+          {/* Ears - visible unless covered by headwear */}
+          {(headwearStyle === 'none' || headwearStyle === 'cap' || headwearStyle === 'fez' || headwearStyle === 'straw' || headwearStyle === 'taqiyah') && (
             <>
-              <mesh position={[-0.19, -0.02, 0.02]} castShadow>
-                <sphereGeometry args={[0.035, 10, 10]} />
-                <meshStandardMaterial color={headColor} roughness={0.9} />
-              </mesh>
-              <mesh position={[0.19, -0.02, 0.02]} castShadow>
-                <sphereGeometry args={[0.035, 10, 10]} />
-                <meshStandardMaterial color={headColor} roughness={0.9} />
-              </mesh>
+              {/* Left ear */}
+              <group position={[-0.19, -0.02, 0.02]} rotation={[0, -0.3, 0]}>
+                {/* Outer ear structure */}
+                <mesh castShadow>
+                  <sphereGeometry args={[0.04, 10, 10, 0, Math.PI]} />
+                  <meshStandardMaterial color={headColor} roughness={0.92} />
+                </mesh>
+                {/* Inner concha depression */}
+                <mesh position={[0, 0, 0.01]} castShadow>
+                  <sphereGeometry args={[0.022, 8, 8]} />
+                  <meshStandardMaterial color={faceShadowColor} roughness={0.95} />
+                </mesh>
+                {/* Ear lobe */}
+                <mesh position={[0, -0.03, 0.005]} castShadow>
+                  <sphereGeometry args={[0.018, 8, 8]} />
+                  <meshStandardMaterial color={faceHighlightColor} roughness={0.9} />
+                </mesh>
+              </group>
+              {/* Right ear */}
+              <group position={[0.19, -0.02, 0.02]} rotation={[0, 0.3, 0]}>
+                {/* Outer ear structure */}
+                <mesh castShadow>
+                  <sphereGeometry args={[0.04, 10, 10, Math.PI, Math.PI]} />
+                  <meshStandardMaterial color={headColor} roughness={0.92} />
+                </mesh>
+                {/* Inner concha depression */}
+                <mesh position={[0, 0, 0.01]} castShadow>
+                  <sphereGeometry args={[0.022, 8, 8]} />
+                  <meshStandardMaterial color={faceShadowColor} roughness={0.95} />
+                </mesh>
+                {/* Ear lobe */}
+                <mesh position={[0, -0.03, 0.005]} castShadow>
+                  <sphereGeometry args={[0.018, 8, 8]} />
+                  <meshStandardMaterial color={faceHighlightColor} roughness={0.9} />
+                </mesh>
+              </group>
             </>
           )}
           {/* Hair */}
@@ -755,91 +887,91 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           {showFacialDetails && (
             <>
               {/* Eyebrows */}
-              <mesh position={[-0.055, 0.08, 0.165]} rotation={[0, 0, isFemale ? -0.1 : -0.08]} castShadow>
+              <mesh position={[-browX, browY, 0.165]} rotation={[0, 0, isFemale ? -0.1 : -0.08]} castShadow>
                 <boxGeometry args={[0.05, browHeight, 0.02]} />
                 <meshStandardMaterial color={browColor} roughness={1} />
               </mesh>
-              <mesh position={[0.055, 0.08, 0.165]} rotation={[0, 0, isFemale ? 0.1 : 0.08]} castShadow>
+              <mesh position={[browX, browY, 0.165]} rotation={[0, 0, isFemale ? 0.1 : 0.08]} castShadow>
                 <boxGeometry args={[0.05, browHeight, 0.02]} />
                 <meshStandardMaterial color={browColor} roughness={1} />
               </mesh>
               {/* Eye whites */}
-              <mesh position={[-0.055, eyeY, 0.195]} scale={eyeScale} castShadow>
+              <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.195]} scale={eyeScale} castShadow>
                 <planeGeometry args={[0.05, 0.03]} />
                 <meshStandardMaterial color="#f2efe8" roughness={1} />
               </mesh>
-              <mesh position={[0.055, eyeY, 0.195]} scale={eyeScale} castShadow>
+              <mesh position={[faceVariant.eyeSpacing, eyeY, 0.195]} scale={eyeScale} castShadow>
                 <planeGeometry args={[0.05, 0.03]} />
                 <meshStandardMaterial color="#f2efe8" roughness={1} />
               </mesh>
               {/* Eye irises */}
-              <mesh position={[-0.055, eyeY, 0.202]} castShadow>
+              <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.202]} castShadow>
                 <planeGeometry args={[0.018, 0.018]} />
                 <meshStandardMaterial color={eyeColor} roughness={1} />
               </mesh>
-              <mesh position={[0.055, eyeY, 0.202]} castShadow>
+              <mesh position={[faceVariant.eyeSpacing, eyeY, 0.202]} castShadow>
                 <planeGeometry args={[0.018, 0.018]} />
                 <meshStandardMaterial color={eyeColor} roughness={1} />
               </mesh>
               {/* Eye pupils */}
-              <mesh position={[-0.055, eyeY, 0.206]} castShadow>
+              <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.206]} castShadow>
                 <planeGeometry args={[0.015, 0.015]} />
                 <meshStandardMaterial color="#2a2a2a" roughness={1} />
               </mesh>
-              <mesh position={[0.055, eyeY, 0.206]} castShadow>
+              <mesh position={[faceVariant.eyeSpacing, eyeY, 0.206]} castShadow>
                 <planeGeometry args={[0.015, 0.015]} />
                 <meshStandardMaterial color="#2a2a2a" roughness={1} />
               </mesh>
               {/* Eyelids */}
-              <mesh ref={upperLidLeft} position={[-0.055, eyeY + 0.018, 0.193]} castShadow>
+              <mesh ref={upperLidLeft} position={[-faceVariant.eyeSpacing, eyeY + 0.018, 0.193]} castShadow>
                 <planeGeometry args={[0.05, 0.012]} />
                 <meshStandardMaterial color={faceShadowColor} roughness={1} />
               </mesh>
-              <mesh ref={upperLidRight} position={[0.055, eyeY + 0.018, 0.193]} castShadow>
+              <mesh ref={upperLidRight} position={[faceVariant.eyeSpacing, eyeY + 0.018, 0.193]} castShadow>
                 <planeGeometry args={[0.05, 0.012]} />
                 <meshStandardMaterial color={faceShadowColor} roughness={1} />
               </mesh>
-              <mesh ref={lowerLidLeft} position={[-0.055, eyeY - 0.018, 0.193]} castShadow>
+              <mesh ref={lowerLidLeft} position={[-faceVariant.eyeSpacing, eyeY - 0.018, 0.193]} castShadow>
                 <planeGeometry args={[0.05, 0.01]} />
                 <meshStandardMaterial color={faceShadowColor} roughness={1} />
               </mesh>
-              <mesh ref={lowerLidRight} position={[0.055, eyeY - 0.018, 0.193]} castShadow>
+              <mesh ref={lowerLidRight} position={[faceVariant.eyeSpacing, eyeY - 0.018, 0.193]} castShadow>
                 <planeGeometry args={[0.05, 0.01]} />
                 <meshStandardMaterial color={faceShadowColor} roughness={1} />
               </mesh>
               {/* Eyelashes (female only) */}
               {isFemale && (
                 <>
-                  <mesh position={[-0.055, eyeY + 0.025, 0.194]} castShadow>
+                  <mesh position={[-faceVariant.eyeSpacing, eyeY + 0.025, 0.194]} castShadow>
                     <boxGeometry args={[0.05, 0.006, 0.01]} />
                     <meshStandardMaterial color="#1a1a1a" roughness={1} />
                   </mesh>
-                  <mesh position={[0.055, eyeY + 0.025, 0.194]} castShadow>
+                  <mesh position={[faceVariant.eyeSpacing, eyeY + 0.025, 0.194]} castShadow>
                     <boxGeometry args={[0.05, 0.006, 0.01]} />
                     <meshStandardMaterial color="#1a1a1a" roughness={1} />
                   </mesh>
                 </>
               )}
               {/* Tear ducts */}
-              <mesh position={[-0.068, eyeY - 0.008, 0.207]} castShadow>
+              <mesh position={[-(faceVariant.eyeSpacing + 0.013), eyeY - 0.008, 0.207]} castShadow>
                 <planeGeometry args={[0.006, 0.006]} />
                 <meshStandardMaterial color="#cfa88c" roughness={1} />
               </mesh>
-              <mesh position={[0.042, eyeY - 0.008, 0.207]} castShadow>
+              <mesh position={[faceVariant.eyeSpacing - 0.013, eyeY - 0.008, 0.207]} castShadow>
                 <planeGeometry args={[0.006, 0.006]} />
                 <meshStandardMaterial color="#cfa88c" roughness={1} />
               </mesh>
               {/* Lips */}
               <mesh position={[0, mouthY, 0.175]} castShadow>
-                <boxGeometry args={[mouthWidth * lipWidthScale, 0.012, 0.015]} />
+                <boxGeometry args={[mouthWidth * lipWidthScale * faceVariant.mouthWidthScale, 0.012, 0.015]} />
                 <meshStandardMaterial color={lipUpperColor} roughness={1} />
               </mesh>
               <mesh position={[0, mouthY - 0.012, 0.175]} castShadow>
-                <boxGeometry args={[mouthWidth * lipWidthScale * lipLowerScale, 0.014, 0.015]} />
+                <boxGeometry args={[mouthWidth * lipWidthScale * lipLowerScale * faceVariant.mouthWidthScale, 0.014, 0.015]} />
                 <meshStandardMaterial color={lipColor} roughness={1} />
               </mesh>
               <mesh position={[0, mouthY - lipGap, 0.176]} castShadow>
-                <boxGeometry args={[mouthWidth * lipWidthScale * 0.9, 0.004, 0.01]} />
+                <boxGeometry args={[mouthWidth * lipWidthScale * 0.9 * faceVariant.mouthWidthScale, 0.004, 0.01]} />
                 <meshStandardMaterial color={lipColor} roughness={1} />
               </mesh>
               {/* Nose */}
@@ -909,24 +1041,71 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           )}
           {headwearStyle === 'turban' && (
             <group>
-              <mesh position={[0, 0.22, -0.01]} rotation={[0, 0.05, 0]} castShadow>
-                <torusGeometry args={[0.26, 0.11, 12, 20]} />
-                <meshStandardMaterial color={turbanColor} roughness={0.85} />
+              {/* Inner cap/base - sits on top of head */}
+              <mesh position={[0, 0.32, -0.04]} castShadow>
+                <capsuleGeometry args={[0.15, 0.06, 12, 16]} />
+                <meshStandardMaterial color={turbanColor} roughness={0.88} />
               </mesh>
-              <mesh position={[0, 0.27, -0.01]} rotation={[0, -0.04, 0]} castShadow>
-                <torusGeometry args={[0.23, 0.1, 12, 20]} />
+
+              {/* Bottom wrap band - sits above forehead, pushed back */}
+              <mesh position={[0, 0.22, -0.04]} rotation={[0.18, 0, 0]} castShadow>
+                <cylinderGeometry args={[0.17, 0.18, 0.09, 20, 1]} />
                 <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
               </mesh>
-              <mesh position={[0, 0.32, -0.01]} rotation={[0, 0.03, 0]} castShadow>
-                <torusGeometry args={[0.2, 0.09, 12, 20]} />
+
+              {/* Left side wrap */}
+              <mesh position={[-0.11, 0.26, -0.04]} rotation={[0.14, 0.2, -Math.PI / 8]} castShadow>
+                <cylinderGeometry args={[0.16, 0.17, 0.10, 20, 1]} />
                 <meshStandardMaterial color={turbanColor} roughness={0.85} />
               </mesh>
-              <mesh position={[0, 0.37, -0.01]} rotation={[0, -0.02, 0]} castShadow>
-                <torusGeometry args={[0.17, 0.08, 12, 20]} />
+
+              {/* Right side wrap */}
+              <mesh position={[0.11, 0.26, -0.04]} rotation={[0.14, -0.2, Math.PI / 8]} castShadow>
+                <cylinderGeometry args={[0.16, 0.17, 0.10, 20, 1]} />
                 <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
               </mesh>
-              <mesh position={[0, 0.15, 0.12]} castShadow>
-                <boxGeometry args={[0.26, 0.08, 0.02]} />
+
+              {/* Front wrap layer - pushed back to avoid forehead */}
+              <mesh position={[0, 0.25, 0.01]} rotation={[Math.PI / 4.2, 0, 0]} castShadow>
+                <cylinderGeometry args={[0.16, 0.17, 0.09, 20, 1]} />
+                <meshStandardMaterial color={turbanColor} roughness={0.85} />
+              </mesh>
+
+              {/* Mid-height wrap band */}
+              <mesh position={[0, 0.30, -0.02]} rotation={[0.08, 0, 0]} castShadow>
+                <cylinderGeometry args={[0.15, 0.16, 0.09, 20, 1]} />
+                <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
+              </mesh>
+
+              {/* Top wrap layer */}
+              <mesh position={[0, 0.35, -0.03]} rotation={[0.05, 0, 0]} castShadow>
+                <cylinderGeometry args={[0.13, 0.14, 0.08, 20, 1]} />
+                <meshStandardMaterial color={turbanColor} roughness={0.85} />
+              </mesh>
+
+              {/* Crown top piece */}
+              <mesh position={[0, 0.39, -0.03]} castShadow>
+                <sphereGeometry args={[0.11, 16, 12]} />
+                <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
+              </mesh>
+
+              {/* Tail/end piece hanging at back - angled more backward and lower */}
+              <mesh position={[0, 0.12, -0.22]} rotation={[Math.PI / 2.8, 0, 0]} castShadow>
+                <boxGeometry args={[0.18, 0.05, 0.02]} />
+                <meshStandardMaterial color={turbanColor} roughness={0.86} />
+              </mesh>
+            </group>
+          )}
+          {headwearStyle === 'taqiyah' && (
+            <group>
+              {/* Simple rounded skullcap */}
+              <mesh position={[0, 0.18, -0.02]} castShadow>
+                <sphereGeometry args={[0.19, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.52]} />
+                <meshStandardMaterial color={turbanColor} roughness={0.88} />
+              </mesh>
+              {/* Bottom band */}
+              <mesh position={[0, 0.10, -0.01]} rotation={[0.08, 0, 0]} castShadow>
+                <cylinderGeometry args={[0.19, 0.20, 0.04, 20]} />
                 <meshStandardMaterial color={turbanHighlight} roughness={0.85} />
               </mesh>
             </group>
@@ -975,19 +1154,59 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             <meshStandardMaterial color="#b08a58" roughness={0.6} />
           </mesh>
         )}
+        {hasAccessory('etched bracelet') && (
+          <group>
+            {/* Left wrist */}
+            <mesh position={[-0.28, 0.95, 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+              <cylinderGeometry args={[0.038, 0.038, 0.025, 16]} />
+              <meshStandardMaterial color="#d4a965" roughness={0.5} metalness={0.3} />
+            </mesh>
+            <mesh position={[-0.28, 0.96, 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+              <torusGeometry args={[0.037, 0.003, 8, 16]} />
+              <meshStandardMaterial color="#8b6f3a" roughness={0.4} />
+            </mesh>
+            {/* Right wrist */}
+            <mesh position={[0.28, 0.95, 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+              <cylinderGeometry args={[0.038, 0.038, 0.025, 16]} />
+              <meshStandardMaterial color="#d4a965" roughness={0.5} metalness={0.3} />
+            </mesh>
+            <mesh position={[0.28, 0.96, 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+              <torusGeometry args={[0.037, 0.003, 8, 16]} />
+              <meshStandardMaterial color="#8b6f3a" roughness={0.4} />
+            </mesh>
+          </group>
+        )}
+        {hasAccessory('woven sash') && (
+          <group>
+            {/* Decorative woven sash hanging from belt */}
+            <mesh position={[-0.15, 0.92, 0.2]} rotation={[0.1, 0, 0]} castShadow>
+              <boxGeometry args={[0.12, 0.25, 0.015]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.9} />
+            </mesh>
+            {/* Woven pattern detail */}
+            <mesh position={[-0.15, 0.92, 0.21]} castShadow>
+              <boxGeometry args={[0.11, 0.24, 0.01]} />
+              <meshStandardMaterial color={color} roughness={0.92} transparent opacity={0.3} />
+            </mesh>
+          </group>
+        )}
 
         {/* Arms (static for performance) */}
         {!isFemale && (
           <>
             {/* Shoulders */}
-            <mesh position={[-0.3, 1.34, 0]} castShadow>
-              <boxGeometry args={[0.18, 0.18, 0.18]} />
-              <meshStandardMaterial color={color} roughness={0.85} />
-            </mesh>
-            <mesh position={[0.3, 1.34, 0]} castShadow>
-              <boxGeometry args={[0.18, 0.18, 0.18]} />
-              <meshStandardMaterial color={color} roughness={0.85} />
-            </mesh>
+            <group ref={leftShoulder} position={[-0.3, 1.34, 0]}>
+              <mesh castShadow>
+                <boxGeometry args={[0.18, 0.18, 0.18]} />
+                <meshStandardMaterial color={color} roughness={0.85} />
+              </mesh>
+            </group>
+            <group ref={rightShoulder} position={[0.3, 1.34, 0]}>
+              <mesh castShadow>
+                <boxGeometry args={[0.18, 0.18, 0.18]} />
+                <meshStandardMaterial color={color} roughness={0.85} />
+              </mesh>
+            </group>
             <group ref={leftArm} position={[-0.38, 1.12, 0]}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.065, 0.065, 0.44, 8]} />
@@ -1033,11 +1252,16 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
         {/* Legs */}
         {!isFemale && (
-          <>
+          <group ref={hipGroup}>
             <group ref={leftLeg} position={[-0.15, 0.45, 0]}>
               <mesh castShadow>
                 <boxGeometry args={[0.15, 0.8, 0.15]} />
                 <meshStandardMaterial color={color} />
+              </mesh>
+              {/* Sirwal (trousers) visible at ankle */}
+              <mesh position={[0, -0.35, 0]} castShadow>
+                <cylinderGeometry args={[0.11, 0.10, 0.22, 12]} />
+                <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
               </mesh>
               {footwearStyle !== 'bare' && (
                 <group ref={leftFoot} position={[0, -0.45, 0.1]}>
@@ -1059,6 +1283,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <boxGeometry args={[0.15, 0.8, 0.15]} />
                 <meshStandardMaterial color={color} />
               </mesh>
+              {/* Sirwal (trousers) visible at ankle */}
+              <mesh position={[0, -0.35, 0]} castShadow>
+                <cylinderGeometry args={[0.11, 0.10, 0.22, 12]} />
+                <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
+              </mesh>
               {footwearStyle !== 'bare' && (
                 <group ref={rightFoot} position={[0, -0.45, 0.1]}>
                   <mesh castShadow>
@@ -1074,7 +1303,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 </group>
               )}
             </group>
-          </>
+          </group>
         )}
         {isFemale && (
           <>

@@ -3,21 +3,24 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, us
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, PointerLockControls } from '@react-three/drei';
-import { CameraMode, BuildingMetadata, PlayerStats, Obstacle } from '../types';
+import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
-import { PushableObject } from '../utils/pushables';
+import { PushableObject, PickupInfo } from '../utils/pushables';
+import { getTerrainHeight } from '../utils/terrain';
 
 const PLAYER_SPEED = 6;
 const RUN_SPEED = 11;
-const CAMERA_SENSITIVITY = 1.5;
+const CAMERA_SENSITIVITY = 4.2;
 const JUMP_FORCE = 8;
 const GRAVITY = -24;
 const OVERHEAD_ZOOM_SPEED = 1.2;
 const OVERHEAD_ROTATE_SPEED = 1.5;
 const OVERHEAD_POLAR_ANGLE = 0.3;
 const MARKER_COLOR = '#fbbf24';
+const ORBIT_DAMPING = 0.18;
+const ORBIT_RECENTER_SPEED = 1.6;
 
 interface PlayerProps {
   initialPosition?: [number, number, number];
@@ -33,6 +36,10 @@ interface PlayerProps {
   onAgentImpact?: (id: string, intensity: number) => void;
   pushablesRef?: React.MutableRefObject<PushableObject[]>;
   onImpactPuff?: (position: THREE.Vector3, intensity: number) => void;
+  district?: DistrictType;
+  terrainSeed?: number;
+  onPickupPrompt?: (label: string | null) => void;
+  onPickup?: (itemId: string, pickup: PickupInfo) => void;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({ 
@@ -46,7 +53,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   agentHashRef,
   onAgentImpact,
   pushablesRef,
-  onImpactPuff
+  onImpactPuff,
+  district,
+  terrainSeed,
+  onPickupPrompt,
+  onPickup
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -104,14 +115,35 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const sprintCharge = useRef(0);
   const landingDamp = useRef(0);
   const lastSpace = useRef(false);
+  const lastMovePosRef = useRef(new THREE.Vector3());
+  const stuckTimerRef = useRef(0);
+  const interactSwingRef = useRef(0);
+  const interactChargeRef = useRef(0);
+  const interactChargingRef = useRef(false);
+  const interactTriggerRef = useRef<number | null>(null);
+  const pickupPromptRef = useRef<string | null>(null);
+  const nearestPickupRef = useRef<{ id: string; pickup: PickupInfo } | null>(null);
 
   useImperativeHandle(ref, () => group.current!, []);
+
+  useEffect(() => {
+    if (!group.current) return;
+    const ground = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+      ? getTerrainHeight(district, initialPosition[0], initialPosition[2], terrainSeed)
+      : 0;
+    group.current.position.set(initialPosition[0], ground + initialPosition[1], initialPosition[2]);
+    lastPlayerPos.current.copy(group.current.position);
+    lastMovePosRef.current.copy(group.current.position);
+  }, [initialPosition, district, terrainSeed]);
 
   const [keys, setKeys] = useState({ 
     up: false, down: false, left: false, right: false, 
     w: false, a: false, s: false, d: false,
     shift: false, space: false
   });
+  const [northLocked, setNorthLocked] = useState(false);
+  const recenterRef = useRef(false);
+  const recenterAmount = useRef(0);
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -138,8 +170,21 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (k === 'a') setKeys(prev => ({ ...prev, a: true }));
       if (k === 's') setKeys(prev => ({ ...prev, s: true }));
       if (k === 'd') setKeys(prev => ({ ...prev, d: true }));
-      if (k === 'shift') setKeys(prev => ({ ...prev, shift: true }));
+      if (k === 'shift') {
+        setKeys(prev => ({ ...prev, shift: true }));
+        if (!interactChargingRef.current && !walkingRef.current) {
+          interactChargingRef.current = true;
+          interactChargeRef.current = 0;
+        }
+      }
       if (k === ' ') setKeys(prev => ({ ...prev, space: true }));
+      if (k === 'r') {
+        recenterRef.current = true;
+        recenterAmount.current = 1;
+      }
+      if (k === 'n') {
+        setNorthLocked(prev => !prev);
+      }
     };
     const up = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
@@ -151,8 +196,23 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (k === 'a') setKeys(prev => ({ ...prev, a: false }));
       if (k === 's') setKeys(prev => ({ ...prev, s: false }));
       if (k === 'd') setKeys(prev => ({ ...prev, d: false }));
-      if (k === 'shift') setKeys(prev => ({ ...prev, shift: false }));
+      if (k === 'shift') {
+        setKeys(prev => ({ ...prev, shift: false }));
+        if (interactChargingRef.current) {
+          const strength = Math.min(1, interactChargeRef.current);
+          const triggerStrength = Math.max(strength, nearestPickupRef.current ? 0.2 : 0);
+          if (triggerStrength > 0.12) {
+            interactSwingRef.current = triggerStrength;
+            interactTriggerRef.current = triggerStrength;
+          }
+          interactChargingRef.current = false;
+          interactChargeRef.current = 0;
+        }
+      }
       if (k === ' ') setKeys(prev => ({ ...prev, space: false }));
+      if (k === 'r') {
+        recenterRef.current = false;
+      }
     };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -193,6 +253,23 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     osc.start();
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
     osc.stop(ctx.currentTime + 0.12);
+  };
+
+  const playPickup = () => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(620, ctx.currentTime + 0.12);
+    gain.gain.value = 0.12;
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
+    osc.stop(ctx.currentTime + 0.16);
   };
 
   const playLand = () => {
@@ -317,11 +394,39 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (keys.s) orbitRef.current.setPolarAngle(Math.min(Math.PI / 2.1, orbitRef.current.getPolarAngle() + angle));
     }
 
+    const groundHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+      ? getTerrainHeight(district, group.current.position.x, group.current.position.z, terrainSeed)
+      : 0;
+
     // 2. Jumping Physics + buffers
     const spacePressed = keys.space && !lastSpace.current;
     const spaceReleased = !keys.space && lastSpace.current;
     lastSpace.current = keys.space;
     if (spacePressed) {
+      if (stuckTimerRef.current > 0.6) {
+        const base = group.current.position.clone();
+        const offsets = [0.8, 1.4, 2.0, 2.6];
+        let moved = false;
+        for (const r of offsets) {
+          for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const candidate = new THREE.Vector3(base.x + Math.cos(angle) * r, 0, base.z + Math.sin(angle) * r);
+            if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(candidate, obstacles, 0.6)) {
+              const candidateHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+                ? getTerrainHeight(district, candidate.x, candidate.z, terrainSeed)
+                : 0;
+              candidate.y = candidateHeight;
+              group.current.position.copy(candidate);
+              lastMovePosRef.current.copy(candidate);
+              stuckTimerRef.current = 0;
+              onImpactPuff?.(candidate, 0.25);
+              moved = true;
+              break;
+            }
+          }
+          if (moved) break;
+        }
+      }
       jumpBuffer.current = 0.12;
       if (isGrounded.current) {
         chargingRef.current = true;
@@ -360,8 +465,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     if (!isGrounded.current) {
       velV.current += GRAVITY * delta;
       group.current.position.y += velV.current * delta;
-      if (group.current.position.y <= 0) {
-        group.current.position.y = 0;
+      if (group.current.position.y <= groundHeight) {
+        group.current.position.y = groundHeight;
         velV.current = 0;
         isGrounded.current = true;
         landingDamp.current = 0.2;
@@ -490,6 +595,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       sprintingRef.current = sprinting;
       setIsSprinting(sprinting);
     }
+    if (moving && keys.shift) {
+      interactChargingRef.current = false;
+      interactChargeRef.current = 0;
+    } else if (keys.shift && !moving) {
+      interactChargeRef.current = Math.min(1.2, interactChargeRef.current + delta * 1.6);
+    }
 
     let currentSpeed = 0;
     if (moving) {
@@ -513,6 +624,21 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
+    const groundHeightNow = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+      ? getTerrainHeight(district, group.current.position.x, group.current.position.z, terrainSeed)
+      : 0;
+    if (isGrounded.current) {
+      group.current.position.y = groundHeightNow;
+    }
+
+    const movedDistSq = group.current.position.distanceToSquared(lastMovePosRef.current);
+    if (moving && movedDistSq < 0.0004) {
+      stuckTimerRef.current = Math.min(1.2, stuckTimerRef.current + delta);
+    } else {
+      stuckTimerRef.current = Math.max(0, stuckTimerRef.current - delta * 2);
+    }
+    lastMovePosRef.current.copy(group.current.position);
+
     if (moving && keys.shift && isGrounded.current) {
       sprintCharge.current = Math.min(1, sprintCharge.current + delta * 0.6);
     } else {
@@ -528,6 +654,75 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     } else {
       footstepTimerRef.current = 0;
+    }
+
+    if (interactSwingRef.current > 0) {
+      interactSwingRef.current = Math.max(0, interactSwingRef.current - delta * 3.5);
+    }
+
+    if (interactTriggerRef.current !== null && group.current) {
+      const strength = interactTriggerRef.current;
+      interactTriggerRef.current = null;
+      if (nearestPickupRef.current && onPickup) {
+        const { id, pickup } = nearestPickupRef.current;
+        nearestPickupRef.current = null;
+        pickupPromptRef.current = null;
+        onPickupPrompt?.(null);
+        playPickup();
+        onPickup(id, pickup);
+      }
+      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), group.current.rotation.y);
+      const hitRange = 1.6 + strength * 0.4;
+      let hit: { id: string; pos: THREE.Vector3 } | null = null;
+      if (agentHashRef?.current) {
+        const neighbors = queryNearbyAgents(group.current.position, agentHashRef.current);
+        let best = Infinity;
+        for (const neighbor of neighbors) {
+          const offset = neighbor.pos.clone().sub(group.current.position);
+          offset.y = 0;
+          const dist = offset.length();
+          if (dist > hitRange || dist < 0.01) continue;
+          const dir = offset.clone().normalize();
+          const dot = forward.dot(dir);
+          if (dot < 0.35) continue;
+          if (dist < best) {
+            best = dist;
+            hit = { id: neighbor.id, pos: neighbor.pos.clone() };
+          }
+        }
+      }
+      if (hit) {
+        const intensity = 0.7 + strength * 0.3;
+        onAgentImpact?.(hit.id, intensity);
+        onImpactPuff?.(hit.pos.clone(), 0.6 + strength * 0.5);
+        playNpcBump(intensity);
+      } else if (pushablesRef?.current) {
+        let best = Infinity;
+        let hitPos: THREE.Vector3 | null = null;
+        for (const item of pushablesRef.current) {
+          const offset = item.position.clone().sub(group.current.position);
+          offset.y = 0;
+          const dist = offset.length();
+          if (dist > hitRange || dist < 0.01) continue;
+          const dir = offset.clone().normalize();
+          const dot = forward.dot(dir);
+          if (dot < 0.35) continue;
+          if (dist < best) {
+            best = dist;
+            hitPos = item.position.clone();
+          }
+        }
+        if (hitPos) {
+          onImpactPuff?.(hitPos, 0.5 + strength * 0.4);
+        } else {
+          const testPoint = group.current.position.clone().add(forward.multiplyScalar(0.9));
+          const blocked = isBlockedByBuildings(testPoint, buildings, 0.2, buildingHash || undefined)
+            || isBlockedByObstacles(testPoint, obstacles, 0.2);
+          if (blocked) {
+            onImpactPuff?.(testPoint, 0.45 + strength * 0.35);
+          }
+        }
+      }
     }
 
     // 3c. NPC collision bump + impact pulse
@@ -554,6 +749,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             const intensity = Math.min(1, 0.35 + effectiveSpeed / RUN_SPEED);
             onAgentImpact?.(neighbor.id, intensity);
             playNpcBump(intensity);
+            if (intensity > 0.6) {
+              onImpactPuff?.(neighbor.pos.clone(), Math.min(1, intensity));
+            }
           }
         }
       }
@@ -597,10 +795,35 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
+    if (pushablesRef?.current && onPickupPrompt) {
+      let nearestLabel: string | null = null;
+      let nearestPickup: { id: string; pickup: PickupInfo } | null = null;
+      let nearestDistSq = Infinity;
+      for (const item of pushablesRef.current) {
+        if (!item.pickup) continue;
+        const dx = item.position.x - group.current.position.x;
+        const dz = item.position.z - group.current.position.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < 1.4 * 1.4 && distSq < nearestDistSq) {
+          nearestDistSq = distSq;
+          nearestLabel = item.pickup.label;
+          nearestPickup = { id: item.id, pickup: item.pickup };
+        }
+      }
+      nearestPickupRef.current = nearestPickup;
+      if (pickupPromptRef.current !== nearestLabel) {
+        pickupPromptRef.current = nearestLabel;
+        onPickupPrompt(nearestLabel ? `Press SHIFT to pick up ${nearestLabel}` : null);
+      }
+    }
+
     // 4. Camera Positioning
     if (cameraMode === CameraMode.FIRST_PERSON) {
       camera.position.set(group.current.position.x, 1.7 + group.current.position.y, group.current.position.z);
+      camera.up.set(0, 1, 0);
+      camera.rotation.order = 'YXZ';
       camera.rotation.set(fpPitch.current, fpYaw.current, 0);
+      camera.rotation.z = 0;
       group.current.rotation.y = fpYaw.current;
     } else if (cameraMode === CameraMode.OVERHEAD && orbitRef.current) {
       const playerPos = group.current.position;
@@ -610,17 +833,27 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         camera.position.copy(playerPos.clone().add(offset));
         lastPlayerPos.current.copy(playerPos);
       }
+      if (northLocked) {
+        orbitRef.current.setAzimuthalAngle(0);
+      }
       orbitRef.current.update();
     } else if (cameraMode === CameraMode.THIRD_PERSON && orbitRef.current) {
       orbitRef.current.target.lerp(group.current.position.clone().add(new THREE.Vector3(0, 1.5, 0)), 0.1);
+      if (recenterRef.current || recenterAmount.current > 0) {
+        const targetAngle = group.current.rotation.y;
+        const currentAngle = orbitRef.current.getAzimuthalAngle();
+        const nextAngle = THREE.MathUtils.lerp(currentAngle, targetAngle, ORBIT_RECENTER_SPEED * delta);
+        orbitRef.current.setAzimuthalAngle(nextAngle);
+        recenterAmount.current = Math.max(0, recenterAmount.current - delta * 2);
+      }
     }
 
     // 5. Marker positioning
     if (markerRef.current) {
       // Keep marker on ground while jumping
-      markerRef.current.position.y = -group.current.position.y + 0.05;
+      markerRef.current.position.y = groundHeightNow - group.current.position.y + 0.05;
       if (markerGlowRef.current) {
-        markerGlowRef.current.position.y = -group.current.position.y + 0.02;
+        markerGlowRef.current.position.y = groundHeightNow - group.current.position.y + 0.02;
       }
     }
   });
@@ -631,12 +864,14 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         <OrbitControls 
           ref={orbitRef} 
           makeDefault 
-          minDistance={cameraMode === CameraMode.OVERHEAD ? 10 : 5} 
+          minDistance={cameraMode === CameraMode.OVERHEAD ? 12 : 7} 
           maxDistance={cameraMode === CameraMode.OVERHEAD ? 120 : 50} 
           minPolarAngle={cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE : 0.1}
           maxPolarAngle={cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE : Math.PI / 2.1}
           enablePan={cameraMode === CameraMode.OVERHEAD}
           enableRotate={cameraMode === CameraMode.THIRD_PERSON}
+          enableDamping
+          dampingFactor={ORBIT_DAMPING}
           screenSpacePanning={cameraMode === CameraMode.OVERHEAD}
           mouseButtons={cameraMode === CameraMode.OVERHEAD ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN } : undefined}
         />
@@ -654,6 +889,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             hairColor={playerStats?.hairColor}
             scale={playerStats ? [playerStats.weight, playerStats.height, playerStats.weight] : undefined}
             enableArmSwing
+            interactionSwingRef={interactSwingRef}
             armSwingMode={(timeOfDay >= 19 || timeOfDay < 5) ? 'left' : 'both'}
             robeAccentColor={playerStats?.robeAccentColor}
             robeHasSash={playerStats?.robeHasSash}

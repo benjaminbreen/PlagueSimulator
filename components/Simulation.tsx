@@ -3,16 +3,19 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents } from './Agents';
 import { Rats, Rat } from './Rats';
 import { Player } from './Player';
 import { MarketStall } from './MarketStall';
+import { MerchantNPC } from './MerchantNPC';
 import { AgentSnapshot, SpatialHash, buildBuildingHash } from '../utils/spatial';
-import { PushableObject, createPushable } from '../utils/pushables';
+import { PushableObject, PickupInfo, createPushable } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
+import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
+import { generateMerchantNPC, mapStallTypeToMerchantType } from '../utils/merchantGeneration';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -22,8 +25,12 @@ interface SimulationProps {
   onStatsUpdate: (stats: SimulationCounts) => void;
   onMapChange: (dx: number, dy: number) => void;
   onNearBuilding: (building: BuildingMetadata | null) => void;
+  onNearMerchant?: (merchant: MerchantNPCType | null) => void;
   onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   selectedNpcId?: string | null;
+  onMinimapUpdate?: (data: MiniMapData) => void;
+  onPickupPrompt?: (label: string | null) => void;
+  onPickupItem?: (pickup: PickupInfo) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -733,7 +740,7 @@ const SunDisc: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNpcSelect, selectedNpcId }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -750,45 +757,156 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const impactPuffsRef = useRef<ImpactPuffSlot[]>(Array.from({ length: MAX_PUFFS }, () => null));
   const impactPuffIndexRef = useRef(0);
   const atmosphereTickRef = useRef(0);
+  const minimapTickRef = useRef(0);
   
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
+  const [playerSpawn, setPlayerSpawn] = useState<[number, number, number]>(() => {
+    return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0];
+  });
   const [buildingsState, setBuildingsState] = useState<BuildingMetadata[]>([]);
   const buildingsRef = useRef<BuildingMetadata[]>([]);
   const [currentNearBuilding, setCurrentNearBuilding] = useState<BuildingMetadata | null>(null);
-  const playerSpawn = useMemo<[number, number, number]>(() => {
-    return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0];
+  const [currentNearMerchant, setCurrentNearMerchant] = useState<MerchantNPCType | null>(null);
+  const terrainSeed = useMemo(() => params.mapX * 1000 + params.mapY * 13 + 19, [params.mapX, params.mapY]);
+  const district = useMemo(() => getDistrictType(params.mapX, params.mapY), [params.mapX, params.mapY]);
+  useEffect(() => {
+    setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0]);
   }, [params.mapX, params.mapY]);
-  const pushables = useMemo<PushableObject[]>(() => {
-    if (params.mapX !== 0 || params.mapY !== 0) return [];
+  const buildPushables = useCallback((): PushableObject[] => {
+    const district = getDistrictType(params.mapX, params.mapY);
     const roll = seededRandom(params.mapX * 1000 + params.mapY * 13 + 101);
-    const items: PushableObject[] = [
-      createPushable('bench-north', 'bench', [-12, 0.2, 9], 1.1, 2.6, Math.PI / 6, 'stone'),
-      createPushable('bench-south', 'bench', [12, 0.2, -9], 1.1, 2.6, -Math.PI / 8, 'stone'),
-      createPushable('jar-west', 'clayJar', [-3.2, 0.3, -3.2], 0.65, 0.9, 0, 'ceramic'),
-      createPushable('jar-east', 'clayJar', [3.4, 0.3, 3.3], 0.65, 0.9, 0, 'ceramic')
-    ];
-    if (roll > 0.4) {
+    const items: PushableObject[] = [];
+    const addCoin = (id: string, position: [number, number, number]) => {
+      const coinRoll = seededRandom(params.mapX * 1000 + params.mapY * 13 + id.length);
+      const coins = [
+        { label: 'Copper Fals', value: 1 },
+        { label: 'Silver Dirham', value: 4 },
+        { label: 'Gold Dinar', value: 12 }
+      ];
+      const coin = coins[Math.floor(coinRoll * coins.length)];
+      const item = createPushable(id, 'coin', position, 0.18, 0.3, 0, 'stone');
+      item.pickup = { type: 'coin', label: `${coin.label} (+${coin.value})`, value: coin.value };
+      items.push(item);
+    };
+    const addPickupItem = (id: string, kind: PushableObject['kind'], position: [number, number, number], label: string, itemId: string) => {
+      const item = createPushable(id, kind, position, 0.2, 0.4, 0.2, 'cloth');
+      item.pickup = { type: 'item', label, itemId };
+      items.push(item);
+    };
+    const addProduce = (id: string, kind: PushableObject['kind'], position: [number, number, number], label: string, itemId: string) => {
+      const item = createPushable(id, kind, position, 0.18, 0.3, 0.1, 'wood');
+      item.pickup = { type: 'produce', label, itemId };
+      items.push(item);
+    };
+    if (district === 'MARKET') {
       items.push(
-        createPushable('geranium-east', 'geranium', [6.2, 0.2, -5.0], 0.85, 1.2, 0, 'ceramic'),
-        createPushable('geranium-west', 'geranium', [-5.6, 0.2, 6.0], 0.85, 1.2, 0, 'ceramic')
+        createPushable('bench-north', 'bench', [-12, 0.2, 9], 1.1, 2.6, Math.PI / 6, 'stone'),
+        createPushable('bench-south', 'bench', [12, 0.2, -9], 1.1, 2.6, -Math.PI / 8, 'stone'),
+        createPushable('jar-west', 'clayJar', [-3.2, 0.3, -3.2], 0.65, 0.9, 0, 'ceramic'),
+        createPushable('jar-east', 'clayJar', [3.4, 0.3, 3.3], 0.65, 0.9, 0, 'ceramic')
       );
+      if (roll > 0.4) {
+        items.push(
+          createPushable('geranium-east', 'geranium', [6.2, 0.2, -5.0], 0.85, 1.2, 0, 'ceramic'),
+          createPushable('geranium-west', 'geranium', [-5.6, 0.2, 6.0], 0.85, 1.2, 0, 'ceramic')
+        );
+      }
+      if (roll > 0.6) {
+        items.push(
+          createPushable('basket-north', 'basket', [-7.8, 0.2, 4.2], 0.6, 0.6, 0.2, 'wood'),
+          createPushable('basket-south', 'basket', [7.4, 0.2, -4.6], 0.6, 0.6, -0.1, 'wood')
+        );
+      }
+      addCoin('coin-market-1', [-2.6, 0.05, 1.6]);
+      addPickupItem('shard-market-1', 'potteryShard', [2.8, 0.05, -1.4], 'Pottery Shard', 'ground-pottery');
+      addPickupItem('linen-market-1', 'linenScrap', [-6.2, 0.05, -0.6], 'Linen Scrap', 'ground-linen');
+      addPickupItem('candle-market-1', 'candleStub', [5.6, 0.05, 2.8], 'Candle Stub', 'ground-candle');
+      return items;
     }
+    if (district === 'WEALTHY') {
+      items.push(
+        createPushable('olive-east', 'olivePot', [6.2, 0.2, 4.8], 0.8, 1.8, 0, 'ceramic'),
+        createPushable('olive-west', 'olivePot', [-6.4, 0.2, -4.6], 0.8, 1.8, 0, 'ceramic'),
+        createPushable('lemon-east', 'lemonPot', [8.6, 0.2, 6.2], 0.8, 1.8, 0, 'ceramic'),
+        createPushable('geranium-wealthy-1', 'geranium', [-8.6, 0.2, 6.2], 0.9, 1.2, 0.1, 'ceramic'),
+        createPushable('geranium-wealthy-2', 'geranium', [8.8, 0.2, -6.4], 0.9, 1.2, -0.1, 'ceramic')
+      );
+      if (roll > 0.5) {
+        items.push(createPushable('bench-wealthy', 'bench', [10.5, 0.2, 8.5], 1.1, 2.6, 0.4, 'stone'));
+      }
+      addProduce('olive-wealthy-1', 'olive', [5.6, 0.05, 5.4], 'Olives (Handful)', 'ground-olives');
+      addProduce('lemon-wealthy-1', 'lemon', [9.2, 0.05, 5.7], 'Lemon', 'ground-lemons');
+      addCoin('coin-wealthy-1', [-1.2, 0.05, 2.6]);
+      return items;
+    }
+    if (district === 'HOVELS') {
+      items.push(
+        createPushable('jar-hovel-1', 'clayJar', [-2.6, 0.3, 2.2], 0.6, 0.8, 0, 'ceramic'),
+        createPushable('jar-hovel-2', 'clayJar', [2.4, 0.3, -2.0], 0.6, 0.8, 0, 'ceramic'),
+        createPushable('basket-hovel', 'basket', [1.4, 0.2, 3.6], 0.6, 0.6, -0.2, 'wood'),
+        createPushable('basket-hovel-2', 'basket', [-3.1, 0.2, -2.8], 0.6, 0.6, 0.15, 'wood'),
+        createPushable('jar-hovel-3', 'clayJar', [3.3, 0.3, 3.4], 0.6, 0.8, 0, 'ceramic')
+      );
+      addPickupItem('twine-hovel-1', 'twine', [-1.6, 0.05, 3.2], 'Palm Twine', 'ground-twine');
+      addPickupItem('shard-hovel-1', 'potteryShard', [2.4, 0.05, -3.2], 'Pottery Shard', 'ground-pottery');
+      addCoin('coin-hovel-1', [0.6, 0.05, -1.2]);
+      return items;
+    }
+    if (district === 'ALLEYS') {
+      items.push(
+        createPushable('jar-alley', 'clayJar', [-1.8, 0.3, 1.6], 0.6, 0.8, 0, 'ceramic'),
+        createPushable('basket-alley', 'basket', [2.2, 0.2, -1.2], 0.6, 0.6, 0.1, 'wood')
+      );
+      addPickupItem('linen-alley-1', 'linenScrap', [-0.8, 0.05, 0.4], 'Linen Scrap', 'ground-linen');
+      addPickupItem('candle-alley-1', 'candleStub', [1.4, 0.05, -2.0], 'Candle Stub', 'ground-candle');
+      addCoin('coin-alley-1', [-2.4, 0.05, -0.4]);
+      return items;
+    }
+    if (district === 'CIVIC') {
+      items.push(
+        createPushable('bench-civic', 'bench', [6.8, 0.2, -6.2], 1.1, 2.6, -0.3, 'stone'),
+        createPushable('olive-civic', 'olivePot', [-5.2, 0.2, 4.8], 0.8, 1.8, 0, 'ceramic'),
+        createPushable('lemon-civic', 'lemonPot', [4.8, 0.2, -4.4], 0.8, 1.8, 0, 'ceramic')
+      );
+      addProduce('olive-civic-1', 'olive', [-4.6, 0.05, 5.4], 'Olives (Handful)', 'ground-olives');
+      addProduce('lemon-civic-1', 'lemon', [5.4, 0.05, -5.2], 'Lemon', 'ground-lemons');
+      addCoin('coin-civic-1', [0.8, 0.05, 1.4]);
+      return items;
+    }
+    items.push(
+      createPushable('jar-res-1', 'clayJar', [-2.2, 0.3, -1.8], 0.6, 0.8, 0, 'ceramic'),
+      createPushable('geranium-res', 'geranium', [2.6, 0.2, 2.4], 0.85, 1.2, 0, 'ceramic')
+    );
+    addPickupItem('shard-res-1', 'potteryShard', [-0.6, 0.05, 1.2], 'Pottery Shard', 'ground-pottery');
+    addPickupItem('candle-res-1', 'candleStub', [1.6, 0.05, -1.4], 'Candle Stub', 'ground-candle');
+    addCoin('coin-res-1', [0.2, 0.05, -2.2]);
     return items;
   }, [params.mapX, params.mapY]);
+  const [pushables, setPushables] = useState<PushableObject[]>(() => buildPushables());
+  useEffect(() => {
+    setPushables(buildPushables());
+  }, [buildPushables]);
   const pushablesRef = useRef<PushableObject[]>(pushables);
   useEffect(() => {
     pushablesRef.current = pushables;
   }, [pushables]);
+  const handlePickupItem = useCallback((itemId: string, pickup: PickupInfo) => {
+    setPushables(prev => prev.filter(item => item.id !== itemId));
+    onPickupItem?.(pickup);
+  }, [onPickupItem]);
 
   // Procedurally generate 1-3 market stalls in the main marketplace
   const marketStalls = useMemo<MarketStallData[]>(() => {
-    if (params.mapX !== 0 || params.mapY !== 0) return [];
+    const district = getDistrictType(params.mapX, params.mapY);
+    if (params.mapX !== 0 || params.mapY !== 0) {
+      if (district !== 'OUTSKIRTS' && district !== 'CARAVANSERAI') return [];
+    }
 
     const seed = params.mapX * 1000 + params.mapY * 100;
     let randCounter = 0;
     const rand = () => seededRandom(seed + randCounter++ * 137);
 
-    const stallCount = 1 + Math.floor(rand() * 3); // 1-3 stalls
+    const stallCount = district === 'OUTSKIRTS' ? 1 : district === 'CARAVANSERAI' ? 6 : 1 + Math.floor(rand() * 3); // 1-3 stalls
     const stalls: MarketStallData[] = [];
 
     // Available stall types
@@ -837,7 +955,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       if (!position) continue; // Skip if couldn't find valid position
 
       const type = stallTypes[Math.floor(rand() * stallTypes.length)];
-      const size = rand() < 0.2 ? 'small' : rand() < 0.7 ? 'medium' : 'large';
+      const size = district === 'OUTSKIRTS' ? 'small' : district === 'CARAVANSERAI' ? 'medium' : rand() < 0.2 ? 'small' : rand() < 0.7 ? 'medium' : 'large';
       const rotation = [0, 90, 180, 270][Math.floor(rand() * 4)];
       const awningColor = awningColors[Math.floor(rand() * awningColors.length)];
       const woodColor = woodColors[Math.floor(rand() * woodColors.length)];
@@ -854,10 +972,23 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         [MarketStallType.GLASSWARE]: '#20b2aa'
       };
 
+      const caravanPositions: Array<[number, number, number]> = [
+        [-14, 0, -6],
+        [14, 0, -6],
+        [-14, 0, 6],
+        [14, 0, 6],
+        [0, 0, -12],
+        [0, 0, 12]
+      ];
+      const positionOverride: [number, number, number] | null = district === 'OUTSKIRTS'
+        ? [0, 0, 8]
+        : district === 'CARAVANSERAI'
+          ? caravanPositions[i % caravanPositions.length]
+          : null;
       stalls.push({
         id: `stall-${i}`,
         type,
-        position,
+        position: positionOverride ?? position,
         rotation,
         size,
         awningColor,
@@ -869,15 +1000,79 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     return stalls;
   }, [params.mapX, params.mapY]);
 
+  // Generate merchant NPCs for each market stall
+  const merchants = useMemo<MerchantNPCType[]>(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    if (params.mapX !== 0 || params.mapY !== 0) {
+      if (district !== 'OUTSKIRTS' && district !== 'CARAVANSERAI') return [];
+    }
+
+    return marketStalls.map((stall, index) => {
+      const merchantType = mapStallTypeToMerchantType(stall.type);
+      const seed = params.mapX * 10000 + params.mapY * 1000 + index;
+
+      // Position merchant behind counter based on stall rotation
+      // Merchants stand ~1.2 units behind the stall center (behind the counter)
+      const standDistance = 1.2;
+      let xOffset = 0;
+      let zOffset = 0;
+
+      // Calculate position based on rotation (merchant faces forward, stall rotates)
+      if (stall.rotation === 0) {
+        // Facing north (0°) - merchant behind (south side)
+        zOffset = -standDistance;
+      } else if (stall.rotation === 90) {
+        // Facing east (90°) - merchant behind (west side)
+        xOffset = -standDistance;
+      } else if (stall.rotation === 180) {
+        // Facing south (180°) - merchant behind (north side)
+        zOffset = standDistance;
+      } else if (stall.rotation === 270) {
+        // Facing west (270°) - merchant behind (east side)
+        xOffset = standDistance;
+      }
+
+      const position: [number, number, number] = [
+        stall.position[0] + xOffset,
+        0,
+        stall.position[2] + zOffset
+      ];
+
+      return generateMerchantNPC(
+        stall.id,
+        'STALL',
+        merchantType,
+        position,
+        seed,
+        simTime
+      );
+    });
+  }, [params.mapX, params.mapY, marketStalls, simTime]);
+
   // Obstacles including market stalls for NPC collision detection
   const obstacles = useMemo<Obstacle[]>(() => {
-    if (params.mapX !== 0 || params.mapY !== 0) return [];
+    const district = getDistrictType(params.mapX, params.mapY);
+    if (params.mapX !== 0 || params.mapY !== 0) {
+      if (district !== 'OUTSKIRTS' && district !== 'CARAVANSERAI') return [];
+    }
 
-    const baseObstacles: Obstacle[] = [
-      { position: [0, 0, 0], radius: 4.2 },      // Fountain
-      { position: [-9, 0, 0], radius: 0.9 },     // Left column
-      { position: [9, 0, 0], radius: 0.9 }       // Right column
-    ];
+    const baseObstacles: Obstacle[] = district === 'OUTSKIRTS'
+      ? []
+      : district === 'CARAVANSERAI'
+        ? [
+          { position: [0, 0, 0], radius: 4.0 }, // Fountain
+          { position: [-24, 0, -18], radius: 3.6 },
+          { position: [24, 0, -18], radius: 3.6 },
+          { position: [-24, 0, 18], radius: 3.6 },
+          { position: [24, 0, 18], radius: 3.6 },
+          { position: [-6, 0, -2], radius: 2.0 },
+          { position: [6, 0, 2], radius: 2.0 }
+        ]
+        : [
+          { position: [0, 0, 0], radius: 4.2 },      // Fountain
+          { position: [-9, 0, 0], radius: 0.9 },     // Left column
+          { position: [9, 0, 0], radius: 0.9 }       // Right column
+        ];
 
     // Add market stall obstacles
     const stallObstacles: Obstacle[] = marketStalls.map(stall => {
@@ -1233,6 +1428,77 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         setCurrentNearBuilding(closest);
         onNearBuilding(closest);
       }
+
+      // Check proximity to merchants
+      let closestMerchant: MerchantNPCType | null = null;
+      let minMerchantDist = 5; // 5 unit interaction range for merchants
+
+      merchants.forEach(m => {
+        const dx = m.position[0] - pos.x;
+        const dz = m.position[2] - pos.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < minMerchantDist) {
+          minMerchantDist = dist;
+          closestMerchant = m;
+        }
+      });
+
+      if (closestMerchant?.id !== currentNearMerchant?.id) {
+        setCurrentNearMerchant(closestMerchant);
+        if (onNearMerchant) {
+          onNearMerchant(closestMerchant);
+        }
+      }
+
+      if (onMinimapUpdate) {
+        const now = state.clock.elapsedTime;
+        if (now - minimapTickRef.current > 0.25) {
+          minimapTickRef.current = now;
+          const district = getDistrictType(params.mapX, params.mapY);
+          const radius = district === 'ALLEYS' ? 20 : district === 'HOVELS' ? 26 : 34;
+          const maxDistSq = (radius * 1.25) * (radius * 1.25);
+          const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
+          const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale;
+          const buildings = buildingsRef.current
+            .filter((b) => {
+              const dx = b.position[0] - pos.x;
+              const dz = b.position[2] - pos.z;
+              return (dx * dx + dz * dz) <= maxDistSq;
+            })
+            .map((b) => ({ x: b.position[0], z: b.position[2], type: b.type, size: buildingSize * (b.sizeScale ?? 1), doorSide: b.doorSide }));
+
+          const npcs: MiniMapData['npcs'] = [];
+          const hash = agentHashRef.current;
+          if (hash) {
+            hash.buckets.forEach((bucket) => {
+              bucket.forEach((agent) => {
+                const dx = agent.pos.x - pos.x;
+                const dz = agent.pos.z - pos.z;
+                if ((dx * dx + dz * dz) <= maxDistSq) {
+                  npcs.push({ x: agent.pos.x, z: agent.pos.z, state: agent.state as AgentState });
+                }
+              });
+            });
+          }
+
+          // Calculate proper camera yaw from camera position (not euler angles)
+          // This prevents pitch changes from affecting the minimap rotation
+          const cameraOffset = new THREE.Vector3(
+            pos.x - state.camera.position.x,
+            0, // Ignore vertical component - only horizontal rotation matters
+            pos.z - state.camera.position.z
+          );
+          const cameraYaw = Math.atan2(cameraOffset.x, cameraOffset.z);
+
+          onMinimapUpdate({
+            player: { x: pos.x, z: pos.z, yaw: playerRef.current.rotation.y, cameraYaw },
+            buildings,
+            npcs,
+            district,
+            radius,
+          });
+        }
+      }
     }
   });
 
@@ -1303,6 +1569,24 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           buildingsRef.current = b;
           buildingHashRef.current = buildBuildingHash(b);
           setBuildingsState(b);
+          const district = getDistrictType(params.mapX, params.mapY);
+          if (district === 'HOVELS' || district === 'ALLEYS') {
+            const spawnSeed = params.mapX * 1000 + params.mapY * 13 + 77;
+            const tryPoints: THREE.Vector3[] = [];
+            const base = new THREE.Vector3(0, 0, 0);
+            const ring = [0, 3, 6, 9, 12];
+            ring.forEach((r) => {
+              for (let i = 0; i < 8; i++) {
+                const angle = (i / 8) * Math.PI * 2 + seededRandom(spawnSeed + r * 13 + i) * 0.6;
+                tryPoints.push(new THREE.Vector3(base.x + Math.cos(angle) * r, 0, base.z + Math.sin(angle) * r));
+              }
+            });
+            const hash = buildingHashRef.current || undefined;
+            const found = tryPoints.find((p) => !isBlockedByBuildings(p, b, 0.6, hash) && !isBlockedByObstacles(p, obstacles, 0.6));
+            if (found) {
+              setPlayerSpawn([found.x, 0, found.z]);
+            }
+          }
         }}
         nearBuildingId={currentNearBuilding?.id}
         timeOfDay={params.timeOfDay}
@@ -1315,6 +1599,19 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       {marketStalls.map((stall) => (
         <MarketStall key={stall.id} stall={stall} nightFactor={nightFactor} />
       ))}
+
+      {/* Merchant NPCs - standing at their stalls */}
+      {merchants.map((merchant) => {
+        const stall = marketStalls.find(s => s.id === merchant.locationId);
+        return (
+          <MerchantNPC
+            key={merchant.id}
+            merchant={merchant}
+            stall={stall}
+            nightFactor={nightFactor}
+          />
+        );
+      })}
 
       {/* Tier 3: Contact Shadows - adds depth and grounding to buildings */}
       {devSettings.showShadows && (
@@ -1346,12 +1643,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           buildings={buildingsRef.current} 
           buildingHash={buildingHashRef.current}
           obstacles={obstacles}
-          maxAgents={30}
+          maxAgents={20}
           agentHashRef={agentHashRef}
           impactMapRef={impactMapRef}
           playerRef={playerRef}
           onNpcSelect={onNpcSelect}
           selectedNpcId={selectedNpcId}
+          district={district}
+          terrainSeed={terrainSeed}
         />
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
@@ -1373,6 +1672,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onAgentImpact={handleAgentImpact}
         pushablesRef={pushablesRef}
         onImpactPuff={handleImpactPuff}
+        district={district}
+        terrainSeed={terrainSeed}
+        onPickupPrompt={onPickupPrompt}
+        onPickup={handlePickupItem}
       />
     </>
   );

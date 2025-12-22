@@ -6,8 +6,9 @@ import * as THREE from 'three';
 import { Simulation } from './components/Simulation';
 import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState } from './types';
-import { generatePlayerStats } from './utils/procedural';
+import { MerchantModal } from './components/MerchantModal';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState, MerchantNPC, MiniMapData } from './types';
+import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
 
 function App() {
@@ -40,9 +41,71 @@ function App() {
   const [interiorNarrator, setInteriorNarrator] = useState<InteriorNarratorState | null>(null);
   const [interiorBuilding, setInteriorBuilding] = useState<BuildingMetadata | null>(null);
   const [selectedNpc, setSelectedNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
+  const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
+  const [showMerchantModal, setShowMerchantModal] = useState(false);
+  const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
+  const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
+  const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
-  const playerStats = useMemo<PlayerStats>(() => generatePlayerStats(playerSeed), [playerSeed]);
+  const [playerStats, setPlayerStats] = useState<PlayerStats>(() => {
+    const stats = generatePlayerStats(playerSeed);
+
+    // Generate starting inventory
+    const rand = () => seededRandom(playerSeed + 999);
+    const startingInventory: import('./types').PlayerItem[] = [];
+
+    // Basic starting items (2-3 random items)
+    const basicItems = [
+      { id: 'item-merchant-bread-seller-0', name: 'Dried Figs', quantity: 2 },
+      { id: 'item-merchant-bread-seller-1', name: 'Olives', quantity: 3 },
+      { id: 'item-merchant-bread-seller-2', name: 'Dried Apricots', quantity: 2 },
+      { id: 'item-merchant-coppersmith-0', name: 'Leather Waterskin', quantity: 1 },
+      { id: 'item-merchant-bread-seller-6', name: 'Candles (Set of 6)', quantity: 1 }
+    ];
+
+    const itemCount = 2 + Math.floor(rand() * 2); // 2-3 items
+    for (let i = 0; i < itemCount; i++) {
+      const item = basicItems[Math.floor(rand() * basicItems.length)];
+      startingInventory.push({
+        id: `player-start-${i}`,
+        itemId: item.id,
+        quantity: item.quantity,
+        acquiredAt: 0
+      });
+    }
+
+    // Profession-specific starting item
+    if (stats.profession.includes('Merchant') || stats.profession.includes('Trader')) {
+      startingInventory.push({
+        id: 'player-start-merchant',
+        itemId: 'item-merchant-merchant-3', // Leather Satchel
+        quantity: 1,
+        acquiredAt: 0
+      });
+    } else if (stats.profession.includes('Apothecary') || stats.profession.includes('Herbalist')) {
+      startingInventory.push({
+        id: 'player-start-herbalist',
+        itemId: 'item-merchant-apothecary-0', // Dates
+        quantity: 3,
+        acquiredAt: 0
+      });
+    } else if (stats.profession.includes('Guard') || stats.profession.includes('Soldier')) {
+      startingInventory.push({
+        id: 'player-start-guard',
+        itemId: 'item-merchant-metalsmith-0', // Damascus Steel Dagger
+        quantity: 1,
+        acquiredAt: 0
+      });
+    }
+
+    return {
+      ...stats,
+      currency: 100, // Starting dirhams
+      inventory: startingInventory,
+      maxInventorySlots: 20
+    };
+  });
   const [devSettings, setDevSettings] = useState<DevSettings>({
     enabled: false,
     weatherOverride: 'auto',
@@ -59,6 +122,21 @@ function App() {
     showRats: true,
     showMiasma: true,
   });
+
+  useEffect(() => {
+    if (sceneMode === 'interior') {
+      setMinimapData(null);
+    }
+    setPickupPrompt(null);
+  }, [sceneMode]);
+
+  useEffect(() => {
+    if (!pickupToast) return;
+    const timeout = window.setTimeout(() => {
+      setPickupToast(prev => (prev?.id === pickupToast.id ? null : prev));
+    }, 2200);
+    return () => window.clearTimeout(timeout);
+  }, [pickupToast]);
 
   // Performance tracking for adaptive resolution
   const [performanceDegraded, setPerformanceDegraded] = useState(false);
@@ -108,10 +186,18 @@ function App() {
       if (e.key === 'Enter' && sceneMode === 'outdoor' && nearBuilding && nearBuilding.isOpen && !showEnterModal) {
         setShowEnterModal(true);
       }
+      // Open merchant modal with 'E' key
+      if (e.key === 'e' && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal) {
+        setShowMerchantModal(true);
+      }
+      // Close merchant modal with Escape
+      if (e.key === 'Escape' && showMerchantModal) {
+        setShowMerchantModal(false);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, sceneMode]);
+  }, [nearBuilding, showEnterModal, nearMerchant, showMerchantModal, sceneMode]);
 
   const handleMapChange = useCallback((dx: number, dy: number) => {
     setTransitioning(true);
@@ -159,6 +245,152 @@ function App() {
     setNearBuilding(null);
     setSceneMode('interior');
   }, [hashToSeed, params.mapX, params.mapY]);
+
+  const handlePurchase = useCallback((item: import('./types').MerchantItem, quantity: number) => {
+    if (!nearMerchant) return;
+
+    const finalPrice = Math.round(item.basePrice * nearMerchant.haggleModifier) * quantity;
+
+    // Check if player can afford
+    if (playerStats.currency < finalPrice) {
+      console.log('Cannot afford this item');
+      return;
+    }
+
+    // Check if merchant has stock
+    if (item.quantity < quantity) {
+      console.log('Merchant does not have enough stock');
+      return;
+    }
+
+    // Check inventory space
+    const currentInventorySize = playerStats.inventory.reduce((sum, i) => sum + i.quantity, 0);
+    if (currentInventorySize + quantity > playerStats.maxInventorySlots) {
+      console.log('Not enough inventory space');
+      return;
+    }
+
+    // Update player stats
+    setPlayerStats(prev => {
+      // Deduct currency
+      const newCurrency = prev.currency - finalPrice;
+
+      // Add to inventory (or update existing)
+      const existingItemIndex = prev.inventory.findIndex(i => i.itemId === item.id);
+      let newInventory = [...prev.inventory];
+
+      if (existingItemIndex >= 0) {
+        newInventory[existingItemIndex] = {
+          ...newInventory[existingItemIndex],
+          quantity: newInventory[existingItemIndex].quantity + quantity
+        };
+      } else {
+        newInventory.push({
+          id: `player-item-${Date.now()}`,
+          itemId: item.id,
+          quantity,
+          acquiredAt: stats.simTime
+        });
+      }
+
+      return {
+        ...prev,
+        currency: newCurrency,
+        inventory: newInventory
+      };
+    });
+
+    // Update merchant inventory (reduce quantity)
+    setNearMerchant(prev => {
+      if (!prev) return prev;
+
+      return {
+        ...prev,
+        inventory: {
+          ...prev.inventory,
+          items: prev.inventory.items.map(i =>
+            i.id === item.id
+              ? { ...i, quantity: i.quantity - quantity }
+              : i
+          )
+        }
+      };
+    });
+  }, [nearMerchant, playerStats.currency, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
+
+  const handleSell = useCallback((playerItem: import('./types').PlayerItem, quantity: number) => {
+    if (!nearMerchant) return;
+
+    // Find the base item
+    const baseItem = nearMerchant.inventory.items.find(i => i.id === playerItem.itemId);
+    if (!baseItem) return;
+
+    const sellPrice = Math.round(baseItem.basePrice * 0.7) * quantity;
+
+    // Check if player has enough to sell
+    const inventoryItem = playerStats.inventory.find(i => i.id === playerItem.id);
+    if (!inventoryItem || inventoryItem.quantity < quantity) {
+      console.log('Not enough items to sell');
+      return;
+    }
+
+    // Update player stats
+    setPlayerStats(prev => {
+      // Add currency
+      const newCurrency = prev.currency + sellPrice;
+
+      // Remove from inventory
+      let newInventory = prev.inventory.map(i =>
+        i.id === playerItem.id
+          ? { ...i, quantity: i.quantity - quantity }
+          : i
+      ).filter(i => i.quantity > 0); // Remove items with 0 quantity
+
+      return {
+        ...prev,
+        currency: newCurrency,
+        inventory: newInventory
+      };
+    });
+  }, [nearMerchant, playerStats.inventory]);
+
+  const handlePickupItem = useCallback((pickup: import('./utils/pushables').PickupInfo) => {
+    setPlayerStats(prev => {
+      if (pickup.type === 'coin' && pickup.value) {
+        setPickupToast({ message: `Picked up ${pickup.label}`, id: Date.now() });
+        return {
+          ...prev,
+          currency: prev.currency + pickup.value
+        };
+      }
+      if (!pickup.itemId) return prev;
+      const currentInventorySize = prev.inventory.reduce((sum, i) => sum + i.quantity, 0);
+      if (currentInventorySize + 1 > prev.maxInventorySlots) {
+        setPickupToast({ message: 'Inventory full', id: Date.now() });
+        return prev;
+      }
+      const existingItemIndex = prev.inventory.findIndex(i => i.itemId === pickup.itemId);
+      let newInventory = [...prev.inventory];
+      if (existingItemIndex >= 0) {
+        newInventory[existingItemIndex] = {
+          ...newInventory[existingItemIndex],
+          quantity: newInventory[existingItemIndex].quantity + 1
+        };
+      } else {
+        newInventory.push({
+          id: `player-item-${Date.now()}`,
+          itemId: pickup.itemId,
+          quantity: 1,
+          acquiredAt: stats.simTime
+        });
+      }
+      setPickupToast({ message: `Picked up ${pickup.label}`, id: Date.now() });
+      return {
+        ...prev,
+        inventory: newInventory
+      };
+    });
+  }, [stats.simTime]);
 
   useEffect(() => {
     if (interiorNarrator) {
@@ -212,6 +444,10 @@ function App() {
         nearBuilding={nearBuilding}
         onFastTravel={handleFastTravel}
         selectedNpc={selectedNpc}
+        minimapData={minimapData}
+        sceneMode={sceneMode}
+        pickupPrompt={pickupPrompt}
+        pickupToast={pickupToast?.message ?? null}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -221,23 +457,23 @@ function App() {
         </div>
       )}
 
-      {/* Interaction Modal */}
+      {/* Building Interaction Modal */}
       {showEnterModal && nearBuilding && (
         <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-[#f2e7d5] border-4 border-amber-900/50 p-8 rounded-lg shadow-2xl max-w-md w-full text-center historical-font relative overflow-hidden">
             {/* Parchment effect */}
             <div className="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]"></div>
-            
+
             <h2 className="text-3xl text-amber-900 mb-6 tracking-tighter uppercase font-bold border-b border-amber-900/20 pb-4">
               Enter {getBuildingLabel(nearBuilding.type)}?
             </h2>
-            
+
             <p className="text-amber-950 text-xl mb-8 leading-relaxed">
               Enter the {getBuildingLabel(nearBuilding.type)} of the {nearBuilding.ownerProfession} <span className="font-bold text-amber-900">{nearBuilding.ownerName}</span>?
             </p>
-            
+
             <div className="flex gap-4 justify-center">
-              <button 
+              <button
                 onClick={() => {
                   setShowEnterModal(false);
                   enterInterior(nearBuilding);
@@ -246,19 +482,30 @@ function App() {
               >
                 YES
               </button>
-              <button 
+              <button
                 onClick={() => setShowEnterModal(false)}
                 className="bg-transparent border-2 border-amber-900 text-amber-900 hover:bg-amber-900/10 px-10 py-3 rounded-full tracking-widest transition-all active:scale-95"
               >
                 NOT NOW
               </button>
             </div>
-            
+
             <div className="mt-8 text-[10px] text-amber-900/40 uppercase tracking-widest">
               Seek refuge or seek fortune within.
             </div>
           </div>
         </div>
+      )}
+
+      {/* Merchant Modal */}
+      {showMerchantModal && nearMerchant && (
+        <MerchantModal
+          merchant={nearMerchant}
+          playerStats={playerStats}
+          onClose={() => setShowMerchantModal(false)}
+          onPurchase={handlePurchase}
+          onSell={handleSell}
+        />
       )}
 
       {sceneMode === 'interior' && interiorInfo && (
@@ -272,11 +519,19 @@ function App() {
         </div>
       )}
 
+      {/* Merchant Interaction Prompt */}
+      {sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
+          Press <span className="font-bold text-amber-400">E</span> to trade with {nearMerchant.stats.name}
+        </div>
+      )}
+
       <Canvas
         shadows
         camera={{ position: [20, 20, 20], fov: 45 }}
         dpr={[1, 2]}
         gl={{ toneMappingExposure: 1.05 }}
+        onPointerDownCapture={() => setSelectedNpc(null)}
         onPointerMissed={() => setSelectedNpc(null)}
         onCreated={({ gl }) => {
           gl.shadowMap.enabled = true;
@@ -310,8 +565,12 @@ function App() {
               onStatsUpdate={handleStatsUpdate}
               onMapChange={handleMapChange}
               onNearBuilding={setNearBuilding}
+              onNearMerchant={setNearMerchant}
               onNpcSelect={setSelectedNpc}
               selectedNpcId={selectedNpc?.stats.id ?? null}
+              onMinimapUpdate={setMinimapData}
+              onPickupPrompt={setPickupPrompt}
+              onPickupItem={handlePickupItem}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -319,6 +578,7 @@ function App() {
               spec={interiorSpec}
               params={params}
               playerStats={playerStats}
+              onPickupPrompt={setPickupPrompt}
             />
           )}
         </Suspense>

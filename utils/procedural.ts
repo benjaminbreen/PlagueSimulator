@@ -1,5 +1,5 @@
 
-import { BuildingType, BuildingMetadata, SocialClass, NPCStats, PlayerStats } from '../types';
+import { BuildingType, BuildingMetadata, SocialClass, NPCStats, PlayerStats, DistrictType } from '../types';
 
 const FIRST_NAMES_MALE = ['Ahmad', 'Yusuf', 'Ibrahim', 'Umar', 'Hassan', 'Mahmud', 'Zayd', 'Malik', 'Nasir', 'Suleiman'];
 const FIRST_NAMES_FEMALE = ['Fatima', 'Zaynab', 'Maryam', 'Aisha', 'Khadija', 'Layla', 'Salma', 'Hafsa', 'Raya', 'Nura'];
@@ -40,6 +40,70 @@ export const seededRandom = (seed: number) => {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+const PROFESSION_TAGS: Record<string, Array<'military' | 'cleric' | 'artisan' | 'service' | 'noble' | 'youth' | 'retired'>> = {
+  'Day-Laborer': ['service'],
+  'Water-Carrier': ['service'],
+  'Copyist': ['service'],
+  'Tanner': ['artisan'],
+  'Unemployed': ['service'],
+  'City Guard': ['military'],
+  'Mamluk Soldier': ['military'],
+  'Retired Guard': ['military', 'retired'],
+  'Spice Merchant': ['service'],
+  'Draper': ['artisan'],
+  'Baker': ['artisan'],
+  'Blacksmith': ['artisan'],
+  'Coppersmith': ['artisan'],
+  'Weaver': ['artisan'],
+  'Carpenter': ['artisan'],
+  'Potter': ['artisan'],
+  'Innkeeper': ['service'],
+  'Khan Warden': ['service'],
+  'Sherbet Seller': ['service'],
+  'Sherbet House Keeper': ['service'],
+  'Caravanserai Keeper': ['service'],
+  'Imam': ['cleric'],
+  'Qadi': ['cleric'],
+  'Mufti': ['cleric'],
+  'Muezzin': ['cleric'],
+  'Qur\'an Reciter': ['cleric'],
+  'Madrasa Teacher': ['cleric'],
+  'Estate Steward': ['noble', 'service'],
+  'Court Clerk': ['noble', 'service'],
+  'Mamluk Officer': ['noble', 'military'],
+  'Spinner': ['artisan'],
+  'Bread Seller': ['service'],
+  'Servant': ['service'],
+  'Water-Bearer': ['service'],
+  'Laundry Worker': ['service'],
+  'Textile Trader': ['service'],
+  'Herbalist': ['artisan'],
+  'Midwife': ['service'],
+  'Dyer\'s Assistant': ['artisan'],
+  'Charity Worker': ['service'],
+  'Qur\'an Teacher': ['cleric'],
+  'Household Manager': ['noble', 'service'],
+  'Tutor': ['noble', 'service'],
+  'Porter': ['service'],
+  'Shepherd': ['service'],
+  'Apprentice Tanner': ['youth', 'artisan'],
+  'Apprentice Potter': ['youth', 'artisan'],
+  'Apprentice Carpenter': ['youth', 'artisan'],
+  'Apprentice Shepherd': ['youth', 'service'],
+  'Apprentice Draper': ['youth', 'artisan'],
+  'Apprentice Coppersmith': ['youth', 'artisan'],
+  'Apprentice Dyer': ['youth', 'artisan'],
+  'Apprentice Weaver': ['youth', 'artisan'],
+  'Apprentice Spinner': ['youth', 'artisan'],
+  'Errand Runner': ['youth', 'service'],
+  'Household Helper': ['youth', 'service'],
+  'Laundry Helper': ['youth', 'service'],
+  'Novice Student': ['youth', 'cleric'],
+  'Page': ['youth', 'noble'],
+  'Household Apprentice': ['youth', 'noble'],
+  'Tutor\'s Assistant': ['youth', 'noble'],
+};
+
 const PROFESSION_RULES: Record<string, { minAge?: number; maxAge?: number; gender?: 'Male' | 'Female'; classes?: SocialClass[] }> = {
   'Retired Guard': { minAge: 45, gender: 'Male' },
   'City Guard': { minAge: 18, maxAge: 45, gender: 'Male' },
@@ -51,14 +115,31 @@ const PROFESSION_RULES: Record<string, { minAge?: number; maxAge?: number; gende
   'Muezzin': { minAge: 18, gender: 'Male', classes: [SocialClass.CLERGY] },
   'Qur\'an Reciter': { minAge: 18, gender: 'Male', classes: [SocialClass.CLERGY] },
   'Madrasa Teacher': { minAge: 25, gender: 'Male', classes: [SocialClass.CLERGY] },
+  'Court Clerk': { minAge: 22, classes: [SocialClass.NOBILITY] },
+  'Estate Steward': { minAge: 25, classes: [SocialClass.NOBILITY] },
+  'Household Manager': { minAge: 25, gender: 'Female', classes: [SocialClass.NOBILITY] },
+  'Tutor': { minAge: 20, classes: [SocialClass.NOBILITY] },
   'Midwife': { minAge: 18, gender: 'Female' },
-  'Household Manager': { minAge: 25, gender: 'Female' },
-  'Tutor': { minAge: 20 },
+  'Charity Worker': { minAge: 18, gender: 'Female', classes: [SocialClass.CLERGY] },
 };
 
-const YOUTH_PROFESSIONS: Record<'Male' | 'Female', string[]> = {
-  Male: ['Errand Runner', 'Apprentice Tanner', 'Apprentice Potter', 'Apprentice Carpenter'],
-  Female: ['Household Helper', 'Apprentice Weaver', 'Apprentice Spinner', 'Laundry Helper'],
+const YOUTH_PROFESSIONS: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
+  [SocialClass.PEASANT]: {
+    Male: ['Errand Runner', 'Apprentice Tanner', 'Apprentice Potter', 'Apprentice Carpenter', 'Apprentice Shepherd'],
+    Female: ['Household Helper', 'Apprentice Weaver', 'Apprentice Spinner', 'Laundry Helper'],
+  },
+  [SocialClass.MERCHANT]: {
+    Male: ['Errand Runner', 'Apprentice Draper', 'Apprentice Coppersmith', 'Apprentice Weaver'],
+    Female: ['Household Helper', 'Apprentice Weaver', 'Apprentice Dyer'],
+  },
+  [SocialClass.CLERGY]: {
+    Male: ['Novice Student', 'Errand Runner'],
+    Female: ['Household Helper'],
+  },
+  [SocialClass.NOBILITY]: {
+    Male: ['Page', 'Household Apprentice'],
+    Female: ['Household Apprentice', 'Tutor\'s Assistant'],
+  },
 };
 
 const isEligible = (profession: string, age: number, gender: 'Male' | 'Female', socialClass: SocialClass) => {
@@ -79,15 +160,21 @@ const chooseProfession = (
   rand: () => number
 ) => {
   if (age < 16) {
-    const youthPool = YOUTH_PROFESSIONS[gender];
+    const youthPool = YOUTH_PROFESSIONS[socialClass][gender];
     return youthPool[Math.floor(rand() * youthPool.length)];
   }
   const filtered = pool.filter((p) => isEligible(p, age, gender, socialClass));
   const pickPool = filtered.length > 0 ? filtered : pool;
+  if (age >= 50) {
+    const elderPool = pickPool.filter((p) => PROFESSION_TAGS[p]?.includes('retired'));
+    if (elderPool.length > 0) {
+      return elderPool[Math.floor(rand() * elderPool.length)];
+    }
+  }
   return pickPool[Math.floor(rand() * pickPool.length)];
 };
 
-export const generateNPCStats = (seed: number): NPCStats => {
+export const generateNPCStats = (seed: number, context?: { districtType?: DistrictType }): NPCStats => {
   let s = seed;
   const rand = () => seededRandom(s++);
 
@@ -99,19 +186,63 @@ export const generateNPCStats = (seed: number): NPCStats => {
   const age = Math.floor(rand() * 50) + 12;
   const classRand = rand();
   let socialClass = SocialClass.PEASANT;
-  if (classRand > 0.95) socialClass = SocialClass.NOBILITY;
-  else if (classRand > 0.7) socialClass = SocialClass.MERCHANT;
-  else if (classRand > 0.6) socialClass = SocialClass.CLERGY;
+  const districtType = context?.districtType;
+  if (districtType === 'WEALTHY') {
+    if (classRand > 0.7) socialClass = SocialClass.NOBILITY;
+    else if (classRand > 0.35) socialClass = SocialClass.MERCHANT;
+    else if (classRand > 0.2) socialClass = SocialClass.CLERGY;
+  } else if (districtType === 'HOVELS') {
+    if (classRand > 0.995) socialClass = SocialClass.NOBILITY;
+    else if (classRand > 0.95) socialClass = SocialClass.MERCHANT;
+    else if (classRand > 0.9) socialClass = SocialClass.CLERGY;
+  } else if (districtType === 'CIVIC') {
+    if (classRand > 0.82) socialClass = SocialClass.NOBILITY;
+    else if (classRand > 0.6) socialClass = SocialClass.MERCHANT;
+    else if (classRand > 0.4) socialClass = SocialClass.CLERGY;
+  } else if (districtType === 'MARKET') {
+    if (classRand > 0.96) socialClass = SocialClass.NOBILITY;
+    else if (classRand > 0.45) socialClass = SocialClass.MERCHANT;
+    else if (classRand > 0.3) socialClass = SocialClass.CLERGY;
+  } else if (districtType === 'ALLEYS') {
+    if (classRand > 0.985) socialClass = SocialClass.NOBILITY;
+    else if (classRand > 0.8) socialClass = SocialClass.MERCHANT;
+    else if (classRand > 0.65) socialClass = SocialClass.CLERGY;
+  } else {
+    if (classRand > 0.95) socialClass = SocialClass.NOBILITY;
+    else if (classRand > 0.7) socialClass = SocialClass.MERCHANT;
+    else if (classRand > 0.6) socialClass = SocialClass.CLERGY;
+  }
 
-  const professionPool = socialClass === SocialClass.CLERGY
-    ? (gender === 'Male' ? CLERGY_PROFESSIONS : ['Charity Worker'])
-    : socialClass === SocialClass.MERCHANT
-      ? COMMERCIAL_PROFESSIONS
-      : RESIDENTIAL_PROFESSIONS;
+  const professionPoolsByClass: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
+    [SocialClass.PEASANT]: {
+      Male: ['Day-Laborer', 'Water-Carrier', 'Tanner', 'Copyist', 'Porter', 'Shepherd'],
+      Female: ['Spinner', 'Bread Seller', 'Servant', 'Water-Bearer', 'Laundry Worker'],
+    },
+    [SocialClass.MERCHANT]: {
+      Male: COMMERCIAL_PROFESSIONS,
+      Female: ['Textile Trader', 'Herbalist', 'Midwife', 'Dyer\'s Assistant', 'Bread Seller'],
+    },
+    [SocialClass.CLERGY]: {
+      Male: CLERGY_PROFESSIONS,
+      Female: ['Charity Worker'],
+    },
+    [SocialClass.NOBILITY]: {
+      Male: ['Estate Steward', 'Court Clerk', 'Mamluk Officer'],
+      Female: ['Household Manager', 'Tutor'],
+    },
+  };
+  const professionPool = professionPoolsByClass[socialClass][gender];
   const profession = chooseProfession(professionPool, age, gender, socialClass, rand);
   const isReligiousLeader = /Imam|Qadi|Mufti|Muezzin|Qur'an|Madrasa/i.test(profession);
   const isSoldier = /Guard|Soldier|Mamluk/i.test(profession);
   const isOfficer = /Officer/i.test(profession);
+  const isMerchant = /(Merchant|Draper|Trader|Khan|Caravanserai|Innkeeper|Sherbet)/i.test(profession);
+  const isLaborer = /(Day-Laborer|Water-Carrier|Tanner|Porter|Unemployed|Bread Seller|Laundry|Servant|Water-Bearer)/i.test(profession);
+  const isArtisan = /(Blacksmith|Coppersmith|Weaver|Carpenter|Potter|Dyer|Tanner)/i.test(profession);
+  const isBlacksmith = /Blacksmith/i.test(profession);
+  const isBaker = /Baker/i.test(profession);
+  const isCarpenter = /Carpenter/i.test(profession);
+  const isShepherd = /Shepherd/i.test(profession);
 
   // Height and weight scales
   const heightBase = age < 18 ? 0.6 + (age / 18) * 0.3 : 0.9 + rand() * 0.2;
@@ -164,15 +295,16 @@ export const generateNPCStats = (seed: number): NPCStats => {
         : socialClass === SocialClass.NOBILITY ? (rand() > 0.4 ? 'medium' : 'long')
         : socialClass === SocialClass.CLERGY ? (rand() > 0.6 ? 'short' : 'medium')
         : rand() > 0.5 ? 'medium' : 'short');
-  let headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none' = gender === 'Female'
+  let headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none' = gender === 'Female'
     ? 'scarf'
     : (() => {
         const roll = rand();
-        if (roll < 0.2) return 'fez';
-        if (roll < 0.3 && socialClass === SocialClass.PEASANT) return 'straw';
-        if (socialClass === SocialClass.NOBILITY) return rand() > 0.2 ? 'turban' : 'cap';
-        if (socialClass === SocialClass.CLERGY) return rand() > 0.4 ? 'turban' : 'cap';
-        return rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
+        if (roll < 0.15) return 'fez';
+        if (roll < 0.25 && socialClass === SocialClass.PEASANT) return 'straw';
+        if (roll < 0.45) return 'taqiyah'; // Common simple skullcap
+        if (socialClass === SocialClass.NOBILITY) return rand() > 0.3 ? 'turban' : 'cap';
+        if (socialClass === SocialClass.CLERGY) return rand() > 0.5 ? 'turban' : 'taqiyah';
+        return rand() > 0.5 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
       })();
   let footwearStyle: 'sandals' | 'shoes' | 'bare' =
     socialClass === SocialClass.NOBILITY ? (rand() > 0.2 ? 'shoes' : 'sandals')
@@ -184,6 +316,14 @@ export const generateNPCStats = (seed: number): NPCStats => {
     footwearColor = style === 'shoes' ? '#3b2a1a' : '#9b7b4f';
   };
 
+  if (districtType === 'HOVELS') {
+    robePattern = 'none';
+  } else if (districtType === 'WEALTHY' && robePattern === 'none') {
+    robePattern = gender === 'Female' ? (rand() > 0.5 ? 'damask' : 'stripe') : 'stripe';
+  } else if (districtType === 'MARKET' && robePattern === 'none' && rand() > 0.6) {
+    robePattern = 'stripe';
+  }
+
   if (isReligiousLeader) {
     headwearStyle = 'turban';
     robePattern = 'none';
@@ -194,7 +334,17 @@ export const generateNPCStats = (seed: number): NPCStats => {
     robePattern = isOfficer ? 'stripe' : robePattern;
     sleeveCoverage = 'full';
     applyFootwear('shoes');
+  } else if (isMerchant) {
+    headwearStyle = 'fez';
+    if (rand() > 0.6 && robePattern === 'none') robePattern = 'stripe';
+  } else if (isLaborer) {
+    headwearStyle = rand() > 0.6 ? 'cap' : 'none';
+    sleeveCoverage = rand() > 0.4 ? 'lower' : 'none';
+  } else if (isArtisan) {
+    headwearStyle = rand() > 0.7 ? 'cap' : 'none';
   }
+
+
   const accessoryPool = gender === 'Female'
     ? (socialClass === SocialClass.NOBILITY
       ? ['bronze earrings', 'copper bracelet', 'small nose ring', 'etched bracelet']
@@ -206,6 +356,30 @@ export const generateNPCStats = (seed: number): NPCStats => {
     rand() > 0.6 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none',
     rand() > 0.7 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none'
   ].filter(a => a !== 'none');
+
+  const heldItem: NPCStats['heldItem'] = (() => {
+    if (isShepherd) return 'staff';
+    if (isBlacksmith) return 'hammer';
+    if (/Water-Carrier|Water-Bearer/i.test(profession)) return 'waterskin';
+    if (isMerchant) return 'ledger';
+    if (isSoldier) return 'spear';
+    if (isBaker) return 'tray';
+    if (isCarpenter) return 'plank';
+    if (/Porter/i.test(profession)) return 'sack';
+    return 'none';
+  })();
+
+  const goalOfDay = (() => {
+    if (isReligiousLeader) return 'Lead prayers and receive petitions.';
+    if (isSoldier) return isOfficer ? 'Inspect the patrol routes.' : 'Keep watch on the streets.';
+    if (isMerchant) return 'Secure new stock for the market stalls.';
+    if (isArtisan) return 'Complete commissions before dusk.';
+    if (/Water-Carrier|Water-Bearer/i.test(profession)) return 'Deliver fresh water to households.';
+    if (/Baker/i.test(profession)) return 'Prepare bread for the morning rush.';
+    if (/Porter/i.test(profession)) return 'Carry goods between the souq and homes.';
+    if (/Shepherd/i.test(profession)) return 'Tend the flock beyond the walls.';
+    return 'Attend to daily duties in the neighborhood.';
+  })();
 
   return {
     id: `npc-${seed}`,
@@ -227,7 +401,9 @@ export const generateNPCStats = (seed: number): NPCStats => {
     sleeveCoverage,
     footwearStyle,
     footwearColor,
+    heldItem,
     accessories,
+    goalOfDay,
   };
 };
 
@@ -249,23 +425,31 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
   const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
   const hairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
 
-  const maleProfessions: Record<SocialClass, string[]> = {
-    [SocialClass.PEASANT]: ['Water-Carrier', 'Day-Laborer', 'Tanner', 'Porter', 'Potter', 'City Guard'],
-    [SocialClass.MERCHANT]: ['Spice Merchant', 'Draper', 'Coppersmith', 'Weaver', 'Carpenter'],
-    [SocialClass.CLERGY]: ['Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher'],
-    [SocialClass.NOBILITY]: ['Estate Steward', 'Court Clerk', 'Mamluk Officer'],
+  const professionPoolsByClass: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
+    [SocialClass.PEASANT]: {
+      Male: ['Water-Carrier', 'Day-Laborer', 'Tanner', 'Porter', 'Potter', 'City Guard'],
+      Female: ['Spinner', 'Bread Seller', 'Servant', 'Water-Bearer', 'Laundry Worker'],
+    },
+    [SocialClass.MERCHANT]: {
+      Male: ['Spice Merchant', 'Draper', 'Coppersmith', 'Weaver', 'Carpenter'],
+      Female: ['Textile Trader', 'Herbalist', 'Midwife', 'Dyer\'s Assistant', 'Bread Seller'],
+    },
+    [SocialClass.CLERGY]: {
+      Male: ['Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher'],
+      Female: ['Charity Worker'],
+    },
+    [SocialClass.NOBILITY]: {
+      Male: ['Estate Steward', 'Court Clerk', 'Mamluk Officer'],
+      Female: ['Household Manager', 'Tutor'],
+    },
   };
-  const femaleProfessions: Record<SocialClass, string[]> = {
-    [SocialClass.PEASANT]: ['Spinner', 'Bread Seller', 'Servant', 'Water-Bearer', 'Laundry Worker'],
-    [SocialClass.MERCHANT]: ['Textile Trader', 'Herbalist', 'Midwife', 'Dyer\'s Assistant'],
-    [SocialClass.CLERGY]: ['Qur\'an Teacher', 'Charity Worker'],
-    [SocialClass.NOBILITY]: ['Household Manager', 'Tutor'],
-  };
-  const professionPool = gender === 'Male' ? maleProfessions[socialClass] : femaleProfessions[socialClass];
+  const professionPool = professionPoolsByClass[socialClass][gender];
   const profession = chooseProfession(professionPool, age, gender, socialClass, rand);
   const isReligiousLeader = /Imam|Qadi|Mufti|Muezzin|Qur'an|Madrasa/i.test(profession);
   const isSoldier = /Guard|Soldier|Mamluk/i.test(profession);
   const isOfficer = /Officer/i.test(profession);
+  const isMerchant = /(Merchant|Draper|Trader|Coppersmith|Weaver|Carpenter|Herbalist|Midwife|Dyer)/i.test(profession);
+  const isLaborer = /(Day-Laborer|Water-Carrier|Tanner|Porter|Bread Seller|Laundry|Servant|Water-Bearer)/i.test(profession);
 
   const robeOptionsByClass: Record<SocialClass, Array<{ desc: string; base: string; accent: string; sash: boolean; sleeves: boolean }>> = {
     [SocialClass.PEASANT]: [
@@ -274,26 +458,34 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
       { desc: 'undyed flax thawb with a simple izar belt', base: '#d6c8a8', accent: '#cdbb9a', sash: false, sleeves: false },
       { desc: 'washed linen thawb in pale sand', base: '#d9cdb2', accent: '#c8b892', sash: false, sleeves: false },
       { desc: 'rough wool qabāʾ in walnut brown', base: '#7a5a3f', accent: '#bfae8a', sash: true, sleeves: true },
+      { desc: 'faded indigo thawb', base: '#5a6e7a', accent: '#c8b892', sash: false, sleeves: false },
+      { desc: 'madder-dyed qamis in brick red', base: '#8b5a4a', accent: '#d6c8a8', sash: true, sleeves: false },
     ],
     [SocialClass.MERCHANT]: [
       { desc: 'dyed wool qaba in muted olive with a beige izar', base: '#6f6a3f', accent: '#e1d3b3', sash: true, sleeves: true },
       { desc: 'well-kept linen thawb in warm tan', base: '#b89b6a', accent: '#d9c9a8', sash: true, sleeves: true },
       { desc: 'trimmed qaba with a woven izar', base: '#7b5a4a', accent: '#e3d2ad', sash: true, sleeves: true },
       { desc: 'dyed linen thawb in soft ochre', base: '#c2a46a', accent: '#ead8b8', sash: true, sleeves: true },
-      { desc: 'muted indigo qabāʾ with pale trim', base: '#4b5666', accent: '#c7b9a1', sash: true, sleeves: true },
+      { desc: 'indigo-dyed qabāʾ with cream trim', base: '#3d5266', accent: '#e8ddc4', sash: true, sleeves: true },
+      { desc: 'saffron-yellow thawb with dark trim', base: '#d9a645', accent: '#5a4a3a', sash: true, sleeves: true },
+      { desc: 'henna-orange qaba with beige izar', base: '#c87a4a', accent: '#e6d8b7', sash: true, sleeves: true },
+      { desc: 'deep madder-red thawb', base: '#a54e3a', accent: '#e1d3b3', sash: true, sleeves: true },
     ],
     [SocialClass.CLERGY]: [
       { desc: 'dark wool qaba with plain trim', base: '#3d3a34', accent: '#8b7f70', sash: false, sleeves: true },
       { desc: 'plain thawb with a faded izar', base: '#51473c', accent: '#9a8a75', sash: true, sleeves: true },
       { desc: 'modest wool qaba in slate tones', base: '#4a4f59', accent: '#7a6f63', sash: false, sleeves: true },
       { desc: 'faded wool thawb in ash brown', base: '#5b5247', accent: '#9b8e7a', sash: false, sleeves: true },
+      { desc: 'deep indigo qaba', base: '#2d3d4f', accent: '#9b8e7a', sash: false, sleeves: true },
     ],
     [SocialClass.NOBILITY]: [
       { desc: 'fine woven qaba with subtle embroidery', base: '#6a5b4a', accent: '#bfa57e', sash: true, sleeves: true },
       { desc: 'well-tailored thawb in rich cloth', base: '#70523f', accent: '#cbb58c', sash: true, sleeves: true },
       { desc: 'layered qaba with ornate trim', base: '#5c4a3f', accent: '#d0b992', sash: true, sleeves: true },
-      { desc: 'dyed wool qabāʾ in deep madder', base: '#6a4038', accent: '#d6c2a4', sash: true, sleeves: true },
-      { desc: 'muted indigo thawb with woven trim', base: '#394252', accent: '#cdbb9a', sash: true, sleeves: true },
+      { desc: 'kermes-crimson qabāʾ with gold trim', base: '#9a3428', accent: '#d4a965', sash: true, sleeves: true },
+      { desc: 'rich indigo thawb with woven trim', base: '#2d415a', accent: '#cdbb9a', sash: true, sleeves: true },
+      { desc: 'saffron-dyed qaba with tiraz bands', base: '#e0a83a', accent: '#3d3a34', sash: true, sleeves: true },
+      { desc: 'true black wool qabāʾ', base: '#1f1f1f', accent: '#a89878', sash: true, sleeves: true },
     ],
   };
   const robePickBase = robeOptionsByClass[socialClass][Math.floor(rand() * robeOptionsByClass[socialClass].length)];
@@ -311,15 +503,16 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
     accent: adjustHex(robePickBase.accent, 0.9 + rand() * 0.18)
   };
 
-  let headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'none' = gender === 'Female'
+  let headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none' = gender === 'Female'
     ? 'scarf'
     : (() => {
         const roll = rand();
-        if (roll < 0.2) return 'fez';
-        if (roll < 0.3 && socialClass === SocialClass.PEASANT) return 'straw';
-        if (socialClass === SocialClass.NOBILITY) return rand() > 0.2 ? 'turban' : 'cap';
-        if (socialClass === SocialClass.CLERGY) return rand() > 0.4 ? 'turban' : 'cap';
-        return rand() > 0.6 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
+        if (roll < 0.15) return 'fez';
+        if (roll < 0.25 && socialClass === SocialClass.PEASANT) return 'straw';
+        if (roll < 0.45) return 'taqiyah'; // Common simple skullcap
+        if (socialClass === SocialClass.NOBILITY) return rand() > 0.3 ? 'turban' : 'cap';
+        if (socialClass === SocialClass.CLERGY) return rand() > 0.5 ? 'turban' : 'taqiyah';
+        return rand() > 0.5 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
       })();
   if (isReligiousLeader) {
     headwearStyle = 'turban';
@@ -470,6 +663,10 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
     robePattern = isOfficer ? 'stripe' : robePattern;
     sleeveCoverage = 'full';
     footwearStyle = 'shoes';
+  } else if (isMerchant) {
+    if (rand() > 0.55 && robePattern === 'none') robePattern = 'stripe';
+  } else if (isLaborer) {
+    sleeveCoverage = rand() > 0.4 ? 'lower' : 'none';
   }
   footwearColor = footwearStyle === 'shoes' ? '#3b2a1a' : '#9b7b4f';
   footwearDescription = footwearStyle === 'bare' ? 'bare feet' : footwearStyle === 'shoes' ? 'simple leather shoes' : 'woven leather sandals';
@@ -535,6 +732,7 @@ export const generatePlayerStats = (seed: number): PlayerStats => {
 export const generateBuildingMetadata = (seed: number, x: number, z: number): BuildingMetadata => {
   let s = seed + Math.abs(x) * 13 + Math.abs(z) * 7;
   const rand = () => seededRandom(s++);
+  const sizeScale = 0.88 + rand() * 0.24;
 
   const typeRand = rand();
   let type = BuildingType.RESIDENTIAL;
@@ -570,6 +768,7 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
     ownerProfession, 
     ownerGender, 
     position: [x, 0, z],
+    sizeScale,
     doorSide: Math.floor(rand() * 4),
     hasSymmetricalWindows: rand() > 0.5,
     isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || rand() > 0.985,

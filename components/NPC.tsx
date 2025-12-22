@@ -2,23 +2,24 @@ import React, { useRef, useState, useMemo, memo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
-import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, Obstacle } from '../types';
+import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 import { seededRandom } from '../utils/procedural';
+import { getTerrainHeight } from '../utils/terrain';
 
 // Helper function to calculate door position from building metadata
 const getDoorPosition = (building: BuildingMetadata): THREE.Vector3 => {
-  const half = CONSTANTS.BUILDING_SIZE / 2;
+  const half = (CONSTANTS.BUILDING_SIZE * (building.sizeScale ?? 1)) / 2;
   const [x, y, z] = building.position;
 
   switch (building.doorSide) {
-    case 0: return new THREE.Vector3(x, 0, z + half + 0.5);  // North (+ a bit outside)
-    case 1: return new THREE.Vector3(x, 0, z - half - 0.5);  // South
-    case 2: return new THREE.Vector3(x + half + 0.5, 0, z);  // East
-    case 3: return new THREE.Vector3(x - half - 0.5, 0, z);  // West
-    default: return new THREE.Vector3(x, 0, z + half + 0.5);
+    case 0: return new THREE.Vector3(x, y, z + half + 0.5);  // North (+ a bit outside)
+    case 1: return new THREE.Vector3(x, y, z - half - 0.5);  // South
+    case 2: return new THREE.Vector3(x + half + 0.5, y, z);  // East
+    case 3: return new THREE.Vector3(x - half - 0.5, y, z);  // West
+    default: return new THREE.Vector3(x, y, z + half + 0.5);
   }
 };
 
@@ -62,6 +63,8 @@ interface NPCProps {
   timeOfDay: number;
   onSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   isSelected?: boolean;
+  district?: DistrictType;
+  terrainSeed?: number;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
@@ -82,7 +85,9 @@ export const NPC: React.FC<NPCProps> = memo(({
   playerRef,
   timeOfDay,
   onSelect,
-  isSelected = false
+  isSelected = false,
+  district,
+  terrainSeed
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -103,8 +108,14 @@ export const NPC: React.FC<NPCProps> = memo(({
   const impactGroupRef = useRef<THREE.Group>(null);
   const statusMarkerRef = useRef<THREE.Mesh>(null);
   const statusMarkerMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const propGroupRef = useRef<THREE.Group>(null);
+  const propPhase = useMemo(() => seededRandom(Number(stats.id.split('-')[1] || '1') + 77) * Math.PI * 2, [stats.id]);
   const impactStemMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const impactDotMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const impactExclaimRef = useRef<THREE.Group>(null);
+  const impactExclaimMatRef = useRef<THREE.MeshBasicMaterial>(null);
+  const [moodOverride, setMoodOverride] = useState<string | null>(null);
+  const moodExpireRef = useRef(0);
 
   // PERFORMANCE: Throttle spatial queries - cache neighbors and update every 3 frames
   const cachedNeighborsRef = useRef<AgentSnapshot[]>([]);
@@ -177,6 +188,7 @@ export const NPC: React.FC<NPCProps> = memo(({
     }
     return { skin, scarf, robe, accent, hair, headwear };
   }, [stats.headwearStyle, stats.id, stats.profession]);
+  const moodDisplay = moodOverride ?? stats.mood;
 
   const pickNewTarget = (avoidDirection?: THREE.Vector3, isStuck = false) => {
     const range = CONSTANTS.MARKET_SIZE - 12;
@@ -496,6 +508,24 @@ export const NPC: React.FC<NPCProps> = memo(({
       if (impact && impact.time > impactStartRef.current) {
         impactStartRef.current = impact.time;
         impactIntensityRef.current = impact.intensity;
+        if (impact.intensity >= 0.7) {
+          const moodOptions = ['Aggressive', 'Horrified', 'Super Annoyed', 'Perturbed'];
+          const nextMood = moodOptions[Math.floor(Math.random() * moodOptions.length)];
+          moodExpireRef.current = performance.now() + 12000;
+          if (moodOverride !== nextMood) {
+            setMoodOverride(nextMood);
+          }
+          if (isSelected && onSelect) {
+            onSelect({ stats: { ...stats, mood: nextMood }, state: stateRef.current });
+          }
+        }
+      }
+    }
+    if (moodOverride && moodExpireRef.current > 0 && performance.now() > moodExpireRef.current) {
+      moodExpireRef.current = 0;
+      setMoodOverride(null);
+      if (isSelected && onSelect) {
+        onSelect({ stats: { ...stats, mood: stats.mood }, state: stateRef.current });
       }
     }
     if (impactStartRef.current > 0) {
@@ -525,6 +555,17 @@ export const NPC: React.FC<NPCProps> = memo(({
         impactDotMatRef.current.opacity = 0.5 + pulse * 0.5;
       }
     }
+    if (impactExclaimRef.current) {
+      const pulse = impactPulseRef.current;
+      const show = pulse > 0.05 && impactIntensityRef.current >= 0.7;
+      impactExclaimRef.current.visible = show;
+      if (show) {
+        impactExclaimRef.current.scale.setScalar(0.6 + pulse * 0.8);
+      }
+      if (impactExclaimMatRef.current) {
+        impactExclaimMatRef.current.opacity = 0.7 + pulse * 0.3;
+      }
+    }
 
     if (statusMarkerRef.current && statusMarkerMatRef.current) {
       const show = displayState === AgentState.INCUBATING || displayState === AgentState.INFECTED;
@@ -532,6 +573,19 @@ export const NPC: React.FC<NPCProps> = memo(({
       if (show) {
         statusMarkerMatRef.current.color.set(getHealthRingColor(displayState));
       }
+    }
+    if (propGroupRef.current && stats.heldItem && stats.heldItem !== 'none') {
+      const t = performance.now() * 0.001 + propPhase;
+      const sway = Math.sin(t) * 0.08;
+      const bob = Math.sin(t * 1.3) * 0.03;
+      propGroupRef.current.rotation.z = sway;
+      propGroupRef.current.position.y = 1.02 + bob;
+    }
+
+    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined) {
+      group.current.position.y = getTerrainHeight(district, currentPosRef.current.x, currentPosRef.current.z, terrainSeed);
+    } else if (group.current) {
+      group.current.position.y = 0;
     }
   });
 
@@ -543,7 +597,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       onClick={(e) => {
         e.stopPropagation();
         if (onSelect) {
-          onSelect({ stats, state: stateRef.current });
+          onSelect({ stats: { ...stats, mood: moodDisplay }, state: stateRef.current });
         }
       }}
     >
@@ -567,8 +621,18 @@ export const NPC: React.FC<NPCProps> = memo(({
             <meshBasicMaterial ref={impactDotMatRef} color="#7dff70" transparent opacity={0.9} />
           </mesh>
         </group>
-      <Humanoid
-        color={stats.gender === 'Female' ? appearance.robe : (stateRef.current === AgentState.DECEASED ? '#111' : colors.body)}
+        <group ref={impactExclaimRef} position={[0, 3.05, 0]} visible={false}>
+          <mesh position={[0, 0.12, 0]}>
+            <boxGeometry args={[0.06, 0.22, 0.06]} />
+            <meshBasicMaterial ref={impactExclaimMatRef} color="#ef4444" transparent opacity={0.9} />
+          </mesh>
+          <mesh position={[0, -0.12, 0]}>
+            <sphereGeometry args={[0.05, 8, 8]} />
+            <meshBasicMaterial color="#ef4444" transparent opacity={0.9} />
+          </mesh>
+        </group>
+        <Humanoid
+          color={stats.gender === 'Female' ? appearance.robe : (stateRef.current === AgentState.DECEASED ? '#111' : colors.body)}
         headColor={appearance.skin}
         turbanColor={appearance.headwear}
         headscarfColor={appearance.scarf}
@@ -593,7 +657,99 @@ export const NPC: React.FC<NPCProps> = memo(({
         isDead={stateRef.current === AgentState.DECEASED}
         walkSpeed={10 * simulationSpeed}
         distanceFromCamera={distanceFromCameraRef.current}
-      />
+        />
+        {stats.heldItem && stats.heldItem !== 'none' && (
+          <group ref={propGroupRef} position={[0.38, 1.02, 0.15]}>
+            {stats.heldItem === 'staff' && (
+              <group>
+                <mesh castShadow>
+                  <cylinderGeometry args={[0.02, 0.02, 0.9, 6]} />
+                  <meshStandardMaterial color="#5c432a" roughness={0.9} />
+                </mesh>
+                <mesh position={[0, 0.42, 0.08]} rotation={[0, 0, Math.PI / 4]} castShadow>
+                  <cylinderGeometry args={[0.015, 0.015, 0.25, 6]} />
+                  <meshStandardMaterial color="#5c432a" roughness={0.9} />
+                </mesh>
+              </group>
+            )}
+            {stats.heldItem === 'hammer' && (
+              <group>
+                <mesh position={[0, -0.1, 0]} castShadow>
+                  <cylinderGeometry args={[0.02, 0.02, 0.5, 6]} />
+                  <meshStandardMaterial color="#5c432a" roughness={0.9} />
+                </mesh>
+                <mesh position={[0, 0.18, 0]} castShadow>
+                  <boxGeometry args={[0.12, 0.06, 0.06]} />
+                  <meshStandardMaterial color="#6b7280" roughness={0.6} />
+                </mesh>
+              </group>
+            )}
+            {stats.heldItem === 'waterskin' && (
+              <group>
+                <mesh position={[0, -0.05, 0]} castShadow>
+                  <sphereGeometry args={[0.08, 10, 10]} />
+                  <meshStandardMaterial color="#7b5a3a" roughness={0.9} />
+                </mesh>
+                <mesh position={[0, 0.08, 0]} castShadow>
+                  <boxGeometry args={[0.08, 0.02, 0.02]} />
+                  <meshStandardMaterial color="#c2a878" roughness={0.9} />
+                </mesh>
+              </group>
+            )}
+            {stats.heldItem === 'ledger' && (
+              <mesh position={[0, 0.02, 0]} castShadow>
+                <boxGeometry args={[0.14, 0.1, 0.04]} />
+                <meshStandardMaterial color="#3b2a1a" roughness={0.85} />
+              </mesh>
+            )}
+            {stats.heldItem === 'spear' && (
+              <group>
+                <mesh position={[0, -0.2, 0]} castShadow>
+                  <cylinderGeometry args={[0.02, 0.02, 1.0, 6]} />
+                  <meshStandardMaterial color="#5c432a" roughness={0.9} />
+                </mesh>
+                <mesh position={[0, 0.35, 0]} castShadow>
+                  <coneGeometry args={[0.04, 0.12, 6]} />
+                  <meshStandardMaterial color="#a9a9a9" roughness={0.5} />
+                </mesh>
+              </group>
+            )}
+            {stats.heldItem === 'tray' && (
+              <group>
+                <mesh position={[0, 0.05, 0]} castShadow>
+                  <boxGeometry args={[0.2, 0.03, 0.14]} />
+                  <meshStandardMaterial color="#8b5e3c" roughness={0.9} />
+                </mesh>
+                <mesh position={[-0.05, 0.08, 0.02]} castShadow>
+                  <sphereGeometry args={[0.03, 8, 8]} />
+                  <meshStandardMaterial color="#d9b37c" roughness={0.8} />
+                </mesh>
+                <mesh position={[0.05, 0.08, -0.02]} castShadow>
+                  <sphereGeometry args={[0.03, 8, 8]} />
+                  <meshStandardMaterial color="#d2a96f" roughness={0.8} />
+                </mesh>
+              </group>
+            )}
+            {stats.heldItem === 'plank' && (
+              <mesh position={[0, 0.05, 0]} castShadow>
+                <boxGeometry args={[0.25, 0.04, 0.08]} />
+                <meshStandardMaterial color="#8b5e3c" roughness={0.9} />
+              </mesh>
+            )}
+            {stats.heldItem === 'sack' && (
+              <group position={[-0.15, 0.2, -0.1]}>
+                <mesh castShadow>
+                  <sphereGeometry args={[0.12, 12, 10]} />
+                  <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
+                </mesh>
+                <mesh position={[0, 0.12, 0]} castShadow>
+                  <boxGeometry args={[0.06, 0.02, 0.02]} />
+                  <meshStandardMaterial color="#c2a878" roughness={0.9} />
+                </mesh>
+              </group>
+            )}
+          </group>
+        )}
 
       {/* GRAPHICS: NPC Torch (1 in 5 NPCs carry a torch at night) */}
       {carriesTorch && (timeOfDay >= 19 || timeOfDay < 5) && stateRef.current !== AgentState.DECEASED && (
@@ -631,7 +787,7 @@ export const NPC: React.FC<NPCProps> = memo(({
               </div>
               <div className="flex justify-between italic text-amber-100/40 mt-1">
                  <span>{stats.gender}</span>
-                 <span>"{stats.mood}"</span>
+                 <span>"{moodDisplay}"</span>
               </div>
             </div>
           </div>

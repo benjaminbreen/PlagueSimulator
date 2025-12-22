@@ -8,9 +8,9 @@ export const isBlockedByBuildings = (
   radius = 0.6,
   hash?: SpatialHash<BuildingMetadata>
 ) => {
-  const half = CONSTANTS.BUILDING_SIZE / 2;
   const candidates = hash ? queryNearbyBuildings(position, hash) : buildings;
   for (const b of candidates) {
+    const half = (CONSTANTS.BUILDING_SIZE * (b.sizeScale ?? 1)) / 2;
     const dx = Math.abs(position.x - b.position[0]);
     const dz = Math.abs(position.z - b.position[2]);
     if (dx < half + radius && dz < half + radius) {
