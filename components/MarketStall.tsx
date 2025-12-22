@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import * as THREE from 'three';
 import { MarketStall as MarketStallData, MarketStallType } from '../types';
+import { seededRandom } from '../utils/procedural';
 
 interface MarketStallProps {
   stall: MarketStallData;
@@ -18,6 +19,65 @@ export const MarketStall: React.FC<MarketStallProps> = ({ stall, nightFactor }) 
   }[size];
 
   const rotationRadians = (rotation * Math.PI) / 180;
+  const propSeed = useMemo(() => {
+    const base = Math.floor((position[0] * 1000) + (position[2] * 1000) + rotation * 17);
+    return Math.abs(base);
+  }, [position, rotation]);
+
+  const renderExtras = () => {
+    let offset = 0;
+    const rand = () => seededRandom(propSeed + offset++ * 31);
+    const showCrate = rand() > 0.4;
+    const showSacks = rand() > 0.35;
+    const showAmphora = rand() > 0.55;
+    const showBasket = rand() > 0.5;
+    const crateColor = ['#7b4a2a', '#6b3f24', '#8b5a3a'][Math.floor(rand() * 3)];
+    const clothColor = ['#d9c9a8', '#c9b38a', '#bfa57e'][Math.floor(rand() * 3)];
+    return (
+      <group>
+        {showCrate && (
+          <group position={[-sizeConfig.width / 2 + 0.6, 0.25, sizeConfig.depth / 2 - 0.5]}>
+            <mesh castShadow>
+              <boxGeometry args={[0.6, 0.4, 0.6]} />
+              <meshStandardMaterial color={crateColor} roughness={0.9} />
+            </mesh>
+            <mesh position={[0, 0.25, 0]} castShadow>
+              <boxGeometry args={[0.55, 0.05, 0.55]} />
+              <meshStandardMaterial color={clothColor} roughness={0.8} />
+            </mesh>
+          </group>
+        )}
+        {showSacks && (
+          <group position={[sizeConfig.width / 2 - 0.6, 0.25, -sizeConfig.depth / 2 + 0.7]}>
+            {[0, 1].map(i => (
+              <mesh key={`sack-${i}`} position={[i * 0.18, i * 0.05, 0]} castShadow>
+                <sphereGeometry args={[0.22, 10, 8]} />
+                <meshStandardMaterial color="#a57c52" roughness={0.9} />
+              </mesh>
+            ))}
+          </group>
+        )}
+        {showAmphora && (
+          <mesh position={[0.2, 0.35, -sizeConfig.depth / 2 + 0.4]} castShadow>
+            <cylinderGeometry args={[0.18, 0.24, 0.7, 10]} />
+            <meshStandardMaterial color="#b0643c" roughness={0.85} />
+          </mesh>
+        )}
+        {showBasket && (
+          <group position={[-0.3, 0.28, sizeConfig.depth / 2 - 0.4]}>
+            <mesh castShadow>
+              <cylinderGeometry args={[0.2, 0.16, 0.22, 10]} />
+              <meshStandardMaterial color="#c28b4a" roughness={0.9} />
+            </mesh>
+            <mesh position={[0, 0.12, 0]} castShadow>
+              <sphereGeometry args={[0.12, 8, 6]} />
+              <meshStandardMaterial color="#6a5b3f" roughness={0.8} />
+            </mesh>
+          </group>
+        )}
+      </group>
+    );
+  };
 
   // Render different goods based on stall type
   const renderGoods = () => {
@@ -264,6 +324,8 @@ export const MarketStall: React.FC<MarketStallProps> = ({ stall, nightFactor }) 
 
       {/* Goods specific to stall type */}
       {renderGoods()}
+      {/* Extra stall clutter */}
+      {renderExtras()}
     </group>
   );
 };

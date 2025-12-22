@@ -164,6 +164,16 @@ export enum InteriorPropType {
   CHAIR = 'CHAIR',
   WALL_HANGING = 'WALL_HANGING',
   CRATE = 'CRATE',
+  LADDER = 'LADDER',
+  STAIRS = 'STAIRS',
+  CANDLE = 'CANDLE',
+  FLOOR_LAMP = 'FLOOR_LAMP',
+  SPINDLE = 'SPINDLE',
+  DYE_VAT = 'DYE_VAT',
+  ANVIL = 'ANVIL',
+  TOOL_RACK = 'TOOL_RACK',
+  MORTAR = 'MORTAR',
+  HERB_RACK = 'HERB_RACK',
 }
 
 export interface InteriorRoom {
@@ -209,6 +219,8 @@ export interface InteriorSpec {
   seed: number;
   socialClass: SocialClass;
   profession: string;
+  exteriorDoorSide?: number;
+  wallHeight?: number;
   rooms: InteriorRoom[];
   props: InteriorProp[];
   npcs: InteriorNPC[];
@@ -381,7 +393,8 @@ export const getLocationLabel = (x: number, y: number) => {
   if (x === -2 && y === 1) return "Al-Salihiyya (Hillside Quarter)";
   if (x === 2 && y === 2) return "Outskirts (Rural Fringe)";
   if (x === -2 && y === -2) return "Caravanserai (Pilgrims' Road)";
-  
+  if (x === -3 && y === 3) return "Mount Qassioun (Sacred Mountain)";
+
   // Procedural names for other blocks
   const prefixes = ["Lower", "Upper", "North", "South", "East", "West"];
   const districts = ["Souk", "Maidan", "Harah", "Bazaar", "Quarter"];
@@ -391,7 +404,7 @@ export const getLocationLabel = (x: number, y: number) => {
   return `${p} ${d} Block — ${x}, ${y}`;
 };
 
-export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS' | 'CARAVANSERAI';
+export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS' | 'CARAVANSERAI' | 'MOUNTAIN_SHRINE';
 
 export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 0 && y === 0) return 'MARKET';
@@ -402,5 +415,6 @@ export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === -2 && y === 1) return 'SALHIYYA';
   if (x === 2 && y === 2) return 'OUTSKIRTS';
   if (x === -2 && y === -2) return 'CARAVANSERAI';
+  if (x === -3 && y === 3) return 'MOUNTAIN_SHRINE';
   return 'RESIDENTIAL';
 };

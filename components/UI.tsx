@@ -44,7 +44,147 @@ interface UIProps {
   sceneMode: 'outdoor' | 'interior';
   pickupPrompt: string | null;
   pickupToast: string | null;
+  currentWeather: string;
 }
+
+const WeatherModal: React.FC<{
+  timeOfDay: number;
+  currentWeather: string;
+  onClose: () => void;
+}> = ({ timeOfDay, currentWeather, onClose }) => {
+  // Calculate temperature based on time of day (Damascus 1348 climate)
+  const getTemperature = () => {
+    const hour = timeOfDay;
+    // Summer temperatures in Damascus (simplified model)
+    // Peak heat around 2-3 PM, coolest before dawn
+    const baseTemp = 28; // Average
+    const variation = 12; // Temperature swing
+    const tempCurve = Math.sin(((hour - 6) / 24) * Math.PI * 2);
+    return Math.round(baseTemp + tempCurve * variation);
+  };
+
+  const temperature = getTemperature();
+
+  const weatherDescriptions = {
+    CLEAR: {
+      name: 'Clear Skies',
+      desc: 'The sun blazes overhead, casting sharp shadows across the dusty streets.',
+      color: 'text-amber-400',
+      bgColor: 'bg-amber-500/10',
+      borderColor: 'border-amber-500/30',
+      humidity: '15-25%',
+      visibility: 'Excellent'
+    },
+    OVERCAST: {
+      name: 'Overcast',
+      desc: 'Gray clouds blanket the sky, diffusing the harsh sunlight.',
+      color: 'text-slate-400',
+      bgColor: 'bg-slate-500/10',
+      borderColor: 'border-slate-500/30',
+      humidity: '45-60%',
+      visibility: 'Moderate'
+    },
+    SANDSTORM: {
+      name: 'Dust Storm',
+      desc: 'Choking dust sweeps through the alleys, obscuring the distant hills.',
+      color: 'text-orange-400',
+      bgColor: 'bg-orange-500/10',
+      borderColor: 'border-orange-500/30',
+      humidity: '5-10%',
+      visibility: 'Poor'
+    }
+  };
+
+  const weatherInfo = weatherDescriptions[currentWeather as keyof typeof weatherDescriptions] || weatherDescriptions.CLEAR;
+
+  // ESC key to close
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
+  return (
+    <div
+      className="absolute inset-0 z-[60] flex items-center justify-center p-4 pointer-events-auto animate-in fade-in duration-200"
+      onClick={onClose}
+    >
+      {/* Modal Content */}
+      <div
+        className="max-w-md w-full bg-black/80 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl relative overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between p-4 border-b border-amber-900/40">
+          <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Weather Report</h4>
+          <button
+            onClick={onClose}
+            className="p-1.5 hover:bg-white/10 rounded transition-colors text-amber-100/50 hover:text-amber-100"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="p-6 space-y-4">
+          {/* Weather Status */}
+          <div className={`${weatherInfo.bgColor} ${weatherInfo.borderColor} border rounded-lg p-4`}>
+            <div className="flex items-center justify-between mb-2">
+              <div className={`text-2xl font-bold ${weatherInfo.color} uppercase tracking-wide`}>
+                {weatherInfo.name}
+              </div>
+              <div className={`w-3 h-3 rounded-full ${weatherInfo.color.replace('text-', 'bg-')} shadow-lg`}></div>
+            </div>
+            <p className="text-xs text-amber-100/60 leading-relaxed">
+              {weatherInfo.desc}
+            </p>
+          </div>
+
+          {/* Temperature Display */}
+          <div className="bg-black/50 border border-amber-900/40 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-1">Temperature</div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-4xl font-mono font-bold text-white">{temperature}°</span>
+                  <span className="text-sm text-amber-100/40 font-mono">C</span>
+                </div>
+                <div className="text-[10px] text-amber-100/30 font-mono mt-1">
+                  {Math.round(temperature * 9/5 + 32)}°F
+                </div>
+              </div>
+              <div className="text-right">
+                <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-2">Time</div>
+                <div className="text-sm font-mono text-amber-100/80">
+                  {Math.floor(timeOfDay)}:{String(Math.floor((timeOfDay % 1) * 60)).padStart(2, '0')}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Atmospheric Conditions */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-black/30 border border-amber-900/30 rounded-lg p-3">
+              <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-1.5">Humidity</div>
+              <div className="text-lg font-mono text-white">{weatherInfo.humidity}</div>
+            </div>
+            <div className="bg-black/30 border border-amber-900/30 rounded-lg p-3">
+              <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-1.5">Visibility</div>
+              <div className="text-lg font-mono text-white">{weatherInfo.visibility}</div>
+            </div>
+          </div>
+
+          {/* Footer Note */}
+          <div className="text-[10px] text-amber-100/30 italic text-center pt-2 border-t border-white/5">
+            Damascus, Summer 1348
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const MapModal: React.FC<{
   currentX: number;
@@ -52,68 +192,186 @@ const MapModal: React.FC<{
   onClose: () => void;
   onSelectLocation: (x: number, y: number) => void;
 }> = ({ currentX, currentY, onClose, onSelectLocation }) => {
+  // Historical Damascus locations with accurate positioning
+  // Each location has a descriptive title and historical name
   const locations = [
-    { name: "Main Road (Al-Buzuriyah)", x: 0, y: 0, type: "Road", desc: "The bustling spine of the city, lined with spices and silks." },
-    { name: "Narrow Alleys (Bab Sharqi)", x: 1, y: 1, type: "Alley", desc: "Claustrophobic streets where the miasma lingers longest." },
-    { name: "Al-Salihiyya (Hillside Quarter)", x: -2, y: 1, type: "Hillside", desc: "A terraced quarter on the slopes, gardens and stone steps rising above the city." },
-    { name: "Wealthy Quarter (Al-Qaymariyya)", x: -1, y: 2, type: "Wealthy", desc: "Ornate mansions behind high walls. The plague spares few." },
-    { name: "Poor Hovels (Al-Shaghour)", x: 0, y: -2, type: "Hovels", desc: "Density and decay make this a breeding ground for death." },
-    { name: "Player's Home", x: 1, y: -1, type: "Home", desc: "A modest courtyard house. Your only sanctuary." },
-    { name: "Outskirts (Rural Fringe)", x: 2, y: 2, type: "Outskirts", desc: "Sparse dwellings and palms where the city thins into fields and hills." },
-    { name: "Caravanserai (Pilgrims' Road)", x: -2, y: -2, type: "Caravanserai", desc: "A fortified inn for caravans and merchants outside the city walls." },
-    { name: "Mamluk Citadel", x: 2, y: -1, type: "Civic", desc: "Seat of the governor. Heavily guarded against the frantic crowds." },
+    { title: "CENTRAL BAZAAR", name: "Al-Buzuriyah Souq", hoverName: "Spice Market District", x: 0, y: 0, type: "market", desc: "Central bazaar near the Umayyad Mosque", color: "amber" },
+    { title: "EASTERN DISTRICT", name: "Bab Sharqi Quarter", hoverName: "Eastern Gate Quarter", x: 1, y: 1, type: "alley", desc: "Eastern gate district with narrow alleys", color: "slate" },
+    { title: "HILLSIDE QUARTER", name: "Al-Salihiyya", hoverName: "Mount Qassioun Slopes", x: -2, y: 1, type: "hillside", desc: "Hillside quarter on Mount Qassioun's slopes", color: "green" },
+    { title: "WEALTHY QUARTER", name: "Al-Qaymariyya", hoverName: "Merchant District", x: -1, y: 2, type: "wealthy", desc: "Wealthy merchant quarter northwest of center", color: "purple" },
+    { title: "SOUTHERN QUARTER", name: "Al-Shaghour", hoverName: "Dense Urban District", x: 0, y: -2, type: "poor", desc: "Dense southern quarter outside old walls", color: "red" },
+    { title: "CHRISTIAN QUARTER", name: "Bab Touma", hoverName: "Eastern Christian District", x: 1, y: -1, type: "residential", desc: "Ancient Christian district, eastern old city", color: "blue" },
+    { title: "RURAL FARMLANDS", name: "The Ghouta", hoverName: "Irrigated Oasis Lands", x: 2, y: 2, type: "outskirts", desc: "Fertile orchards and farmland irrigated by Barada", color: "lime" },
+    { title: "SILK MARKET", name: "Khan al-Harir", hoverName: "Silk Caravanserai", x: -2, y: -2, type: "caravanserai", desc: "Silk merchants' caravanserai and lodging", color: "orange" },
+    { title: "MAMLUK FORTRESS", name: "The Citadel", hoverName: "Damascus Citadel", x: 2, y: -1, type: "civic", desc: "Military fortress in northwestern old city", color: "red" },
+    { title: "MOUNTAIN SHRINE", name: "Mount Qassioun", hoverName: "Sacred Mountain Peak", x: -3, y: 3, type: "landmark", desc: "Sacred mountain overlooking Damascus from northwest", color: "emerald" },
+    { title: "SOUTHERN ROAD", name: "Hauran Highway", hoverName: "Southern Trade Route", x: 1, y: -3, type: "landmark", desc: "Trade route to the fertile Hauran plateau", color: "yellow" },
   ];
 
+  // ESC key to close
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleEsc);
+    return () => window.removeEventListener('keydown', handleEsc);
+  }, [onClose]);
+
   return (
-    <div className="absolute inset-0 bg-black/80 backdrop-blur-xl z-[60] flex items-center justify-center p-4 md:p-8 animate-in fade-in zoom-in-95 pointer-events-auto">
-      <div className="max-w-4xl w-full bg-[#f4e4bc] border-8 border-[#3d2817] rounded-sm shadow-[0_0_100px_rgba(0,0,0,0.8)] relative overflow-hidden flex flex-col md:flex-row h-[90vh]">
-        {/* Parchment Texture Overlay */}
-        <div className="absolute inset-0 opacity-20 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')] mix-blend-multiply"></div>
-        
-        {/* Left Side: Map Visual */}
-        <div className="relative flex-1 bg-[#dcc69c] border-b md:border-b-0 md:border-r-4 border-[#3d2817] p-8 overflow-hidden group">
-          <div className="absolute top-4 left-4 text-[#3d2817] historical-font font-bold text-xl uppercase opacity-40">Map of Damascus — 1348 AD</div>
-          
-          {/* Stylized SVG Map of Damascus */}
-          <div className="relative w-full h-full flex items-center justify-center">
-            <svg viewBox="0 0 400 400" className="w-full h-full drop-shadow-lg opacity-80">
-              {/* City Walls */}
-              <path d="M100,50 L300,50 L350,150 L320,350 L80,350 L50,150 Z" fill="#c4b593" stroke="#3d2817" strokeWidth="4" />
-              {/* Barada River */}
-              <path d="M0,40 Q200,20 400,60" fill="none" stroke="#5a7a8a" strokeWidth="12" strokeOpacity="0.5" />
-              {/* Straight Street (Suq al-Tawila) */}
-              <line x1="100" y1="200" x2="330" y2="200" stroke="#8b4513" strokeWidth="4" strokeDasharray="4 2" />
-              {/* Umayyad Mosque Landmark */}
-              <rect x="180" y="140" width="40" height="40" fill="#a89f91" stroke="#3d2817" strokeWidth="2" />
-              <circle cx="200" cy="160" r="10" fill="#c2b280" />
-              
-              {/* Interactive Location Nodes */}
+    <div
+      className="absolute inset-0 z-[60] flex items-center justify-center p-4 pointer-events-auto animate-in fade-in duration-200 bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="max-w-6xl w-full bg-black/80 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Left: Map Visualization */}
+        <div className="flex-1 p-6 md:p-8 border-b md:border-b-0 md:border-r border-amber-900/40">
+          <div className="flex items-center justify-between mb-6">
+            <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Damascus Map — 1348</h4>
+            <button
+              onClick={onClose}
+              className="p-1.5 hover:bg-white/10 rounded transition-colors text-amber-100/50 hover:text-amber-100"
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          {/* SVG Map of Historical Damascus */}
+          <div className="bg-black/30 border border-amber-900/30 rounded-lg p-6 relative overflow-hidden">
+            <svg viewBox="0 0 500 500" className="w-full h-full">
+              {/* Barada River - flows from northwest */}
+              <path d="M0,80 Q120,70 250,90 Q380,110 500,100" fill="none" stroke="#4a7c8a" strokeWidth="8" opacity="0.4" />
+              <path d="M0,80 Q120,70 250,90 Q380,110 500,100" fill="none" stroke="#6aa4b8" strokeWidth="3" opacity="0.6" />
+
+              {/* City Walls (irregular oval) */}
+              <ellipse cx="250" cy="270" rx="160" ry="180" fill="none" stroke="#8b7355" strokeWidth="3" strokeDasharray="8 4" opacity="0.3" />
+
+              {/* Straight Street (Via Recta) - Roman road */}
+              <line x1="120" y1="270" x2="380" y2="270" stroke="#6b5a45" strokeWidth="2.5" strokeDasharray="6 3" opacity="0.5" />
+
+              {/* Umayyad Mosque - central landmark */}
+              <rect x="220" y="200" width="60" height="50" fill="#8a7355" stroke="#d4af37" strokeWidth="1.5" opacity="0.6" />
+              <circle cx="250" cy="225" r="8" fill="#d4af37" opacity="0.7" />
+              <text x="250" y="263" textAnchor="middle" className="text-[8px] fill-amber-300/50 font-bold">UMAYYAD</text>
+
+              {/* Mount Qassioun - northwest, prominent landmark */}
+              <path d="M10,140 L50,80 L90,140 Z" fill="#3a4a3a" opacity="0.4" />
+              <path d="M25,125 L50,95 L75,125 Z" fill="#4a5a4a" opacity="0.5" />
+              <circle cx="50" cy="105" r="3" fill="#6a8a6a" opacity="0.6" />
+              <text x="50" y="158" textAnchor="middle" className="text-[8px] fill-emerald-300/50 font-semibold">Mt. Qassioun</text>
+
+              {/* Ghouta farmlands - indicated by scattered vegetation */}
+              <circle cx="420" cy="350" r="4" fill="#7a9a5a" opacity="0.3" />
+              <circle cx="440" cy="330" r="3" fill="#7a9a5a" opacity="0.25" />
+              <circle cx="460" cy="360" r="5" fill="#7a9a5a" opacity="0.35" />
+              <text x="440" y="390" textAnchor="middle" className="text-[7px] fill-lime-300/40 italic">Ghouta</text>
+
+              {/* Location Markers */}
               {locations.map((loc) => {
                 const isCurrent = loc.x === currentX && loc.y === currentY;
-                // Map logical coords to SVG space
-                const svgX = 200 + loc.x * 60;
-                const svgY = 200 - loc.y * 60;
-                
+                const svgX = 250 + loc.x * 70;
+                const svgY = 270 - loc.y * 65;
+
+                const colorMap = {
+                  amber: { bg: 'fill-amber-500', ring: 'stroke-amber-400', text: 'fill-amber-300', glow: 'rgba(251, 191, 36, 0.4)' },
+                  slate: { bg: 'fill-slate-500', ring: 'stroke-slate-400', text: 'fill-slate-300', glow: 'rgba(148, 163, 184, 0.4)' },
+                  green: { bg: 'fill-green-500', ring: 'stroke-green-400', text: 'fill-green-300', glow: 'rgba(34, 197, 94, 0.4)' },
+                  purple: { bg: 'fill-purple-500', ring: 'stroke-purple-400', text: 'fill-purple-300', glow: 'rgba(168, 85, 247, 0.4)' },
+                  red: { bg: 'fill-red-500', ring: 'stroke-red-400', text: 'fill-red-300', glow: 'rgba(239, 68, 68, 0.4)' },
+                  blue: { bg: 'fill-blue-500', ring: 'stroke-blue-400', text: 'fill-blue-300', glow: 'rgba(59, 130, 246, 0.4)' },
+                  lime: { bg: 'fill-lime-500', ring: 'stroke-lime-400', text: 'fill-lime-300', glow: 'rgba(132, 204, 22, 0.4)' },
+                  orange: { bg: 'fill-orange-500', ring: 'stroke-orange-400', text: 'fill-orange-300', glow: 'rgba(249, 115, 22, 0.4)' },
+                  emerald: { bg: 'fill-emerald-500', ring: 'stroke-emerald-400', text: 'fill-emerald-300', glow: 'rgba(16, 185, 129, 0.4)' },
+                  yellow: { bg: 'fill-yellow-500', ring: 'stroke-yellow-400', text: 'fill-yellow-300', glow: 'rgba(234, 179, 8, 0.4)' },
+                };
+
+                const colors = colorMap[loc.color as keyof typeof colorMap];
+
                 return (
                   <g key={loc.name} className="cursor-pointer group/node" onClick={() => onSelectLocation(loc.x, loc.y)}>
-                    <circle 
-                      cx={svgX} 
-                      cy={svgY} 
-                      r={isCurrent ? 8 : 6} 
-                      fill={isCurrent ? "#ef4444" : "#3d2817"} 
-                      className="transition-all hover:r-10"
+                    {/* Glassomorphic glow on hover */}
+                    <circle
+                      cx={svgX}
+                      cy={svgY}
+                      r="18"
+                      fill={colors.glow}
+                      className="opacity-0 group-hover/node:opacity-100 transition-opacity duration-300"
+                      style={{ filter: 'blur(8px)' }}
                     />
+                    <circle
+                      cx={svgX}
+                      cy={svgY}
+                      r="14"
+                      fill={colors.glow}
+                      className="opacity-0 group-hover/node:opacity-100 transition-opacity duration-300"
+                      style={{ filter: 'blur(4px)' }}
+                    />
+
+                    {/* Current location indicator - expanding pulse */}
                     {isCurrent && (
-                      <circle cx={svgX} cy={svgY} r={12} fill="none" stroke="#ef4444" strokeWidth="2" className="animate-ping" />
+                      <>
+                        <circle cx={svgX} cy={svgY} r="16" className={colors.ring} strokeWidth="2" fill="none" opacity="0.3">
+                          <animate attributeName="r" from="12" to="20" dur="1.5s" repeatCount="indefinite" />
+                          <animate attributeName="opacity" from="0.4" to="0" dur="1.5s" repeatCount="indefinite" />
+                        </circle>
+                        <circle cx={svgX} cy={svgY} r="12" className={colors.ring} strokeWidth="2" fill="none" opacity="0.6" />
+                      </>
                     )}
-                    <text 
-                      x={svgX} 
-                      y={svgY - 15} 
-                      textAnchor="middle" 
-                      className="text-[8px] md:text-[10px] historical-font fill-[#3d2817] font-bold uppercase tracking-tighter opacity-0 group-hover/node:opacity-100 transition-opacity"
-                    >
-                      {loc.name}
-                    </text>
+
+                    {/* Main location marker */}
+                    <circle
+                      cx={svgX}
+                      cy={svgY}
+                      r={isCurrent ? "7" : "5"}
+                      className={`${colors.bg} transition-all duration-200`}
+                      opacity={isCurrent ? "1" : "0.8"}
+                    />
+                    <circle
+                      cx={svgX}
+                      cy={svgY}
+                      r="9"
+                      className={`${colors.ring} transition-all duration-200 group-hover/node:opacity-70`}
+                      strokeWidth="1.5"
+                      fill="none"
+                      opacity={isCurrent ? "0.5" : "0.3"}
+                    />
+
+                    {/* Labels - always show title, detailed info on hover */}
+                    <g className="pointer-events-none">
+                      {/* Default label - always visible */}
+                      <text
+                        x={svgX}
+                        y={svgY - 16}
+                        textAnchor="middle"
+                        className={`text-[8px] ${colors.text} font-bold transition-opacity group-hover/node:opacity-0`}
+                        opacity="0.7"
+                      >
+                        {loc.title}
+                      </text>
+
+                      {/* Hover label - detailed two-line */}
+                      <g className="opacity-0 group-hover/node:opacity-100 transition-opacity">
+                        <text
+                          x={svgX}
+                          y={svgY - 24}
+                          textAnchor="middle"
+                          className={`text-[9px] ${colors.text} font-bold`}
+                        >
+                          {loc.title}
+                        </text>
+                        <text
+                          x={svgX}
+                          y={svgY - 14}
+                          textAnchor="middle"
+                          className={`text-[8px] ${colors.text} italic`}
+                          opacity="0.8"
+                        >
+                          {loc.hoverName}
+                        </text>
+                      </g>
+                    </g>
                   </g>
                 );
               })}
@@ -121,40 +379,46 @@ const MapModal: React.FC<{
           </div>
         </div>
 
-        {/* Right Side: Location Info & List */}
-        <div className="w-full md:w-80 p-6 flex flex-col gap-6 bg-[#efe0bc] z-10">
-          <div className="flex justify-between items-center border-b-2 border-[#3d2817] pb-2">
-            <h3 className="historical-font text-2xl text-[#3d2817] font-bold italic tracking-tighter">Fast Travel</h3>
-            <button onClick={onClose} className="text-[#3d2817] hover:scale-110 transition-transform">
-              <X size={24} />
-            </button>
+        {/* Right: Location List */}
+        <div className="w-full md:w-96 p-6 flex flex-col gap-4 overflow-hidden">
+          <div className="pb-3 border-b border-amber-900/40">
+            <h3 className="text-lg font-bold text-amber-100 uppercase tracking-wider">Fast Travel</h3>
+            <p className="text-[10px] text-amber-100/40 mt-1">Select a district to visit</p>
           </div>
 
-          <div className="flex-1 overflow-y-auto pr-2 space-y-4">
+          <div className="flex-1 overflow-y-auto space-y-2 pr-2">
             {locations.map((loc) => {
               const isCurrent = loc.x === currentX && loc.y === currentY;
               return (
                 <button
                   key={loc.name}
                   onClick={() => onSelectLocation(loc.x, loc.y)}
-                  className={`w-full text-left p-3 border-2 transition-all group ${
-                    isCurrent 
-                      ? 'bg-[#3d2817] border-[#3d2817] text-[#f4e4bc]' 
-                      : 'border-[#3d2817]/20 hover:border-[#3d2817] hover:bg-[#3d2817]/5'
+                  disabled={isCurrent}
+                  className={`w-full text-left p-3 rounded-lg border transition-all group ${
+                    isCurrent
+                      ? 'bg-amber-900/40 border-amber-700/60 cursor-default'
+                      : 'bg-black/30 border-amber-900/30 hover:bg-amber-900/20 hover:border-amber-700/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.15)]'
                   }`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="historical-font font-bold text-sm tracking-tight uppercase">
-                      {loc.name}
-                    </span>
-                    {isCurrent && <MapPin size={12} />}
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex-1">
+                      <div className="font-bold text-[11px] text-amber-100/90 uppercase tracking-widest leading-tight">
+                        {loc.title}
+                      </div>
+                      <div className="text-sm text-amber-200/70 font-serif italic mt-0.5">
+                        {loc.name}
+                      </div>
+                    </div>
+                    {isCurrent && (
+                      <MapPin size={14} className="text-amber-500" />
+                    )}
                   </div>
-                  <p className={`text-[10px] leading-tight ${isCurrent ? 'text-amber-100/70' : 'text-[#3d2817]/60'}`}>
+                  <p className="text-[11px] leading-snug text-amber-100/50">
                     {loc.desc}
                   </p>
                   {!isCurrent && (
-                    <div className="mt-2 flex items-center gap-1 text-[9px] font-bold opacity-0 group-hover:opacity-100 transition-opacity text-[#3d2817] uppercase tracking-widest">
-                      <Navigation size={10} /> Commute to district
+                    <div className="mt-2 flex items-center gap-1.5 text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity text-amber-400 uppercase tracking-widest">
+                      <Navigation size={12} /> Travel Here
                     </div>
                   )}
                 </button>
@@ -162,8 +426,8 @@ const MapModal: React.FC<{
             })}
           </div>
 
-          <div className="text-[10px] text-[#3d2817]/40 text-center italic border-t border-[#3d2817]/20 pt-4">
-            "By the grace of the Barada, we travel safely."
+          <div className="text-[9px] text-amber-100/30 text-center italic border-t border-white/5 pt-3">
+            Damascus, Pearl of the East
           </div>
         </div>
       </div>
@@ -437,15 +701,23 @@ const NpcPortrait: React.FC<{ npc: NPCStats }> = ({ npc }) => {
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
+  const [showWeather, setShowWeather] = useState(false);
   const [reportTab, setReportTab] = useState<'epidemic' | 'player'>('epidemic');
   const [settingsTab, setSettingsTab] = useState<'about' | 'dev'>('about');
   const [showPerspective, setShowPerspective] = useState(true);
   const [fps, setFps] = useState(0);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [inventorySortBy, setInventorySortBy] = useState<'name' | 'rarity' | 'quantity'>('name');
+  const [tabPulse, setTabPulse] = useState<'epidemic' | 'player' | null>(null);
+
+  useEffect(() => {
+    if (!tabPulse) return;
+    const timer = window.setTimeout(() => setTabPulse(null), 260);
+    return () => window.clearTimeout(timer);
+  }, [tabPulse]);
   const inventoryEntries = useMemo(() => {
     const rarityRank: Record<'common' | 'uncommon' | 'rare', number> = {
       common: 0,
@@ -621,11 +893,15 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             <span className="text-xs font-mono tracking-widest uppercase">{getDateStr()}</span>
           </div>
           <div className="w-px h-4 bg-amber-800/30" />
-          <div className="flex items-center gap-2 text-amber-100/90">
+          <div
+            className="flex items-center gap-2 text-amber-100/90 cursor-pointer hover:bg-amber-900/20 px-2 py-1 rounded-lg transition-colors"
+            onClick={() => setShowWeather(true)}
+            title="View Weather Report"
+          >
             {params.timeOfDay > 6 && params.timeOfDay < 18 ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-400" />}
             <span className="text-xs font-mono tracking-widest">{getTimeStr()}</span>
           </div>
-          
+
           <div className="w-px h-4 bg-amber-800/30 ml-2" />
           
           <div className="flex gap-1 bg-white/5 rounded-lg p-1">
@@ -711,14 +987,23 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
       {/* OVERWORLD MAP MODAL */}
       {showMap && (
-        <MapModal 
-          currentX={params.mapX} 
-          currentY={params.mapY} 
-          onClose={() => setShowMap(false)} 
+        <MapModal
+          currentX={params.mapX}
+          currentY={params.mapY}
+          onClose={() => setShowMap(false)}
           onSelectLocation={(x, y) => {
             onFastTravel(x, y);
             setShowMap(false);
           }}
+        />
+      )}
+
+      {/* WEATHER MODAL */}
+      {showWeather && (
+        <WeatherModal
+          timeOfDay={params.timeOfDay}
+          currentWeather={currentWeather}
+          onClose={() => setShowWeather(false)}
         />
       )}
 
@@ -732,19 +1017,27 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Reports Panel</h4>
               <div className="flex gap-1 bg-amber-950/40 p-1 rounded-full border border-amber-900/40">
                 <button
-                  onClick={() => setReportTab('epidemic')}
-                  className={`px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all ${
+                  onClick={() => {
+                    setReportTab('epidemic');
+                    setTabPulse('epidemic');
+                  }}
+                  className={`relative px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all overflow-hidden ${
                     reportTab === 'epidemic' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/50 hover:text-amber-200'
                   }`}
                 >
+                  <span className={`absolute inset-0 rounded-full bg-amber-300/30 blur-[2px] transition-all duration-300 ${tabPulse === 'epidemic' ? 'opacity-100 scale-110' : 'opacity-0 scale-95'}`} />
                   Epidemic
                 </button>
                 <button
-                  onClick={() => setReportTab('player')}
-                  className={`px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all ${
+                  onClick={() => {
+                    setReportTab('player');
+                    setTabPulse('player');
+                  }}
+                  className={`relative px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all overflow-hidden ${
                     reportTab === 'player' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/50 hover:text-amber-200'
                   }`}
                 >
+                  <span className={`absolute inset-0 rounded-full bg-amber-300/30 blur-[2px] transition-all duration-300 ${tabPulse === 'player' ? 'opacity-100 scale-110' : 'opacity-0 scale-95'}`} />
                   Player
                 </button>
               </div>

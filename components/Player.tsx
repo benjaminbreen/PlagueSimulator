@@ -128,7 +128,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   useEffect(() => {
     if (!group.current) return;
-    const ground = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+    const ground = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
       ? getTerrainHeight(district, initialPosition[0], initialPosition[2], terrainSeed)
       : 0;
     group.current.position.set(initialPosition[0], ground + initialPosition[1], initialPosition[2]);
@@ -290,6 +290,23 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     gain.connect(ctx.destination);
     source.start();
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+    source.stop(ctx.currentTime + 0.2);
+
+    const thudOsc = ctx.createOscillator();
+    const thudGain = ctx.createGain();
+    const thudFilter = ctx.createBiquadFilter();
+    thudOsc.type = 'sine';
+    thudOsc.frequency.setValueAtTime(120, ctx.currentTime);
+    thudOsc.frequency.exponentialRampToValueAtTime(70, ctx.currentTime + 0.12);
+    thudFilter.type = 'lowpass';
+    thudFilter.frequency.value = 180;
+    thudGain.gain.value = 0.08;
+    thudOsc.connect(thudFilter);
+    thudFilter.connect(thudGain);
+    thudGain.connect(ctx.destination);
+    thudOsc.start();
+    thudGain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.14);
+    thudOsc.stop(ctx.currentTime + 0.16);
   };
 
   const playObjectImpact = (material: PushableObject['material'], intensity: number) => {
@@ -394,7 +411,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (keys.s) orbitRef.current.setPolarAngle(Math.min(Math.PI / 2.1, orbitRef.current.getPolarAngle() + angle));
     }
 
-    const groundHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+    const groundHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
       ? getTerrainHeight(district, group.current.position.x, group.current.position.z, terrainSeed)
       : 0;
 
@@ -412,7 +429,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             const angle = (i / 8) * Math.PI * 2;
             const candidate = new THREE.Vector3(base.x + Math.cos(angle) * r, 0, base.z + Math.sin(angle) * r);
             if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(candidate, obstacles, 0.6)) {
-              const candidateHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+              const candidateHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
                 ? getTerrainHeight(district, candidate.x, candidate.z, terrainSeed)
                 : 0;
               candidate.y = candidateHeight;
@@ -624,7 +641,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    const groundHeightNow = (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined
+    const groundHeightNow = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
       ? getTerrainHeight(district, group.current.position.x, group.current.position.z, terrainSeed)
       : 0;
     if (isGrounded.current) {

@@ -46,6 +46,7 @@ function App() {
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
+  const [currentWeather, setCurrentWeather] = useState<string>('CLEAR');
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
   const [playerStats, setPlayerStats] = useState<PlayerStats>(() => {
@@ -448,6 +449,7 @@ function App() {
         sceneMode={sceneMode}
         pickupPrompt={pickupPrompt}
         pickupToast={pickupToast?.message ?? null}
+        currentWeather={currentWeather}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -571,6 +573,7 @@ function App() {
               onMinimapUpdate={setMinimapData}
               onPickupPrompt={setPickupPrompt}
               onPickupItem={handlePickupItem}
+              onWeatherUpdate={setCurrentWeather}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -579,6 +582,7 @@ function App() {
               params={params}
               playerStats={playerStats}
               onPickupPrompt={setPickupPrompt}
+              onPickupItem={handlePickupItem}
             />
           )}
         </Suspense>

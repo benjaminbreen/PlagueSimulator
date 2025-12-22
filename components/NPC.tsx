@@ -582,7 +582,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       propGroupRef.current.position.y = 1.02 + bob;
     }
 
-    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS') && terrainSeed !== undefined) {
+    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined) {
       group.current.position.y = getTerrainHeight(district, currentPosRef.current.x, currentPosRef.current.z, terrainSeed);
     } else if (group.current) {
       group.current.position.y = 0;

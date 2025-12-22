@@ -215,8 +215,29 @@ const GROUND_ITEM_MAP: Record<string, string> = {
   'ground-twine': 'Palm Twine'
 };
 
+const INTERIOR_ITEM_DETAILS: Record<string, ItemTemplate> = {
+  'interior-candle': { name: 'Tallow Candle', description: 'A small hand-made candle for light', category: MerchantType.TRADER, basePrice: 3, rarity: 'common' },
+  'interior-lamp': { name: 'Oil Lamp', description: 'Clay lamp with a soot-darkened wick', category: MerchantType.TRADER, basePrice: 8, rarity: 'common' },
+  'interior-ewer': { name: 'Water Ewer', description: 'Ceramic jug for washing and ritual use', category: MerchantType.TRADER, basePrice: 10, rarity: 'common' },
+  'interior-basin': { name: 'Water Basin', description: 'Shallow basin, worn smooth by use', category: MerchantType.TRADER, basePrice: 12, rarity: 'common' },
+  'interior-ledger': { name: 'Ledger', description: 'Merchant records and tallies', category: MerchantType.TRADER, basePrice: 14, rarity: 'uncommon' },
+  'interior-books': { name: 'Manuscripts', description: 'Hand-copied pages bound in leather', category: MerchantType.TRADER, basePrice: 18, rarity: 'uncommon' },
+  'interior-ink-set': { name: 'Ink Set', description: 'Ink, quills, and a small knife', category: MerchantType.TRADER, basePrice: 9, rarity: 'common' },
+  'interior-hookah': { name: 'Hookah Parts', description: 'A small brass base with fittings', category: MerchantType.TRADER, basePrice: 16, rarity: 'uncommon' },
+  'interior-tray': { name: 'Serving Tray', description: 'Wooden tray worn by years of use', category: MerchantType.TRADER, basePrice: 6, rarity: 'common' },
+  'interior-tea-set': { name: 'Tea Service', description: 'Cup and small pot for sherbet or tea', category: MerchantType.TRADER, basePrice: 12, rarity: 'uncommon' },
+  'interior-cloth': { name: 'Bolt of Cloth', description: 'Rolled cloth ready for dye or trade', category: MerchantType.TEXTILE, basePrice: 20, rarity: 'common' },
+  'interior-spindle': { name: 'Spindle', description: 'Simple spindle for thread-spinning', category: MerchantType.TEXTILE, basePrice: 7, rarity: 'common' },
+  'interior-mortar': { name: 'Mortar & Pestle', description: 'Stone set for grinding spices', category: MerchantType.APOTHECARY, basePrice: 11, rarity: 'common' },
+  'interior-herbs': { name: 'Herb Bundle', description: 'Aromatic dried herbs', category: MerchantType.APOTHECARY, basePrice: 5, rarity: 'common' },
+  'interior-tools': { name: 'Tool Set', description: 'Small hand tools bound in twine', category: MerchantType.METALSMITH, basePrice: 15, rarity: 'uncommon' },
+  'interior-basket': { name: 'Market Basket', description: 'Woven basket for goods', category: MerchantType.TRADER, basePrice: 4, rarity: 'common' }
+};
+
 // Get item details by itemId (handles starting inventory items)
 export const getItemDetailsByItemId = (itemId: string): { name: string; description: string; rarity: 'common' | 'uncommon' | 'rare'; basePrice: number; category: MerchantType; effects?: ItemEffect[] } | null => {
+  const interiorItem = INTERIOR_ITEM_DETAILS[itemId];
+  if (interiorItem) return interiorItem;
   // Try to find in starting item map first
   const itemName = STARTING_ITEM_MAP[itemId];
   if (itemName) {
