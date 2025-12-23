@@ -3,90 +3,353 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { SimulationParams, CONSTANTS } from '../types';
 
-const RAT_SPEED = 5.0;
-const tempObj = new THREE.Object3D();
+// Speed constants by state
+const SPEED_IDLE = 0;
+const SPEED_WANDER = 2.5;
+const SPEED_FLEE = 9.0;
+
+// Threat detection ranges
+const PLAYER_FLEE_RANGE = 4.0;
+const CAT_FLEE_RANGE = 10.0;
+const NPC_FLEE_RANGE = 3.0;
+const SAFE_DISTANCE = 12.0;
+
+// Minimum rats always present
+const MIN_RATS = 3;
+const MAX_RATS = 50;
+
+// Temp objects for instanced mesh updates
+const tempBody = new THREE.Object3D();
+const tempHead = new THREE.Object3D();
+const tempTail = new THREE.Object3D();
+const tempEarL = new THREE.Object3D();
+const tempEarR = new THREE.Object3D();
+
+export type RatState = 'idle' | 'wander' | 'flee';
 
 export class Rat {
-    position: THREE.Vector3;
-    velocity: THREE.Vector3;
-    active: boolean;
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  targetVelocity: THREE.Vector3;
+  active: boolean;
+  state: RatState;
+  stateTimer: number;
+  animPhase: number;
+  size: number;
+  fleeTarget: THREE.Vector3 | null;
 
-    constructor() {
-        this.position = new THREE.Vector3((Math.random()-0.5)*70, 0, (Math.random()-0.5)*70);
-        this.velocity = new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize();
-        this.active = true;
+  constructor(index: number) {
+    // Spread rats around map edges (prefer cover)
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 20 + Math.random() * 25;
+    this.position = new THREE.Vector3(
+      Math.cos(angle) * radius,
+      0.05,
+      Math.sin(angle) * radius
+    );
+    this.velocity = new THREE.Vector3(0, 0, 0);
+    this.targetVelocity = new THREE.Vector3(0, 0, 0);
+    this.active = true;
+    this.state = Math.random() > 0.5 ? 'idle' : 'wander';
+    this.stateTimer = 1 + Math.random() * 3;
+    this.animPhase = Math.random() * Math.PI * 2;
+    this.size = 0.85 + Math.random() * 0.3; // 0.85 to 1.15
+    this.fleeTarget = null;
+  }
+
+  update(
+    dt: number,
+    params: SimulationParams,
+    playerPos?: THREE.Vector3,
+    catPos?: THREE.Vector3,
+    npcPositions?: THREE.Vector3[]
+  ) {
+    if (!this.active || dt <= 0) return;
+
+    this.animPhase += dt * 12;
+    this.stateTimer -= dt;
+
+    // Check for threats
+    let threat: THREE.Vector3 | null = null;
+    let threatDistance = Infinity;
+
+    if (playerPos) {
+      const playerDist = this.position.distanceTo(playerPos);
+      if (playerDist < PLAYER_FLEE_RANGE) {
+        threat = playerPos;
+        threatDistance = playerDist;
+      }
     }
 
-    update(dt: number, params: SimulationParams) {
-        if (!this.active) return;
-        
-        if (Math.random() < 0.03) {
-             this.velocity.set(Math.random()-0.5, 0, Math.random()-0.5).normalize();
-        }
-
-        // Avoid the central well area if too close
-        if (this.position.length() < 4) {
-             this.velocity.add(this.position.clone().normalize().multiplyScalar(0.5)).normalize();
-        }
-
-        const boundary = CONSTANTS.MARKET_SIZE - 5;
-        if (Math.abs(this.position.x) > boundary || Math.abs(this.position.z) > boundary) {
-            this.velocity.multiplyScalar(-1);
-            this.position.clamp(new THREE.Vector3(-boundary, 0, -boundary), new THREE.Vector3(boundary, 0, boundary));
-        }
-
-        this.position.add(this.velocity.clone().multiplyScalar(RAT_SPEED * dt));
+    if (catPos) {
+      const catDist = this.position.distanceTo(catPos);
+      if (catDist < CAT_FLEE_RANGE && catDist < threatDistance) {
+        threat = catPos;
+        threatDistance = catDist;
+      }
     }
+
+    // Check for nearby NPCs
+    if (npcPositions) {
+      for (const npcPos of npcPositions) {
+        const npcDist = this.position.distanceTo(npcPos);
+        if (npcDist < NPC_FLEE_RANGE && npcDist < threatDistance) {
+          threat = npcPos;
+          threatDistance = npcDist;
+        }
+      }
+    }
+
+    // State transitions
+    if (threat) {
+      if (this.state !== 'flee') {
+        this.state = 'flee';
+        this.stateTimer = 2 + Math.random();
+      }
+      // Flee direction: away from threat
+      const fleeDir = this.position.clone().sub(threat);
+      fleeDir.y = 0;
+      fleeDir.normalize();
+      // Add some randomness to avoid predictable paths
+      fleeDir.x += (Math.random() - 0.5) * 0.3;
+      fleeDir.z += (Math.random() - 0.5) * 0.3;
+      fleeDir.normalize();
+      this.targetVelocity.copy(fleeDir).multiplyScalar(SPEED_FLEE);
+    } else if (this.state === 'flee') {
+      // Check if safe from all threats
+      const playerSafe = !playerPos || this.position.distanceTo(playerPos) > SAFE_DISTANCE;
+      const catSafe = !catPos || this.position.distanceTo(catPos) > SAFE_DISTANCE;
+      let npcSafe = true;
+      if (npcPositions) {
+        for (const npcPos of npcPositions) {
+          if (this.position.distanceTo(npcPos) < SAFE_DISTANCE * 0.5) {
+            npcSafe = false;
+            break;
+          }
+        }
+      }
+      if ((playerSafe && catSafe && npcSafe) || this.stateTimer <= 0) {
+        this.state = 'idle';
+        this.stateTimer = 1 + Math.random() * 2;
+        this.targetVelocity.set(0, 0, 0);
+      }
+    } else if (this.stateTimer <= 0) {
+      // Cycle between idle and wander
+      if (this.state === 'idle') {
+        this.state = 'wander';
+        this.stateTimer = 3 + Math.random() * 5;
+        // Pick a new wander direction, prefer edges
+        const toCenter = this.position.clone().normalize();
+        const wanderDir = new THREE.Vector3(
+          Math.random() - 0.5,
+          0,
+          Math.random() - 0.5
+        ).normalize();
+        // Bias away from center
+        wanderDir.add(toCenter.multiplyScalar(0.3)).normalize();
+        this.targetVelocity.copy(wanderDir).multiplyScalar(SPEED_WANDER);
+      } else {
+        this.state = 'idle';
+        this.stateTimer = 1 + Math.random() * 3;
+        this.targetVelocity.set(0, 0, 0);
+      }
+    }
+
+    // Smooth velocity interpolation
+    const lerpFactor = this.state === 'flee' ? 8 : 4;
+    this.velocity.lerp(this.targetVelocity, Math.min(1, lerpFactor * dt));
+
+    // Boundary handling
+    const boundary = CONSTANTS.MARKET_SIZE - 3;
+    if (Math.abs(this.position.x) > boundary) {
+      this.velocity.x *= -0.5;
+      this.targetVelocity.x *= -0.5;
+      this.position.x = Math.sign(this.position.x) * boundary;
+    }
+    if (Math.abs(this.position.z) > boundary) {
+      this.velocity.z *= -0.5;
+      this.targetVelocity.z *= -0.5;
+      this.position.z = Math.sign(this.position.z) * boundary;
+    }
+
+    // Avoid center well
+    if (this.position.length() < 5) {
+      const pushOut = this.position.clone().normalize().multiplyScalar(0.5);
+      this.velocity.add(pushOut);
+    }
+
+    // Apply movement
+    this.position.add(this.velocity.clone().multiplyScalar(dt));
+    this.position.y = 0.05; // Keep on ground
+  }
 }
 
 interface RatsProps {
   params: SimulationParams;
+  playerPos?: THREE.Vector3;
+  catPos?: THREE.Vector3;
+  npcPositions?: THREE.Vector3[];
 }
 
-export const Rats = forwardRef<Rat[], RatsProps>(({ params }, ref) => {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
+export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, npcPositions }, ref) => {
+  const bodyRef = useRef<THREE.InstancedMesh>(null);
+  const headRef = useRef<THREE.InstancedMesh>(null);
+  const tailRef = useRef<THREE.InstancedMesh>(null);
+  const earRef = useRef<THREE.InstancedMesh>(null);
 
   const rats = useMemo(() => {
-      const arr = [];
-      for(let i=0; i<40; i++) arr.push(new Rat());
-      return arr;
+    const arr: Rat[] = [];
+    for (let i = 0; i < MAX_RATS; i++) arr.push(new Rat(i));
+    return arr;
   }, []);
 
   useImperativeHandle(ref, () => rats, [rats]);
 
+  // Rat color - dark brown/gray
+  const ratColor = useMemo(() => new THREE.Color('#2a1f1a'), []);
+  const ratColorDark = useMemo(() => new THREE.Color('#1a1210'), []);
+
   useFrame((state, delta) => {
-    const dt = delta * params.simulationSpeed;
-    
-    // Rats only appear if sanitation < 40%
-    const showRats = params.hygieneLevel < 0.4;
-    const ratLimit = showRats ? Math.floor(rats.length * (0.8 - params.hygieneLevel * 2)) : 0;
-    
+    const dt = Math.min(delta, 0.1) * params.simulationSpeed;
+
+    // Calculate active rat count: minimum + hygiene bonus
+    const hygieneBonus = params.hygieneLevel < 0.4
+      ? Math.floor((MAX_RATS - MIN_RATS) * (0.4 - params.hygieneLevel) / 0.4)
+      : 0;
+    const activeCount = MIN_RATS + hygieneBonus;
+
+    // Update rats
     rats.forEach((rat, i) => {
-        rat.active = i < Math.max(0, ratLimit);
-        if (rat.active && dt > 0) rat.update(dt, params);
+      rat.active = i < activeCount;
+      if (rat.active) {
+        rat.update(dt, params, playerPos, catPos, npcPositions);
+      }
     });
 
-    if (meshRef.current) {
-        rats.forEach((rat, i) => {
-            if (rat.active) {
-                tempObj.position.copy(rat.position);
-                tempObj.lookAt(rat.position.clone().add(rat.velocity));
-                tempObj.scale.set(0.2, 0.1, 0.45); 
-                tempObj.updateMatrix();
-            } else {
-                tempObj.scale.set(0,0,0);
-                tempObj.updateMatrix();
-            }
-            meshRef.current!.setMatrixAt(i, tempObj.matrix);
-        });
-        meshRef.current.instanceMatrix.needsUpdate = true;
-    }
+    // Update instanced meshes
+    if (!bodyRef.current || !headRef.current || !tailRef.current || !earRef.current) return;
+
+    rats.forEach((rat, i) => {
+      if (rat.active) {
+        const speed = rat.velocity.length();
+        const isMoving = speed > 0.1;
+        const bodyBob = isMoving ? Math.sin(rat.animPhase * 2) * 0.01 : 0;
+        const tailWag = Math.sin(rat.animPhase) * (isMoving ? 0.4 : 0.15);
+        const s = rat.size;
+
+        // Calculate facing direction
+        let angle = 0;
+        if (rat.velocity.lengthSq() > 0.01) {
+          angle = Math.atan2(rat.velocity.x, rat.velocity.z);
+        }
+
+        // Body - elongated ellipsoid
+        tempBody.position.set(rat.position.x, rat.position.y + 0.06 * s + bodyBob, rat.position.z);
+        tempBody.rotation.set(0, angle, 0);
+        tempBody.scale.set(0.08 * s, 0.06 * s, 0.14 * s);
+        tempBody.updateMatrix();
+        bodyRef.current!.setMatrixAt(i, tempBody.matrix);
+
+        // Head - smaller sphere at front
+        const headOffset = new THREE.Vector3(0, 0.02, 0.12 * s).applyAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          angle
+        );
+        tempHead.position.set(
+          rat.position.x + headOffset.x,
+          rat.position.y + 0.07 * s + bodyBob,
+          rat.position.z + headOffset.z
+        );
+        tempHead.rotation.set(0, angle, 0);
+        tempHead.scale.set(0.05 * s, 0.045 * s, 0.055 * s);
+        tempHead.updateMatrix();
+        headRef.current!.setMatrixAt(i, tempHead.matrix);
+
+        // Tail - thin cylinder at back, wagging
+        const tailOffset = new THREE.Vector3(0, 0, -0.14 * s).applyAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          angle
+        );
+        tempTail.position.set(
+          rat.position.x + tailOffset.x,
+          rat.position.y + 0.05 * s,
+          rat.position.z + tailOffset.z
+        );
+        tempTail.rotation.set(0.3, angle + tailWag, 0);
+        tempTail.scale.set(0.012 * s, 0.12 * s, 0.012 * s);
+        tempTail.updateMatrix();
+        tailRef.current!.setMatrixAt(i, tempTail.matrix);
+
+        // Ears - two small spheres on head (combined into one instance, positioned twice)
+        const earOffsetL = new THREE.Vector3(-0.025 * s, 0.035, 0.1 * s).applyAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          angle
+        );
+        const earOffsetR = new THREE.Vector3(0.025 * s, 0.035, 0.1 * s).applyAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          angle
+        );
+        // Use two indices for ears (i*2 and i*2+1)
+        tempEarL.position.set(
+          rat.position.x + earOffsetL.x,
+          rat.position.y + 0.09 * s + bodyBob,
+          rat.position.z + earOffsetL.z
+        );
+        tempEarL.scale.set(0.02 * s, 0.015 * s, 0.015 * s);
+        tempEarL.updateMatrix();
+        earRef.current!.setMatrixAt(i * 2, tempEarL.matrix);
+
+        tempEarR.position.set(
+          rat.position.x + earOffsetR.x,
+          rat.position.y + 0.09 * s + bodyBob,
+          rat.position.z + earOffsetR.z
+        );
+        tempEarR.scale.set(0.02 * s, 0.015 * s, 0.015 * s);
+        tempEarR.updateMatrix();
+        earRef.current!.setMatrixAt(i * 2 + 1, tempEarR.matrix);
+      } else {
+        // Hide inactive rats
+        tempBody.scale.set(0, 0, 0);
+        tempBody.updateMatrix();
+        bodyRef.current!.setMatrixAt(i, tempBody.matrix);
+        headRef.current!.setMatrixAt(i, tempBody.matrix);
+        tailRef.current!.setMatrixAt(i, tempBody.matrix);
+        earRef.current!.setMatrixAt(i * 2, tempBody.matrix);
+        earRef.current!.setMatrixAt(i * 2 + 1, tempBody.matrix);
+      }
+    });
+
+    bodyRef.current.instanceMatrix.needsUpdate = true;
+    headRef.current.instanceMatrix.needsUpdate = true;
+    tailRef.current.instanceMatrix.needsUpdate = true;
+    earRef.current.instanceMatrix.needsUpdate = true;
   });
 
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, 40]} castShadow>
-      <boxGeometry args={[1, 1, 1]} />
-      <meshStandardMaterial color="#1a110a" roughness={1.0} />
-    </instancedMesh>
+    <group>
+      {/* Body */}
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, MAX_RATS]} castShadow>
+        <sphereGeometry args={[1, 6, 5]} />
+        <meshStandardMaterial color={ratColor} roughness={0.95} />
+      </instancedMesh>
+
+      {/* Head */}
+      <instancedMesh ref={headRef} args={[undefined, undefined, MAX_RATS]} castShadow>
+        <sphereGeometry args={[1, 5, 4]} />
+        <meshStandardMaterial color={ratColor} roughness={0.95} />
+      </instancedMesh>
+
+      {/* Tail */}
+      <instancedMesh ref={tailRef} args={[undefined, undefined, MAX_RATS]} castShadow>
+        <cylinderGeometry args={[0.3, 1, 1, 4]} />
+        <meshStandardMaterial color={ratColorDark} roughness={0.9} />
+      </instancedMesh>
+
+      {/* Ears (2 per rat) */}
+      <instancedMesh ref={earRef} args={[undefined, undefined, MAX_RATS * 2]}>
+        <sphereGeometry args={[1, 4, 3]} />
+        <meshStandardMaterial color={ratColorDark} roughness={0.95} />
+      </instancedMesh>
+    </group>
   );
 });

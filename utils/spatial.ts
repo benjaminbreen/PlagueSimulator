@@ -42,6 +42,8 @@ export interface AgentSnapshot {
   id: string;
   state: number;
   pos: THREE.Vector3;
+  awareness: number;  // 0-100: plague awareness for rumor spread
+  panic: number;      // 0-100: fear level for behavior modification
 }
 
 export const buildAgentHash = (agents: AgentSnapshot[], cellSize = 6): SpatialHash<AgentSnapshot> => {

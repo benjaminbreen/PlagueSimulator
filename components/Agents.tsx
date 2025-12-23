@@ -1,16 +1,24 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats, DistrictType, getDistrictType } from '../types';
+import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats, DistrictType, getDistrictType, PlayerActionEvent } from '../types';
 import { generateNPCStats } from '../utils/procedural';
 import { NPC } from './NPC';
 import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
 import { TerrainHeightmap } from '../utils/terrain';
 
+export interface MoraleStats {
+  avgAwareness: number;  // 0-100 average plague awareness
+  avgPanic: number;      // 0-100 average panic level
+  agentCount: number;    // Number of living NPCs
+}
+
 interface AgentsProps {
   params: SimulationParams;
   simTime: number;
   onStatsUpdate: (stats: SimulationCounts) => void;
+  onMoraleUpdate?: (morale: MoraleStats) => void;
+  actionEvent?: PlayerActionEvent | null;
   rats: any[];
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
@@ -30,6 +38,8 @@ export const Agents: React.FC<AgentsProps> = ({
   params,
   simTime,
   onStatsUpdate,
+  onMoraleUpdate,
+  actionEvent,
   buildings,
   buildingHash = null,
   obstacles = [],
@@ -43,7 +53,7 @@ export const Agents: React.FC<AgentsProps> = ({
   terrainSeed,
   heightmap
 }) => {
-  const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3 }>>(new Map());
+  const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3, awareness: number, panic: number }>>(new Map());
   const localAgentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
   const statsTickRef = useRef(0);
 
@@ -75,19 +85,33 @@ export const Agents: React.FC<AgentsProps> = ({
   const minVisible = params.timeOfDay >= 6 && params.timeOfDay <= 22 ? 8 : 4;
   const activeCount = Math.min(maxAgents, Math.max(minVisible, getActiveCount()));
 
-  const handleUpdate = (id: string, state: AgentState, pos: THREE.Vector3) => {
-    agentRegistry.current.set(id, { state, pos });
+  const handleUpdate = (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number) => {
+    agentRegistry.current.set(id, { state, pos, awareness, panic });
   };
 
   useFrame(() => {
     const snapshots: AgentSnapshot[] = [];
     let healthy = 0, incubating = 0, infected = 0, deceased = 0;
+    let totalAwareness = 0, totalPanic = 0, agentCount = 0;
     agentRegistry.current.forEach((agent, id) => {
-      snapshots.push({ id, state: agent.state, pos: agent.pos });
+      snapshots.push({
+        id,
+        state: agent.state,
+        pos: agent.pos,
+        awareness: agent.awareness,
+        panic: agent.panic
+      });
       if (agent.state === AgentState.HEALTHY) healthy++;
       else if (agent.state === AgentState.INCUBATING) incubating++;
       else if (agent.state === AgentState.INFECTED) infected++;
       else deceased++;
+
+      // Aggregate morale data (excluding deceased)
+      if (agent.state !== AgentState.DECEASED) {
+        totalAwareness += agent.awareness;
+        totalPanic += agent.panic;
+        agentCount++;
+      }
     });
 
     const builtHash = buildAgentHash(snapshots);
@@ -104,6 +128,15 @@ export const Agents: React.FC<AgentsProps> = ({
         infected,
         deceased
       });
+
+      // Report morale stats
+      if (onMoraleUpdate && agentCount > 0) {
+        onMoraleUpdate({
+          avgAwareness: totalAwareness / agentCount,
+          avgPanic: totalPanic / agentCount,
+          agentCount
+        });
+      }
     }
   });
 
@@ -133,6 +166,7 @@ export const Agents: React.FC<AgentsProps> = ({
           district={district ?? getDistrictType(params.mapX, params.mapY)}
           terrainSeed={terrainSeed}
           heightmap={heightmap}
+          actionEvent={actionEvent}
         />
       ))}
     </group>

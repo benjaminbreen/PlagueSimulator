@@ -1,5 +1,5 @@
 
-import { BuildingType, BuildingMetadata, SocialClass, NPCStats, PlayerStats, DistrictType } from '../types';
+import { BuildingType, BuildingMetadata, SocialClass, NPCStats, PlayerStats, DistrictType, getDistrictType } from '../types';
 
 const FIRST_NAMES_MALE = ['Ahmad', 'Yusuf', 'Ibrahim', 'Umar', 'Hassan', 'Mahmud', 'Zayd', 'Malik', 'Nasir', 'Suleiman'];
 const FIRST_NAMES_FEMALE = ['Fatima', 'Zaynab', 'Maryam', 'Aisha', 'Khadija', 'Layla', 'Salma', 'Hafsa', 'Raya', 'Nura'];
@@ -18,10 +18,42 @@ const COMMERCIAL_PROFESSIONS = [
   'Khan Warden',
   'Sherbet Seller',
   'Sherbet House Keeper',
-  'Caravanserai Keeper'
+  'Caravanserai Keeper',
+  // Damascus-specific trades (historically accurate)
+  'Apothecary',           // Medicine, herbs, remedies
+  'Perfumer',             // Oils, incense, fragrances (Suq al-Attarin)
+  'Silk Merchant',        // Damascus silk was famous
+  'Glassblower',          // Damascus glasswork renowned
+  'Soap Maker',           // Damascus soap (sabun) exported throughout region
+  'Rug Merchant',         // Carpets, prayer rugs
+  'Jeweler',              // Precious metals, gems
+  'Leather Worker',       // Saddles, bags, shoes
+  'Barber-Surgeon',       // Medical care and grooming
+  'Locksmith',            // Intricate metalwork, keys
+  'Oil Presser',          // Olive oil, sesame oil
 ];
 const RESIDENTIAL_PROFESSIONS = ['Day-Laborer', 'Water-Carrier', 'Copyist', 'Tanner', 'Unemployed', 'City Guard', 'Mamluk Soldier', 'Retired Guard'];
 const CLERGY_PROFESSIONS = ['Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher'];
+
+// Religious building professions (architecture-specific)
+const RELIGIOUS_PROFESSIONS = [
+  'Imam',                    // Neighborhood mosque (masjid)
+  'Friday Mosque Imam',      // Large Friday mosque (jami)
+  'Madrasa Director',        // Islamic school/college
+  'Shaykh',                  // Sufi lodge (zawiya)
+  'Shrine Keeper',           // Mausoleum/tomb (maqam)
+];
+
+// Civic building professions (public services and government)
+const CIVIC_PROFESSIONS = [
+  'Mamluk Governor',         // Military/political headquarters
+  'Court Qadi',              // Court/tribunal
+  'Notary',                  // Legal documents, contracts
+  'Court Physician',         // Medical clinic
+  'Market Inspector',        // Muhtasib - enforces fair trade
+  'Hammam Keeper',           // Public bath
+  'Fountain Keeper',         // Public fountain (sabil)
+];
 const MOODS = ['Fearful', 'Anxious', 'Determined', 'Exhausted', 'Pious', 'Sullen', 'Grateful', 'Stoic'];
 const FAMILY_STRUCTURES = [
   'No immediate family noted',
@@ -381,6 +413,16 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     return 'Attend to daily duties in the neighborhood.';
   })();
 
+  // Initial morale values - slightly randomized with profession/class modifiers
+  // Merchants hear rumors first (trade networks), clergy are calmer
+  const baseAwareness = Math.floor(rand() * 12);
+  const awarenessModifier = isMerchant ? 8 : isReligiousLeader ? -3 : 0;
+  const awarenessLevel = Math.max(0, Math.min(100, baseAwareness + awarenessModifier));
+
+  // Initial panic is low, builds from awareness and witnessed events
+  const basePanic = Math.floor(rand() * 6);
+  const panicLevel = Math.max(0, Math.min(100, basePanic));
+
   return {
     id: `npc-${seed}`,
     name,
@@ -391,6 +433,8 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     height: heightBase,
     weight: weightBase,
     mood: MOODS[Math.floor(rand() * MOODS.length)],
+    awarenessLevel,
+    panicLevel,
     robeSpread,
     robeHasTrim,
     robeHemBand,
@@ -745,30 +789,68 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
   let ownerProfession = '';
   let ownerGender: 'Male' | 'Female' = rand() > 0.5 ? 'Male' : 'Female';
 
-  if (type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC) {
-    ownerName = 'Sultan Al-Nasir Muhammad';
-    ownerProfession = type === BuildingType.RELIGIOUS ? 'Representative' : 'Mamluk Governor';
-    ownerAge = 54;
+  if (type === BuildingType.RELIGIOUS) {
+    ownerProfession = RELIGIOUS_PROFESSIONS[Math.floor(rand() * RELIGIOUS_PROFESSIONS.length)];
+
+    // Sultan appoints major institutions (Friday Mosque, Madrasa)
+    if (ownerProfession === 'Friday Mosque Imam' || ownerProfession === 'Madrasa Director') {
+      ownerName = 'Sultan Al-Nasir Muhammad';
+      ownerAge = 54;
+    } else {
+      // Local religious leader
+      ownerName = `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
+      ownerAge = Math.floor(rand() * 30) + 35; // 35-65 years old
+    }
+    ownerGender = 'Male';
+  } else if (type === BuildingType.CIVIC) {
+    ownerProfession = CIVIC_PROFESSIONS[Math.floor(rand() * CIVIC_PROFESSIONS.length)];
+
+    // Sultan appoints high government positions
+    if (ownerProfession === 'Mamluk Governor' || ownerProfession === 'Court Qadi') {
+      ownerName = 'Sultan Al-Nasir Muhammad';
+      ownerAge = 54;
+    } else {
+      // Local civic servant
+      ownerName = `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
+      ownerAge = Math.floor(rand() * 35) + 30; // 30-65 years old
+    }
     ownerGender = 'Male';
   } else {
-    ownerName = ownerGender === 'Male' 
+    ownerName = ownerGender === 'Male'
       ? `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`
       : `${FIRST_NAMES_FEMALE[Math.floor(rand() * FIRST_NAMES_FEMALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
 
-    ownerProfession = type === BuildingType.COMMERCIAL 
+    ownerProfession = type === BuildingType.COMMERCIAL
       ? COMMERCIAL_PROFESSIONS[Math.floor(rand() * COMMERCIAL_PROFESSIONS.length)]
       : RESIDENTIAL_PROFESSIONS[Math.floor(rand() * RESIDENTIAL_PROFESSIONS.length)];
   }
 
-  return { 
-    id: `bld-${x}-${z}`, 
-    type, 
-    ownerName, 
-    ownerAge, 
-    ownerProfession, 
-    ownerGender, 
+  // Calculate building height using the same formula as Environment.tsx
+  const district = getDistrictType(x, z);
+  const localSeed = x * 1000 + z;
+  const baseHeight = district === 'HOVELS' && type !== BuildingType.RELIGIOUS && type !== BuildingType.CIVIC
+    ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
+    : type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
+  const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
+  const height = baseHeight * districtScale;
+
+  // Determine story count based on building height
+  // 1 story: < 6, 2 stories: 6-10, 3 stories: >= 10
+  const storyCount: 1 | 2 | 3 = height < 6 ? 1 : height < 10 ? 2 : 3;
+
+  // Adjust footprint based on story count: 3-story buildings are ~10% wider
+  const footprintScale = storyCount === 3 ? sizeScale * 1.1 : storyCount === 2 ? sizeScale * 1.05 : sizeScale;
+
+  return {
+    id: `bld-${x}-${z}`,
+    type,
+    ownerName,
+    ownerAge,
+    ownerProfession,
+    ownerGender,
     position: [x, 0, z],
-    sizeScale,
+    sizeScale: footprintScale,
+    storyCount,
     doorSide: Math.floor(rand() * 4),
     hasSymmetricalWindows: rand() > 0.5,
     isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || rand() > 0.985,

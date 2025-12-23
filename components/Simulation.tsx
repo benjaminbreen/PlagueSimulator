@@ -3,9 +3,9 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
-import { Agents } from './Agents';
+import { Agents, MoraleStats } from './Agents';
 import { Rats, Rat } from './Rats';
 import { Player } from './Player';
 import { MarketStall } from './MarketStall';
@@ -17,6 +17,8 @@ import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
 import { generateMerchantNPC, mapStallTypeToMerchantType } from '../utils/merchantGeneration';
 import { LaundryLine, generateLaundryLine, shouldGenerateLaundryLine } from '../utils/laundry';
+import { ActionEffects } from './ActionEffects';
+import { Footprints } from './Footprints';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -34,6 +36,10 @@ interface SimulationProps {
   onPickupItem?: (pickup: PickupInfo) => void;
   onWeatherUpdate?: (weatherType: string) => void;
   onPushCharge?: (charge: number) => void;
+  onMoraleUpdate?: (morale: MoraleStats) => void;
+  actionEvent?: PlayerActionEvent | null;
+  onPlayerPositionUpdate?: (pos: THREE.Vector3) => void;
+  dossierMode?: boolean;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -943,7 +949,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem, onWeatherUpdate, onPushCharge }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, onPlayerPositionUpdate, dossierMode }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -952,6 +958,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const marketBounceRef = useRef<THREE.PointLight>(null);
   const fogRef = useRef<THREE.FogExp2>(null);
   const ratsRef = useRef<Rat[]>([]);
+  const catPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
+  const ratPositionsRef = useRef<THREE.Vector3[]>([]);
+  const npcPositionsRef = useRef<THREE.Vector3[]>([]);
   const playerRef = useRef<THREE.Group>(null);
   const { scene, gl } = useThree();
 
@@ -991,6 +1000,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const terrainSeed = useMemo(() => params.mapX * 1000 + params.mapY * 13 + 19, [params.mapX, params.mapY]);
   const sessionSeed = useMemo(() => Math.floor(Math.random() * 1000000), []);
   const district = useMemo(() => getDistrictType(params.mapX, params.mapY), [params.mapX, params.mapY]);
+  const isOutskirts = district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT';
   useEffect(() => {
     setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0]);
   }, [params.mapX, params.mapY]);
@@ -1116,7 +1126,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     addCoin('coin-res-1', [0.2, 0.05, -2.2]);
 
     // Generate boulders for hilly districts
-    if (district === 'MOUNTAIN_SHRINE' || district === 'SALHIYYA' || district === 'OUTSKIRTS') {
+    if (district === 'MOUNTAIN_SHRINE' || district === 'SALHIYYA' || isOutskirts) {
       const getBoulderPositions = (): Array<[number, number, number]> => {
         if (district === 'MOUNTAIN_SHRINE') {
           // Reuse existing rock positions from Environment.tsx
@@ -1139,7 +1149,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             [-12, 0, 32], [-8, 0, 28], [10, 0, 35], [8, 0, 30], [15, 0, 28],
           ];
         }
-        if (district === 'OUTSKIRTS') {
+        if (isOutskirts) {
           // Generate 8 boulders on rolling hills
           return [
             [-32, 0, -22], [-25, 0, -15],
@@ -1248,14 +1258,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const marketStalls = useMemo<MarketStallData[]>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
     if (params.mapX !== 0 || params.mapY !== 0) {
-      if (district !== 'OUTSKIRTS' && district !== 'CARAVANSERAI') return [];
+      if (!isOutskirts && district !== 'CARAVANSERAI') return [];
     }
 
     const seed = params.mapX * 1000 + params.mapY * 100 + sessionSeed;
     let randCounter = 0;
     const rand = () => seededRandom(seed + randCounter++ * 137);
 
-    const stallCount = district === 'OUTSKIRTS' ? 1 : district === 'CARAVANSERAI' ? 6 : 1 + Math.floor(rand() * 3); // 1-3 stalls
+    const stallCount = isOutskirts ? 1 : district === 'CARAVANSERAI' ? 6 : 1 + Math.floor(rand() * 3); // 1-3 stalls
     const stalls: MarketStallData[] = [];
 
     // Available stall types
@@ -1304,7 +1314,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       if (!position) continue; // Skip if couldn't find valid position
 
       const type = stallTypes[Math.floor(rand() * stallTypes.length)];
-      const size = district === 'OUTSKIRTS' ? 'small' : district === 'CARAVANSERAI' ? 'medium' : rand() < 0.2 ? 'small' : rand() < 0.7 ? 'medium' : 'large';
+      const size = isOutskirts ? 'small' : district === 'CARAVANSERAI' ? 'medium' : rand() < 0.2 ? 'small' : rand() < 0.7 ? 'medium' : 'large';
       const rotation = [0, 90, 180, 270][Math.floor(rand() * 4)];
       const awningColor = awningColors[Math.floor(rand() * awningColors.length)];
       const woodColor = woodColors[Math.floor(rand() * woodColors.length)];
@@ -1329,7 +1339,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         [0, 0, -12],
         [0, 0, 12]
       ];
-      const positionOverride: [number, number, number] | null = district === 'OUTSKIRTS'
+      const positionOverride: [number, number, number] | null = isOutskirts
         ? [0, 0, 8]
         : district === 'CARAVANSERAI'
           ? caravanPositions[i % caravanPositions.length]
@@ -1353,7 +1363,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const merchants = useMemo<MerchantNPCType[]>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
     if (params.mapX !== 0 || params.mapY !== 0) {
-      if (district !== 'OUTSKIRTS' && district !== 'CARAVANSERAI') return [];
+      if (!isOutskirts && district !== 'CARAVANSERAI') return [];
     }
 
     return marketStalls.map((stall, index) => {
@@ -1412,40 +1422,20 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const obstacles = useMemo<Obstacle[]>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
     if (params.mapX !== 0 || params.mapY !== 0) {
-      if (district !== 'OUTSKIRTS' && district !== 'CARAVANSERAI') return [];
+      if (!isOutskirts && district !== 'CARAVANSERAI') return [];
     }
 
-    const baseObstacles: Obstacle[] = district === 'OUTSKIRTS'
+    const baseObstacles: Obstacle[] = isOutskirts
       ? []
       : district === 'CARAVANSERAI'
         ? [
-          // Central fountain
-          { position: [0, 0, 0], radius: 5.5 },
-          // Merchant stalls in arcades (north wall)
-          { position: [-25, 0, -32], radius: 3.0 },
-          { position: [-10, 0, -32], radius: 3.0 },
-          { position: [10, 0, -32], radius: 3.0 },
-          { position: [25, 0, -32], radius: 3.0 },
-          // South wall stalls
-          { position: [-25, 0, 32], radius: 3.0 },
-          { position: [-10, 0, 32], radius: 3.0 },
-          { position: [10, 0, 32], radius: 3.0 },
-          { position: [25, 0, 32], radius: 3.0 },
-          // East wall stalls
-          { position: [32, 0, -25], radius: 3.0 },
-          { position: [32, 0, -10], radius: 3.0 },
-          { position: [32, 0, 10], radius: 3.0 },
-          { position: [32, 0, 25], radius: 3.0 },
-          // West wall stalls
-          { position: [-32, 0, -25], radius: 3.0 },
-          { position: [-32, 0, -10], radius: 3.0 },
-          { position: [-32, 0, 10], radius: 3.0 },
-          { position: [-32, 0, 25], radius: 3.0 },
-          // Camels
-          { position: [-15, 0, -12], radius: 2.0 },
-          { position: [12, 0, -15], radius: 2.0 },
-          { position: [-12, 0, 15], radius: 2.0 },
-          { position: [15, 0, 12], radius: 2.0 }
+          // Central fountain (actual size from Environment.tsx)
+          { position: [0, 0, 0], radius: 4.5 },
+          // Camels (positions match Environment.tsx)
+          { position: [-15, 0, -12], radius: 1.5 },
+          { position: [12, 0, -15], radius: 1.5 },
+          { position: [-12, 0, 15], radius: 1.5 },
+          { position: [15, 0, 12], radius: 1.5 }
         ]
         : [
           { position: [0, 0, 0], radius: 4.2 },      // Fountain
@@ -1464,7 +1454,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     });
 
     // Add tree obstacles for hilly districts
-    if (district === 'MOUNTAIN_SHRINE' || district === 'SALHIYYA' || district === 'OUTSKIRTS') {
+    if (district === 'MOUNTAIN_SHRINE' || district === 'SALHIYYA' || isOutskirts) {
       return [...baseObstacles, ...stallObstacles, ...treeObstacles];
     }
 
@@ -1512,6 +1502,25 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
+
+    // Update rat positions for cat to hunt
+    if (ratsRef.current.length > 0) {
+      ratPositionsRef.current = ratsRef.current
+        .filter(r => r.active)
+        .map(r => r.position);
+    }
+
+    // Update NPC positions for rats to avoid
+    if (agentHashRef.current) {
+      const positions: THREE.Vector3[] = [];
+      agentHashRef.current.buckets.forEach(bucket => {
+        for (const agent of bucket) {
+          positions.push(agent.pos);
+        }
+      });
+      npcPositionsRef.current = positions;
+    }
+
     const doAtmosphere = t - atmosphereTickRef.current >= 0.12;
     if (doAtmosphere) {
       atmosphereTickRef.current = t;
@@ -1848,6 +1857,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     // 2. Boundary Check for Map Transitions & Proximity Check
     if (playerRef.current) {
       const pos = playerRef.current.position;
+
+      // Report player position for action system
+      onPlayerPositionUpdate?.(pos);
+
       const district = getDistrictType(params.mapX, params.mapY);
       const boundary = district === 'SOUTHERN_ROAD' ? 40 : CONSTANTS.BOUNDARY;
 
@@ -2060,10 +2073,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         timeOfDay={params.timeOfDay}
         enableHoverWireframe={enableHoverWireframe}
         enableHoverLabel={enableHoverLabel}
+        showCityWalls={devSettings.showCityWalls}
         pushables={pushables}
         fogColor={colorCache.current.fogColor}
         heightmap={heightmapRef.current}
         laundryLines={laundryLines}
+        catPositionRef={catPositionRef}
+        ratPositions={ratPositionsRef.current}
       />
 
       {/* Market Stalls - procedurally generated with variety */}
@@ -2110,6 +2126,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           params={params}
           simTime={simTime}
           onStatsUpdate={onStatsUpdate}
+          onMoraleUpdate={onMoraleUpdate}
+          actionEvent={actionEvent}
           rats={ratsRef.current}
           buildings={buildingsRef.current}
           buildingHash={buildingHashRef.current}
@@ -2127,7 +2145,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
       {devSettings.showTorches && <WindowLightPool buildings={buildingsState} timeOfDay={params.timeOfDay} />}
-      {devSettings.showRats && <Rats ref={ratsRef} params={params} />}
+      {devSettings.showRats && <Rats ref={ratsRef} params={params} playerPos={playerRef.current?.position} catPos={catPositionRef.current} npcPositions={npcPositionsRef.current} />}
 
       <Player
         ref={playerRef}
@@ -2150,7 +2168,21 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onPickupPrompt={onPickupPrompt}
         onPickup={handlePickupItem}
         onPushCharge={onPushCharge}
+        dossierMode={dossierMode}
       />
+
+      {/* Footprints in sand (OUTSKIRTS_DESERT only) */}
+      {playerRef.current && district === 'OUTSKIRTS_DESERT' && (
+        <Footprints
+          playerPosition={playerRef.current.position}
+          playerRotation={playerRef.current.rotation.y}
+          isWalking={true} // Will detect movement automatically based on position changes
+          enabled={true}
+        />
+      )}
+
+      {/* Action visual effects */}
+      <ActionEffects actionEvent={actionEvent} />
     </>
   );
 };

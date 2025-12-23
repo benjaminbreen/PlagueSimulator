@@ -2,7 +2,7 @@ import React, { useRef, useState, useMemo, memo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
-import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle } from '../types';
+import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle, PANIC_SUSCEPTIBILITY, PlayerActionEvent } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
@@ -49,7 +49,7 @@ interface NPCProps {
   initialState?: AgentState;
   position: THREE.Vector3;
   target: THREE.Vector3;
-  onUpdate: (id: string, state: AgentState, pos: THREE.Vector3) => void;
+  onUpdate: (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number) => void;
   getSimTime: () => number;
   infectionRate: number;
   quarantine: boolean;
@@ -66,6 +66,7 @@ interface NPCProps {
   district?: DistrictType;
   terrainSeed?: number;
   heightmap?: TerrainHeightmap | null;
+  actionEvent?: PlayerActionEvent | null;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
@@ -89,7 +90,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   isSelected = false,
   district,
   terrainSeed,
-  heightmap
+  heightmap,
+  actionEvent
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -128,6 +130,15 @@ export const NPC: React.FC<NPCProps> = memo(({
 
   // PERFORMANCE: Throttle infection checks to once per second instead of every frame
   const infectionCheckTimerRef = useRef(0);
+
+  // MORALE SYSTEM: Track awareness and panic levels
+  const awarenessRef = useRef(stats.awarenessLevel);
+  const panicRef = useRef(stats.panicLevel);
+  const rumorCheckTimerRef = useRef(0);
+  const lastWitnessedDeathIdRef = useRef<string | null>(null);
+
+  // PLAYER ACTION RESPONSE: Track last processed action
+  const lastActionTimestampRef = useRef(0);
 
   // PERFORMANCE: Cache speed modifiers (only recalculate when hour or state changes)
   const cachedSpeedRef = useRef(2.0);
@@ -203,6 +214,41 @@ export const NPC: React.FC<NPCProps> = memo(({
         currentTargetRef.current.copy(doorPos);
         targetBuildingRef.current = nearestBuilding.id;
         return;
+      }
+    }
+
+    // MORALE: High-panic NPCs flee from infected/deceased and seek shelter
+    if (panicRef.current > 50 && agentHash) {
+      const threats = queryNearbyAgents(currentPosRef.current, agentHash)
+        .filter(a => a.id !== stats.id && (a.state === AgentState.INFECTED || a.state === AgentState.DECEASED));
+
+      if (threats.length > 0) {
+        // Calculate escape direction (opposite of threat centroid)
+        const threatCenter = new THREE.Vector3();
+        threats.forEach(t => threatCenter.add(t.pos));
+        threatCenter.divideScalar(threats.length);
+
+        const escapeDir = currentPosRef.current.clone().sub(threatCenter).normalize();
+        const escapeDistance = 15 + Math.random() * 10;
+
+        currentTargetRef.current.set(
+          currentPosRef.current.x + escapeDir.x * escapeDistance,
+          0,
+          currentPosRef.current.z + escapeDir.z * escapeDistance
+        );
+        targetBuildingRef.current = null;
+        return;
+      }
+
+      // High panic NPCs more likely to seek shelter (40% vs 20%)
+      if (Math.random() < 0.4) {
+        const nearestBuilding = findNearestBuilding(currentPosRef.current, buildings, 25);
+        if (nearestBuilding) {
+          const doorPos = getDoorPosition(nearestBuilding);
+          currentTargetRef.current.copy(doorPos);
+          targetBuildingRef.current = nearestBuilding.id;
+          return;
+        }
       }
     }
 
@@ -360,6 +406,13 @@ export const NPC: React.FC<NPCProps> = memo(({
       let speed = cachedSpeedRef.current;
       if (quarantine && stateRef.current === AgentState.INFECTED) speed = 0;
 
+      // MORALE: Panicked NPCs move faster (fleeing behavior)
+      if (panicRef.current > 70) {
+        speed *= 1.35;
+      } else if (panicRef.current > 40) {
+        speed *= 1.15;
+      }
+
       const step = dir.multiplyScalar(speed * delta * simulationSpeed);
       const nextPos = currentPosRef.current.clone().add(step);
 
@@ -423,7 +476,16 @@ export const NPC: React.FC<NPCProps> = memo(({
             // Enter the building!
             activityStateRef.current = 'INSIDE_BUILDING';
             insideBuildingIdRef.current = building.id;
-            buildingExitTimeRef.current = simTime + (1 + Math.random() * 4); // 1-5 sim minutes inside
+
+            // MORALE: Panicked people hide longer, high awareness people avoid public
+            let stayDuration = 1 + Math.random() * 4; // Base: 1-5 sim minutes
+            if (panicRef.current > 60) {
+              stayDuration += 2 + Math.random() * 3; // +2-5 extra minutes if panicked
+            }
+            if (awarenessRef.current > 70 && Math.random() < 0.4) {
+              stayDuration += 4; // Sometimes stay much longer if very aware
+            }
+            buildingExitTimeRef.current = simTime + stayDuration;
             targetBuildingRef.current = null;
 
             // Hide the NPC
@@ -496,13 +558,117 @@ export const NPC: React.FC<NPCProps> = memo(({
       }
     }
 
+    // 3b. RUMOR SPREAD & PANIC (Throttled to twice per second - faster than plague)
+    if (agentHash) {
+      rumorCheckTimerRef.current += delta * simulationSpeed;
+
+      if (rumorCheckTimerRef.current >= 0.5) {
+        rumorCheckTimerRef.current = 0;
+
+        const neighbors = queryNearbyAgents(currentPosRef.current, agentHash);
+        const panicMod = PANIC_SUSCEPTIBILITY[stats.socialClass] ?? 1.0;
+
+        for (const other of neighbors) {
+          if (other.id === stats.id) continue;
+
+          const distSq = currentPosRef.current.distanceToSquared(other.pos);
+
+          // WITNESS DEATH: Seeing a body causes major panic spike
+          if (other.state === AgentState.DECEASED && distSq < 9) {
+            if (lastWitnessedDeathIdRef.current !== other.id) {
+              lastWitnessedDeathIdRef.current = other.id;
+              awarenessRef.current = Math.min(100, awarenessRef.current + 30);
+              panicRef.current = Math.min(100, panicRef.current + 25 * panicMod);
+              setMoodOverride('Horrified');
+              moodExpireRef.current = performance.now() + 20000;
+            }
+          }
+          // WITNESS INFECTED: Seeing visibly sick people increases awareness
+          else if (other.state === AgentState.INFECTED && distSq < 6) {
+            awarenessRef.current = Math.min(100, awarenessRef.current + 3);
+            panicRef.current = Math.min(100, panicRef.current + 1.5 * panicMod);
+          }
+
+          // RUMOR SPREAD: Information flows from high awareness to low
+          // Rumors spread further than plague (16 distSq = 4 unit radius)
+          if (distSq < 16) {
+            const theirAwareness = other.awareness ?? 0;
+            const myAwareness = awarenessRef.current;
+
+            if (theirAwareness > myAwareness + 10) {
+              // I learn from them - transfer rate based on difference
+              const transfer = (theirAwareness - myAwareness) * 0.08;
+              awarenessRef.current = Math.min(100, myAwareness + transfer);
+
+              // Panic follows awareness with class modifier
+              panicRef.current = Math.min(100, panicRef.current + transfer * 0.4 * panicMod);
+            }
+          }
+        }
+
+        // Panic decays slowly over time (calm returns)
+        // Decay rate: ~5% per simulated hour at normal speed
+        panicRef.current = Math.max(0, panicRef.current - 0.08);
+
+        // Awareness decays very slowly (people don't forget)
+        awarenessRef.current = Math.max(0, awarenessRef.current - 0.01);
+      }
+    }
+
+    // 3c. PLAYER ACTION RESPONSE
+    if (actionEvent && actionEvent.timestamp > lastActionTimestampRef.current) {
+      const actionPos = new THREE.Vector3(actionEvent.position[0], actionEvent.position[1], actionEvent.position[2]);
+      const distToAction = currentPosRef.current.distanceTo(actionPos);
+
+      // Only respond if within action radius
+      if (distToAction <= actionEvent.radius) {
+        lastActionTimestampRef.current = actionEvent.timestamp;
+        const panicMod = PANIC_SUSCEPTIBILITY[stats.socialClass] ?? 1.0;
+
+        if (actionEvent.effect === 'aoe_panic') {
+          // WARN: Increase panic and scatter away from player
+          awarenessRef.current = Math.min(100, awarenessRef.current + 25 + Math.random() * 10);
+          panicRef.current = Math.min(100, panicRef.current + (15 + Math.random() * 10) * panicMod);
+
+          // Set target to flee away from player
+          const escapeDir = currentPosRef.current.clone().sub(actionPos).normalize();
+          const escapeDistance = 12 + Math.random() * 8;
+          currentTargetRef.current.set(
+            currentPosRef.current.x + escapeDir.x * escapeDistance,
+            0,
+            currentPosRef.current.z + escapeDir.z * escapeDistance
+          );
+          targetBuildingRef.current = null;
+
+          setMoodOverride('Alarmed');
+          moodExpireRef.current = performance.now() + 8000;
+        } else if (actionEvent.effect === 'aoe_calm') {
+          // ENCOURAGE: Decrease panic, some NPCs move toward player
+          panicRef.current = Math.max(0, panicRef.current - (20 + Math.random() * 10) / panicMod);
+
+          // 40% chance to gather toward player
+          if (Math.random() < 0.4) {
+            currentTargetRef.current.set(
+              actionPos.x + (Math.random() - 0.5) * 4,
+              0,
+              actionPos.z + (Math.random() - 0.5) * 4
+            );
+            targetBuildingRef.current = null;
+          }
+
+          setMoodOverride('Reassured');
+          moodExpireRef.current = performance.now() + 6000;
+        }
+      }
+    }
+
     if (lastStateRef.current !== stateRef.current) {
       lastStateRef.current = stateRef.current;
       setDisplayState(stateRef.current);
     }
 
     // 4. Report back to Registry
-    onUpdate(stats.id, stateRef.current, currentPosRef.current);
+    onUpdate(stats.id, stateRef.current, currentPosRef.current, awarenessRef.current, panicRef.current);
 
     // 5. Impact pulse update (cheap)
     if (impactMapRef?.current) {
@@ -584,7 +750,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       propGroupRef.current.position.y = 1.02 + bob;
     }
 
-    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE')) {
+    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT' || district === 'MOUNTAIN_SHRINE')) {
       group.current.position.y = sampleTerrainHeight(heightmap, currentPosRef.current.x, currentPosRef.current.z);
     } else if (group.current) {
       group.current.position.y = 0;
@@ -779,13 +945,33 @@ export const NPC: React.FC<NPCProps> = memo(({
               <div className="flex justify-between">
                 <span className="text-amber-500/60 font-bold">HEALTH</span>
                 <span className={`font-bold ${
-                  stateRef.current === AgentState.HEALTHY ? 'text-green-400' : 
+                  stateRef.current === AgentState.HEALTHY ? 'text-green-400' :
                   stateRef.current === AgentState.DECEASED ? 'text-gray-500' : 'text-red-500'
                 }`}>
-                  {stateRef.current === AgentState.HEALTHY ? 'Sound' : 
-                   stateRef.current === AgentState.DECEASED ? 'Fallen' : 
+                  {stateRef.current === AgentState.HEALTHY ? 'Sound' :
+                   stateRef.current === AgentState.DECEASED ? 'Fallen' :
                    stateRef.current === AgentState.INFECTED ? 'Afflicted' : 'Unwell'}
                 </span>
+              </div>
+              <div className="border-t border-amber-900/30 pt-1.5 mt-1.5 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-500/60 font-bold w-20">AWARENESS</span>
+                  <div className="flex-1 h-1 bg-gray-700/50 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.min(100, awarenessRef.current)}%` }} />
+                  </div>
+                  <span className="w-8 text-right font-mono text-amber-100/60">{Math.round(awarenessRef.current)}%</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-amber-500/60 font-bold w-20">PANIC</span>
+                  <div className="flex-1 h-1 bg-gray-700/50 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${
+                      panicRef.current < 36 ? 'bg-emerald-500' :
+                      panicRef.current < 56 ? 'bg-yellow-500' :
+                      panicRef.current < 76 ? 'bg-orange-500' : 'bg-red-500'
+                    }`} style={{ width: `${Math.min(100, panicRef.current)}%` }} />
+                  </div>
+                  <span className="w-8 text-right font-mono text-amber-100/60">{Math.round(panicRef.current)}%</span>
+                </div>
               </div>
               <div className="flex justify-between italic text-amber-100/40 mt-1">
                  <span>{stats.gender}</span>

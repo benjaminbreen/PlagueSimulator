@@ -43,6 +43,7 @@ interface PlayerProps {
   onPickupPrompt?: (label: string | null) => void;
   onPickup?: (itemId: string, pickup: PickupInfo) => void;
   onPushCharge?: (charge: number) => void;
+  dossierMode?: boolean;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -62,7 +63,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   heightmap,
   onPickupPrompt,
   onPickup,
-  onPushCharge
+  onPushCharge,
+  dossierMode = false
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -91,7 +93,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const lastPlayerPos = useRef(new THREE.Vector3());
   const fpYaw = useRef(0);
   const fpPitch = useRef(0);
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   const [isWalking, setIsWalking] = useState(false);
   const [isSprinting, setIsSprinting] = useState(false);
   const walkingRef = useRef(false);
@@ -128,6 +130,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const interactTriggerRef = useRef<number | null>(null);
   const pickupPromptRef = useRef<string | null>(null);
   const nearestPickupRef = useRef<{ id: string; pickup: PickupInfo } | null>(null);
+
+  // Dossier mode camera state
+  const savedCameraPos = useRef<THREE.Vector3 | null>(null);
+  const savedCameraTarget = useRef<THREE.Vector3 | null>(null);
 
   useImperativeHandle(ref, () => group.current!, []);
 
@@ -381,6 +387,67 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   useFrame((state, delta) => {
     if (!group.current) return;
+
+    // 0. Dossier Mode Camera Animation
+    if (dossierMode && orbitRef.current) {
+      // Save original camera position on first frame of dossier mode
+      if (!savedCameraPos.current) {
+        savedCameraPos.current = camera.position.clone();
+        savedCameraTarget.current = orbitRef.current.target.clone();
+      }
+
+      // Set camera view offset to center player in RIGHT half of screen
+      // Modal takes up left 50%, so we want player centered at 75% position
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.setViewOffset(
+          size.width,        // Full viewport width
+          size.height,       // Full viewport height
+          -size.width / 4,   // Shift left by 25% to move center point to 75% position
+          0,                 // No vertical shift
+          size.width,        // Render full width
+          size.height        // Render full height
+        );
+      }
+
+      // Calculate portrait camera position (in front of player at eye level)
+      const playerPos = group.current.position;
+      const portraitCameraPos = new THREE.Vector3(
+        playerPos.x,
+        playerPos.y + 1.6,  // Eye level
+        playerPos.z + 2.5   // 2.5 units in front
+      );
+      const portraitTarget = new THREE.Vector3(
+        playerPos.x,
+        playerPos.y + 1.5,  // Look at face
+        playerPos.z
+      );
+
+      // Smooth lerp to portrait position
+      camera.position.lerp(portraitCameraPos, 0.08);
+      orbitRef.current.target.lerp(portraitTarget, 0.08);
+      orbitRef.current.update();
+    } else {
+      // Always clear camera view offset when NOT in dossier mode
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.clearViewOffset();
+      }
+
+      // Lerp back to original position when modal closes
+      if (savedCameraPos.current && orbitRef.current) {
+        camera.position.lerp(savedCameraPos.current, 0.08);
+        orbitRef.current.target.lerp(savedCameraTarget.current!, 0.08);
+        orbitRef.current.update();
+
+        // Clear saved position when close enough
+        if (camera.position.distanceTo(savedCameraPos.current) < 0.1) {
+          savedCameraPos.current = null;
+          savedCameraTarget.current = null;
+        }
+      }
+    }
+
+    // Skip all movement and interaction logic when in dossier mode
+    if (dossierMode) return;
 
     // 1. Camera Adjustment Logic (WASD)
     if (cameraMode === CameraMode.FIRST_PERSON) {

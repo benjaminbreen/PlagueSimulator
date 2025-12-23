@@ -25,11 +25,13 @@ const roomSizeForClass = (socialClass: SocialClass): number => {
   return 10;
 };
 
-const resolveRoomSize = (socialClass: SocialClass, sizeScale: number, buildingType: BuildingType): number => {
+const resolveRoomSize = (socialClass: SocialClass, sizeScale: number, buildingType: BuildingType, storyCount?: 1 | 2 | 3): number => {
   const base = roomSizeForClass(socialClass) * sizeScale;
   const typeBoost = buildingType === BuildingType.CIVIC || buildingType === BuildingType.RELIGIOUS ? 1.15 : 1;
-  const raw = base * typeBoost;
-  return Math.max(8, Math.min(22, raw));
+  // Scale interior size based on story count: 1 story = 1x, 2 stories = 1.5x, 3 stories = 2x
+  const storyMultiplier = storyCount === 3 ? 2.0 : storyCount === 2 ? 1.5 : 1.0;
+  const raw = base * typeBoost * storyMultiplier;
+  return Math.max(8, Math.min(32, raw));
 };
 
 const roomCountForClass = (socialClass: SocialClass): number => {
@@ -227,6 +229,28 @@ const wallAnchor = (
   return [cx - halfW + inset, 0, cz + offset];
 };
 
+const faceIntoRoom = (side: 'north' | 'south' | 'east' | 'west'): [number, number, number] => {
+  if (side === 'north') return [0, Math.PI, 0];
+  if (side === 'south') return [0, 0, 0];
+  if (side === 'east') return [0, -Math.PI / 2, 0];
+  return [0, Math.PI / 2, 0];
+};
+
+const cornerAnchor = (
+  room: InteriorRoom,
+  corner: 'ne' | 'nw' | 'se' | 'sw',
+  inset = 0.7,
+  height = 2.3
+): [number, number, number] => {
+  const [cx, , cz] = room.center;
+  const halfW = room.size[0] / 2 - inset;
+  const halfD = room.size[2] / 2 - inset;
+  if (corner === 'ne') return [cx + halfW, height, cz + halfD];
+  if (corner === 'nw') return [cx - halfW, height, cz + halfD];
+  if (corner === 'se') return [cx + halfW, height, cz - halfD];
+  return [cx - halfW, height, cz - halfD];
+};
+
 const clampToRoom = (room: InteriorRoom, pos: [number, number, number], margin = 0.6): [number, number, number] => {
   const [cx, , cz] = room.center;
   const halfW = room.size[0] / 2 - margin;
@@ -328,20 +352,36 @@ const addCommercialLayout = (
   }
 
   if (profLower.includes('khan') || profLower.includes('caravanserai')) {
-    addProp(props, hall, InteriorPropType.COUNTER, 'Reception counter', clampToRoom(hall, wallAnchor(hall, counterSide, 0.8)));
+    addProp(
+      props,
+      hall,
+      InteriorPropType.COUNTER,
+      'Reception counter',
+      clampToRoom(hall, wallAnchor(hall, counterSide, 0.8)),
+      faceIntoRoom(counterSide)
+    );
     return;
   }
 
   const counterPos = clampToRoom(hall, wallAnchor(hall, counterSide, 1.6));
-  addProp(props, hall, InteriorPropType.COUNTER, 'Sales counter', counterPos);
+  addProp(props, hall, InteriorPropType.COUNTER, 'Sales counter', counterPos, faceIntoRoom(counterSide));
   const displaySide = entrySide === 'east' || entrySide === 'west'
     ? (entrySide === 'east' ? 'north' : 'south')
     : (entrySide === 'north' ? 'east' : 'west');
-  addProp(props, hall, InteriorPropType.DISPLAY, 'Display shelf', clampToRoom(hall, wallAnchor(hall, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4)), [0, displaySide === 'east' ? -Math.PI / 2 : Math.PI / 2, 0]);
+  const displayRot = faceIntoRoom(displaySide);
+  addProp(
+    props,
+    hall,
+    InteriorPropType.DISPLAY,
+    'Display shelf',
+    clampToRoom(hall, wallAnchor(hall, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4)),
+    displayRot
+  );
   addProp(props, hall, InteriorPropType.BASKET, 'Market baskets', clampToRoom(hall, [hall.center[0], 0, hall.center[2] - hall.size[2] / 2 + 2.2]), [0, rand() * Math.PI, 0]);
   addProp(props, hall, InteriorPropType.BOLT_OF_CLOTH, 'Bolts of cloth', clampToRoom(hall, [hall.center[0] + 1.4, 0.75, hall.center[2] - hall.size[2] / 2 + 0.8]), [0, 0, 0]);
-  addProp(props, hall, InteriorPropType.SCALE, 'Balance scale', clampToRoom(hall, [counterPos[0] - 0.5, 0.85, counterPos[2] + 0.15]));
-  addProp(props, hall, InteriorPropType.LEDGER, 'Account ledger', clampToRoom(hall, [counterPos[0] + 0.5, 0.85, counterPos[2] + 0.15]));
+  const counterTopY = 1.18;
+  addProp(props, hall, InteriorPropType.SCALE, 'Balance scale', clampToRoom(hall, [counterPos[0] - 0.5, counterTopY, counterPos[2] + 0.12]));
+  addProp(props, hall, InteriorPropType.LEDGER, 'Account ledger', clampToRoom(hall, [counterPos[0] + 0.5, counterTopY, counterPos[2] + 0.12]));
   if (profLower.includes('weaver') || profLower.includes('textile') || profLower.includes('draper')) {
     addProp(props, hall, InteriorPropType.LOOM, 'Weaving loom', clampToRoom(hall, wallAnchor(hall, 'north', 0.8, 0)));
     addProp(props, hall, InteriorPropType.BOLT_OF_CLOTH, 'Dyed cloth bolts', clampToRoom(hall, wallAnchor(hall, 'north', 0.7, 1.6)), [0, Math.PI / 2, 0]);
@@ -356,7 +396,7 @@ const addCommercialLayout = (
   }
   if (profLower.includes('smith') || profLower.includes('blacksmith') || profLower.includes('armorer')) {
     addProp(props, hall, InteriorPropType.ANVIL, 'Anvil', clampToRoom(hall, [hall.center[0] + 0.6, 0, hall.center[2] - 0.4]));
-    addProp(props, hall, InteriorPropType.TOOL_RACK, 'Tool rack', clampToRoom(hall, wallAnchor(hall, 'north', 0.7, 1.2)));
+    addProp(props, hall, InteriorPropType.TOOL_RACK, 'Tool rack', clampToRoom(hall, wallAnchor(hall, 'north', 0.7, 1.2)), faceIntoRoom('north'));
   }
   if (profLower.includes('baker')) {
     addProp(props, hall, InteriorPropType.TRAY, 'Bread tray', clampToRoom(hall, [hall.center[0] - 0.4, 0.75, hall.center[2] - hall.size[2] / 2 + 0.9]));
@@ -412,15 +452,19 @@ const placePropPosition = (
 
   const wallAligned = () => {
     if (wallPick === 0) {
-      return { position: adjustForDoor([cx + wallOffset(), 0, cz - halfD + wallInset]), rotation: [0, 0, 0] };
+      // South wall - face north (into room)
+      return { position: adjustForDoor([cx + wallOffset(), 0, cz - halfD + wallInset]), rotation: [0, Math.PI, 0] };
     }
     if (wallPick === 1) {
-      return { position: adjustForDoor([cx + wallOffset(), 0, cz + halfD - wallInset]), rotation: [0, Math.PI, 0] };
+      // North wall - face south (into room)
+      return { position: adjustForDoor([cx + wallOffset(), 0, cz + halfD - wallInset]), rotation: [0, 0, 0] };
     }
     if (wallPick === 2) {
-      return { position: adjustForDoor([cx - halfW + wallInset, 0, cz + wallZOffset()]), rotation: [0, Math.PI / 2, 0] };
-    }
-    return { position: adjustForDoor([cx + halfW - wallInset, 0, cz + wallZOffset()]), rotation: [0, -Math.PI / 2, 0] };
+    // West wall - face east (into room)
+    return { position: adjustForDoor([cx - halfW + wallInset, 0, cz + wallZOffset()]), rotation: [0, Math.PI / 2, 0] };
+  }
+  // East wall - face west (into room)
+  return { position: adjustForDoor([cx + halfW - wallInset, 0, cz + wallZOffset()]), rotation: [0, -Math.PI / 2, 0] };
   };
 
   switch (type) {
@@ -446,6 +490,7 @@ const placePropPosition = (
     case InteriorPropType.STAIRS:
     case InteriorPropType.CANDLE:
     case InteriorPropType.FLOOR_LAMP:
+    case InteriorPropType.LANTERN:
     case InteriorPropType.SPINDLE:
     case InteriorPropType.DYE_VAT:
     case InteriorPropType.ANVIL:
@@ -744,19 +789,23 @@ const pickProps = (
     }
   });
 
-  // Add table candles.
+  // Add table and counter candles.
   rooms.forEach((room) => {
     const tables = props.filter((prop) => prop.roomId === room.id && prop.type === InteriorPropType.LOW_TABLE);
-    if (tables.length === 0) return;
+    const counters = props.filter((prop) => prop.roomId === room.id && prop.type === InteriorPropType.COUNTER);
+    const desks = props.filter((prop) => prop.roomId === room.id && prop.type === InteriorPropType.DESK);
+    if (tables.length === 0 && counters.length === 0 && desks.length === 0) return;
     const existingCandles = props.filter((prop) => prop.roomId === room.id && prop.type === InteriorPropType.CANDLE);
     const maxCandles = socialClass === SocialClass.NOBILITY ? 2 : socialClass === SocialClass.MERCHANT ? 1 : 0;
     if (existingCandles.length >= maxCandles) return;
-    const table = tables[Math.floor(rand() * tables.length)];
+    const pick = (list: InteriorProp[]) => list[Math.floor(rand() * list.length)];
+    const target = tables.length ? pick(tables) : counters.length ? pick(counters) : pick(desks);
+    const baseY = target.type === InteriorPropType.COUNTER ? 1.22 : target.type === InteriorPropType.DESK ? 0.95 : 0.45;
     props.push({
       id: `prop-candle-${room.id}-${existingCandles.length}`,
       type: InteriorPropType.CANDLE,
       roomId: room.id,
-      position: [table.position[0], 0.45, table.position[2]],
+      position: [target.position[0], baseY, target.position[2]],
       rotation: [0, rand() * Math.PI * 2, 0],
       scale: [1, 1, 1],
       label: 'Beeswax candle',
@@ -766,7 +815,11 @@ const pickProps = (
   // Add floor lamps in larger rooms lacking light sources.
   rooms.forEach((room) => {
     const hasLight = props.some((prop) => prop.roomId === room.id && (
-      prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.FIRE_PIT || prop.type === InteriorPropType.FLOOR_LAMP
+      prop.type === InteriorPropType.LAMP
+      || prop.type === InteriorPropType.BRAZIER
+      || prop.type === InteriorPropType.FIRE_PIT
+      || prop.type === InteriorPropType.FLOOR_LAMP
+      || prop.type === InteriorPropType.LANTERN
     ));
     if (hasLight) return;
     const shouldStand = socialClass !== SocialClass.PEASANT && (room.size[0] > 12 || room.size[2] > 12);
@@ -856,6 +909,95 @@ const applyRoomLayouts = (
   };
   rooms.forEach((room) => {
     if (room.type === InteriorRoomType.ENTRY) {
+      // Special handling for religious sanctuary - the ENTRY room IS the main sanctuary
+      if (buildingType === BuildingType.RELIGIOUS) {
+        const [cx, , cz] = room.center;
+        const [roomWidth, , roomDepth] = room.size;
+        const halfW = roomWidth / 2;
+        const halfD = roomDepth / 2;
+
+        // Calculate arch inset based on room width - arches should be inside the walls
+        const wallMargin = 1.8;
+        const maxArchInset = halfW - wallMargin;
+        const archInset = Math.min(maxArchInset, Math.max(1.5, roomWidth * 0.25));
+
+        // Only add arches if room is wide enough
+        if (roomWidth >= 8 && roomDepth >= 8) {
+          const archSpacing = 3.2;
+          const maxArchDepth = halfD - 2.0;
+          const numArches = Math.max(1, Math.min(4, Math.floor((roomDepth - 4) / archSpacing)));
+
+          for (let i = 0; i < numArches; i++) {
+            const zOffset = (i - (numArches - 1) / 2) * archSpacing;
+            const clampedZ = Math.max(cz - maxArchDepth, Math.min(cz + maxArchDepth, cz + zOffset));
+
+            props.push({
+              id: `arch-east-${room.id}-${i}`,
+              type: InteriorPropType.ARCH_COLUMN,
+              roomId: room.id,
+              position: [cx + archInset, 0, clampedZ],
+              rotation: [0, Math.PI / 2, 0],
+              scale: [1, 1, 1],
+              label: 'Stone arch',
+            });
+
+            props.push({
+              id: `arch-west-${room.id}-${i}`,
+              type: InteriorPropType.ARCH_COLUMN,
+              roomId: room.id,
+              position: [cx - archInset, 0, clampedZ],
+              rotation: [0, -Math.PI / 2, 0],
+              scale: [1, 1, 1],
+              label: 'Stone arch',
+            });
+          }
+        }
+
+        // Add grid of prayer rugs
+        const rugSpacingX = 1.7;
+        const rugSpacingZ = 2.4;
+        const rugMargin = 1.5;
+
+        const rugAreaHalfW = roomWidth >= 8 ? Math.min(archInset - 1.2, halfW - rugMargin) : halfW - rugMargin;
+        const rugAreaHalfD = halfD - rugMargin;
+        const availableWidth = rugAreaHalfW * 2;
+        const availableDepth = rugAreaHalfD * 2;
+
+        const rugsPerRow = Math.max(1, Math.floor(availableWidth / rugSpacingX));
+        const numRows = Math.max(1, Math.floor(availableDepth / rugSpacingZ));
+
+        const gridWidth = (rugsPerRow - 1) * rugSpacingX;
+        const gridDepth = (numRows - 1) * rugSpacingZ;
+        const gridStartX = cx - gridWidth / 2;
+        const gridStartZ = cz - gridDepth / 2;
+
+        for (let row = 0; row < numRows; row++) {
+          for (let col = 0; col < rugsPerRow; col++) {
+            const rugX = gridStartX + col * rugSpacingX;
+            const rugZ = gridStartZ + row * rugSpacingZ;
+            const clampedX = Math.max(cx - halfW + rugMargin, Math.min(cx + halfW - rugMargin, rugX));
+            const clampedZ = Math.max(cz - halfD + rugMargin, Math.min(cz + halfD - rugMargin, rugZ));
+
+            props.push({
+              id: `prayer-rug-${room.id}-${row}-${col}`,
+              type: InteriorPropType.PRAYER_RUG,
+              roomId: room.id,
+              position: [clampedX, 0, clampedZ],
+              rotation: [0, 0, 0],
+              scale: [0.6, 1, 0.6],
+              label: 'Prayer rug',
+            });
+          }
+        }
+
+        // Add mihrab rug and lantern
+        const mihrabZ = Math.max(cz - halfD + 2.0, cz - halfD + rugMargin + 0.5);
+        upsertProp(props, room, InteriorPropType.RUG, 'Mihrab rug', clampToRoom(room, [cx, 0, mihrabZ]));
+        upsertProp(props, room, InteriorPropType.LANTERN, 'Sanctuary lamp', [cx, 2.2, cz]);
+        return;
+      }
+
+      // Normal entry room for non-religious buildings
       const safeSide = oppositeSide(entrySide);
       upsertProp(props, room, InteriorPropType.FLOOR_MAT, 'Woven floor mat', clampToRoom(room, wallAnchor(room, safeSide, 1.4, 0)));
       upsertProp(props, room, InteriorPropType.CHEST, 'Storage chest', clampToRoom(room, wallAnchor(room, safeSide, 0.8, -0.8)));
@@ -894,13 +1036,30 @@ const applyRoomLayouts = (
     if (room.type === InteriorRoomType.HALL) {
       if (isCommercial && !isInnLike) {
         const counterSide = oppositeSide(entrySide);
-        upsertProp(props, room, InteriorPropType.COUNTER, 'Sales counter', clampToRoom(room, wallAnchor(room, counterSide, 1.6, 0)));
+        upsertProp(
+          props,
+          room,
+          InteriorPropType.COUNTER,
+          'Sales counter',
+          clampToRoom(room, wallAnchor(room, counterSide, 1.6, 0)),
+          faceIntoRoom(counterSide)
+        );
         const displaySide = entrySide === 'east' || entrySide === 'west'
           ? (entrySide === 'east' ? 'north' : 'south')
           : (entrySide === 'north' ? 'east' : 'west');
-        upsertProp(props, room, InteriorPropType.DISPLAY, 'Display shelf', clampToRoom(room, wallAnchor(room, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4)), [0, displaySide === 'east' ? -Math.PI / 2 : Math.PI / 2, 0]);
-        upsertProp(props, room, InteriorPropType.SCALE, 'Balance scale', clampToRoom(room, [room.center[0] - 0.4, 0, room.center[2] - room.size[2] / 2 + 0.9]));
-        upsertProp(props, room, InteriorPropType.LEDGER, 'Account ledger', clampToRoom(room, [room.center[0] + 0.4, 0, room.center[2] - room.size[2] / 2 + 0.9]));
+        const displayRot = faceIntoRoom(displaySide);
+        upsertProp(
+          props,
+          room,
+          InteriorPropType.DISPLAY,
+          'Display shelf',
+          clampToRoom(room, wallAnchor(room, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4)),
+          displayRot
+        );
+        const counterPos = clampToRoom(room, wallAnchor(room, counterSide, 1.6, 0));
+        const counterTopY = 1.18;
+        upsertProp(props, room, InteriorPropType.SCALE, 'Balance scale', clampToRoom(room, [counterPos[0] - 0.5, counterTopY, counterPos[2] + 0.12]));
+        upsertProp(props, room, InteriorPropType.LEDGER, 'Account ledger', clampToRoom(room, [counterPos[0] + 0.5, counterTopY, counterPos[2] + 0.12]));
         upsertProp(props, room, InteriorPropType.BASKET, 'Market baskets', clampToRoom(room, wallAnchor(room, 'west', 0.8, 1.2)));
         return;
       }
@@ -1041,14 +1200,16 @@ export const generateInteriorSpec = (
   const isCommercial = building.type === BuildingType.COMMERCIAL;
   const isInnLike = isCommercial && (profLower.includes('inn') || profLower.includes('sherbet'));
   const isCaravan = isCommercial && (profLower.includes('khan') || profLower.includes('caravanserai'));
-  const isShopStall = isCommercial && !isInnLike && !isCaravan && sizeScale <= 1.1;
+  const isShopStall = isCommercial && !isInnLike && !isCaravan;
+  const allowMultiRoom = building.type === BuildingType.CIVIC
+    || building.type === BuildingType.RELIGIOUS
+    || isInnLike
+    || isCaravan
+    || socialClass === SocialClass.NOBILITY
+    || (socialClass === SocialClass.MERCHANT && sizeScale > 1.2);
   let baseRoomTypes = overrides?.roomTypes ?? defaultRoomTypes(socialClass, profession, building.type);
-  if (isShopStall) {
+  if (isShopStall || !allowMultiRoom) {
     baseRoomTypes = [InteriorRoomType.ENTRY];
-  } else if (!isCommercial && building.type !== BuildingType.CIVIC && building.type !== BuildingType.RELIGIOUS) {
-    if (socialClass !== SocialClass.NOBILITY && sizeScale <= 1.1) {
-      baseRoomTypes = [InteriorRoomType.ENTRY];
-    }
   }
   if (sizeScale < 0.9) {
     baseRoomTypes = baseRoomTypes.slice(0, 1);
@@ -1056,20 +1217,22 @@ export const generateInteriorSpec = (
     baseRoomTypes = baseRoomTypes.slice(0, Math.min(2, baseRoomTypes.length));
   }
   const roomCount = overrides?.roomCount ?? baseRoomTypes.length;
-  let size = resolveRoomSize(socialClass, sizeScale, building.type);
+  let size = resolveRoomSize(socialClass, sizeScale, building.type, building.storyCount);
   if (isShopStall) {
     size = Math.max(8, size * 0.8);
   }
 
   const entrySide = building.doorSide === 0 ? 'north' : building.doorSide === 1 ? 'south' : building.doorSide === 2 ? 'east' : 'west';
-  const openSide: 'north' | 'south' | 'east' | 'west' | null = building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS ? null : 'south';
+  const openSide: 'north' | 'south' | 'east' | 'west' | null = building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS
+    ? null
+    : entrySide;
   const rooms = placeRooms(s, baseRoomTypes.slice(0, roomCount), size);
   s += 50;
   const props = pickProps(rooms, socialClass, building.type, profession, s, entrySide);
   applyRoomLayouts(props, rooms, building.type, profession, socialClass, s + 31, entrySide);
   s += 80;
   const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? rooms[0];
-  const hasLightSource = props.some((prop) => prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER);
+  const hasLightSource = props.some((prop) => prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.LANTERN);
   const wallHeight = Math.max(3.0, Math.min(5.2, 3.1 + sizeScale * 0.9 + (building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS ? 0.4 : 0)));
   const ladderSide: 'north' | 'south' | 'east' | 'west' = entrySide === 'north' || entrySide === 'south' ? 'east' : 'north';
   const isMultiStory = (building.sizeScale ?? 1) > 1.15 || building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS;
@@ -1125,6 +1288,38 @@ export const generateInteriorSpec = (
     ensureEntryProp(InteriorPropType.CUSHION, 'Cushion', [1.6, 0, 0.2]);
   }
   ensureEntryProp(InteriorPropType.LAMP, 'Oil lamp', [-0.8, 0, -0.8]);
+
+  const addLantern = () => {
+    const lanternRoom = building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS
+      ? rooms.find((room) => room.type === InteriorRoomType.HALL || room.type === InteriorRoomType.ENTRY)
+      : rooms.find((room) => room.type === InteriorRoomType.PRIVATE || room.type === InteriorRoomType.ENTRY);
+    if (!lanternRoom) return;
+    const hasLantern = props.some((prop) => prop.roomId === lanternRoom.id && prop.type === InteriorPropType.LANTERN);
+    if (hasLantern) return;
+    const corner = entrySide === 'north'
+      ? 'se'
+      : entrySide === 'south'
+        ? 'ne'
+        : entrySide === 'east'
+          ? 'sw'
+          : 'se';
+    // Position lantern well inside room (inset 1.5 from corner), at a lower height for visibility
+    const lanternHeight = Math.min(wallHeight - 0.8, 2.4);  // Lower, more visible height
+    const pos = cornerAnchor(lanternRoom, corner, 1.5, lanternHeight);
+    props.push({
+      id: `prop-lantern-${building.id}`,
+      type: InteriorPropType.LANTERN,
+      roomId: lanternRoom.id,
+      position: clampToRoom(lanternRoom, pos, 1.2),  // Use larger margin to keep inside walls
+      rotation: [0, 0, 0],
+      scale: [3, 3, 3],  // Larger scale for more prominent appearance
+      label: 'Hanging lantern',
+    });
+  };
+
+  if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.RESIDENTIAL) {
+    addLantern();
+  }
   if (!hasLightSource) {
     props.push({
       id: `prop-lamp-${building.id}`,
@@ -1196,6 +1391,28 @@ export const generateInteriorSpec = (
         stats,
       });
     });
+  }
+
+  if (process.env.NODE_ENV !== 'production') {
+    const issues: string[] = [];
+    props.forEach((prop) => {
+      const room = rooms.find((candidate) => candidate.id === prop.roomId);
+      if (!room) {
+        issues.push(`${prop.id} missing room ${prop.roomId}`);
+        return;
+      }
+      const [cx, , cz] = room.center;
+      const halfW = room.size[0] / 2 - 0.4;
+      const halfD = room.size[2] / 2 - 0.4;
+      const dx = Math.abs(prop.position[0] - cx);
+      const dz = Math.abs(prop.position[2] - cz);
+      if (dx > halfW || dz > halfD) {
+        issues.push(`${prop.id} outside ${room.id} (${dx.toFixed(2)}, ${dz.toFixed(2)})`);
+      }
+    });
+    if (issues.length) {
+      console.warn(`[interior] placement issues for ${building.id}`, issues);
+    }
   }
 
   const spec: InteriorSpec = {
@@ -1270,6 +1487,7 @@ export const generateInteriorObstacles = (
       || prop.type === InteriorPropType.FLOOR_MAT
       || prop.type === InteriorPropType.FLOOR_PILLOWS
       || prop.type === InteriorPropType.CUSHION
+      || prop.type === InteriorPropType.LANTERN
     ) {
       return;
     }

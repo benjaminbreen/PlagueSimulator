@@ -4,10 +4,11 @@ import { Canvas } from '@react-three/fiber';
 import { AdaptiveDpr, AdaptiveEvents, PerformanceMonitor } from '@react-three/drei';
 import * as THREE from 'three';
 import { Simulation } from './components/Simulation';
+import { MoraleStats } from './components/Agents';
 import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
 import { MerchantModal } from './components/MerchantModal';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState, MerchantNPC, MiniMapData } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
 
@@ -43,11 +44,29 @@ function App() {
   const [selectedNpc, setSelectedNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
   const [showMerchantModal, setShowMerchantModal] = useState(false);
+  const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
   const [pushCharge, setPushCharge] = useState(0);
   const [currentWeather, setCurrentWeather] = useState<string>('CLEAR');
+  const [moraleStats, setMoraleStats] = useState<MoraleStats>({
+    avgAwareness: 0,
+    avgPanic: 0,
+    agentCount: 0
+  });
+
+  // Action system state
+  const [actionSlots, setActionSlots] = useState<ActionSlotState>({
+    slot1: 'warn',
+    slot2: 'encourage',
+    slot3: 'observe',
+    cooldowns: {},
+    lastTriggered: null
+  });
+  const [actionEvent, setActionEvent] = useState<PlayerActionEvent | null>(null);
+  const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
+
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
   const [playerStats, setPlayerStats] = useState<PlayerStats>(() => {
@@ -123,6 +142,7 @@ function App() {
     showNPCs: true,
     showRats: true,
     showMiasma: true,
+    showCityWalls: true,
   });
 
   useEffect(() => {
@@ -200,6 +220,77 @@ function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [nearBuilding, showEnterModal, nearMerchant, showMerchantModal, sceneMode]);
+
+  // Action trigger function
+  const triggerAction = useCallback((actionId: ActionId) => {
+    const action = PLAYER_ACTIONS[actionId];
+    const currentTime = stats.simTime;
+
+    // Check cooldown
+    const cooldownEnd = actionSlots.cooldowns[actionId] || 0;
+    if (currentTime < cooldownEnd) {
+      return; // Still on cooldown
+    }
+
+    // Check charisma requirement
+    if (action.requiresCharisma && playerStats.charisma < action.requiresCharisma) {
+      return; // Doesn't meet requirement
+    }
+
+    // Create action event
+    const event: PlayerActionEvent = {
+      actionId,
+      position: [playerPositionRef.current.x, playerPositionRef.current.y, playerPositionRef.current.z],
+      timestamp: Date.now(),
+      effect: action.effect,
+      radius: action.radius
+    };
+
+    setActionEvent(event);
+
+    // Set cooldown
+    if (action.cooldownSeconds > 0) {
+      setActionSlots(prev => ({
+        ...prev,
+        cooldowns: {
+          ...prev.cooldowns,
+          [actionId]: currentTime + action.cooldownSeconds
+        },
+        lastTriggered: {
+          actionId,
+          timestamp: Date.now(),
+          position: event.position
+        }
+      }));
+    }
+
+    // Clear action event after a short delay
+    setTimeout(() => setActionEvent(null), 500);
+  }, [actionSlots.cooldowns, playerStats.charisma, stats.simTime]);
+
+  // Action hotkey listener (1, 2, 3)
+  useEffect(() => {
+    const handleActionKey = (e: KeyboardEvent) => {
+      // Don't trigger if typing in an input or modal is open
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (showMerchantModal || showEnterModal || showPlayerModal) return;
+      if (sceneMode !== 'outdoor') return;
+
+      if (e.key === '1') {
+        e.preventDefault();
+        triggerAction(actionSlots.slot1);
+      } else if (e.key === '2') {
+        e.preventDefault();
+        triggerAction(actionSlots.slot2);
+      } else if (e.key === '3') {
+        e.preventDefault();
+        triggerAction(actionSlots.slot3);
+      }
+    };
+
+    window.addEventListener('keydown', handleActionKey);
+    return () => window.removeEventListener('keydown', handleActionKey);
+  }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, showMerchantModal, showEnterModal, showPlayerModal, sceneMode]);
 
   const handleMapChange = useCallback((dx: number, dy: number) => {
     setTransitioning(true);
@@ -456,6 +547,12 @@ function App() {
         pickupToast={pickupToast?.message ?? null}
         currentWeather={currentWeather}
         pushCharge={pushCharge}
+        moraleStats={moraleStats}
+        actionSlots={actionSlots}
+        onTriggerAction={triggerAction}
+        simTime={stats.simTime}
+        showPlayerModal={showPlayerModal}
+        setShowPlayerModal={setShowPlayerModal}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -581,6 +678,10 @@ function App() {
               onPickupItem={handlePickupItem}
               onWeatherUpdate={setCurrentWeather}
               onPushCharge={setPushCharge}
+              onMoraleUpdate={setMoraleStats}
+              actionEvent={actionEvent}
+              onPlayerPositionUpdate={(pos) => playerPositionRef.current.copy(pos)}
+              dossierMode={showPlayerModal}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -590,6 +691,8 @@ function App() {
               playerStats={playerStats}
               onPickupPrompt={setPickupPrompt}
               onPickupItem={handlePickupItem}
+              onNpcSelect={setSelectedNpc}
+              selectedNpcId={selectedNpc?.stats.id ?? null}
             />
           )}
         </Suspense>

@@ -21,7 +21,7 @@ export const getTerrainHeight = (
   z: number,
   seed: number
 ): number => {
-  if (district !== 'SALHIYYA' && district !== 'OUTSKIRTS' && district !== 'MOUNTAIN_SHRINE') return 0;
+  if (district !== 'SALHIYYA' && district !== 'OUTSKIRTS_FARMLAND' && district !== 'OUTSKIRTS_DESERT' && district !== 'MOUNTAIN_SHRINE') return 0;
   const s = seededRandom(seed) * 100;
 
   // Mountain shrine: gentle hilly terrain rising toward center
@@ -37,12 +37,13 @@ export const getTerrainHeight = (
     return hillHeight + h1 + h2 + h3 + h4;
   }
 
-  const f1 = district === 'OUTSKIRTS' ? 0.035 : 0.045;
-  const f2 = district === 'OUTSKIRTS' ? 0.06 : 0.08;
+  const isOutskirts = district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT';
+  const f1 = isOutskirts ? 0.035 : 0.045;
+  const f2 = isOutskirts ? 0.06 : 0.08;
   const h1 = Math.sin((x + s) * f1) * Math.cos((z - s) * f1) * 2.4;
   const h2 = Math.sin((x + z) * f2 + s * 0.3) * 1.2;
   const h3 = Math.cos((z - x) * 0.06 + s * 0.2) * 0.6;
-  const scale = district === 'OUTSKIRTS' ? 0.65 : 1.1;
+  const scale = isOutskirts ? 0.65 : 1.1;
   return (h1 + h2 + h3) * scale;
 };
 

@@ -19,6 +19,14 @@ export enum CameraMode {
   FIRST_PERSON = 'FIRST_PERSON',
 }
 
+// Panic susceptibility by social class (wealthy are more insulated from panic)
+export const PANIC_SUSCEPTIBILITY: Record<SocialClass, number> = {
+  [SocialClass.NOBILITY]: 0.6,   // Wealthy, removed from daily street life
+  [SocialClass.CLERGY]: 0.75,    // Faith provides some comfort
+  [SocialClass.MERCHANT]: 1.0,   // Baseline - concerned about business
+  [SocialClass.PEASANT]: 1.25,   // Most vulnerable, least resources
+};
+
 export enum BuildingType {
   RESIDENTIAL = 'RESIDENTIAL',
   COMMERCIAL = 'COMMERCIAL',
@@ -36,6 +44,9 @@ export interface NPCStats {
   height: number;
   weight: number;
   mood: string;
+  // Morale/Rumor system
+  awarenessLevel: number;     // 0-100: knowledge of plague spreading in city
+  panicLevel: number;         // 0-100: fear/anxiety response
   goalOfDay?: string;
   heldItem?: 'staff' | 'hammer' | 'waterskin' | 'ledger' | 'spear' | 'tray' | 'plank' | 'sack' | 'none';
   robeSpread?: number;
@@ -114,6 +125,7 @@ export interface BuildingMetadata {
   ownerGender: 'Male' | 'Female';
   position: [number, number, number];
   sizeScale?: number;
+  storyCount?: 1 | 2 | 3;
   doorSide: number; // 0: North, 1: South, 2: East, 3: West
   hasSymmetricalWindows: boolean;
   isPointOfInterest?: boolean;
@@ -168,12 +180,14 @@ export enum InteriorPropType {
   STAIRS = 'STAIRS',
   CANDLE = 'CANDLE',
   FLOOR_LAMP = 'FLOOR_LAMP',
+  LANTERN = 'LANTERN',
   SPINDLE = 'SPINDLE',
   DYE_VAT = 'DYE_VAT',
   ANVIL = 'ANVIL',
   TOOL_RACK = 'TOOL_RACK',
   MORTAR = 'MORTAR',
   HERB_RACK = 'HERB_RACK',
+  ARCH_COLUMN = 'ARCH_COLUMN',  // Decorative arch columns for religious buildings
 }
 
 export interface InteriorRoom {
@@ -347,6 +361,7 @@ export interface DevSettings {
   showNPCs: boolean;
   showRats: boolean;
   showMiasma: boolean;
+  showCityWalls: boolean;
 }
 
 export interface SimulationStats {
@@ -370,8 +385,8 @@ export const CONSTANTS = {
   MARKET_SIZE: 60,
   BUILDING_SIZE: 8,
   STREET_WIDTH: 5,
-  BOUNDARY: 75,
-  PROXIMITY_THRESHOLD: 12,
+  BOUNDARY: 55,
+  PROXIMITY_THRESHOLD: 10,
   HOURS_TO_INCUBATE: 1,
   HOURS_TO_INFECTED: 2,
   HOURS_TO_DEATH: 24,
@@ -383,6 +398,99 @@ export interface PlayerState {
   isMoving: boolean;
 }
 
+// ============================================
+// PLAYER ACTION SYSTEM
+// ============================================
+
+export type ActionId = 'warn' | 'encourage' | 'observe' | 'pray' | 'trade' | 'heal';
+export type ActionHotkey = '1' | '2' | '3';
+export type ActionEffect = 'aoe_panic' | 'aoe_calm' | 'none' | 'aoe_heal' | 'self_buff';
+
+export interface PlayerAction {
+  id: ActionId;
+  name: string;
+  description: string;
+  icon: string;              // Lucide icon name
+  cooldownSeconds: number;
+  radius: number;            // Effect radius in world units
+  requiresCharisma?: number; // Minimum charisma to use
+  effect: ActionEffect;
+}
+
+export interface ActionSlotState {
+  slot1: ActionId;
+  slot2: ActionId;
+  slot3: ActionId;
+  cooldowns: Record<ActionId, number>;  // simTime when usable again
+  lastTriggered: { actionId: ActionId; timestamp: number; position: [number, number, number] } | null;
+}
+
+export const PLAYER_ACTIONS: Record<ActionId, PlayerAction> = {
+  warn: {
+    id: 'warn',
+    name: 'Warn',
+    description: 'Alert nearby people to danger. They scatter in fear.',
+    icon: 'AlertTriangle',
+    cooldownSeconds: 15,
+    radius: 8,
+    effect: 'aoe_panic'
+  },
+  encourage: {
+    id: 'encourage',
+    name: 'Encourage',
+    description: 'Calm the populace with reassuring words. Some may gather.',
+    icon: 'Heart',
+    cooldownSeconds: 30,
+    radius: 6,
+    requiresCharisma: 3,
+    effect: 'aoe_calm'
+  },
+  observe: {
+    id: 'observe',
+    name: 'Observe',
+    description: 'Watch and learn from your surroundings.',
+    icon: 'Eye',
+    cooldownSeconds: 0,
+    radius: 0,
+    effect: 'none'
+  },
+  pray: {
+    id: 'pray',
+    name: 'Pray',
+    description: 'Seek divine comfort to steady your nerves.',
+    icon: 'Sparkles',
+    cooldownSeconds: 60,
+    radius: 0,
+    effect: 'self_buff'
+  },
+  trade: {
+    id: 'trade',
+    name: 'Trade',
+    description: 'Initiate a trade with nearby merchants.',
+    icon: 'Coins',
+    cooldownSeconds: 0,
+    radius: 3,
+    effect: 'none'
+  },
+  heal: {
+    id: 'heal',
+    name: 'Heal',
+    description: 'Use medical supplies to treat the afflicted.',
+    icon: 'Cross',
+    cooldownSeconds: 45,
+    radius: 2,
+    effect: 'aoe_heal'
+  }
+};
+
+export interface PlayerActionEvent {
+  actionId: ActionId;
+  position: [number, number, number];
+  timestamp: number;
+  effect: ActionEffect;
+  radius: number;
+}
+
 export const getLocationLabel = (x: number, y: number) => {
   if (x === 0 && y === 0) return "Al-Buzuriyah (Main Road)";
   if (x === 1 && y === 1) return "Bab Sharqi (Narrow Alleys)";
@@ -391,7 +499,8 @@ export const getLocationLabel = (x: number, y: number) => {
   if (x === 2 && y === -1) return "The Mamluk Citadel (Civic Quarter)";
   if (x === 1 && y === -1) return "Player's Home (Residential)";
   if (x === -2 && y === 1) return "Al-Salihiyya (Hillside Quarter)";
-  if (x === 2 && y === 2) return "Outskirts (Rural Fringe)";
+  if (x === 2 && y === 2) return "Ghouta Farmlands (Rural Fringe)";
+  if (x === -3 && y === -1) return "Desert Outskirts (North Track)";
   if (x === -2 && y === -2) return "Caravanserai (Pilgrims' Road)";
   if (x === -3 && y === 3) return "Mount Qassioun (Sacred Mountain)";
   if (x === 1 && y === -3) return "Hauran Highway (Southern Road)";
@@ -405,7 +514,7 @@ export const getLocationLabel = (x: number, y: number) => {
   return `${p} ${d} Block — ${x}, ${y}`;
 };
 
-export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS' | 'CARAVANSERAI' | 'MOUNTAIN_SHRINE' | 'SOUTHERN_ROAD';
+export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS_FARMLAND' | 'OUTSKIRTS_DESERT' | 'CARAVANSERAI' | 'MOUNTAIN_SHRINE' | 'SOUTHERN_ROAD';
 
 export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 0 && y === 0) return 'MARKET';
@@ -414,7 +523,8 @@ export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 2 && y === -1) return 'CIVIC';
   if (x === 1 && y === 1) return 'ALLEYS';
   if (x === -2 && y === 1) return 'SALHIYYA';
-  if (x === 2 && y === 2) return 'OUTSKIRTS';
+  if (x === 2 && y === 2) return 'OUTSKIRTS_FARMLAND';
+  if (x === -3 && y === -1) return 'OUTSKIRTS_DESERT';
   if (x === -2 && y === -2) return 'CARAVANSERAI';
   if (x === -3 && y === 3) return 'MOUNTAIN_SHRINE';
   if (x === 1 && y === -3) return 'SOUTHERN_ROAD';
