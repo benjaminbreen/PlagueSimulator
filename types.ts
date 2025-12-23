@@ -394,6 +394,7 @@ export const getLocationLabel = (x: number, y: number) => {
   if (x === 2 && y === 2) return "Outskirts (Rural Fringe)";
   if (x === -2 && y === -2) return "Caravanserai (Pilgrims' Road)";
   if (x === -3 && y === 3) return "Mount Qassioun (Sacred Mountain)";
+  if (x === 1 && y === -3) return "Hauran Highway (Southern Road)";
 
   // Procedural names for other blocks
   const prefixes = ["Lower", "Upper", "North", "South", "East", "West"];
@@ -404,7 +405,7 @@ export const getLocationLabel = (x: number, y: number) => {
   return `${p} ${d} Block — ${x}, ${y}`;
 };
 
-export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS' | 'CARAVANSERAI' | 'MOUNTAIN_SHRINE';
+export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS' | 'CARAVANSERAI' | 'MOUNTAIN_SHRINE' | 'SOUTHERN_ROAD';
 
 export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 0 && y === 0) return 'MARKET';
@@ -416,5 +417,6 @@ export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 2 && y === 2) return 'OUTSKIRTS';
   if (x === -2 && y === -2) return 'CARAVANSERAI';
   if (x === -3 && y === 3) return 'MOUNTAIN_SHRINE';
+  if (x === 1 && y === -3) return 'SOUTHERN_ROAD';
   return 'RESIDENTIAL';
 };

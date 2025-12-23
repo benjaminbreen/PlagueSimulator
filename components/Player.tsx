@@ -8,7 +8,8 @@ import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 import { PushableObject, PickupInfo } from '../utils/pushables';
-import { getTerrainHeight } from '../utils/terrain';
+import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
+import { calculateTerrainGradient } from '../utils/terrain-gradient';
 
 const PLAYER_SPEED = 6;
 const RUN_SPEED = 11;
@@ -38,12 +39,14 @@ interface PlayerProps {
   onImpactPuff?: (position: THREE.Vector3, intensity: number) => void;
   district?: DistrictType;
   terrainSeed?: number;
+  heightmap?: TerrainHeightmap | null;
   onPickupPrompt?: (label: string | null) => void;
   onPickup?: (itemId: string, pickup: PickupInfo) => void;
+  onPushCharge?: (charge: number) => void;
 }
 
-export const Player = forwardRef<THREE.Group, PlayerProps>(({ 
-  initialPosition = [0, 0, 0], 
+export const Player = forwardRef<THREE.Group, PlayerProps>(({
+  initialPosition = [0, 0, 0],
   cameraMode,
   buildings = [],
   buildingHash = null,
@@ -56,8 +59,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onImpactPuff,
   district,
   terrainSeed,
+  heightmap,
   onPickupPrompt,
-  onPickup
+  onPickup,
+  onPushCharge
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -128,13 +133,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   useEffect(() => {
     if (!group.current) return;
-    const ground = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
-      ? getTerrainHeight(district, initialPosition[0], initialPosition[2], terrainSeed)
-      : 0;
+    // BUGFIX: Use bilinear interpolation for accurate terrain sampling
+    const ground = sampleTerrainHeight(heightmap, initialPosition[0], initialPosition[2]);
     group.current.position.set(initialPosition[0], ground + initialPosition[1], initialPosition[2]);
     lastPlayerPos.current.copy(group.current.position);
     lastMovePosRef.current.copy(group.current.position);
-  }, [initialPosition, district, terrainSeed]);
+  }, [initialPosition, heightmap]);
 
   const [keys, setKeys] = useState({ 
     up: false, down: false, left: false, right: false, 
@@ -411,9 +415,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (keys.s) orbitRef.current.setPolarAngle(Math.min(Math.PI / 2.1, orbitRef.current.getPolarAngle() + angle));
     }
 
-    const groundHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
-      ? getTerrainHeight(district, group.current.position.x, group.current.position.z, terrainSeed)
-      : 0;
+    // BUGFIX: Use bilinear interpolation for accurate terrain sampling
+    const groundHeight = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
 
     // 2. Jumping Physics + buffers
     const spacePressed = keys.space && !lastSpace.current;
@@ -429,9 +432,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             const angle = (i / 8) * Math.PI * 2;
             const candidate = new THREE.Vector3(base.x + Math.cos(angle) * r, 0, base.z + Math.sin(angle) * r);
             if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(candidate, obstacles, 0.6)) {
-              const candidateHeight = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
-                ? getTerrainHeight(district, candidate.x, candidate.z, terrainSeed)
-                : 0;
+              // BUGFIX: Use bilinear interpolation for accurate terrain sampling
+              const candidateHeight = sampleTerrainHeight(heightmap, candidate.x, candidate.z);
               candidate.y = candidateHeight;
               group.current.position.copy(candidate);
               lastMovePosRef.current.copy(candidate);
@@ -582,6 +584,182 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
+    // 2c. Boulder slope gravity
+    if (pushablesRef?.current && heightmap) {
+      const now = state.clock.elapsedTime;
+      const SLOPE_GRAVITY_FORCE = 4.0; // Acceleration down slopes
+      const MIN_ROLL_ANGLE = 0.08; // ~4.5 degrees minimum to start rolling
+      const TERMINAL_VELOCITY = 12.0; // Max speed on steep slopes
+      const ROTATION_DAMPING = 0.95; // Angular velocity decay
+
+      for (const item of pushablesRef.current) {
+        if (item.kind !== 'boulder') continue;
+
+        // Position boulder on terrain surface
+        const terrainY = sampleTerrainHeight(heightmap, item.position.x, item.position.z);
+        item.position.y = terrainY + item.radius * 0.7;
+
+        // Throttle gradient calculations (every 0.1s per boulder)
+        const lastCheck = item.lastSlopeCheck || 0;
+        if (now - lastCheck < 0.1) continue;
+        item.lastSlopeCheck = now;
+
+        const gradient = calculateTerrainGradient(heightmap, item.position.x, item.position.z);
+
+        // Wake boulder if on significant slope
+        if (gradient.slopeAngle > MIN_ROLL_ANGLE) {
+          item.isSleeping = false;
+        }
+
+        // Skip sleeping boulders (stationary on flat ground)
+        if (item.isSleeping) continue;
+
+        // Apply downhill gravity force
+        if (gradient.slopeAngle > MIN_ROLL_ANGLE) {
+          const gravityForce = gradient.slope.clone()
+            .normalize()
+            .multiplyScalar(SLOPE_GRAVITY_FORCE * Math.sin(gradient.slopeAngle) * delta);
+
+          item.velocity.add(gravityForce);
+
+          // Clamp to terminal velocity
+          const speed = item.velocity.length();
+          if (speed > TERMINAL_VELOCITY) {
+            item.velocity.normalize().multiplyScalar(TERMINAL_VELOCITY);
+          }
+        }
+
+        // Put boulder to sleep if stopped on flat ground
+        if (item.velocity.lengthSq() < 0.0001 && gradient.slopeAngle < MIN_ROLL_ANGLE) {
+          item.isSleeping = true;
+          item.velocity.set(0, 0, 0);
+          if (item.angularVelocity) item.angularVelocity.set(0, 0, 0);
+        }
+
+        // Calculate rolling rotation (perpendicular to velocity)
+        if (item.velocity.lengthSq() > 0.001) {
+          if (!item.angularVelocity) item.angularVelocity = new THREE.Vector3();
+
+          // Angular velocity = linear velocity / radius (v = ωr)
+          const angularSpeed = item.velocity.length() / item.radius;
+          const axis = new THREE.Vector3(-item.velocity.z, 0, item.velocity.x).normalize();
+          item.angularVelocity.copy(axis.multiplyScalar(angularSpeed));
+        }
+
+        // Apply angular damping
+        if (item.angularVelocity) {
+          item.angularVelocity.multiplyScalar(ROTATION_DAMPING);
+        }
+      }
+    }
+
+    // 2d. Boulder-tree collision
+    if (pushablesRef?.current && obstacles.length > 0) {
+      for (const boulder of pushablesRef.current) {
+        if (boulder.kind !== 'boulder') continue;
+        if (boulder.velocity.lengthSq() < 0.01) continue; // Skip slow boulders
+
+        // Check collision with all obstacles (trees, etc.)
+        for (const obstacle of obstacles) {
+          const dx = boulder.position.x - obstacle.position[0];
+          const dz = boulder.position.z - obstacle.position[2];
+          const distSq = dx * dx + dz * dz;
+          const limit = boulder.radius + obstacle.radius;
+
+          if (distSq < limit * limit && distSq > 0.0001) {
+            const dist = Math.sqrt(distSq);
+            const normal = new THREE.Vector3(dx, 0, dz).normalize();
+
+            // Push boulder out of tree
+            const overlap = limit - dist;
+            boulder.position.add(normal.clone().multiplyScalar(overlap + 0.05));
+
+            // Bounce with momentum loss
+            const TREE_RESTITUTION = 0.3; // Lose 70% energy on tree impact
+            const velocityAlongNormal = boulder.velocity.dot(normal);
+
+            if (velocityAlongNormal < 0) {
+              // Reflect velocity and apply energy loss
+              boulder.velocity.add(normal.clone().multiplyScalar(-velocityAlongNormal * (1 + TREE_RESTITUTION)));
+
+              // Impact sound/effect
+              const intensity = Math.min(1, Math.abs(velocityAlongNormal) * 0.4);
+              if (intensity > 0.3) {
+                const last = objectImpactCooldownRef.current.get(boulder.id) || 0;
+                const now = state.clock.elapsedTime;
+                if (now - last > 0.18) {
+                  playObjectImpact('stone', intensity);
+                  onImpactPuff?.(boulder.position, intensity);
+                  objectImpactCooldownRef.current.set(boulder.id, now);
+                }
+              }
+
+              // Apply angular impulse from off-center impacts
+              if (boulder.angularVelocity) {
+                const angularImpulse = new THREE.Vector3(
+                  normal.z * velocityAlongNormal,
+                  0,
+                  -normal.x * velocityAlongNormal
+                ).multiplyScalar(0.5);
+                boulder.angularVelocity.add(angularImpulse);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // 2e. Boulder-NPC collision
+    if (pushablesRef?.current && agentHashRef?.current) {
+      const NPC_RADIUS = 0.5;
+      const BOULDER_NPC_KNOCKBACK_SCALE = 2.5; // Stronger than player shove
+
+      for (const boulder of pushablesRef.current) {
+        if (boulder.kind !== 'boulder') continue;
+        const speed = boulder.velocity.length();
+        if (speed < 0.5) continue; // Only moving boulders affect NPCs
+
+        // Query nearby NPCs using spatial hash
+        const nearbyAgents = queryNearbyAgents(boulder.position, agentHashRef.current);
+
+        for (const agent of nearbyAgents) {
+          const offset = agent.pos.clone().sub(boulder.position);
+          offset.y = 0;
+          const distSq = offset.lengthSq();
+          const limit = boulder.radius + NPC_RADIUS;
+
+          if (distSq < limit * limit && distSq > 0.0001) {
+            const dist = Math.sqrt(distSq);
+            const normal = offset.normalize();
+
+            // Calculate knockback force based on boulder momentum
+            const momentum = speed * boulder.mass;
+            const knockbackForce = momentum * BOULDER_NPC_KNOCKBACK_SCALE;
+
+            // Apply impulse to NPC via impact map
+            if (onAgentImpact) {
+              const intensity = Math.min(1, knockbackForce * 0.1);
+              onAgentImpact(agent.id, intensity);
+            }
+
+            // Boulder loses some momentum (conservation of momentum)
+            const boulderMassRatio = boulder.mass / (boulder.mass + 5.0); // Assume NPC mass ~5
+            boulder.velocity.multiplyScalar(boulderMassRatio * 0.8);
+
+            // Visual/audio feedback
+            const intensity = Math.min(1, speed * 0.3);
+            const last = objectImpactCooldownRef.current.get(boulder.id) || 0;
+            const now = state.clock.elapsedTime;
+            if (now - last > 0.2) {
+              playObjectImpact('stone', intensity);
+              onImpactPuff?.(agent.pos, intensity * 1.2);
+              objectImpactCooldownRef.current.set(boulder.id, now);
+            }
+          }
+        }
+      }
+    }
+
     // 3. Movement Logic (Arrow Keys)
     let moveVec = new THREE.Vector3();
     const forward = new THREE.Vector3();
@@ -615,8 +793,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     if (moving && keys.shift) {
       interactChargingRef.current = false;
       interactChargeRef.current = 0;
+      onPushCharge?.(0);
     } else if (keys.shift && !moving) {
       interactChargeRef.current = Math.min(1.2, interactChargeRef.current + delta * 1.6);
+      onPushCharge?.(Math.min(1, interactChargeRef.current));
+    } else if (!keys.shift && interactChargeRef.current > 0) {
+      onPushCharge?.(0);
     }
 
     let currentSpeed = 0;
@@ -641,9 +823,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    const groundHeightNow = (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined
-      ? getTerrainHeight(district, group.current.position.x, group.current.position.z, terrainSeed)
-      : 0;
+    // BUGFIX: Use bilinear interpolation for accurate terrain sampling
+    const groundHeightNow = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
     if (isGrounded.current) {
       group.current.position.y = groundHeightNow;
     }
@@ -715,22 +896,55 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         playNpcBump(intensity);
       } else if (pushablesRef?.current) {
         let best = Infinity;
-        let hitPos: THREE.Vector3 | null = null;
+        let hitItem: PushableObject | null = null;
+        // Increased range for pushing objects (especially boulders)
+        const pushRange = hitRange + 1.5;
         for (const item of pushablesRef.current) {
           const offset = item.position.clone().sub(group.current.position);
           offset.y = 0;
           const dist = offset.length();
-          if (dist > hitRange || dist < 0.01) continue;
+          if (dist > pushRange || dist < 0.01) continue;
           const dir = offset.clone().normalize();
           const dot = forward.dot(dir);
-          if (dot < 0.35) continue;
+          // More forgiving angle check (was 0.35, now 0.1 = ~84 degree cone)
+          if (dot < 0.1) continue;
           if (dist < best) {
             best = dist;
-            hitPos = item.position.clone();
+            hitItem = item;
           }
         }
-        if (hitPos) {
-          onImpactPuff?.(hitPos, 0.5 + strength * 0.4);
+        if (hitItem) {
+          // Apply push force to the object
+          const pushDir = hitItem.position.clone().sub(group.current.position);
+          pushDir.y = 0;
+          pushDir.normalize();
+
+          // Calculate push force - stronger for testing
+          const PUSH_FORCE_BASE = 25.0;  // Increased for testing
+          const pushForce = PUSH_FORCE_BASE * (0.5 + strength * 0.5) / Math.max(0.3, hitItem.mass * 0.03);
+
+          // Apply velocity to the object
+          hitItem.velocity.add(pushDir.multiplyScalar(pushForce));
+
+          // Wake up sleeping boulders and ensure they always roll
+          if (hitItem.kind === 'boulder') {
+            hitItem.isSleeping = false;
+            // Initialize angular velocity if needed
+            if (!hitItem.angularVelocity) {
+              hitItem.angularVelocity = new THREE.Vector3();
+            }
+            // Add initial angular velocity for immediate rolling effect
+            const pushDirForRoll = hitItem.position.clone().sub(group.current.position);
+            pushDirForRoll.y = 0;
+            pushDirForRoll.normalize();
+            const rollAxis = new THREE.Vector3(-pushDirForRoll.z, 0, pushDirForRoll.x);
+            const initialAngularSpeed = pushForce * 0.3 / hitItem.radius;
+            hitItem.angularVelocity.copy(rollAxis.multiplyScalar(initialAngularSpeed));
+          }
+
+          // Visual and audio feedback
+          onImpactPuff?.(hitItem.position.clone(), 0.5 + strength * 0.4);
+          playObjectImpact('stone', 0.5 + strength * 0.3);
         } else {
           const testPoint = group.current.position.clone().add(forward.multiplyScalar(0.9));
           const blocked = isBlockedByBuildings(testPoint, buildings, 0.2, buildingHash || undefined)

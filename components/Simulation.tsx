@@ -16,6 +16,7 @@ import { seededRandom } from '../utils/procedural';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
 import { generateMerchantNPC, mapStallTypeToMerchantType } from '../utils/merchantGeneration';
+import { LaundryLine, generateLaundryLine, shouldGenerateLaundryLine } from '../utils/laundry';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -32,6 +33,7 @@ interface SimulationProps {
   onPickupPrompt?: (label: string | null) => void;
   onPickupItem?: (pickup: PickupInfo) => void;
   onWeatherUpdate?: (weatherType: string) => void;
+  onPushCharge?: (charge: number) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -941,7 +943,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem, onWeatherUpdate }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem, onWeatherUpdate, onPushCharge }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -976,6 +978,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const impactPuffIndexRef = useRef(0);
   const atmosphereTickRef = useRef(0);
   const minimapTickRef = useRef(0);
+  const heightmapRef = useRef<import('../utils/terrain').TerrainHeightmap | null>(null);
   
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
   const [playerSpawn, setPlayerSpawn] = useState<[number, number, number]>(() => {
@@ -991,6 +994,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   useEffect(() => {
     setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0]);
   }, [params.mapX, params.mapY]);
+  const pushableSeed = useMemo(
+    () => params.mapX * 1000 + params.mapY * 100 + sessionSeed,
+    [params.mapX, params.mapY, sessionSeed]
+  );
   const buildPushables = useCallback((): PushableObject[] => {
     const district = getDistrictType(params.mapX, params.mapY);
     const roll = seededRandom(params.mapX * 1000 + params.mapY * 13 + 101);
@@ -1015,6 +1022,16 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     const addProduce = (id: string, kind: PushableObject['kind'], position: [number, number, number], label: string, itemId: string) => {
       const item = createPushable(id, kind, position, 0.18, 0.3, 0.1, 'wood');
       item.pickup = { type: 'produce', label, itemId };
+      items.push(item);
+    };
+    const addVariedPot = (id: string, position: [number, number, number], seed: number) => {
+      const potTypes: PushableObject['kind'][] = ['olivePot', 'lemonPot', 'palmPot', 'bougainvilleaPot', 'geranium'];
+      const kind = potTypes[Math.floor(seededRandom(seed + 1) * potTypes.length)];
+      const potSize = 0.7 + seededRandom(seed + 2) * 0.6; // 0.7 to 1.3
+      const potStyle = Math.floor(seededRandom(seed + 3) * 3); // 0, 1, or 2
+      const item = createPushable(id, kind, position, 0.8, 1.8, seededRandom(seed + 4) * Math.PI * 2, 'ceramic');
+      item.potSize = potSize;
+      item.potStyle = potStyle;
       items.push(item);
     };
     if (district === 'MARKET') {
@@ -1043,13 +1060,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       return items;
     }
     if (district === 'WEALTHY') {
-      items.push(
-        createPushable('olive-east', 'olivePot', [6.2, 0.2, 4.8], 0.8, 1.8, 0, 'ceramic'),
-        createPushable('olive-west', 'olivePot', [-6.4, 0.2, -4.6], 0.8, 1.8, 0, 'ceramic'),
-        createPushable('lemon-east', 'lemonPot', [8.6, 0.2, 6.2], 0.8, 1.8, 0, 'ceramic'),
-        createPushable('geranium-wealthy-1', 'geranium', [-8.6, 0.2, 6.2], 0.9, 1.2, 0.1, 'ceramic'),
-        createPushable('geranium-wealthy-2', 'geranium', [8.8, 0.2, -6.4], 0.9, 1.2, -0.1, 'ceramic')
-      );
+      addVariedPot('pot-wealthy-1', [6.2, 0.2, 4.8], pushableSeed + 101);
+      addVariedPot('pot-wealthy-2', [-6.4, 0.2, -4.6], pushableSeed + 102);
+      addVariedPot('pot-wealthy-3', [8.6, 0.2, 6.2], pushableSeed + 103);
+      addVariedPot('pot-wealthy-4', [-8.6, 0.2, 6.2], pushableSeed + 104);
+      addVariedPot('pot-wealthy-5', [8.8, 0.2, -6.4], pushableSeed + 105);
       if (roll > 0.5) {
         items.push(createPushable('bench-wealthy', 'bench', [10.5, 0.2, 8.5], 1.1, 2.6, 0.4, 'stone'));
       }
@@ -1083,22 +1098,83 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
     if (district === 'CIVIC') {
       items.push(
-        createPushable('bench-civic', 'bench', [6.8, 0.2, -6.2], 1.1, 2.6, -0.3, 'stone'),
-        createPushable('olive-civic', 'olivePot', [-5.2, 0.2, 4.8], 0.8, 1.8, 0, 'ceramic'),
-        createPushable('lemon-civic', 'lemonPot', [4.8, 0.2, -4.4], 0.8, 1.8, 0, 'ceramic')
+        createPushable('bench-civic', 'bench', [6.8, 0.2, -6.2], 1.1, 2.6, -0.3, 'stone')
       );
+      addVariedPot('pot-civic-1', [-5.2, 0.2, 4.8], pushableSeed + 201);
+      addVariedPot('pot-civic-2', [4.8, 0.2, -4.4], pushableSeed + 202);
       addProduce('olive-civic-1', 'olive', [-4.6, 0.05, 5.4], 'Olives (Handful)', 'ground-olives');
       addProduce('lemon-civic-1', 'lemon', [5.4, 0.05, -5.2], 'Lemon', 'ground-lemons');
       addCoin('coin-civic-1', [0.8, 0.05, 1.4]);
       return items;
     }
     items.push(
-      createPushable('jar-res-1', 'clayJar', [-2.2, 0.3, -1.8], 0.6, 0.8, 0, 'ceramic'),
-      createPushable('geranium-res', 'geranium', [2.6, 0.2, 2.4], 0.85, 1.2, 0, 'ceramic')
+      createPushable('jar-res-1', 'clayJar', [-2.2, 0.3, -1.8], 0.6, 0.8, 0, 'ceramic')
     );
+    addVariedPot('pot-res-1', [2.6, 0.2, 2.4], pushableSeed + 301);
     addPickupItem('shard-res-1', 'potteryShard', [-0.6, 0.05, 1.2], 'Pottery Shard', 'ground-pottery');
     addPickupItem('candle-res-1', 'candleStub', [1.6, 0.05, -1.4], 'Candle Stub', 'ground-candle');
     addCoin('coin-res-1', [0.2, 0.05, -2.2]);
+
+    // Generate boulders for hilly districts
+    if (district === 'MOUNTAIN_SHRINE' || district === 'SALHIYYA' || district === 'OUTSKIRTS') {
+      const getBoulderPositions = (): Array<[number, number, number]> => {
+        if (district === 'MOUNTAIN_SHRINE') {
+          // Reuse existing rock positions from Environment.tsx
+          return [
+            [-30, 0, -20], [-22, 0, -8], [-15, 0, -25], [-8, 0, -15],
+            [25, 0, -15], [18, 0, -5], [12, 0, -20], [20, 0, -25],
+            [-25, 0, 15], [-18, 0, 22], [-12, 0, 8], [-20, 0, 25],
+            [15, 0, 18], [22, 0, 25], [8, 0, 12], [18, 0, 8],
+            [-12, 0, 5], [10, 0, -8], [-18, 0, -12], [15, 0, -18],
+          ];
+        }
+        if (district === 'SALHIYYA') {
+          // Generate 28 boulders on hillsides
+          return [
+            [-35, 0, -25], [-28, 0, -18], [-22, 0, -30], [-18, 0, -12], [-32, 0, -10],
+            [30, 0, -20], [25, 0, -28], [20, 0, -15], [35, 0, -22], [28, 0, -12],
+            [-30, 0, 22], [-25, 0, 28], [-20, 0, 18], [-35, 0, 20], [-22, 0, 25],
+            [28, 0, 25], [22, 0, 30], [32, 0, 22], [25, 0, 18],
+            [-15, 0, -35], [-10, 0, -28], [12, 0, -32], [15, 0, -25],
+            [-12, 0, 32], [-8, 0, 28], [10, 0, 35], [8, 0, 30], [15, 0, 28],
+          ];
+        }
+        if (district === 'OUTSKIRTS') {
+          // Generate 8 boulders on rolling hills
+          return [
+            [-32, 0, -22], [-25, 0, -15],
+            [28, 0, -18], [22, 0, -25],
+            [-28, 0, 20], [-22, 0, 28],
+            [25, 0, 22], [30, 0, 28],
+          ];
+        }
+        return [];
+      };
+
+      const calculateBoulderMass = (size: number): number => {
+        const volume = (4 / 3) * Math.PI * Math.pow(size, 3);
+        const stoneDensity = 2.5; // Heavier than wood baseline
+        return volume * stoneDensity * 10; // Scale up for gameplay feel
+      };
+
+      const boulderPositions = getBoulderPositions();
+      boulderPositions.forEach((pos, i) => {
+        const size = 0.4 + seededRandom(sessionSeed + i * 1000) * 0.8; // 0.4-1.2 range
+        const mass = calculateBoulderMass(size);
+        const boulder = createPushable(
+          `boulder-${district}-${i}`,
+          'boulder',
+          [pos[0], 0, pos[2]], // Y=0, will be positioned by physics/rendering
+          size * 0.7, // Collision radius slightly smaller than visual
+          mass,
+          Math.random() * Math.PI * 2, // Random initial rotation
+          'stone'
+        );
+        boulder.isSleeping = true; // Start sleeping for performance
+        items.push(boulder);
+      });
+    }
+
     return items;
   }, [params.mapX, params.mapY]);
   const [pushables, setPushables] = useState<PushableObject[]>(() => buildPushables());
@@ -1113,6 +1189,60 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     setPushables(prev => prev.filter(item => item.id !== itemId));
     onPickupItem?.(pickup);
   }, [onPickupItem]);
+
+  // Generate laundry lines between buildings
+  const buildLaundryLines = useCallback((): LaundryLine[] => {
+    const lines: LaundryLine[] = [];
+    const buildings = buildingsRef.current;
+
+    if (buildings.length < 2) return lines;
+
+    const district = getDistrictType(params.mapX, params.mapY);
+    const baseSeed = params.mapX * 1000 + params.mapY * 13 + 500;
+
+    // Find building pairs for laundry lines
+    const checked = new Set<string>();
+    buildings.forEach((b1, i) => {
+      buildings.forEach((b2, j) => {
+        if (i >= j) return;
+
+        const pairId = `${Math.min(i, j)}-${Math.max(i, j)}`;
+        if (checked.has(pairId)) return;
+        checked.add(pairId);
+
+        const dx = b2.position[0] - b1.position[0];
+        const dz = b2.position[2] - b1.position[2];
+        const distance = Math.sqrt(dx * dx + dz * dz);
+
+        // Only connect buildings 4-12 units apart
+        if (distance < 4 || distance > 12) return;
+
+        // Check district density
+        const lineSeed = baseSeed + i * 1000 + j;
+        if (!shouldGenerateLaundryLine(district, lineSeed)) return;
+
+        // Create line with attachment points high on buildings
+        const height1 = b1.position[1] + 3.5 + seededRandom(lineSeed + 1) * 1.0;
+        const height2 = b2.position[1] + 3.5 + seededRandom(lineSeed + 2) * 1.0;
+
+        const start: [number, number, number] = [b1.position[0], height1, b1.position[2]];
+        const end: [number, number, number] = [b2.position[0], height2, b2.position[2]];
+
+        lines.push(generateLaundryLine(`laundry-${i}-${j}`, start, end, district, lineSeed));
+      });
+    });
+
+    return lines;
+  }, [params.mapX, params.mapY]);
+
+  const [laundryLines, setLaundryLines] = useState<LaundryLine[]>([]);
+
+  // Update laundry lines when buildings change
+  useEffect(() => {
+    if (buildingsRef.current.length > 0) {
+      setLaundryLines(buildLaundryLines());
+    }
+  }, [buildingsState, buildLaundryLines]);
 
   // Procedurally generate 1-3 market stalls in the main marketplace
   const marketStalls = useMemo<MarketStallData[]>(() => {
@@ -1217,7 +1347,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
 
     return stalls;
-  }, [params.mapX, params.mapY, sessionSeed]);
+  }, [params.mapX, params.mapY, sessionSeed, pushableSeed]);
 
   // Generate merchant NPCs for each market stall
   const merchants = useMemo<MerchantNPCType[]>(() => {
@@ -1267,6 +1397,16 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       );
     });
   }, [params.mapX, params.mapY, marketStalls, simTime, sessionSeed]);
+
+  // Tree obstacles for boulder collision
+  const [treeObstacles, setTreeObstacles] = useState<Obstacle[]>([]);
+  const handleTreePositions = useCallback((positions: Array<[number, number, number]>) => {
+    const obstacles: Obstacle[] = positions.map(pos => ({
+      position: pos,
+      radius: 0.35 // Tree trunk radius
+    }));
+    setTreeObstacles(obstacles);
+  }, []);
 
   // Obstacles including market stalls for NPC collision detection
   const obstacles = useMemo<Obstacle[]>(() => {
@@ -1323,8 +1463,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       };
     });
 
+    // Add tree obstacles for hilly districts
+    if (district === 'MOUNTAIN_SHRINE' || district === 'SALHIYYA' || district === 'OUTSKIRTS') {
+      return [...baseObstacles, ...stallObstacles, ...treeObstacles];
+    }
+
     return [...baseObstacles, ...stallObstacles];
-  }, [params.mapX, params.mapY, marketStalls]);
+  }, [params.mapX, params.mapY, marketStalls, treeObstacles]);
 
   const weather = useRef<WeatherState>({
     cloudCover: 0.25,
@@ -1685,9 +1830,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           // Realistic physics: add altitude-based density (more fog near ground)
           const altitudeFactor = 0.0008; // Ground-level fog accumulation
 
+          const overheadFactor = params.cameraMode === CameraMode.OVERHEAD ? 0.25 : 1;
           fogRef.current.density = THREE.MathUtils.lerp(
             fogRef.current.density,
-            (baseFog + horizonHaze + altitudeFactor + humidity * 0.004 + cloudCover * 0.003 + nightAtmosphere) * devSettings.fogDensityScale,
+            (baseFog + horizonHaze + altitudeFactor + humidity * 0.004 + cloudCover * 0.003 + nightAtmosphere)
+              * devSettings.fogDensityScale
+              * overheadFactor,
             0.02
           );
           fogRef.current.color.lerp(fogColor, 0.05);
@@ -1700,7 +1848,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     // 2. Boundary Check for Map Transitions & Proximity Check
     if (playerRef.current) {
       const pos = playerRef.current.position;
-      const boundary = CONSTANTS.BOUNDARY;
+      const district = getDistrictType(params.mapX, params.mapY);
+      const boundary = district === 'SOUTHERN_ROAD' ? 40 : CONSTANTS.BOUNDARY;
 
       if (pos.z > boundary) { onMapChange(0, 1); pos.z = -boundary + 2; } 
       else if (pos.z < -boundary) { onMapChange(0, -1); pos.z = boundary - 2; } 
@@ -1881,14 +2030,40 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             if (found) {
               setPlayerSpawn([found.x, 0, found.z]);
             }
+          } else if (district === 'CARAVANSERAI') {
+            let spawnSeed = params.mapX * 1000 + params.mapY * 13 + 177;
+            const tryPoints = [
+              new THREE.Vector3(12, 0, 12),
+              new THREE.Vector3(-12, 0, 12),
+              new THREE.Vector3(12, 0, -12),
+              new THREE.Vector3(-12, 0, -12),
+              new THREE.Vector3(0, 0, 18),
+              new THREE.Vector3(18, 0, 0),
+              new THREE.Vector3(-18, 0, 0),
+              new THREE.Vector3(0, 0, -18)
+            ];
+            const shuffled = tryPoints.sort(() => seededRandom(spawnSeed++) - 0.5);
+            const hash = buildingHashRef.current || undefined;
+            const found = shuffled.find((p) => !isBlockedByBuildings(p, b, 1.0, hash) && !isBlockedByObstacles(p, obstacles, 1.0));
+            if (found) {
+              setPlayerSpawn([found.x, 0, found.z]);
+            } else {
+              setPlayerSpawn([14, 0, 14]);
+            }
           }
         }}
+        onHeightmapBuilt={(heightmap) => {
+          heightmapRef.current = heightmap;
+        }}
+        onTreePositionsGenerated={handleTreePositions}
         nearBuildingId={currentNearBuilding?.id}
         timeOfDay={params.timeOfDay}
         enableHoverWireframe={enableHoverWireframe}
         enableHoverLabel={enableHoverLabel}
         pushables={pushables}
         fogColor={colorCache.current.fogColor}
+        heightmap={heightmapRef.current}
+        laundryLines={laundryLines}
       />
 
       {/* Market Stalls - procedurally generated with variety */}
@@ -1931,12 +2106,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <ImpactPuffs puffsRef={impactPuffsRef} />
       
       {devSettings.showNPCs && (
-        <Agents 
-          params={params} 
-          simTime={simTime} 
-          onStatsUpdate={onStatsUpdate} 
-          rats={ratsRef.current} 
-          buildings={buildingsRef.current} 
+        <Agents
+          params={params}
+          simTime={simTime}
+          onStatsUpdate={onStatsUpdate}
+          rats={ratsRef.current}
+          buildings={buildingsRef.current}
           buildingHash={buildingHashRef.current}
           obstacles={obstacles}
           maxAgents={20}
@@ -1947,17 +2122,18 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           selectedNpcId={selectedNpcId}
           district={district}
           terrainSeed={terrainSeed}
+          heightmap={heightmapRef.current}
         />
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
       {devSettings.showTorches && <WindowLightPool buildings={buildingsState} timeOfDay={params.timeOfDay} />}
       {devSettings.showRats && <Rats ref={ratsRef} params={params} />}
-      
-      <Player 
+
+      <Player
         ref={playerRef}
         initialPosition={playerSpawn}
-        targetPosition={playerTarget} 
-        setTargetPosition={setPlayerTarget} 
+        targetPosition={playerTarget}
+        setTargetPosition={setPlayerTarget}
         cameraMode={params.cameraMode}
         buildings={buildingsRef.current}
         buildingHash={buildingHashRef.current}
@@ -1970,8 +2146,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onImpactPuff={handleImpactPuff}
         district={district}
         terrainSeed={terrainSeed}
+        heightmap={heightmapRef.current}
         onPickupPrompt={onPickupPrompt}
         onPickup={handlePickupItem}
+        onPushCharge={onPushCharge}
       />
     </>
   );

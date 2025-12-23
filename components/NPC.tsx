@@ -7,7 +7,7 @@ import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 import { seededRandom } from '../utils/procedural';
-import { getTerrainHeight } from '../utils/terrain';
+import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
 
 // Helper function to calculate door position from building metadata
 const getDoorPosition = (building: BuildingMetadata): THREE.Vector3 => {
@@ -65,6 +65,7 @@ interface NPCProps {
   isSelected?: boolean;
   district?: DistrictType;
   terrainSeed?: number;
+  heightmap?: TerrainHeightmap | null;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
@@ -87,7 +88,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   onSelect,
   isSelected = false,
   district,
-  terrainSeed
+  terrainSeed,
+  heightmap
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -582,8 +584,8 @@ export const NPC: React.FC<NPCProps> = memo(({
       propGroupRef.current.position.y = 1.02 + bob;
     }
 
-    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE') && terrainSeed !== undefined) {
-      group.current.position.y = getTerrainHeight(district, currentPosRef.current.x, currentPosRef.current.z, terrainSeed);
+    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS' || district === 'MOUNTAIN_SHRINE')) {
+      group.current.position.y = sampleTerrainHeight(heightmap, currentPosRef.current.x, currentPosRef.current.z);
     } else if (group.current) {
       group.current.position.y = 0;
     }

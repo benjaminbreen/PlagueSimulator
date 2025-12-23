@@ -5,12 +5,13 @@ import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMeta
 import { generateNPCStats } from '../utils/procedural';
 import { NPC } from './NPC';
 import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
+import { TerrainHeightmap } from '../utils/terrain';
 
 interface AgentsProps {
   params: SimulationParams;
   simTime: number;
   onStatsUpdate: (stats: SimulationCounts) => void;
-  rats: any[]; 
+  rats: any[];
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   obstacles?: Obstacle[];
@@ -22,6 +23,7 @@ interface AgentsProps {
   selectedNpcId?: string | null;
   district?: DistrictType;
   terrainSeed?: number;
+  heightmap?: TerrainHeightmap | null;
 }
 
 export const Agents: React.FC<AgentsProps> = ({
@@ -38,7 +40,8 @@ export const Agents: React.FC<AgentsProps> = ({
   onNpcSelect,
   selectedNpcId = null,
   district,
-  terrainSeed
+  terrainSeed,
+  heightmap
 }) => {
   const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3 }>>(new Map());
   const localAgentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
@@ -129,6 +132,7 @@ export const Agents: React.FC<AgentsProps> = ({
           isSelected={selectedNpcId === npc.stats.id}
           district={district ?? getDistrictType(params.mapX, params.mapY)}
           terrainSeed={terrainSeed}
+          heightmap={heightmap}
         />
       ))}
     </group>

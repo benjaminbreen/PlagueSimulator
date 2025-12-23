@@ -48,7 +48,8 @@ const createRugTexture = (base: string, accent: string, pattern: 'stripe' | 'dia
     }
   }
   const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(1, 1);
@@ -72,7 +73,8 @@ const createNoiseTexture = (base: string, accent: string) => {
   }
   ctx.globalAlpha = 1;
   const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(1.5, 1.5);
@@ -98,7 +100,8 @@ const createPlankTexture = (base: string, accent: string) => {
   }
   ctx.globalAlpha = 1;
   const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(2, 2);
@@ -125,7 +128,8 @@ const createWallTexture = (base: string, accent: string) => {
   }
   ctx.globalAlpha = 1;
   const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(1, 1);
@@ -154,7 +158,8 @@ const createPlasterTexture = (base: string, accent: string) => {
   }
   ctx.globalAlpha = 1;
   const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
   texture.repeat.set(1.2, 1.2);
@@ -717,7 +722,6 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
     case InteriorPropType.COUNTER:
       return (
         <group {...common}>
-          <ContactShadow size={[3.0, 0.9]} />
           <mesh position={[0, 0.55, 0]} receiveShadow>
             <boxGeometry args={[3.2, 1.1, 0.9]} />
             <meshStandardMaterial color="#6a4a32" roughness={0.9} />
@@ -750,8 +754,11 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
         const isSpice = profLower.includes('spice') || profLower.includes('apothecary') || profLower.includes('herb');
         const isMetal = profLower.includes('metal') || profLower.includes('blacksmith') || profLower.includes('smith');
         const isBaker = profLower.includes('baker') || profLower.includes('bread');
-        const wood = rand() > 0.5 ? '#6a4a32' : '#5a3d28';
-        const trim = '#9a7a54';
+        const wood = rand() > 0.6 ? '#6a4a32' : rand() > 0.3 ? '#5a3d28' : '#7a5b3a';
+        const trim = rand() > 0.5 ? '#9a7a54' : '#b08a5a';
+        const displayHeight = rand() > 0.6 ? 2.5 : 2.2;
+        const hasGlass = rand() > 0.55;
+        const hasCarved = rand() > 0.6;
         const clothColors = ['#b88b5a', '#8f6a49', '#c3a16e', '#a17a54'];
         const spiceColors = ['#b86d3c', '#cfa35a', '#8c6a3f', '#a9773f'];
         const metalColors = ['#6f6f6f', '#8a7a6a', '#5c5c5c'];
@@ -808,6 +815,9 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
             { label: 'Utility tools', type: 'tool' }
           ]);
         }
+        while (items.length < 6) {
+          items.push({ label: 'Goods', type: 'cloth' });
+        }
         const renderItem = (item: typeof items[number], pos: [number, number, number], key: string) => {
           const [x, y, z] = pos;
           const worldPos: [number, number, number] = [base.x + x, base.y + y, base.z + z];
@@ -821,7 +831,7 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
           })();
           return (
             <InteriorHoverable key={key} position={worldPos} label={item.label} labelOffset={[0, 0.35, 0]}>
-              <group position={[0, 0, 0]}>
+              <group position={[x, y, z]}>
                 {item.type === 'cloth' && (
                   <mesh receiveShadow>
                     <boxGeometry args={[0.55, 0.16, 0.32]} />
@@ -876,29 +886,28 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
         };
         return (
           <group {...common}>
-            <ContactShadow size={[3.6, 1.2]} />
-            <mesh position={[0, 1.0, 0]} receiveShadow>
-              <boxGeometry args={[3.4, 2.2, 0.8]} />
+            <mesh position={[0, displayHeight / 2 - 0.1, 0]} receiveShadow>
+              <boxGeometry args={[3.4, displayHeight, 0.8]} />
               <meshStandardMaterial color={wood} roughness={0.9} />
             </mesh>
-            <mesh position={[0, 1.65, 0.36]} receiveShadow>
-              <boxGeometry args={[3.0, 0.12, 0.14]} />
+            <mesh position={[0, displayHeight - 0.55, 0.36]} receiveShadow>
+              <boxGeometry args={[3.0, 0.12, 0.16]} />
               <meshStandardMaterial color={trim} roughness={0.85} />
             </mesh>
-            <mesh position={[0, 0.95, 0.36]} receiveShadow>
-              <boxGeometry args={[3.0, 0.12, 0.14]} />
+            <mesh position={[0, displayHeight - 1.25, 0.36]} receiveShadow>
+              <boxGeometry args={[3.0, 0.12, 0.16]} />
               <meshStandardMaterial color={trim} roughness={0.85} />
             </mesh>
             <mesh position={[0, 0.28, 0.36]} receiveShadow>
-              <boxGeometry args={[3.0, 0.12, 0.14]} />
+              <boxGeometry args={[3.0, 0.12, 0.16]} />
               <meshStandardMaterial color={trim} roughness={0.85} />
             </mesh>
-            <mesh position={[-1.55, 1.0, 0]} receiveShadow>
-              <boxGeometry args={[0.12, 2.0, 0.7]} />
+            <mesh position={[-1.55, displayHeight / 2 - 0.1, 0]} receiveShadow>
+              <boxGeometry args={[0.12, displayHeight - 0.2, 0.7]} />
               <meshStandardMaterial color={darkenHex(wood, 0.85)} roughness={0.9} />
             </mesh>
-            <mesh position={[1.55, 1.0, 0]} receiveShadow>
-              <boxGeometry args={[0.12, 2.0, 0.7]} />
+            <mesh position={[1.55, displayHeight / 2 - 0.1, 0]} receiveShadow>
+              <boxGeometry args={[0.12, displayHeight - 0.2, 0.7]} />
               <meshStandardMaterial color={darkenHex(wood, 0.85)} roughness={0.9} />
             </mesh>
             <mesh position={[0, 0.6, 0.28]} receiveShadow>
@@ -909,6 +918,24 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
               <boxGeometry args={[3.0, 0.06, 0.1]} />
               <meshStandardMaterial color={darkenHex(wood, 0.8)} roughness={0.9} />
             </mesh>
+            {hasCarved && (
+              <>
+                <mesh position={[0, displayHeight - 0.25, 0.42]} receiveShadow>
+                  <boxGeometry args={[3.2, 0.08, 0.06]} />
+                  <meshStandardMaterial color={darkenHex(trim, 0.8)} roughness={0.8} />
+                </mesh>
+                <mesh position={[0, 0.18, 0.42]} receiveShadow>
+                  <boxGeometry args={[3.2, 0.08, 0.06]} />
+                  <meshStandardMaterial color={darkenHex(trim, 0.8)} roughness={0.8} />
+                </mesh>
+              </>
+            )}
+            {hasGlass && (
+              <mesh position={[0, displayHeight / 2 - 0.1, 0.42]}>
+                <planeGeometry args={[3.0, displayHeight - 0.6]} />
+                <meshStandardMaterial color="#c8d0d8" transparent opacity={0.12} roughness={0.15} metalness={0.1} />
+              </mesh>
+            )}
             {shelfYs.map((y, shelfIndex) => (
               <group key={`shelf-${shelfIndex}`}>
                 {itemSlots.map((x, idx) => {
@@ -1056,30 +1083,70 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
       const seed = Math.floor(seededRandom(prop.id.length + prop.position[0] * 11 + prop.position[2] * 17) * 10000);
       let localSeed = seed;
       const rand = () => seededRandom(localSeed++);
-      const palette = ['#8d6a4a', '#7a5a3a', '#6a4b35', '#9a7a5a', '#7d6248'];
-      const accent = ['#c2a56f', '#b88b5a', '#9b7b52'];
+      const palette = ['#9b4a3c', '#8a6b4f', '#7b3f2d', '#b07a4a', '#6f5a7b', '#9b7a52', '#6b4f3f'];
+      const accent = ['#d1b06b', '#c18b5a', '#b58a6a', '#9e6d4a', '#8e6b9b'];
       const base = palette[Math.floor(rand() * palette.length)];
       const stripe = accent[Math.floor(rand() * accent.length)];
-      const scaleA = 0.85 + rand() * 0.2;
-      const scaleB = 0.75 + rand() * 0.2;
+      const scaleA = 0.9 + rand() * 0.25;
+      const scaleB = 0.8 + rand() * 0.25;
+      const pickShape = () => {
+        const roll = rand();
+        if (roll < 0.1) return 'oct';
+        if (roll < 0.7) return 'square';
+        return 'round';
+      };
+      const shapeA = pickShape();
+      const shapeB = pickShape();
       return (
         <group {...common}>
-          <mesh position={[0.2, 0.12, 0]} receiveShadow>
-            <boxGeometry args={[0.75 * scaleA, 0.22, 0.75 * scaleA]} />
-            <meshStandardMaterial color={base} roughness={0.92} />
-          </mesh>
-          <mesh position={[-0.35, 0.12, -0.15]} receiveShadow>
-            <boxGeometry args={[0.62 * scaleB, 0.2, 0.62 * scaleB]} />
-            <meshStandardMaterial color={darkenHex(base, 0.92)} roughness={0.92} />
-          </mesh>
-          <mesh position={[0.2, 0.24, 0]} receiveShadow>
-            <boxGeometry args={[0.12, 0.04, 0.75 * scaleA]} />
-            <meshStandardMaterial color={stripe} roughness={0.85} />
-          </mesh>
-          <mesh position={[-0.35, 0.22, -0.15]} receiveShadow>
-            <boxGeometry args={[0.62 * scaleB, 0.03, 0.1]} />
-            <meshStandardMaterial color={stripe} roughness={0.85} />
-          </mesh>
+          <group position={[0.2, 0.12, 0]}>
+            {shapeA === 'square' && (
+              <mesh receiveShadow>
+                <boxGeometry args={[0.78 * scaleA, 0.22, 0.78 * scaleA]} />
+                <meshStandardMaterial color={base} roughness={0.92} />
+              </mesh>
+            )}
+            {shapeA === 'round' && (
+              <mesh receiveShadow>
+                <cylinderGeometry args={[0.42 * scaleA, 0.46 * scaleA, 0.22, 16]} />
+                <meshStandardMaterial color={base} roughness={0.92} />
+              </mesh>
+            )}
+            {shapeA === 'oct' && (
+              <mesh receiveShadow>
+                <cylinderGeometry args={[0.42 * scaleA, 0.46 * scaleA, 0.22, 8]} />
+                <meshStandardMaterial color={base} roughness={0.92} />
+              </mesh>
+            )}
+            <mesh position={[0, 0.12, 0]} receiveShadow>
+              <boxGeometry args={[0.1, 0.03, 0.65 * scaleA]} />
+              <meshStandardMaterial color={stripe} roughness={0.85} />
+            </mesh>
+          </group>
+          <group position={[-0.35, 0.12, -0.15]}>
+            {shapeB === 'square' && (
+              <mesh receiveShadow>
+                <boxGeometry args={[0.68 * scaleB, 0.2, 0.68 * scaleB]} />
+                <meshStandardMaterial color={darkenHex(base, 0.9)} roughness={0.92} />
+              </mesh>
+            )}
+            {shapeB === 'round' && (
+              <mesh receiveShadow>
+                <cylinderGeometry args={[0.36 * scaleB, 0.4 * scaleB, 0.2, 16]} />
+                <meshStandardMaterial color={darkenHex(base, 0.9)} roughness={0.92} />
+              </mesh>
+            )}
+            {shapeB === 'oct' && (
+              <mesh receiveShadow>
+                <cylinderGeometry args={[0.36 * scaleB, 0.4 * scaleB, 0.2, 8]} />
+                <meshStandardMaterial color={darkenHex(base, 0.9)} roughness={0.92} />
+              </mesh>
+            )}
+            <mesh position={[0, 0.1, 0]} receiveShadow>
+              <boxGeometry args={[0.6 * scaleB, 0.03, 0.09]} />
+              <meshStandardMaterial color={stripe} roughness={0.85} />
+            </mesh>
+          </group>
         </group>
       );
     }
@@ -1147,7 +1214,6 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
       const metal = '#3f2b1b';
       return (
         <group {...common} position={anchoredPos(h * 0.75)}>
-          <ContactShadow size={[w + 0.1, d + 0.1]} />
           <mesh receiveShadow>
             <boxGeometry args={[w, h, d]} />
             <meshStandardMaterial color={wood} roughness={0.85} />
@@ -1408,24 +1474,40 @@ const InteriorPropMesh: React.FC<{ prop: InteriorProp; rugMaterial: THREE.MeshSt
         const seed = Math.floor(seededRandom(prop.id.length + prop.position[0] * 19 + prop.position[2] * 31) * 10000);
         let localSeed = seed;
         const rand = () => seededRandom(localSeed++);
-        const palette = ['#8e6a4a', '#7a5b3b', '#6f5137', '#9a7a5b', '#7d6248'];
-        const accent = ['#c9ad76', '#b98a5a', '#9f7b52', '#a6764e'];
+        const palette = ['#9b4a3c', '#8a6b4f', '#7b3f2d', '#6f5a7b', '#9b7a52', '#7d6248', '#b07a4a'];
+        const accent = ['#d1b06b', '#c18b5a', '#b58a6a', '#9e6d4a', '#8e6b9b'];
         const base = palette[Math.floor(rand() * palette.length)];
         const trim = accent[Math.floor(rand() * accent.length)];
         const w = 0.72 + rand() * 0.24;
         const d = 0.72 + rand() * 0.24;
+        const roll = rand();
+        const shape = roll < 0.1 ? 'oct' : roll < 0.7 ? 'square' : 'round';
         return (
           <group {...common} position={anchoredPos(0.12)}>
-            <mesh receiveShadow>
-              <boxGeometry args={[w, 0.24, d]} />
-              <meshStandardMaterial color={base} roughness={0.9} />
-            </mesh>
+            {shape === 'square' && (
+              <mesh receiveShadow>
+                <boxGeometry args={[w, 0.24, d]} />
+                <meshStandardMaterial color={base} roughness={0.9} />
+              </mesh>
+            )}
+            {shape === 'round' && (
+              <mesh receiveShadow>
+                <cylinderGeometry args={[w * 0.5, w * 0.55, 0.24, 16]} />
+                <meshStandardMaterial color={base} roughness={0.9} />
+              </mesh>
+            )}
+            {shape === 'oct' && (
+              <mesh receiveShadow>
+                <cylinderGeometry args={[w * 0.5, w * 0.55, 0.24, 8]} />
+                <meshStandardMaterial color={base} roughness={0.9} />
+              </mesh>
+            )}
             <mesh position={[0, 0.14, 0]} receiveShadow>
-              <boxGeometry args={[w * 0.75, 0.03, d * 0.08]} />
+              <boxGeometry args={[w * 0.7, 0.03, d * 0.08]} />
               <meshStandardMaterial color={trim} roughness={0.85} />
             </mesh>
             <mesh position={[0, 0.14, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
-              <boxGeometry args={[d * 0.75, 0.03, w * 0.08]} />
+              <boxGeometry args={[d * 0.7, 0.03, w * 0.08]} />
               <meshStandardMaterial color={trim} roughness={0.85} />
             </mesh>
           </group>
@@ -2671,13 +2753,22 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
         const alcoveSide = alcoveSides.length
           ? alcoveSides[Math.floor(seededRandom(styleSeed + index * 29) * alcoveSides.length)]
           : null;
+        const windowInset = 0.22;
+        const glassInset = 0.32;
         const windowOffset = windowSide === 'north'
-          ? [0, 1.6, room.size[2] / 2 - 0.12]
+          ? [0, 1.6, room.size[2] / 2 - windowInset]
           : windowSide === 'south'
-            ? [0, 1.6, -room.size[2] / 2 + 0.12]
+            ? [0, 1.6, -room.size[2] / 2 + windowInset]
             : windowSide === 'east'
-              ? [room.size[0] / 2 - 0.12, 1.6, 0]
-              : [-room.size[0] / 2 + 0.12, 1.6, 0];
+              ? [room.size[0] / 2 - windowInset, 1.6, 0]
+              : [-room.size[0] / 2 + windowInset, 1.6, 0];
+        const glassOffset = windowSide === 'north'
+          ? [0, 1.6, room.size[2] / 2 - glassInset]
+          : windowSide === 'south'
+            ? [0, 1.6, -room.size[2] / 2 + glassInset]
+            : windowSide === 'east'
+              ? [room.size[0] / 2 - glassInset, 1.6, 0]
+              : [-room.size[0] / 2 + glassInset, 1.6, 0];
         const stainedSeed = seededRandom(styleSeed + index * 47);
         const stainedColors = ['#8fb6e6', '#c8a2d6', '#d6b56b', '#9ec7a8'];
         const stainedGlass = spec.buildingType === BuildingType.RELIGIOUS && stainedSeed > 0.55;
@@ -2714,11 +2805,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
                   decay={2}
                 />
               )}
-              <mesh position={windowOffset as [number, number, number]} rotation={windowSide === 'east' || windowSide === 'west' ? [0, Math.PI / 2, 0] : [0, 0, 0]} receiveShadow>
+              <mesh position={windowOffset as [number, number, number]} rotation={windowSide === 'east' || windowSide === 'west' ? [0, Math.PI / 2, 0] : [0, 0, 0]} receiveShadow renderOrder={1}>
                 <planeGeometry args={[1.4, 1.2]} />
                 <meshStandardMaterial color={stainedGlass ? '#5a3f2c' : '#7a5b42'} roughness={0.85} />
               </mesh>
-              <mesh position={[windowOffset[0], windowOffset[1], windowOffset[2] + (windowSide === 'north' ? 0.06 : windowSide === 'south' ? -0.06 : 0)]} rotation={windowSide === 'east' || windowSide === 'west' ? [0, Math.PI / 2, 0] : [0, 0, 0]}>
+              <mesh position={glassOffset as [number, number, number]} rotation={windowSide === 'east' || windowSide === 'west' ? [0, Math.PI / 2, 0] : [0, 0, 0]} renderOrder={2}>
                 <planeGeometry args={[1.2, 1.0]} />
                 <meshStandardMaterial
                   color={stainedGlass ? stainedColor : '#c9b089'}
@@ -2726,10 +2817,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
                   emissiveIntensity={isDay ? (stainedGlass ? 0.65 : 0.45) : 0.1}
                   transparent
                   opacity={isDay ? (stainedGlass ? 0.6 : 0.55) : 0.15}
+                  depthWrite={false}
                 />
               </mesh>
               {stainedGlass && (
-                <group position={[windowOffset[0], windowOffset[1], windowOffset[2] + (windowSide === 'north' ? 0.07 : windowSide === 'south' ? -0.07 : 0)]} rotation={windowSide === 'east' || windowSide === 'west' ? [0, Math.PI / 2, 0] : [0, 0, 0]}>
+                <group position={[glassOffset[0], glassOffset[1], glassOffset[2] + (windowSide === 'north' ? 0.02 : windowSide === 'south' ? -0.02 : 0)]} rotation={windowSide === 'east' || windowSide === 'west' ? [0, Math.PI / 2, 0] : [0, 0, 0]}>
                   {[ -0.35, 0, 0.35 ].map((x, idx) => (
                     <mesh key={`glass-bar-v-${idx}`} position={[x, 0, 0]} receiveShadow>
                       <boxGeometry args={[0.05, 0.9, 0.04]} />

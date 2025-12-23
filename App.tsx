@@ -46,6 +46,7 @@ function App() {
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
+  const [pushCharge, setPushCharge] = useState(0);
   const [currentWeather, setCurrentWeather] = useState<string>('CLEAR');
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
@@ -211,6 +212,10 @@ function App() {
       setTransitioning(false);
     }, 600);
   }, []);
+
+  const canvasCamera = useMemo(() => ({ position: [20, 20, 20] as [number, number, number], fov: 45 }), []);
+  const canvasDpr = useMemo(() => [1, 2] as [number, number], []);
+  const canvasGl = useMemo(() => ({ toneMappingExposure: 1.05 }), []);
 
   const handleFastTravel = useCallback((x: number, y: number) => {
     setTransitioning(true);
@@ -450,6 +455,7 @@ function App() {
         pickupPrompt={pickupPrompt}
         pickupToast={pickupToast?.message ?? null}
         currentWeather={currentWeather}
+        pushCharge={pushCharge}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -523,16 +529,16 @@ function App() {
 
       {/* Merchant Interaction Prompt */}
       {sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && (
-        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
+        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
           Press <span className="font-bold text-amber-400">E</span> to trade with {nearMerchant.stats.name}
         </div>
       )}
 
       <Canvas
         shadows
-        camera={{ position: [20, 20, 20], fov: 45 }}
-        dpr={[1, 2]}
-        gl={{ toneMappingExposure: 1.05 }}
+        camera={canvasCamera}
+        dpr={canvasDpr}
+        gl={canvasGl}
         onPointerDownCapture={() => setSelectedNpc(null)}
         onPointerMissed={() => setSelectedNpc(null)}
         onCreated={({ gl }) => {
@@ -543,7 +549,7 @@ function App() {
         }}
       >
         {/* Adaptive Performance - automatically adjusts resolution based on FPS */}
-        <AdaptiveDpr pixelated />
+        <AdaptiveDpr />
         <AdaptiveEvents />
         <PerformanceMonitor
           onIncline={() => setPerformanceDegraded(false)}
@@ -574,6 +580,7 @@ function App() {
               onPickupPrompt={setPickupPrompt}
               onPickupItem={handlePickupItem}
               onWeatherUpdate={setCurrentWeather}
+              onPushCharge={setPushCharge}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (

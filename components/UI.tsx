@@ -45,6 +45,7 @@ interface UIProps {
   pickupPrompt: string | null;
   pickupToast: string | null;
   currentWeather: string;
+  pushCharge: number;
 }
 
 const WeatherModal: React.FC<{
@@ -606,6 +607,7 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     data.district === 'SALHIYYA' ? 'Al-Salihiyya' :
     data.district === 'OUTSKIRTS' ? 'Outskirts' :
     data.district === 'CARAVANSERAI' ? 'Caravanserai' :
+    data.district === 'SOUTHERN_ROAD' ? 'Southern Road' :
     'Residential';
 
   return (
@@ -701,7 +703,7 @@ const NpcPortrait: React.FC<{ npc: NPCStats }> = ({ npc }) => {
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather, pushCharge }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
@@ -1317,6 +1319,21 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         {pickupToast && (
           <div className="absolute bottom-36 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-950/90 via-black/80 to-amber-950/90 backdrop-blur-md px-5 py-2 rounded-full border border-amber-500/50 text-amber-100 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_30px_rgba(245,158,11,0.35)]">
             {pickupToast}
+          </div>
+        )}
+
+        {/* Push Charge Meter - shows when holding shift near a pushable object */}
+        {pushCharge > 0 && (
+          <div className="absolute bottom-48 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none">
+            <div className="text-[9px] uppercase tracking-widest text-amber-400/80">
+              {pushCharge >= 1 ? 'Release to Push!' : 'Hold Shift...'}
+            </div>
+            <div className="w-32 h-2 bg-black/60 rounded-full border border-amber-700/50 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-75 ${pushCharge >= 1 ? 'bg-amber-400 animate-pulse' : 'bg-amber-600'}`}
+                style={{ width: `${Math.min(100, pushCharge * 100)}%` }}
+              />
+            </div>
           </div>
         )}
 

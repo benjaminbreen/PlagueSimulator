@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior';
+export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder';
 export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth';
 
 export interface PickupInfo {
@@ -21,6 +21,11 @@ export interface PushableObject {
   rotation?: number;
   sourceId?: string;
   pickup?: PickupInfo;
+  angularVelocity?: THREE.Vector3;  // For rolling rotation (boulders)
+  isSleeping?: boolean;              // Performance optimization (boulders)
+  lastSlopeCheck?: number;           // Throttle gradient calculations (boulders)
+  potStyle?: number;                 // 0-2 for pot style variation
+  potSize?: number;                  // 0.7-1.3 scale multiplier
 }
 
 export const createPushable = (

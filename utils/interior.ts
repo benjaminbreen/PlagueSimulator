@@ -238,6 +238,33 @@ const clampToRoom = (room: InteriorRoom, pos: [number, number, number], margin =
   ];
 };
 
+const keepInsideOpenSide = (
+  room: InteriorRoom,
+  pos: [number, number, number],
+  openSide: 'north' | 'south' | 'east' | 'west' | null,
+  inset = 1.8
+): [number, number, number] => {
+  if (!openSide) return pos;
+  const [cx, , cz] = room.center;
+  const halfW = room.size[0] / 2;
+  const halfD = room.size[2] / 2;
+  const next: [number, number, number] = [...pos];
+  if (openSide === 'south') {
+    const minZ = cz - halfD + inset;
+    if (next[2] < minZ) next[2] = minZ;
+  } else if (openSide === 'north') {
+    const maxZ = cz + halfD - inset;
+    if (next[2] > maxZ) next[2] = maxZ;
+  } else if (openSide === 'west') {
+    const minX = cx - halfW + inset;
+    if (next[0] < minX) next[0] = minX;
+  } else if (openSide === 'east') {
+    const maxX = cx + halfW - inset;
+    if (next[0] > maxX) next[0] = maxX;
+  }
+  return next;
+};
+
 const addCommercialLayout = (
   props: InteriorProp[],
   rooms: InteriorRoom[],
@@ -248,6 +275,7 @@ const addCommercialLayout = (
   let s = seed;
   const rand = () => seededRandom(s++);
   const profLower = profession.toLowerCase();
+  const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY);
   const hall = rooms.find((room) => room.type === InteriorRoomType.HALL) ?? rooms[0];
   const clampToRoom = (room: InteriorRoom, pos: [number, number, number]): [number, number, number] => {
     const [cx, , cz] = room.center;
@@ -268,11 +296,12 @@ const addCommercialLayout = (
   const counterSide = oppositeSide(entrySide);
 
   if (profLower.includes('inn') || profLower.includes('sherbet')) {
-    const tableCount = hall.size[0] > 14 ? 3 : 2;
+    const cafeRoom = entryRoom ?? hall;
+    const tableCount = cafeRoom.size[0] > 14 ? 3 : 2;
     for (let i = 0; i < tableCount; i += 1) {
       const offsetX = (i - (tableCount - 1) / 2) * 3.2;
-      const basePos: [number, number, number] = [hall.center[0] + offsetX, 0, hall.center[2] + (i % 2 === 0 ? 1.0 : -1.0)];
-      addProp(props, hall, InteriorPropType.LOW_TABLE, 'Low table', basePos);
+      const basePos: [number, number, number] = [cafeRoom.center[0] + offsetX, 0, cafeRoom.center[2] + (i % 2 === 0 ? 1.0 : -1.0)];
+      addProp(props, cafeRoom, InteriorPropType.LOW_TABLE, 'Low table', clampToRoom(cafeRoom, basePos));
       const pillows = [
         [basePos[0] + 1.0, 0, basePos[2]],
         [basePos[0] - 1.0, 0, basePos[2]],
@@ -280,20 +309,20 @@ const addCommercialLayout = (
         [basePos[0], 0, basePos[2] - 1.0],
       ];
       pillows.forEach((pos) => {
-        addProp(props, hall, InteriorPropType.FLOOR_PILLOWS, 'Floor pillows', pos, [0, rand() * Math.PI * 2, 0]);
+        addProp(props, cafeRoom, InteriorPropType.FLOOR_PILLOWS, 'Floor pillows', clampToRoom(cafeRoom, pos), [0, rand() * Math.PI * 2, 0]);
       });
-      addProp(props, hall, InteriorPropType.TRAY, 'Serving tray', [basePos[0] + 0.2, 0.78, basePos[2] - 0.1]);
-      addProp(props, hall, InteriorPropType.TEA_SET, 'Sherbet service', [basePos[0] - 0.2, 0.78, basePos[2] + 0.1]);
+      addProp(props, cafeRoom, InteriorPropType.TRAY, 'Serving tray', clampToRoom(cafeRoom, [basePos[0] + 0.2, 0.78, basePos[2] - 0.1]));
+      addProp(props, cafeRoom, InteriorPropType.TEA_SET, 'Sherbet service', clampToRoom(cafeRoom, [basePos[0] - 0.2, 0.78, basePos[2] + 0.1]));
       if (rand() > 0.4) {
-        addProp(props, hall, InteriorPropType.HOOKAH, 'Hookah', [basePos[0] + 1.2, 0, basePos[2] + 0.6]);
+        addProp(props, cafeRoom, InteriorPropType.HOOKAH, 'Hookah', clampToRoom(cafeRoom, [basePos[0] + 1.2, 0, basePos[2] + 0.6]));
       }
     }
-    addProp(props, hall, InteriorPropType.BRAZIER, 'Charcoal brazier', clampToRoom(hall, wallAnchor(hall, counterSide, 0.7)));
+    addProp(props, cafeRoom, InteriorPropType.BRAZIER, 'Charcoal brazier', clampToRoom(cafeRoom, wallAnchor(cafeRoom, counterSide, 0.7)));
     if (rand() > 0.4) {
-      addProp(props, hall, InteriorPropType.BENCH, 'Low bench', clampToRoom(hall, wallAnchor(hall, 'east', 0.7, -2.0)), [0, Math.PI / 2, 0]);
+      addProp(props, cafeRoom, InteriorPropType.BENCH, 'Low bench', clampToRoom(cafeRoom, wallAnchor(cafeRoom, 'east', 0.7, -2.0)), [0, Math.PI / 2, 0]);
     }
     if (rand() > 0.3) {
-      addProp(props, hall, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(hall, wallAnchor(hall, 'west', 0.7, 1.4)), [0, Math.PI / 2, 0]);
+      addProp(props, cafeRoom, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(cafeRoom, wallAnchor(cafeRoom, 'west', 0.7, 1.4)), [0, Math.PI / 2, 0]);
     }
     return;
   }
@@ -303,15 +332,16 @@ const addCommercialLayout = (
     return;
   }
 
-  addProp(props, hall, InteriorPropType.COUNTER, 'Sales counter', clampToRoom(hall, wallAnchor(hall, counterSide, 1.6)));
+  const counterPos = clampToRoom(hall, wallAnchor(hall, counterSide, 1.6));
+  addProp(props, hall, InteriorPropType.COUNTER, 'Sales counter', counterPos);
   const displaySide = entrySide === 'east' || entrySide === 'west'
     ? (entrySide === 'east' ? 'north' : 'south')
     : (entrySide === 'north' ? 'east' : 'west');
   addProp(props, hall, InteriorPropType.DISPLAY, 'Display shelf', clampToRoom(hall, wallAnchor(hall, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4)), [0, displaySide === 'east' ? -Math.PI / 2 : Math.PI / 2, 0]);
   addProp(props, hall, InteriorPropType.BASKET, 'Market baskets', clampToRoom(hall, [hall.center[0], 0, hall.center[2] - hall.size[2] / 2 + 2.2]), [0, rand() * Math.PI, 0]);
   addProp(props, hall, InteriorPropType.BOLT_OF_CLOTH, 'Bolts of cloth', clampToRoom(hall, [hall.center[0] + 1.4, 0.75, hall.center[2] - hall.size[2] / 2 + 0.8]), [0, 0, 0]);
-  addProp(props, hall, InteriorPropType.SCALE, 'Balance scale', clampToRoom(hall, [hall.center[0] - 0.4, 0.85, hall.center[2] - hall.size[2] / 2 + 0.85]));
-  addProp(props, hall, InteriorPropType.LEDGER, 'Account ledger', clampToRoom(hall, [hall.center[0] + 0.4, 0.85, hall.center[2] - hall.size[2] / 2 + 0.85]));
+  addProp(props, hall, InteriorPropType.SCALE, 'Balance scale', clampToRoom(hall, [counterPos[0] - 0.5, 0.85, counterPos[2] + 0.15]));
+  addProp(props, hall, InteriorPropType.LEDGER, 'Account ledger', clampToRoom(hall, [counterPos[0] + 0.5, 0.85, counterPos[2] + 0.15]));
   if (profLower.includes('weaver') || profLower.includes('textile') || profLower.includes('draper')) {
     addProp(props, hall, InteriorPropType.LOOM, 'Weaving loom', clampToRoom(hall, wallAnchor(hall, 'north', 0.8, 0)));
     addProp(props, hall, InteriorPropType.BOLT_OF_CLOTH, 'Dyed cloth bolts', clampToRoom(hall, wallAnchor(hall, 'north', 0.7, 1.6)), [0, Math.PI / 2, 0]);
@@ -610,6 +640,7 @@ const pickProps = (
 
   rooms.forEach((room) => {
     if (room.type === InteriorRoomType.HALL) {
+      if (profLower.includes('inn') || profLower.includes('sherbet')) return;
       const hasTable = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.LOW_TABLE);
       if (!hasTable) {
         const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
@@ -806,6 +837,7 @@ const applyRoomLayouts = (
   const rand = () => seededRandom(s++);
   const profLower = profession.toLowerCase();
   const isCommercial = buildingType === BuildingType.COMMERCIAL || profLower.includes('merchant') || profLower.includes('shop');
+  const isInnLike = profLower.includes('inn') || profLower.includes('sherbet');
   const oppositeSide = (side: 'north' | 'south' | 'east' | 'west') => {
     if (side === 'north') return 'south';
     if (side === 'south') return 'north';
@@ -860,7 +892,7 @@ const applyRoomLayouts = (
       return;
     }
     if (room.type === InteriorRoomType.HALL) {
-      if (isCommercial) {
+      if (isCommercial && !isInnLike) {
         const counterSide = oppositeSide(entrySide);
         upsertProp(props, room, InteriorPropType.COUNTER, 'Sales counter', clampToRoom(room, wallAnchor(room, counterSide, 1.6, 0)));
         const displaySide = entrySide === 'east' || entrySide === 'west'
@@ -1030,6 +1062,7 @@ export const generateInteriorSpec = (
   }
 
   const entrySide = building.doorSide === 0 ? 'north' : building.doorSide === 1 ? 'south' : building.doorSide === 2 ? 'east' : 'west';
+  const openSide: 'north' | 'south' | 'east' | 'west' | null = building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS ? null : 'south';
   const rooms = placeRooms(s, baseRoomTypes.slice(0, roomCount), size);
   s += 50;
   const props = pickProps(rooms, socialClass, building.type, profession, s, entrySide);
@@ -1110,6 +1143,9 @@ export const generateInteriorSpec = (
     const room = rooms.find((candidate) => candidate.id === prop.roomId);
     if (!room) return;
     prop.position = clampToRoom(room, prop.position, 0.8);
+    if (room.type === InteriorRoomType.ENTRY) {
+      prop.position = keepInsideOpenSide(room, prop.position, openSide, 2.0);
+    }
   });
 
   if (overrides?.extraProps) {
@@ -1127,6 +1163,27 @@ export const generateInteriorSpec = (
       });
     });
   }
+
+  // Final safety pass: ensure every prop is tied to a valid room and clamped.
+  props.forEach((prop) => {
+    let room = rooms.find((candidate) => candidate.id === prop.roomId);
+    if (!room) {
+      room = entryRoom;
+      prop.roomId = entryRoom.id;
+      prop.position = entryRoom.center;
+    }
+    const needsExtraInset = prop.type === InteriorPropType.RUG
+      || prop.type === InteriorPropType.PRAYER_RUG
+      || prop.type === InteriorPropType.FLOOR_MAT
+      || prop.type === InteriorPropType.FIRE_PIT
+      || prop.type === InteriorPropType.BRAZIER
+      || prop.type === InteriorPropType.DESK;
+    const margin = needsExtraInset ? 1.2 : 0.8;
+    prop.position = clampToRoom(room, prop.position, margin);
+    if (room.type === InteriorRoomType.ENTRY) {
+      prop.position = keepInsideOpenSide(room, prop.position, openSide, 2.0);
+    }
+  });
 
   if (overrides?.extraNPCs) {
     overrides.extraNPCs.forEach((extra, index) => {
