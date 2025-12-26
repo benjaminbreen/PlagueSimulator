@@ -3,7 +3,7 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent, PlagueStatus, NpcStateOverride } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents, MoraleStats } from './Agents';
 import { Rats, Rat } from './Rats';
@@ -20,11 +20,12 @@ import { LaundryLine, generateLaundryLine, shouldGenerateLaundryLine } from '../
 import { ActionEffects } from './ActionEffects';
 import { Footprints } from './Footprints';
 import { SkyGradient } from './SkyGradient';
-import { AmbientAudio } from './AmbientAudio';
+import { AmbientAudio, SpatialSource } from './AmbientAudio';
 import { SnakeCharmer } from './npcs/SnakeCharmer';
 import { FluteMusic } from './audio/FluteMusic';
 import { Astrologer } from './npcs/Astrologer';
 import { Scribe } from './npcs/Scribe';
+import { exposePlayerToPlague } from '../utils/plague';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -44,8 +45,11 @@ interface SimulationProps {
   onPushCharge?: (charge: number) => void;
   onMoraleUpdate?: (morale: MoraleStats) => void;
   actionEvent?: PlayerActionEvent | null;
+  showDemographicsOverlay?: boolean;
+  npcStateOverride?: NpcStateOverride | null;
   onPlayerPositionUpdate?: (pos: THREE.Vector3) => void;
   dossierMode?: boolean;
+  onPlagueExposure?: (plague: PlagueStatus) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -905,7 +909,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, onPlayerPositionUpdate, dossierMode }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, onPlayerPositionUpdate, dossierMode, onPlagueExposure }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -913,7 +917,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const hemiRef = useRef<THREE.HemisphereLight>(null);
   const marketBounceRef = useRef<THREE.PointLight>(null);
   const fogRef = useRef<THREE.FogExp2>(null);
-  const ratsRef = useRef<Rat[]>([]);
+  const ratsRef = useRef<Rat[] | null>(null);
   const catPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const ratPositionsRef = useRef<THREE.Vector3[]>([]);
   const npcPositionsRef = useRef<THREE.Vector3[]>([]);
@@ -1198,6 +1202,29 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     onPickupItem?.(pickup);
   }, [onPickupItem]);
 
+  // Plague exposure handler - called when player is exposed to plague
+  const handlePlagueExposure = useCallback((
+    exposureType: 'flea' | 'airborne' | 'contact',
+    intensity: number
+  ) => {
+    if (playerStats.plague.state !== AgentState.HEALTHY) return;
+
+    const updatedPlague = exposePlayerToPlague(
+      playerStats.plague,
+      exposureType,
+      intensity,
+      simTime
+    );
+
+    if (updatedPlague.state !== AgentState.HEALTHY) {
+      onPlagueExposure?.(updatedPlague);
+
+      // Subtle notification
+      onPickupPrompt?.("You feel a sudden chill...");
+      setTimeout(() => onPickupPrompt?.(null), 2000);
+    }
+  }, [playerStats.plague, simTime, onPlagueExposure, onPickupPrompt]);
+
   // Generate laundry lines between buildings
   const buildLaundryLines = useCallback((): LaundryLine[] => {
     const lines: LaundryLine[] = [];
@@ -1251,6 +1278,58 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       setLaundryLines(buildLaundryLines());
     }
   }, [buildingsState, buildLaundryLines]);
+
+  // Generate spatial audio sources from buildings
+  const spatialAudioSources = useMemo<SpatialSource[]>(() => {
+    const sources: SpatialSource[] = [];
+
+    // Central fountain/well (always at origin in main square)
+    if (params.mapX === 0 && params.mapY === 0) {
+      sources.push({
+        id: 'central-fountain',
+        type: 'water',
+        position: [0, 0, 0],
+      });
+    }
+
+    // Generate sources from buildings based on profession
+    for (const building of buildingsState) {
+      const profession = building.ownerProfession?.toLowerCase() || '';
+
+      // Mosques
+      if (profession.includes('imam') || profession.includes('mosque')) {
+        sources.push({
+          id: `mosque-${building.id}`,
+          type: 'mosque',
+          position: building.position,
+        });
+      }
+
+      // Blacksmiths - forge fire
+      if (profession.includes('blacksmith') || profession.includes('smith')) {
+        sources.push({
+          id: `forge-${building.id}`,
+          type: 'fire',
+          position: building.position,
+        });
+      }
+
+      // Market-related professions
+      if (
+        profession.includes('merchant') ||
+        profession.includes('vendor') ||
+        profession.includes('seller')
+      ) {
+        sources.push({
+          id: `market-${building.id}`,
+          type: 'market',
+          position: building.position,
+        });
+      }
+    }
+
+    return sources;
+  }, [buildingsState, params.mapX, params.mapY]);
 
   // Procedurally generate 1-3 market stalls in the main marketplace
   const marketStalls = useMemo<MarketStallData[]>(() => {
@@ -2339,11 +2418,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           district={district}
           terrainSeed={terrainSeed}
           heightmap={heightmapRef.current}
+          npcStateOverride={npcStateOverride}
+          showDemographicsOverlay={showDemographicsOverlay}
         />
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
       {devSettings.showTorches && <WindowLightPool buildings={buildingsState} timeOfDay={params.timeOfDay} />}
-      {devSettings.showRats && <Rats ref={ratsRef} params={params} playerPos={playerRef.current?.position} catPos={catPositionRef.current} npcPositions={npcPositionsRef.current} />}
+      {devSettings.showRats && <Rats ref={ratsRef} ratsRef={ratsRef} params={params} playerPos={playerRef.current?.position} catPos={catPositionRef.current} npcPositions={npcPositionsRef.current} agentHashRef={agentHashRef} />}
 
       <Player
         ref={playerRef}
@@ -2368,6 +2449,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onPushCharge={onPushCharge}
         dossierMode={dossierMode}
         sprintStateRef={sprintStateRef}
+        ratsRef={ratsRef}
+        onPlagueExposure={handlePlagueExposure}
+        simTime={simTime}
       />
 
       {/* Footprints in sand (OUTSKIRTS_DESERT only) */}
@@ -2399,6 +2483,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         playerPosition={playerPositionRef.current}
         nearbyInfected={nearbyInfectedRef.current}
         nearbyDeceased={nearbyDeceasedRef.current}
+        spatialSources={spatialAudioSources}
         enabled={true}
         masterVolume={0.4}
       />

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   ConversationMessage,
   ConversationSummary,
@@ -11,6 +11,10 @@ import {
   trimConversationHistory,
   generateInitialGreeting
 } from '../../utils/conversationContext';
+import {
+  analyzeConversationImpact,
+  ConversationImpact
+} from '../../utils/friendliness';
 
 // Call serverless chat route to keep API key off the client.
 async function callChatAPI(
@@ -46,10 +50,15 @@ async function callChatAPI(
   return responseText;
 }
 
+interface ConversationResult {
+  summary: ConversationSummary;
+  impact: ConversationImpact;
+}
+
 interface UseConversationOptions {
   npc: NPCStats;
   context: EncounterContext;
-  onSummaryGenerated?: (summary: ConversationSummary) => void;
+  onConversationEnd?: (result: ConversationResult) => void;
 }
 
 interface UseConversationReturn {
@@ -57,18 +66,23 @@ interface UseConversationReturn {
   isLoading: boolean;
   error: string | null;
   sendMessage: (content: string) => Promise<void>;
-  endConversation: () => Promise<ConversationSummary | null>;
+  endConversation: () => Promise<ConversationResult | null>;
   clearError: () => void;
 }
 
 export function useConversation({
   npc,
   context,
-  onSummaryGenerated
+  onConversationEnd
 }: UseConversationOptions): UseConversationReturn {
   const [messages, setMessages] = useState<ConversationMessage[]>(() => {
-    // Start with NPC greeting
-    const greeting = generateInitialGreeting(npc, context.environment.timeOfDay);
+    // Start with NPC greeting - uses friendliness system with player context
+    const greeting = generateInitialGreeting(
+      npc,
+      context.environment.timeOfDay,
+      context.player,
+      context.conversationHistory
+    );
     return [{
       id: `msg-${Date.now()}`,
       role: 'npc' as const,
@@ -79,9 +93,14 @@ export function useConversation({
 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const messagesRef = useRef<ConversationMessage[]>(messages);
 
   // Cache the system prompt to avoid rebuilding on every message
   const systemPromptRef = useRef<string>(buildSystemPrompt(context));
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim() || isLoading) return;
@@ -100,7 +119,7 @@ export function useConversation({
 
     try {
       // Prepare messages for API (trim to avoid token overflow)
-      const trimmedMessages = trimConversationHistory(messages, 10);
+      const trimmedMessages = trimConversationHistory(messagesRef.current, 10);
       const formattedMessages = formatMessagesForGemini(trimmedMessages);
 
       // Call Gemini API directly
@@ -136,27 +155,16 @@ export function useConversation({
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading, npc]);
+  }, [isLoading, npc]);
 
-  const endConversation = useCallback(async (): Promise<ConversationSummary | null> => {
+  const endConversation = useCallback(async (): Promise<ConversationResult | null> => {
     if (messages.length < 2) return null;
 
-    // Generate summary locally (could also use API for better summaries)
+    // Analyze conversation impact on NPC disposition and panic
+    const impact = analyzeConversationImpact(messages);
+
+    // Generate summary locally
     const playerMessages = messages.filter(m => m.role === 'player').map(m => m.content);
-    const npcMessages = messages.filter(m => m.role === 'npc').map(m => m.content);
-
-    // Simple sentiment analysis based on keywords
-    const allText = messages.map(m => m.content).join(' ').toLowerCase();
-    let sentiment: 'positive' | 'neutral' | 'negative' = 'neutral';
-
-    const positiveWords = ['thank', 'bless', 'peace', 'help', 'friend', 'kind', 'good'];
-    const negativeWords = ['fear', 'death', 'plague', 'curse', 'flee', 'danger', 'sick'];
-
-    const positiveCount = positiveWords.filter(w => allText.includes(w)).length;
-    const negativeCount = negativeWords.filter(w => allText.includes(w)).length;
-
-    if (positiveCount > negativeCount + 1) sentiment = 'positive';
-    else if (negativeCount > positiveCount + 1) sentiment = 'negative';
 
     // Create a simple summary
     const topicSnippet = playerMessages[0]?.slice(0, 50) || 'brief exchange';
@@ -164,15 +172,17 @@ export function useConversation({
       npcId: npc.id,
       simTime: context.simulationStats.simTime,
       summary: `Spoke with ${npc.name} about ${topicSnippet}...`,
-      sentiment
+      sentiment: impact.sentiment // Use sentiment from impact analysis
     };
 
-    if (onSummaryGenerated) {
-      onSummaryGenerated(summary);
+    const result: ConversationResult = { summary, impact };
+
+    if (onConversationEnd) {
+      onConversationEnd(result);
     }
 
-    return summary;
-  }, [messages, npc, context.simulationStats.simTime, onSummaryGenerated]);
+    return result;
+  }, [messages, npc, context.simulationStats.simTime, onConversationEnd]);
 
   const clearError = useCallback(() => {
     setError(null);

@@ -1,9 +1,124 @@
 
-import { BuildingType, BuildingMetadata, SocialClass, NPCStats, PlayerStats, DistrictType, getDistrictType } from '../types';
+import { BuildingType, BuildingMetadata, SocialClass, NPCStats, PlayerStats, DistrictType, getDistrictType, Ethnicity, Religion } from '../types';
+import { assignDemographics } from './demographics';
 
-const FIRST_NAMES_MALE = ['Ahmad', 'Yusuf', 'Ibrahim', 'Umar', 'Hassan', 'Mahmud', 'Zayd', 'Malik', 'Nasir', 'Suleiman'];
-const FIRST_NAMES_FEMALE = ['Fatima', 'Zaynab', 'Maryam', 'Aisha', 'Khadija', 'Layla', 'Salma', 'Hafsa', 'Raya', 'Nura'];
-const LAST_NAMES = ['Al-Dimashqi', 'Al-Halabi', 'Al-Baghdadi', 'Al-Suri', 'Al-Farsi', 'Al-Andalusi', 'Al-Misri', 'Ibn Khaldun', 'Al-Bakri'];
+// ============================================
+// ETHNICITY-SPECIFIC NAME POOLS
+// ============================================
+
+// Arab names (Sunni/Shia Muslim Arabs)
+const ARAB_NAMES_MALE = ['Ahmad', 'Yusuf', 'Ibrahim', 'Umar', 'Hassan', 'Mahmud', 'Zayd', 'Malik', 'Nasir', 'Suleiman', 'Ali', 'Muhammad', 'Khalil', 'Rashid', 'Tariq', 'Salah', 'Jamal', 'Faris', 'Khalid', 'Said'];
+const ARAB_NAMES_FEMALE = ['Fatima', 'Zaynab', 'Maryam', 'Aisha', 'Khadija', 'Layla', 'Salma', 'Hafsa', 'Raya', 'Nura', 'Amina', 'Safiya', 'Suhayla', 'Lamia', 'Hana', 'Yasmin'];
+const ARAB_NISBAS = ['Al-Dimashqi', 'Al-Halabi', 'Al-Baghdadi', 'Al-Suri', 'Al-Misri', 'Al-Andalusi', 'Ibn Khaldun', 'Al-Bakri', 'Al-Hashimi', 'Al-Qurashi'];
+
+// Turkic names (Mamluk elite - often took Arabic names after conversion, but retained Turkic given names)
+const TURKIC_NAMES_MALE = ['Baybars', 'Qalawun', 'Kitbugha', 'Barquq', 'Tankiz', 'Aydakin', 'Sanjar', 'Tughril', 'Arslan', 'Ilgazi', 'Tengiz', 'Qutuz', 'Aybak', 'Aqtay'];
+const TURKIC_NAMES_FEMALE = ['Shagarat', 'Turkan', 'Khatun', 'Terken', 'Altun'];
+const TURKIC_NISBAS = ['Al-Mansuri', 'Al-Nasiri', 'Al-Ashrafiyya', 'Al-Turki', 'Al-Zahiri'];
+
+// Kurdish names
+const KURDISH_NAMES_MALE = ['Salahuddin', 'Shirkuh', 'Bahram', 'Rostam', 'Kurdi', 'Diyar', 'Barzani', 'Shams', 'Ayyub'];
+const KURDISH_NAMES_FEMALE = ['Zarin', 'Gulbahar', 'Shirin', 'Rojin', 'Helin', 'Narin'];
+const KURDISH_NISBAS = ['Al-Kurdi', 'Al-Akradi', 'Al-Ayyubi', 'Ibn Ayyub'];
+
+// Persian names
+const PERSIAN_NAMES_MALE = ['Dariush', 'Khosrow', 'Farhad', 'Jamshid', 'Behram', 'Firuz', 'Rostam', 'Shiraz', 'Isfahan'];
+const PERSIAN_NAMES_FEMALE = ['Parvin', 'Soraya', 'Roxana', 'Shireen', 'Mahvash', 'Golnar', 'Maryam'];
+const PERSIAN_NISBAS = ['Al-Farsi', 'Al-Shirazi', 'Al-Isfahani', 'Al-Khorasani', 'Al-Tabari'];
+
+// Armenian names
+const ARMENIAN_NAMES_MALE = ['Hovhannes', 'Vartan', 'Grigor', 'Tigran', 'Aram', 'Levon', 'Hayk', 'Dikran', 'Sahak', 'Nerses'];
+const ARMENIAN_NAMES_FEMALE = ['Anahit', 'Nvard', 'Sona', 'Arpi', 'Siranush', 'Gayane', 'Satenik', 'Mariam'];
+const ARMENIAN_SURNAMES = ['Melikyan', 'Sargsyan', 'Hovhannisyan', 'Grigoryan', 'Petrosyan', 'Hakobyan'];
+
+// Greek/Rum names (Byzantine Christians in Syria)
+const GREEK_NAMES_MALE = ['Konstantinos', 'Nikolaos', 'Georgios', 'Dimitrios', 'Theodoros', 'Mikhail', 'Pavlos', 'Ioannis'];
+const GREEK_NAMES_FEMALE = ['Maria', 'Sophia', 'Anastasia', 'Eleni', 'Theodora', 'Irini', 'Katerina'];
+const GREEK_NISBAS = ['Al-Rumi', 'Al-Yunani', 'Palaiologos', 'Komnenos'];
+
+// Aramaean/Syriac names (Syriac Christians)
+const SYRIAC_NAMES_MALE = ['Yuhanna', 'Shimun', 'Matta', 'Yaqub', 'Ephrem', 'Barsoum', 'Gewargis', 'Isa'];
+const SYRIAC_NAMES_FEMALE = ['Maryam', 'Shushanik', 'Sarah', 'Hanna', 'Marya', 'Shamiran'];
+const SYRIAC_NISBAS = ['Bar Shimun', 'Bar Yaqub', 'Al-Suryani', 'Bar Ephrem'];
+
+// Circassian names (later Mamluk period)
+const CIRCASSIAN_NAMES_MALE = ['Barquq', 'Jaqmaq', 'Inal', 'Qaytbay', 'Barsbay', 'Tatar', 'Khushqadam'];
+const CIRCASSIAN_NAMES_FEMALE = ['Khawand', 'Shirin'];
+const CIRCASSIAN_NISBAS = ['Al-Zahiri', 'Al-Ashrafiyya', 'Al-Jarkasi'];
+
+// Jewish names (Sephardic/Mizrahi Jews of Damascus)
+const JEWISH_NAMES_MALE = ['Yosef', 'Shlomo', 'Moshe', 'Avraham', 'Yitzhak', 'David', 'Yaakov', 'Eliyahu', 'Shmuel', 'Yehuda'];
+const JEWISH_NAMES_FEMALE = ['Esther', 'Miriam', 'Rachel', 'Sarah', 'Leah', 'Rebecca', 'Rivka', 'Hannah', 'Dinah'];
+const JEWISH_SURNAMES = ['Ibn Ezra', 'Ben Gabirol', 'Ibn Shaprut', 'Al-Yahudi', 'Ben David', 'Ibn Tibbon', 'Al-Harizi'];
+
+// Frankish names (Italian, Venetian, Genoese, Provençal merchants - Latin Christians)
+// These are merchants, diplomats, and travelers from Italian city-states and Crusader remnants
+const FRANKISH_NAMES_MALE = ['Marco', 'Giovanni', 'Pietro', 'Antonio', 'Francesco', 'Lorenzo', 'Niccolò', 'Andrea', 'Giacomo', 'Matteo', 'Bernardo', 'Filippo'];
+const FRANKISH_NAMES_FEMALE = ['Maria', 'Caterina', 'Isabella', 'Lucia', 'Giovanna', 'Beatrice', 'Margherita', 'Elena'];
+const FRANKISH_SURNAMES = ['da Venezia', 'di Genova', 'Polo', 'Doria', 'Contarini', 'Mocenigo', 'da Pisa', 'de Provence', 'di Firenze', 'Dandolo'];
+
+// Lookup tables for name generation
+const NAMES_BY_ETHNICITY: Record<Ethnicity, { male: string[]; female: string[]; surnames: string[] }> = {
+  'Arab': { male: ARAB_NAMES_MALE, female: ARAB_NAMES_FEMALE, surnames: ARAB_NISBAS },
+  'Turkic': { male: TURKIC_NAMES_MALE, female: TURKIC_NAMES_FEMALE, surnames: TURKIC_NISBAS },
+  'Kurdish': { male: KURDISH_NAMES_MALE, female: KURDISH_NAMES_FEMALE, surnames: KURDISH_NISBAS },
+  'Persian': { male: PERSIAN_NAMES_MALE, female: PERSIAN_NAMES_FEMALE, surnames: PERSIAN_NISBAS },
+  'Armenian': { male: ARMENIAN_NAMES_MALE, female: ARMENIAN_NAMES_FEMALE, surnames: ARMENIAN_SURNAMES },
+  'Greek/Rum': { male: GREEK_NAMES_MALE, female: GREEK_NAMES_FEMALE, surnames: GREEK_NISBAS },
+  'Aramaean/Syriac': { male: SYRIAC_NAMES_MALE, female: SYRIAC_NAMES_FEMALE, surnames: SYRIAC_NISBAS },
+  'Circassian': { male: CIRCASSIAN_NAMES_MALE, female: CIRCASSIAN_NAMES_FEMALE, surnames: CIRCASSIAN_NISBAS },
+  'Frankish': { male: FRANKISH_NAMES_MALE, female: FRANKISH_NAMES_FEMALE, surnames: FRANKISH_SURNAMES },
+};
+
+// Special case: Jewish names override ethnicity-based names
+const JEWISH_NAMES = { male: JEWISH_NAMES_MALE, female: JEWISH_NAMES_FEMALE, surnames: JEWISH_SURNAMES };
+
+// Special case: Frankish names for Latin Christians
+const FRANKISH_NAMES = { male: FRANKISH_NAMES_MALE, female: FRANKISH_NAMES_FEMALE, surnames: FRANKISH_SURNAMES };
+
+// Generate name based on ethnicity and religion
+// Exported for use by merchant generation
+export const generateNameForMerchant = (
+  rand: () => number,
+  gender: 'Male' | 'Female',
+  ethnicity: Ethnicity,
+  religion: Religion
+): string => {
+  // Jewish religion uses Jewish names regardless of ethnicity
+  if (religion === 'Jewish') {
+    const firstName = gender === 'Male'
+      ? JEWISH_NAMES.male[Math.floor(rand() * JEWISH_NAMES.male.length)]
+      : JEWISH_NAMES.female[Math.floor(rand() * JEWISH_NAMES.female.length)];
+    const surname = JEWISH_NAMES.surnames[Math.floor(rand() * JEWISH_NAMES.surnames.length)];
+    return `${firstName} ${surname}`;
+  }
+
+  // Latin Christian (Frankish) uses Italian/Venetian names
+  if (religion === 'Latin Christian') {
+    const firstName = gender === 'Male'
+      ? FRANKISH_NAMES.male[Math.floor(rand() * FRANKISH_NAMES.male.length)]
+      : FRANKISH_NAMES.female[Math.floor(rand() * FRANKISH_NAMES.female.length)];
+    const surname = FRANKISH_NAMES.surnames[Math.floor(rand() * FRANKISH_NAMES.surnames.length)];
+    return `${firstName} ${surname}`;
+  }
+
+  // Get ethnicity-specific names
+  const namePool = NAMES_BY_ETHNICITY[ethnicity] || NAMES_BY_ETHNICITY['Arab'];
+  const firstName = gender === 'Male'
+    ? namePool.male[Math.floor(rand() * namePool.male.length)]
+    : namePool.female[Math.floor(rand() * namePool.female.length)];
+  const surname = namePool.surnames[Math.floor(rand() * namePool.surnames.length)];
+
+  return `${firstName} ${surname}`;
+};
+
+// Internal alias for name generation
+const generateName = generateNameForMerchant;
+
+// Legacy name arrays for backward compatibility with building generation
+const FIRST_NAMES_MALE = ARAB_NAMES_MALE;
+const FIRST_NAMES_FEMALE = ARAB_NAMES_FEMALE;
+const LAST_NAMES = ARAB_NISBAS;
 
 const COMMERCIAL_PROFESSIONS = [
   'Spice Merchant',
@@ -117,7 +232,44 @@ const CIVIC_PROFESSIONS = [
   'Hammam Keeper',           // Public bath
   'Fountain Keeper',         // Public fountain (sabil)
 ];
-const MOODS = ['Fearful', 'Anxious', 'Determined', 'Exhausted', 'Pious', 'Sullen', 'Grateful', 'Stoic'];
+// Moods organized by disposition range (0-100)
+// High disposition (80-100): Friendly moods
+// Medium-high (60-80): Pleasant moods
+// Medium (40-60): Neutral moods
+// Medium-low (20-40): Negative moods
+// Low (0-20): Unfriendly moods
+const MOODS_BY_DISPOSITION: Record<string, string[]> = {
+  friendly: ['Cheerful', 'Warm', 'Gracious', 'Welcoming', 'Jovial'],
+  pleasant: ['Content', 'Calm', 'Patient', 'Thoughtful', 'Cordial'],
+  neutral: ['Reserved', 'Busy', 'Preoccupied', 'Stoic', 'Matter-of-fact'],
+  negative: ['Tired', 'Irritable', 'Impatient', 'Wary', 'Sullen'],
+  unfriendly: ['Suspicious', 'Bitter', 'Cold', 'Hostile', 'Despairing']
+};
+
+// Get mood based on disposition value
+const getMoodFromDisposition = (disposition: number, rand: () => number): string => {
+  let category: string;
+  if (disposition >= 80) category = 'friendly';
+  else if (disposition >= 60) category = 'pleasant';
+  else if (disposition >= 40) category = 'neutral';
+  else if (disposition >= 20) category = 'negative';
+  else category = 'unfriendly';
+
+  const moods = MOODS_BY_DISPOSITION[category];
+  return moods[Math.floor(rand() * moods.length)];
+};
+
+// Generate disposition with normal-ish distribution (most people are neutral-ish)
+const generateDisposition = (rand: () => number): number => {
+  // Use multiple random samples to create a bell curve centered around 50
+  const r1 = rand();
+  const r2 = rand();
+  const r3 = rand();
+  // Average of 3 samples, scaled to 0-100
+  const base = ((r1 + r2 + r3) / 3) * 100;
+  // Clamp to valid range
+  return Math.floor(Math.max(0, Math.min(100, base)));
+};
 const FAMILY_STRUCTURES = [
   'No immediate family noted',
   'Widowed, one child',
@@ -269,19 +421,28 @@ const chooseProfession = (
   return pickPool[Math.floor(rand() * pickPool.length)];
 };
 
+// Helper to check if a religion can hold a profession
+const isMuslim = (religion: Religion): boolean =>
+  religion === 'Sunni Islam' || religion === 'Shia Islam';
+
+// Professions that require being Muslim (historical dhimmi restrictions)
+const MUSLIM_ONLY_PROFESSIONS = [
+  'Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher',
+  'City Guard', 'Mamluk Soldier', 'Mamluk Officer', 'Mamluk Governor',
+  'Court Qadi', 'Market Inspector', 'Friday Mosque Imam', 'Madrasa Director', 'Shaykh', 'Shrine Keeper'
+];
+
 export const generateNPCStats = (seed: number, context?: { districtType?: DistrictType }): NPCStats => {
   let s = seed;
   const rand = () => seededRandom(s++);
 
   const gender: 'Male' | 'Female' = rand() > 0.5 ? 'Male' : 'Female';
-  const name = gender === 'Male' 
-    ? `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`
-    : `${FIRST_NAMES_FEMALE[Math.floor(rand() * FIRST_NAMES_FEMALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
-
   const age = Math.floor(rand() * 50) + 12;
+  const districtType = context?.districtType;
+
+  // Step 1: Determine social class based on district
   const classRand = rand();
   let socialClass = SocialClass.PEASANT;
-  const districtType = context?.districtType;
   if (districtType === 'WEALTHY') {
     if (classRand > 0.7) socialClass = SocialClass.NOBILITY;
     else if (classRand > 0.35) socialClass = SocialClass.MERCHANT;
@@ -308,6 +469,24 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     else if (classRand > 0.6) socialClass = SocialClass.CLERGY;
   }
 
+  // Step 2: Assign demographics BEFORE profession (fixes religion/profession mismatch)
+  // For clergy class, we force Muslim religion since non-Muslims can't hold religious positions
+  const preliminaryDemographics = assignDemographics(rand, { districtType, socialClass, gender });
+  let { ethnicity, religion, language } = preliminaryDemographics;
+
+  // If assigned to CLERGY class but rolled non-Muslim religion, reassign to MERCHANT class
+  // (Non-Muslims couldn't hold Islamic religious positions)
+  if (socialClass === SocialClass.CLERGY && !isMuslim(religion)) {
+    socialClass = SocialClass.MERCHANT;
+  }
+
+  // If assigned to NOBILITY class (which includes military) but non-Muslim, reassign
+  // (Mamluks and government positions required being Muslim)
+  if (socialClass === SocialClass.NOBILITY && !isMuslim(religion)) {
+    socialClass = SocialClass.MERCHANT;
+  }
+
+  // Step 3: Build profession pools with religion-appropriate options
   const professionPoolsByClass: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
     [SocialClass.PEASANT]: {
       Male: ['Day-Laborer', 'Water-Carrier', 'Tanner', 'Copyist', 'Porter', 'Shepherd'],
@@ -326,8 +505,18 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
       Female: ['Household Manager', 'Tutor'],
     },
   };
-  const professionPool = professionPoolsByClass[socialClass][gender];
+
+  // Step 4: Choose profession (now religion-validated)
+  // Filter out Muslim-only professions for non-Muslims
+  let professionPool = professionPoolsByClass[socialClass][gender];
+  if (!isMuslim(religion)) {
+    professionPool = professionPool.filter(p => !MUSLIM_ONLY_PROFESSIONS.includes(p));
+  }
   const profession = chooseProfession(professionPool, age, gender, socialClass, rand);
+
+  // Step 5: Generate ethnicity-appropriate name AFTER demographics are finalized
+  const name = generateName(rand, gender, ethnicity, religion);
+
   const isReligiousLeader = /Imam|Qadi|Mufti|Muezzin|Qur'an|Madrasa/i.test(profession);
   const isSoldier = /Guard|Soldier|Mamluk/i.test(profession);
   const isOfficer = /Officer/i.test(profession);
@@ -439,6 +628,18 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     headwearStyle = rand() > 0.7 ? 'cap' : 'none';
   }
 
+  if (!isReligiousLeader && !isSoldier && gender === 'Male') {
+    if (religion === 'Eastern Orthodox' || religion === 'Syriac Orthodox' || religion === 'Armenian Apostolic') {
+      headwearStyle = rand() > 0.6 ? 'none' : 'cap';
+    } else if (religion === 'Jewish') {
+      headwearStyle = rand() > 0.5 ? 'cap' : 'taqiyah';
+    } else if (religion === 'Druze') {
+      headwearStyle = rand() > 0.5 ? 'turban' : 'cap';
+    } else if (religion === 'Shia Islam' && headwearStyle === 'cap' && rand() > 0.6) {
+      headwearStyle = 'turban';
+    }
+  }
+
 
   const accessoryPool = gender === 'Female'
     ? (socialClass === SocialClass.NOBILITY
@@ -476,15 +677,29 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     return 'Attend to daily duties in the neighborhood.';
   })();
 
+  // Generate disposition (baseline personality/friendliness)
+  // Profession can slightly modify disposition
+  let disposition = generateDisposition(rand);
+  // Service workers dealing with public tend to be slightly more personable
+  if (/Innkeeper|Sherbet|Baker|Bread Seller/i.test(profession)) disposition = Math.min(100, disposition + 10);
+  // Military tends to be more reserved/stern
+  if (isSoldier) disposition = Math.max(0, disposition - 15);
+  // Clergy can vary but often formal
+  if (isReligiousLeader) disposition = Math.min(100, Math.max(20, disposition)); // Not too unfriendly
+
+  // Mood derived from disposition
+  const mood = getMoodFromDisposition(disposition, rand);
+
   // Initial morale values - slightly randomized with profession/class modifiers
   // Merchants hear rumors first (trade networks), clergy are calmer
   const baseAwareness = Math.floor(rand() * 12);
   const awarenessModifier = isMerchant ? 8 : isReligiousLeader ? -3 : 0;
   const awarenessLevel = Math.max(0, Math.min(100, baseAwareness + awarenessModifier));
 
-  // Initial panic is low, builds from awareness and witnessed events
-  const basePanic = Math.floor(rand() * 6);
-  const panicLevel = Math.max(0, Math.min(100, basePanic));
+  // Initial panic is 0-10, modified by disposition (higher disposition = calmer)
+  const basePanic = Math.floor(rand() * 10);
+  const dispositionPanicReduction = Math.floor(disposition / 20); // 0-5 reduction based on disposition
+  const panicLevel = Math.max(0, Math.min(100, basePanic - dispositionPanicReduction));
 
   return {
     id: `npc-${seed}`,
@@ -493,9 +708,13 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     gender,
     profession,
     socialClass,
+    ethnicity,
+    religion,
+    language,
     height: heightBase,
     weight: weightBase,
-    mood: MOODS[Math.floor(rand() * MOODS.length)],
+    disposition,
+    mood,
     awarenessLevel,
     panicLevel,
     robeSpread,
@@ -514,7 +733,10 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   };
 };
 
-export const generatePlayerStats = (seed: number): Omit<PlayerStats, 'currency' | 'inventory' | 'maxInventorySlots' | 'plague'> => {
+export const generatePlayerStats = (
+  seed: number,
+  context?: { districtType?: DistrictType }
+): Omit<PlayerStats, 'currency' | 'inventory' | 'maxInventorySlots' | 'plague'> => {
   let s = seed * 7 + 13;
   const rand = () => seededRandom(s++);
 
@@ -526,12 +748,31 @@ export const generatePlayerStats = (seed: number): Omit<PlayerStats, 'currency' 
   else if (classRoll > 0.62) socialClass = SocialClass.CLERGY;
 
   const age = Math.floor(rand() * 35) + 16;
+
+  // Step 1: Assign demographics BEFORE profession (same pattern as NPC generation)
+  const preliminaryDemographics = assignDemographics(rand, { districtType: context?.districtType, socialClass, gender });
+  let { ethnicity, religion, language } = preliminaryDemographics;
+
+  // If assigned to CLERGY class but rolled non-Muslim religion, reassign to MERCHANT class
+  if (socialClass === SocialClass.CLERGY && !isMuslim(religion)) {
+    socialClass = SocialClass.MERCHANT;
+  }
+
+  // If assigned to NOBILITY class but non-Muslim, reassign to MERCHANT
+  if (socialClass === SocialClass.NOBILITY && !isMuslim(religion)) {
+    socialClass = SocialClass.MERCHANT;
+  }
+
+  // Step 2: Generate ethnicity-appropriate name
+  const name = generateName(rand, gender, ethnicity, religion);
+
   const skinTone = `hsl(${26 + Math.round(rand() * 8)}, ${28 + Math.round(rand() * 18)}%, ${30 + Math.round(rand() * 18)}%)`;
   const skinDescriptions = ['olive-toned complexion', 'sun-browned skin', 'warm sand-brown skin', 'weathered bronze complexion'];
   const hairDescriptions = ['black hair', 'deep brown hair', 'dark chestnut hair'];
   const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
   const hairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
 
+  // Step 3: Build profession pools (religion-validated)
   const professionPoolsByClass: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
     [SocialClass.PEASANT]: {
       Male: ['Water-Carrier', 'Day-Laborer', 'Tanner', 'Porter', 'Potter', 'City Guard'],
@@ -550,7 +791,12 @@ export const generatePlayerStats = (seed: number): Omit<PlayerStats, 'currency' 
       Female: ['Household Manager', 'Tutor'],
     },
   };
-  const professionPool = professionPoolsByClass[socialClass][gender];
+
+  // Filter out Muslim-only professions for non-Muslims
+  let professionPool = professionPoolsByClass[socialClass][gender];
+  if (!isMuslim(religion)) {
+    professionPool = professionPool.filter(p => !MUSLIM_ONLY_PROFESSIONS.includes(p));
+  }
   const profession = chooseProfession(professionPool, age, gender, socialClass, rand);
   const isReligiousLeader = /Imam|Qadi|Mufti|Muezzin|Qur'an|Madrasa/i.test(profession);
   const isSoldier = /Guard|Soldier|Mamluk/i.test(profession);
@@ -657,6 +903,21 @@ export const generatePlayerStats = (seed: number): Omit<PlayerStats, 'currency' 
     headwearPick = isOfficer
       ? { desc: 'deep red imamah with pale striping', color: '#8b2e2e' }
       : { desc: 'dark wool cap with a narrow band', color: '#3a3a3a' };
+  }
+  if (!isReligiousLeader && !isSoldier && gender === 'Male') {
+    if (religion === 'Eastern Orthodox' || religion === 'Syriac Orthodox' || religion === 'Armenian Apostolic') {
+      headwearStyle = rand() > 0.6 ? 'none' : 'cap';
+      headwearPick = { desc: 'plain linen cap', color: '#5a4a3a' };
+    } else if (religion === 'Jewish') {
+      headwearStyle = rand() > 0.5 ? 'cap' : 'taqiyah';
+      headwearPick = { desc: 'simple skullcap in dark cloth', color: '#3a3a3a' };
+    } else if (religion === 'Druze') {
+      headwearStyle = rand() > 0.5 ? 'turban' : 'cap';
+      headwearPick = { desc: 'dark indigo imamah', color: '#3f5d7a' };
+    } else if (religion === 'Shia Islam' && headwearStyle === 'cap' && rand() > 0.6) {
+      headwearStyle = 'turban';
+      headwearPick = { desc: 'white-wrapped turban', color: '#e8dfcf' };
+    }
   }
 
   const healthHistoryOptions = [
@@ -790,11 +1051,14 @@ export const generatePlayerStats = (seed: number): Omit<PlayerStats, 'currency' 
   ].filter(a => a !== 'none');
 
   return {
-    name: generateNPCStats(seed).name,
+    name,
     age,
     gender,
     profession,
     socialClass,
+    ethnicity,
+    religion,
+    language,
     height,
     weight,
     family: FAMILY_STRUCTURES[Math.floor(rand() * FAMILY_STRUCTURES.length)],

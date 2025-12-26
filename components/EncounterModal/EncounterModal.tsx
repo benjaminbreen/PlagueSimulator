@@ -46,6 +46,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   const [activeTab, setActiveTab] = useState<'conversation' | 'history'>('conversation');
   const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasSummarizedRef = useRef(false);
 
   // Build context for conversation
   const context: EncounterContext = {
@@ -93,7 +94,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   }, [messages]);
 
   const handleClose = async () => {
-    if (messages.length > 1) {
+    if (messages.length > 1 && !hasSummarizedRef.current) {
+      hasSummarizedRef.current = true;
       await endConversation();
     }
     onClose();
@@ -113,7 +115,10 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   };
 
   const handleEndTalk = async () => {
-    await endConversation();
+    if (!hasSummarizedRef.current) {
+      hasSummarizedRef.current = true;
+      await endConversation();
+    }
     onClose();
   };
 
@@ -205,13 +210,13 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
             <div className="relative h-48 sm:h-56 md:h-64 bg-gradient-to-b from-amber-950/30 to-black/50">
               <div className="absolute inset-3 border border-amber-600/20 rounded-md pointer-events-none" />
               <Canvas
-                camera={{ position: [0, 0.3, 1.8], fov: 35 }}
+                camera={{ position: [0, 0.4, 1.8], fov: 30 }}
                 style={{ background: 'transparent' }}
               >
-                <ambientLight intensity={0.4} />
-                <directionalLight position={[2, 3, 2]} intensity={0.8} color="#ffeedd" />
-                <directionalLight position={[-2, 1, 1]} intensity={0.3} color="#aabbff" />
-                <group position={[0, -0.9, 0]}>
+                <ambientLight intensity={0.5} />
+                <directionalLight position={[2, 3, 2]} intensity={0.9} color="#ffeedd" />
+                <directionalLight position={[-2, 1, 1]} intensity={0.7} color="#aabbff" />
+                <group position={[0, -1.65, 0.0]}>
                   <Humanoid
                     color={npc.gender === 'Female' ? robe : '#5c4b3a'}
                     headColor={skin}
@@ -275,6 +280,24 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                     'bg-stone-800/40 text-stone-300'
                   }`}>
                     {npc.socialClass}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-amber-100/40 uppercase tracking-widest">Ethnicity</span>
+                  <span className="text-sm text-amber-100/90">{npc.ethnicity}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-amber-100/40 uppercase tracking-widest">Religion</span>
+                  <span className={`text-sm px-2 py-0.5 rounded text-xs ${
+                    npc.religion === 'Sunni Islam' ? 'bg-amber-900/40 text-amber-200' :
+                    npc.religion === 'Shia Islam' ? 'bg-amber-900/40 text-amber-300' :
+                    npc.religion === 'Eastern Orthodox' ? 'bg-sky-900/40 text-sky-200' :
+                    npc.religion === 'Armenian Apostolic' ? 'bg-rose-900/40 text-rose-200' :
+                    npc.religion === 'Syriac Orthodox' ? 'bg-cyan-900/40 text-cyan-200' :
+                    npc.religion === 'Jewish' ? 'bg-emerald-900/40 text-emerald-200' :
+                    'bg-stone-800/40 text-stone-300'
+                  }`}>
+                    {npc.religion}
                   </span>
                 </div>
               </div>

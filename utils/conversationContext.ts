@@ -3,6 +3,7 @@ import {
   PlayerStats,
   EncounterContext,
   ConversationMessage,
+  ConversationSummary,
   SocialClass,
   SimulationStats,
   EncounterEnvironment
@@ -116,11 +117,17 @@ export function buildSystemPrompt(context: EncounterContext): string {
   const relationshipContext = buildRelationshipContext(
     conversationHistory.map(h => ({ summary: h.summary, sentiment: h.sentiment }))
   );
+  const languageLine = npc.language === 'Arabic'
+    ? 'Arabic'
+    : `${npc.language}, and you also use Arabic in daily trade.`;
 
   return `You are ${npc.name}, a ${npc.age}-year-old ${npc.gender.toLowerCase()} ${npc.profession} in Damascus, 1348 AD.
 
 ## YOUR IDENTITY
 - Social class: ${npc.socialClass}
+- Ethnicity: ${npc.ethnicity}
+- Faith: ${npc.religion}
+- Language: ${languageLine}
 - Current mood: ${npc.mood}
 - Today's goal: ${npc.goalOfDay || "Go about daily business"}
 
@@ -162,7 +169,7 @@ ${relationshipContext}
 3. Your responses reflect your panic and awareness levels. If terrified, be brief or evasive.
 4. React naturally to nearby threats (corpses, sick people). You might want to flee.
 5. Keep responses concise: 1-3 sentences typically, occasionally longer for important topics.
-6. Reference Islamic faith naturally: prayers, Allah's will, divine punishment, fate.
+6. Speak consistent with your faith and community; refer to prayers, fasts, and holy places appropriate to your religion.
 7. Social class affects your tone: deferential to nobility, dismissive of beggars.
 8. Medical knowledge is medieval: discuss miasma (bad air), humoral imbalance, divine wrath.
 9. You may reference local landmarks: the Great Mosque, the Citadel, the souks, the city gates.
@@ -193,31 +200,259 @@ export function formatMessagesForGemini(
     }));
 }
 
-// Generate a greeting based on NPC state
-export function generateInitialGreeting(npc: NPCStats, timeOfDay: number): string {
+import {
+  calculateEffectiveFriendliness,
+  getFriendlinessLevel,
+  FriendlinessLevel
+} from './friendliness';
+
+// Tiered greetings by religion and friendliness level
+interface TieredGreetings {
+  friendly: string[];
+  neutral: string[];
+  unfriendly: string[];
+}
+
+// Get religion-appropriate greetings organized by friendliness tier
+function getGreetingsByReligionAndTier(npc: NPCStats): TieredGreetings {
+  const profession = npc.profession.toLowerCase();
+  const name = npc.name;
+
+  // Islamic greetings (Sunni and Shia)
+  if (npc.religion === 'Sunni Islam' || npc.religion === 'Shia Islam') {
+    return {
+      friendly: [
+        `As-salamu alaykum! I am ${name}, ${profession}. How may I help you, friend?`,
+        `Salaam, and welcome! ${name} at your service.`,
+        `Peace be upon you! Come, come. I am ${name}.`,
+        `Allah's blessings upon you, traveler. I am ${name}. What do you seek?`,
+      ],
+      neutral: [
+        `Salaam. I am ${name}. What is your business?`,
+        `Peace be upon you. How may I assist?`,
+        `Yes? I am ${name}, ${profession}.`,
+        `*nods* Salaam. What do you need?`,
+      ],
+      unfriendly: [
+        `*barely glances up* What do you want?`,
+        `Hmm? I am busy. Speak quickly.`,
+        `*sighs* Yes? What is it?`,
+        `Another stranger... What do you need?`,
+        `I have no time for this. Be brief.`,
+      ]
+    };
+  }
+
+  // Eastern Orthodox (Melkite) greetings
+  if (npc.religion === 'Eastern Orthodox') {
+    return {
+      friendly: [
+        `Christ is in our midst! Welcome, friend. I am ${name}.`,
+        `God be with you, traveler! How may I assist?`,
+        `Peace of the Lord upon you! I am ${name}, ${profession}.`,
+        `Welcome to our quarter, friend. I am ${name}.`,
+      ],
+      neutral: [
+        `God be with you. I am ${name}. What do you need?`,
+        `*nods* Peace. How may I help?`,
+        `Yes? I am ${name}, ${profession}.`,
+        `What brings you here?`,
+      ],
+      unfriendly: [
+        `*eyes you warily* What do you want?`,
+        `Speak quickly. I have work to do.`,
+        `*frowns* Yes?`,
+        `I am occupied. What is it?`,
+      ]
+    };
+  }
+
+  // Armenian Apostolic greetings
+  if (npc.religion === 'Armenian Apostolic') {
+    return {
+      friendly: [
+        `Barev dzez! Welcome, friend. I am ${name}.`,
+        `God's peace upon you! I am ${name} the Armenian.`,
+        `Welcome, traveler! Our community helps those in need.`,
+        `Barev! Come, friend. I am ${name}, ${profession}.`,
+      ],
+      neutral: [
+        `Barev. I am ${name}. What is your need?`,
+        `Peace be with you. I am ${name}.`,
+        `Yes? How may I help?`,
+        `*nods* What brings you?`,
+      ],
+      unfriendly: [
+        `*looks up impatiently* Yes?`,
+        `What do you want? I am busy.`,
+        `*mutters* Another interruption...`,
+        `Speak your piece and be gone.`,
+      ]
+    };
+  }
+
+  // Syriac Orthodox greetings
+  if (npc.religion === 'Syriac Orthodox') {
+    return {
+      friendly: [
+        `Shlama! Welcome, friend. I am ${name}.`,
+        `God's blessing upon you! I am ${name}, ${profession}.`,
+        `Peace of Mar Yaqub upon you! How may I help?`,
+        `Welcome to our neighborhood! I am ${name}.`,
+      ],
+      neutral: [
+        `Shlama. I am ${name}. What do you need?`,
+        `God's peace. How may I assist?`,
+        `Yes? I am ${name}.`,
+        `*nods acknowledgment* What brings you?`,
+      ],
+      unfriendly: [
+        `*barely acknowledges you* Yes?`,
+        `What is it? I have work.`,
+        `*looks annoyed* Speak.`,
+        `I have no time. Be quick.`,
+      ]
+    };
+  }
+
+  // Jewish greetings
+  if (npc.religion === 'Jewish') {
+    return {
+      friendly: [
+        `Shalom aleichem! Welcome, friend. I am ${name}.`,
+        `Peace upon you! I am ${name}, ${profession}. How may I help?`,
+        `Shalom! Come, friend. What do you seek?`,
+        `God's blessing upon you! I am ${name}.`,
+      ],
+      neutral: [
+        `Shalom. I am ${name}. What do you need?`,
+        `Peace upon you. How may I assist?`,
+        `Yes? What brings you to ${name}?`,
+        `*nods* Shalom. What is your business?`,
+      ],
+      unfriendly: [
+        `*looks up warily* What do you want?`,
+        `Yes? I am busy with my work.`,
+        `*sighs* What is it now?`,
+        `Speak quickly. I have much to do.`,
+      ]
+    };
+  }
+
+  // Latin Christian (Frankish/Italian) greetings - FIXED: removed Salve, Pax vobiscum
+  if (npc.religion === 'Latin Christian') {
+    return {
+      friendly: [
+        `Buongiorno! I am ${name}, merchant from Italia. Welcome, friend!`,
+        `Ah, a customer! I am ${name}. How may I serve you?`,
+        `Benvenuto! I am ${name}. You seek goods from the West, yes?`,
+        `Dio vi benedica! Welcome! I am ${name}, at your service.`,
+      ],
+      neutral: [
+        `Buongiorno. I am ${name}. What do you seek?`,
+        `*nods* Yes? I am ${name}, trader from Venezia.`,
+        `Salaam, friend. I am ${name}. You wish to trade?`,
+        `How may I help? I am ${name}.`,
+      ],
+      unfriendly: [
+        `*looks up from ledger* What? I am busy.`,
+        `Yes, yes? What do you want?`,
+        `*waves dismissively* I have no time for idle talk.`,
+        `Make it quick. I have accounts to settle.`,
+      ]
+    };
+  }
+
+  // Druze greetings
+  if (npc.religion === 'Druze') {
+    return {
+      friendly: [
+        `Peace upon you, traveler! I am ${name}. Welcome.`,
+        `God's wisdom guide you! I am ${name}, ${profession}.`,
+        `Welcome, friend! How may I assist?`,
+      ],
+      neutral: [
+        `Peace. I am ${name}. What do you need?`,
+        `*nods* How may I help?`,
+        `Yes? I am ${name}.`,
+      ],
+      unfriendly: [
+        `*studies you silently* What do you want?`,
+        `I am busy. Speak quickly.`,
+        `*frowns* Yes?`,
+      ]
+    };
+  }
+
+  // Default/fallback
+  return {
+    friendly: [
+      `Peace be upon you! I am ${name}, ${profession}. Welcome.`,
+      `Greetings, traveler! How may I assist?`,
+    ],
+    neutral: [
+      `Peace be upon you. I am ${name}. What is your need?`,
+      `Yes? How may I help?`,
+    ],
+    unfriendly: [
+      `*looks up impatiently* What?`,
+      `I am busy. What do you need?`,
+    ]
+  };
+}
+
+// Generate a greeting based on NPC state, religion, and friendliness
+export function generateInitialGreeting(
+  npc: NPCStats,
+  timeOfDay: number,
+  player?: PlayerStats,
+  conversationHistory?: ConversationSummary[]
+): string {
   const isNight = timeOfDay < 6 || timeOfDay > 20;
-  const greetings = [
-    `Peace be upon you. I am ${npc.name}, ${npc.profession.toLowerCase()} of this city.`,
-    `Salaam. What brings you to speak with a humble ${npc.profession.toLowerCase()}?`,
-    `Allah's blessings upon you, stranger. How may I help?`,
-  ];
 
-  const panicGreetings = [
-    `*glances nervously* Yes? What do you want? Make it quick.`,
-    `You startled me! These are dangerous times to approach strangers...`,
-    `*backing away slightly* Speak quickly, I must not linger here.`,
-  ];
-
-  const nightGreetings = [
-    `*squints in the darkness* Who goes there at this hour?`,
-    `It is late. What business brings you out when honest folk sleep?`,
-  ];
-
+  // High panic overrides everything - fear transcends personality
   if (npc.panicLevel > 60) {
+    const panicGreetings = [
+      `*glances nervously* Yes? What do you want? Make it quick.`,
+      `You startled me! These are dangerous times...`,
+      `*backing away* Speak quickly, I must not linger here.`,
+      `*trembling* What? What do you want from me?`,
+      `*looks around fearfully* Not now, not now...`,
+    ];
     return panicGreetings[Math.floor(Math.random() * panicGreetings.length)];
   }
+
+  // Night makes everyone more cautious
   if (isNight) {
+    const nightGreetings = [
+      `*squints in the darkness* Who goes there?`,
+      `It is late. What business brings you out at this hour?`,
+      `*hand moves to belt* Who are you? What do you want?`,
+      `The night is no time for strangers. Speak your purpose.`,
+    ];
     return nightGreetings[Math.floor(Math.random() * nightGreetings.length)];
   }
+
+  // Calculate effective friendliness
+  let friendlinessLevel: FriendlinessLevel = 'neutral';
+
+  if (player) {
+    const effectiveFriendliness = calculateEffectiveFriendliness(
+      npc,
+      player,
+      conversationHistory
+    );
+    friendlinessLevel = getFriendlinessLevel(effectiveFriendliness);
+  } else {
+    // Without player context, use disposition directly
+    if (npc.disposition >= 55) friendlinessLevel = 'friendly';
+    else if (npc.disposition >= 35) friendlinessLevel = 'neutral';
+    else friendlinessLevel = 'unfriendly';
+  }
+
+  // Get tiered greetings for this NPC's religion
+  const tieredGreetings = getGreetingsByReligionAndTier(npc);
+  const greetings = tieredGreetings[friendlinessLevel];
+
   return greetings[Math.floor(Math.random() * greetings.length)];
 }

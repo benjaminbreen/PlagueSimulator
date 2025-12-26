@@ -36,6 +36,7 @@ import {
   Activity
 } from 'lucide-react';
 import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
+import { SoundDebugPanel } from './audio/SoundDebugPanel';
 import { EncounterModal } from './EncounterModal/EncounterModal';
 import { ConversationSummary } from '../types';
 import { SicknessMeter } from './SicknessMeter';
@@ -69,6 +70,10 @@ interface UIProps {
   setShowEncounterModal3: React.Dispatch<React.SetStateAction<boolean>>;
   conversationHistories: ConversationSummary[];
   onConversationSummary: (summary: ConversationSummary) => void;
+  showDemographicsOverlay: boolean;
+  setShowDemographicsOverlay: React.Dispatch<React.SetStateAction<boolean>>;
+  onForceNpcState: (id: string, state: AgentState) => void;
+  onForceAllNpcState: (state: AgentState) => void;
 }
 
 const WeatherModal: React.FC<{
@@ -1063,7 +1068,7 @@ const EncounterModalLegacy: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationSummary }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationSummary, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
@@ -1075,6 +1080,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [tabPulse, setTabPulse] = useState<'epidemic' | 'player' | null>(null);
   const [reportsPanelCollapsed, setReportsPanelCollapsed] = useState(false);
   const [alchemistTableCollapsed, setAlchemistTableCollapsed] = useState(true);
+  const [spreadRate, setSpreadRate] = useState<number | null>(null);
+  const prevStatsRef = useRef<{ infected: number; incubating: number; simTime: number } | null>(null);
   const [hasPlayerMoved, setHasPlayerMoved] = useState(false);
 
   // Biome ambience preview for settings
@@ -1149,6 +1156,20 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     return () => cancelAnimationFrame(rafId);
   }, [devSettings.showPerfPanel]);
 
+  useEffect(() => {
+    const prev = prevStatsRef.current;
+    if (prev) {
+      const deltaTime = simTime - prev.simTime;
+      if (deltaTime > 0.1) {
+        const currentTotal = stats.infected + stats.incubating;
+        const prevTotal = prev.infected + prev.incubating;
+        const perHour = (currentTotal - prevTotal) / deltaTime;
+        setSpreadRate(Number.isFinite(perHour) ? perHour : null);
+      }
+    }
+    prevStatsRef.current = { infected: stats.infected, incubating: stats.incubating, simTime };
+  }, [stats.infected, stats.incubating, simTime]);
+
   const handleChange = (key: keyof SimulationParams, value: any) => {
     setParams(prev => ({ ...prev, [key]: value }));
   };
@@ -1214,6 +1235,33 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     if (parts.length === 0) return 'NPC';
     if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
     return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  };
+
+  const getReligionColor = (value: string) => {
+    switch (value) {
+      case 'Sunni Islam': return 'text-amber-200';
+      case 'Shia Islam': return 'text-amber-300';
+      case 'Eastern Orthodox': return 'text-sky-200';
+      case 'Armenian Apostolic': return 'text-rose-200';
+      case 'Syriac Orthodox': return 'text-cyan-200';
+      case 'Jewish': return 'text-emerald-200';
+      case 'Druze': return 'text-violet-200';
+      default: return 'text-amber-100';
+    }
+  };
+
+  const getEthnicityColor = (value: string) => {
+    switch (value) {
+      case 'Arab': return 'text-amber-100';
+      case 'Aramaean/Syriac': return 'text-cyan-200';
+      case 'Kurdish': return 'text-lime-200';
+      case 'Turkic': return 'text-sky-200';
+      case 'Circassian': return 'text-indigo-200';
+      case 'Armenian': return 'text-rose-200';
+      case 'Greek/Rum': return 'text-blue-200';
+      case 'Persian': return 'text-purple-200';
+      default: return 'text-amber-100';
+    }
   };
 
   const getDateStr = () => {
@@ -1592,6 +1640,21 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                           {params.quarantine ? 'QUARANTINE ENFORCED' : 'Enable Quarantine'}
                         </button>
                       </div>
+
+                      <div className="pt-2 border-t border-white/10">
+                        <label className="flex items-center justify-between text-[10px] uppercase tracking-widest text-amber-200/70">
+                          <span>Demographics Overlay</span>
+                          <input
+                            type="checkbox"
+                            checked={showDemographicsOverlay}
+                            onChange={(e) => setShowDemographicsOverlay(e.target.checked)}
+                            className="accent-amber-600"
+                          />
+                        </label>
+                        <div className="text-[9px] text-amber-100/40 mt-1 italic">
+                          Floating tags follow nearby NPCs.
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1738,8 +1801,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   <div className="text-[10px] text-amber-500/70 uppercase tracking-widest mt-1">
                     {selectedNpc.stats.profession}
                   </div>
-                  <div className="text-[10px] text-amber-100/70 mt-1">
-                    {selectedNpc.stats.gender}, {selectedNpc.stats.age} years · {selectedNpc.stats.socialClass}
+                  <div className="text-[10px] text-amber-100/70 mt-1 flex flex-wrap items-center gap-1">
+                    <span>{selectedNpc.stats.gender}, {selectedNpc.stats.age} years</span>
+                    <span className="text-amber-500/40">•</span>
+                    <span className="text-amber-100/90">{selectedNpc.stats.profession}</span>
+                    <span className="text-amber-500/40">•</span>
+                    <span className={`${getReligionColor(selectedNpc.stats.religion)}`}>{selectedNpc.stats.religion}</span>
+                    <span className="text-amber-500/40">•</span>
+                    <span className={`${getEthnicityColor(selectedNpc.stats.ethnicity)}`}>{selectedNpc.stats.ethnicity}</span>
                   </div>
                 </div>
                 {selectedNpc.stats.goalOfDay && (
@@ -2222,6 +2291,96 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                       className="accent-amber-600"
                     />
                   </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Sound Debug Panel</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showSoundDebug}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showSoundDebug: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
+                </div>
+
+                <div className="bg-black/40 border border-amber-900/40 rounded-lg p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/80 font-bold">Infection Debug</div>
+                    <div className="text-[9px] text-amber-100/50 text-right">
+                      <div>Global: {spreadRate === null ? '—' : spreadRate.toFixed(1)} / hr</div>
+                      <div className="text-amber-200/40">
+                        {getLocationLabel(params.mapX, params.mapY)}: {spreadRate === null ? '—' : spreadRate.toFixed(1)} / hr
+                      </div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] text-amber-100/70 mb-3">
+                    <div className="flex items-center justify-between bg-black/40 border border-amber-900/30 rounded px-2 py-1">
+                      <span className="uppercase tracking-widest text-amber-400/60">Incubating</span>
+                      <span className="font-mono text-amber-200">{stats.incubating}</span>
+                    </div>
+                    <div className="flex items-center justify-between bg-black/40 border border-amber-900/30 rounded px-2 py-1">
+                      <span className="uppercase tracking-widest text-amber-400/60">Infected</span>
+                      <span className="font-mono text-amber-200">{stats.infected}</span>
+                    </div>
+                  </div>
+                  <div className="text-[9px] text-amber-100/40 italic mb-2">
+                    {selectedNpc ? `Selected: ${selectedNpc.stats.name}` : 'Select an NPC to force state.'}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest">
+                    <button
+                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.HEALTHY)}
+                      disabled={!selectedNpc}
+                      className="px-3 py-2 rounded-md border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40"
+                    >
+                      Healthy
+                    </button>
+                    <button
+                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.INCUBATING)}
+                      disabled={!selectedNpc}
+                      className="px-3 py-2 rounded-md border border-yellow-500/40 text-yellow-200 hover:bg-yellow-500/10 disabled:opacity-40"
+                    >
+                      Incubating
+                    </button>
+                    <button
+                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.INFECTED)}
+                      disabled={!selectedNpc}
+                      className="px-3 py-2 rounded-md border border-red-500/40 text-red-200 hover:bg-red-500/10 disabled:opacity-40"
+                    >
+                      Infected
+                    </button>
+                    <button
+                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.DECEASED)}
+                      disabled={!selectedNpc}
+                      className="px-3 py-2 rounded-md border border-gray-500/40 text-gray-200 hover:bg-gray-500/10 disabled:opacity-40"
+                    >
+                      Deceased
+                    </button>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest">
+                    <button
+                      onClick={() => onForceAllNpcState(AgentState.HEALTHY)}
+                      className="px-3 py-2 rounded-md border border-emerald-500/30 text-emerald-200/90 hover:bg-emerald-500/10"
+                    >
+                      All Healthy
+                    </button>
+                    <button
+                      onClick={() => onForceAllNpcState(AgentState.INCUBATING)}
+                      className="px-3 py-2 rounded-md border border-yellow-500/30 text-yellow-200/90 hover:bg-yellow-500/10"
+                    >
+                      All Incubating
+                    </button>
+                    <button
+                      onClick={() => onForceAllNpcState(AgentState.INFECTED)}
+                      className="px-3 py-2 rounded-md border border-red-500/30 text-red-200/90 hover:bg-red-500/10"
+                    >
+                      All Infected
+                    </button>
+                    <button
+                      onClick={() => onForceAllNpcState(AgentState.DECEASED)}
+                      className="px-3 py-2 rounded-md border border-gray-500/30 text-gray-200/90 hover:bg-gray-500/10"
+                    >
+                      All Deceased
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -2284,6 +2443,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             </label>
           </div>
         </div>
+      )}
+
+      {devSettings.showSoundDebug && (
+        <SoundDebugPanel
+          onClose={() => setDevSettings(prev => ({ ...prev, showSoundDebug: false }))}
+        />
       )}
 
       {showPlayerModal && (

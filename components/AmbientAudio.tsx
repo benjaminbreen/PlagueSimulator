@@ -2,6 +2,7 @@
  * AmbientAudio - React component wrapper for the ambient sound system
  *
  * Integrates the AmbientSoundEngine with the simulation state.
+ * Also manages SpatialAudioManager for 3D positioned point sources.
  * Handles initialization, updates, and cleanup.
  */
 
@@ -14,13 +15,27 @@ import {
   AmbientState,
   WeatherType,
 } from './audio/AmbientSoundEngine';
+import {
+  SpatialAudioManager,
+  getSpatialAudioManager,
+  disposeSpatialAudioManager,
+  PointSourceType,
+} from './audio/SpatialAudioManager';
 import { BaseDroneLayer } from './audio/layers/BaseDrone';
 import { TimeLayer } from './audio/layers/TimeLayer';
 import { WeatherLayer } from './audio/layers/WeatherLayer';
 import { SacredLayer } from './audio/layers/SacredLayer';
 import { SocialLayer } from './audio/layers/SocialLayer';
 import { PlagueLayer } from './audio/layers/PlagueLayer';
+import { BiomeLayer } from './audio/layers/BiomeLayer';
 import { DistrictType, getDistrictType } from '../types';
+
+// Spatial audio point source definition
+export interface SpatialSource {
+  id: string;
+  type: PointSourceType;
+  position: [number, number, number];
+}
 
 export interface AmbientAudioProps {
   // Simulation state
@@ -38,6 +53,9 @@ export interface AmbientAudioProps {
   playerPosition: [number, number, number];
   nearbyInfected: number;
   nearbyDeceased: number;
+
+  // Spatial audio point sources (fountains, wells, etc.)
+  spatialSources?: SpatialSource[];
 
   // Controls
   enabled?: boolean;
@@ -59,12 +77,15 @@ export const AmbientAudio: React.FC<AmbientAudioProps> = ({
   playerPosition,
   nearbyInfected,
   nearbyDeceased,
+  spatialSources = [],
   enabled = true,
   masterVolume = 0.5,
 }) => {
   const engineRef = useRef<AmbientSoundEngine | null>(null);
+  const spatialRef = useRef<SpatialAudioManager | null>(null);
   const isInitializedRef = useRef(false);
   const lastClickTimeRef = useRef(0);
+  const lastSourcesRef = useRef<string>('');
 
   // Initialize engine on user interaction
   const initializeAudio = useCallback(async () => {
@@ -82,18 +103,28 @@ export const AmbientAudio: React.FC<AmbientAudioProps> = ({
     // Register all layers
     engine.registerLayer(new BaseDroneLayer(ctx));
     engine.registerLayer(new TimeLayer(ctx));
-    engine.registerLayer(new WeatherLayer(ctx));
+    // WeatherLayer disabled - wind/gust sounds were too intrusive
+    // engine.registerLayer(new WeatherLayer(ctx));
     engine.registerLayer(new SacredLayer(ctx));
     engine.registerLayer(new SocialLayer(ctx));
     engine.registerLayer(new PlagueLayer(ctx));
+    // BiomeLayer disabled - kept for future use/testing via Settings preview
+    // engine.registerLayer(new BiomeLayer(ctx));
 
     engine.setMasterVolume(masterVolume);
     engine.start();
 
+    // Initialize spatial audio manager (shares the same AudioContext)
+    const spatial = getSpatialAudioManager();
+    await spatial.initialize(ctx);
+    spatial.setMasterVolume(masterVolume * 0.8); // Slightly lower for spatial
+    spatial.start();
+
     engineRef.current = engine;
+    spatialRef.current = spatial;
     isInitializedRef.current = true;
 
-    console.log('[AmbientAudio] Initialized and started');
+    console.log('[AmbientAudio] Initialized ambient engine and spatial audio');
   }, [masterVolume]);
 
   // Handle click to initialize (browsers require user interaction)
@@ -128,20 +159,27 @@ export const AmbientAudio: React.FC<AmbientAudioProps> = ({
   // Handle enabled state changes
   useEffect(() => {
     const engine = engineRef.current;
+    const spatial = spatialRef.current;
     if (!engine) return;
 
     if (enabled && !engine.isActive()) {
       engine.start();
+      spatial?.start();
     } else if (!enabled && engine.isActive()) {
       engine.stop();
+      spatial?.stop();
     }
   }, [enabled]);
 
   // Handle master volume changes
   useEffect(() => {
     const engine = engineRef.current;
+    const spatial = spatialRef.current;
     if (engine) {
       engine.setMasterVolume(masterVolume);
+    }
+    if (spatial) {
+      spatial.setMasterVolume(masterVolume * 0.8);
     }
   }, [masterVolume]);
 
@@ -149,36 +187,79 @@ export const AmbientAudio: React.FC<AmbientAudioProps> = ({
   useEffect(() => {
     return () => {
       disposeAmbientSoundEngine();
+      disposeSpatialAudioManager();
       engineRef.current = null;
+      spatialRef.current = null;
       isInitializedRef.current = false;
     };
   }, []);
 
+  // Register/unregister spatial sources when they change
+  useEffect(() => {
+    const spatial = spatialRef.current;
+    if (!spatial) return;
+
+    // Create a key for comparison
+    const sourcesKey = spatialSources.map(s => `${s.id}:${s.type}:${s.position.join(',')}`).join('|');
+
+    // Skip if unchanged
+    if (sourcesKey === lastSourcesRef.current) return;
+    lastSourcesRef.current = sourcesKey;
+
+    // Get currently registered source IDs
+    const currentIds = new Set(spatial.getRegisteredSourceIds());
+    const newIds = new Set(spatialSources.map(s => s.id));
+
+    // Unregister sources that are no longer in the list
+    for (const id of currentIds) {
+      if (!newIds.has(id)) {
+        spatial.unregisterSource(id);
+      }
+    }
+
+    // Register new sources
+    for (const source of spatialSources) {
+      if (!currentIds.has(source.id)) {
+        spatial.registerSource(source.id, source.type, source.position);
+      }
+    }
+  }, [spatialSources]);
+
   // Update engine with simulation state each frame
   useFrame((_, delta) => {
     const engine = engineRef.current;
-    if (!engine || !engine.isActive()) return;
+    const spatial = spatialRef.current;
+    const deltaMs = delta * 1000;
 
-    const district = getDistrictType(mapX, mapY);
+    // Update ambient sound engine
+    if (engine && engine.isActive()) {
+      const district = getDistrictType(mapX, mapY);
 
-    const state: AmbientState = {
-      timeOfDay,
-      district,
-      weather: weatherType,
-      windDirection,
-      windStrength,
-      humidity,
-      activeNpcCount,
-      avgPanic,
-      avgAwareness,
-      sceneMode,
-      playerPosition,
-      nearbyInfected,
-      nearbyDeceased,
-      isInteriorOpen: sceneMode === 'interior',
-    };
+      const state: AmbientState = {
+        timeOfDay,
+        district,
+        weather: weatherType,
+        windDirection,
+        windStrength,
+        humidity,
+        activeNpcCount,
+        avgPanic,
+        avgAwareness,
+        sceneMode,
+        playerPosition,
+        nearbyInfected,
+        nearbyDeceased,
+        isInteriorOpen: sceneMode === 'interior',
+      };
 
-    engine.update(state, delta * 1000); // Convert to ms
+      engine.update(state, deltaMs);
+    }
+
+    // Update spatial audio manager
+    if (spatial && spatial.isActive()) {
+      spatial.updateListenerPosition(playerPosition);
+      spatial.update(deltaMs);
+    }
   });
 
   // This component doesn't render anything

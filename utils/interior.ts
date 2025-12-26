@@ -1,4 +1,4 @@
-import { BuildingMetadata, BuildingType, InteriorSpec, InteriorRoom, InteriorRoomType, InteriorProp, InteriorPropType, InteriorNPC, InteriorOverrides, SocialClass, NPCStats, Obstacle, getProfessionCategory, ProfessionCategory, PROFESSION_SIZE_SCALE } from '../types';
+import { BuildingMetadata, BuildingType, InteriorSpec, InteriorRoom, InteriorRoomType, InteriorProp, InteriorPropType, InteriorNPC, InteriorOverrides, SocialClass, NPCStats, Obstacle, getProfessionCategory, ProfessionCategory, PROFESSION_SIZE_SCALE, AgentState } from '../types';
 import { generateNPCStats, seededRandom } from './procedural';
 
 const ROOM_HEIGHT = 3.4;
@@ -1568,6 +1568,7 @@ const createNPCs = (
     position: ownerPosition,
     rotation: ownerRotation,
     stats: ownerStats,
+    state: AgentState.HEALTHY,
   });
 
   if (socialClass !== SocialClass.PEASANT && rand() > 0.6) {
@@ -1584,6 +1585,7 @@ const createNPCs = (
       position: guestPos,
       rotation: [0, rand() * Math.PI * 2, 0],
       stats: guestStats,
+      state: AgentState.HEALTHY,
     });
   }
 
@@ -1609,6 +1611,7 @@ const createNPCs = (
         position: worshipperPos,
         rotation: [0, Math.PI, 0],  // All facing the same direction (toward qibla/altar)
         stats: worshipperStats,
+        state: AgentState.HEALTHY,
       });
     }
   }
@@ -1841,6 +1844,7 @@ export const generateInteriorSpec = (
         position: extra.position ?? [0, 0, 0],
         rotation: extra.rotation ?? [0, 0, 0],
         stats,
+        state: extra.state ?? AgentState.HEALTHY,
       });
     });
   }

@@ -191,6 +191,9 @@ interface HumanoidProps {
   actionAnimationRef?: React.MutableRefObject<{ action: string; progress: number } | null>;
   // Sickness level (0 = healthy, 1 = fully sick) - affects skin pallor
   sicknessLevel?: number;
+  // Plague infection state
+  isInfected?: boolean;
+  isIncubating?: boolean;
 }
 
 export const Humanoid: React.FC<HumanoidProps> = memo(({
@@ -236,7 +239,9 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   gazeTarget,
   worldPosition,
   actionAnimationRef,
-  sicknessLevel = 0
+  sicknessLevel = 0,
+  isInfected = false,
+  isIncubating = false
 }) => {
   // PERFORMANCE: LOD - skip facial details beyond 25 units
   const showFacialDetails = distanceFromCamera < 25;
@@ -273,6 +278,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const headGroup = useRef<THREE.Group>(null);
   const leftShoulder = useRef<THREE.Group>(null);
   const rightShoulder = useRef<THREE.Group>(null);
+
+  // PLAGUE VISUALS: Coughing animation for infected NPCs
+  const coughTimer = useRef(0);
+  const coughPhase = useRef(0);
+  const glowIntensity = useRef(0);
+
   const isFemale = gender === 'Female';
   const faceShadowColor = useMemo(() => new THREE.Color(sickHeadColor).multiplyScalar(0.85).getStyle(), [sickHeadColor]);
   const faceHighlightColor = useMemo(() => new THREE.Color(sickHeadColor).multiplyScalar(1.08).getStyle(), [sickHeadColor]);
@@ -415,6 +426,49 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       return;
     }
 
+    // PLAGUE VISUALS: Coughing animation and red glow for infected NPCs
+    const dt = state.clock.getDelta();
+    if (isInfected || isIncubating) {
+      // Coughing animation - periodic chest heave and head forward
+      coughTimer.current += dt;
+      const coughInterval = 3 + Math.random() * 2; // Cough every 3-5 seconds
+
+      if (coughTimer.current > coughInterval) {
+        coughTimer.current = 0;
+        coughPhase.current = 1; // Start cough
+      }
+
+      // Animate cough phase
+      if (coughPhase.current > 0) {
+        coughPhase.current = Math.max(0, coughPhase.current - dt * 3); // Decay over ~0.33 seconds
+
+        // Apply cough animation to torso and head
+        if (torsoGroup.current) {
+          const coughBend = Math.sin(coughPhase.current * Math.PI) * 0.3; // Lean forward
+          torsoGroup.current.rotation.x = THREE.MathUtils.lerp(
+            torsoGroup.current.rotation.x,
+            coughBend,
+            0.3
+          );
+        }
+        if (headGroup.current) {
+          const headForward = Math.sin(coughPhase.current * Math.PI) * 0.4;
+          headGroup.current.rotation.x = THREE.MathUtils.lerp(
+            headGroup.current.rotation.x,
+            headForward,
+            0.3
+          );
+        }
+      }
+
+      // Pulsing red glow intensity
+      glowIntensity.current = 0.3 + Math.sin(state.clock.elapsedTime * 2) * 0.15;
+    } else {
+      glowIntensity.current = 0;
+      coughPhase.current = 0;
+      coughTimer.current = 0;
+    }
+
     const jumping = isJumpingRef ? isJumpingRef.current : isJumping;
     const jumpT = jumpPhaseRef ? jumpPhaseRef.current : jumpPhase;
     const anticipate = jumpAnticipationRef ? jumpAnticipationRef.current : 0;
@@ -480,7 +534,6 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     }
 
     // Idle weight shifting - periodic subtle movement when standing still
-    const dt = state.clock.getDelta();
     if (!isWalking && !jumping) {
       idleShiftTimer.current += dt;
 
@@ -1171,6 +1224,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
             <circleGeometry args={[0.5, 16]} />
             <meshBasicMaterial color="black" transparent opacity={0.3} />
+          </mesh>
+        )}
+
+        {/* PLAGUE VISUAL: Red glow around infected NPCs */}
+        {(isInfected || isIncubating) && !isDead && (
+          <mesh position={[0, 1.2, 0]}>
+            <sphereGeometry args={[1.2, 16, 16]} />
+            <meshBasicMaterial
+              color="#ff0000"
+              transparent
+              opacity={glowIntensity.current * 0.2}
+              depthWrite={false}
+            />
           </mesh>
         )}
 

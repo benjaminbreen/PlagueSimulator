@@ -1,7 +1,7 @@
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats, DistrictType, getDistrictType, PlayerActionEvent } from '../types';
+import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats, DistrictType, getDistrictType, PlayerActionEvent, NpcStateOverride } from '../types';
 import { generateNPCStats } from '../utils/procedural';
 import { NPC } from './NPC';
 import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
@@ -32,6 +32,8 @@ interface AgentsProps {
   district?: DistrictType;
   terrainSeed?: number;
   heightmap?: TerrainHeightmap | null;
+  showDemographicsOverlay?: boolean;
+  npcStateOverride?: NpcStateOverride | null;
 }
 
 export const Agents: React.FC<AgentsProps> = ({
@@ -51,7 +53,9 @@ export const Agents: React.FC<AgentsProps> = ({
   selectedNpcId = null,
   district,
   terrainSeed,
-  heightmap
+  heightmap,
+  showDemographicsOverlay = false,
+  npcStateOverride
 }) => {
   const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3, awareness: number, panic: number }>>(new Map());
   const localAgentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
@@ -167,6 +171,8 @@ export const Agents: React.FC<AgentsProps> = ({
           terrainSeed={terrainSeed}
           heightmap={heightmap}
           actionEvent={actionEvent}
+          showDemographicsOverlay={showDemographicsOverlay}
+          npcStateOverride={npcStateOverride}
         />
       ))}
     </group>

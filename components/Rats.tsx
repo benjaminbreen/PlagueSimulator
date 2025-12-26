@@ -1,7 +1,8 @@
 import React, { useRef, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { SimulationParams, CONSTANTS } from '../types';
+import { SimulationParams, CONSTANTS, AgentState } from '../types';
+import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 
 // Speed constants by state
 const SPEED_IDLE = 0;
@@ -62,7 +63,8 @@ export class Rat {
     params: SimulationParams,
     playerPos?: THREE.Vector3,
     catPos?: THREE.Vector3,
-    npcPositions?: THREE.Vector3[]
+    npcPositions?: THREE.Vector3[],
+    corpsePositions?: THREE.Vector3[]
   ) {
     if (!this.active || dt <= 0) return;
 
@@ -155,6 +157,32 @@ export class Rat {
       }
     }
 
+    // Corpse attraction - rats seek out corpses as food source
+    // Only when wandering or idle (not fleeing)
+    if ((this.state === 'wander' || this.state === 'idle') && corpsePositions && corpsePositions.length > 0) {
+      let nearestCorpse: THREE.Vector3 | null = null;
+      let nearestDist = 8.0; // Attraction range
+
+      for (const corpsePos of corpsePositions) {
+        const dist = this.position.distanceTo(corpsePos);
+        if (dist < nearestDist) {
+          nearestCorpse = corpsePos;
+          nearestDist = dist;
+        }
+      }
+
+      if (nearestCorpse && nearestDist > 0.5) { // Don't stack on corpse
+        const dx = nearestCorpse.x - this.position.x;
+        const dz = nearestCorpse.z - this.position.z;
+        const len = Math.sqrt(dx * dx + dz * dz);
+        if (len > 0) {
+          // Bias velocity toward corpse (subtle attraction)
+          this.targetVelocity.x += (dx / len) * SPEED_WANDER * 0.4;
+          this.targetVelocity.z += (dz / len) * SPEED_WANDER * 0.4;
+        }
+      }
+    }
+
     // Smooth velocity interpolation
     const lerpFactor = this.state === 'flee' ? 8 : 4;
     this.velocity.lerp(this.targetVelocity, Math.min(1, lerpFactor * dt));
@@ -189,9 +217,11 @@ interface RatsProps {
   playerPos?: THREE.Vector3;
   catPos?: THREE.Vector3;
   npcPositions?: THREE.Vector3[];
+  ratsRef?: React.MutableRefObject<Rat[] | null>;
+  agentHashRef?: React.MutableRefObject<SpatialHash<AgentSnapshot> | null>;
 }
 
-export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, npcPositions }, ref) => {
+export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, npcPositions, ratsRef, agentHashRef }, ref) => {
   const bodyRef = useRef<THREE.InstancedMesh>(null);
   const headRef = useRef<THREE.InstancedMesh>(null);
   const tailRef = useRef<THREE.InstancedMesh>(null);
@@ -208,6 +238,11 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
   }, []);
 
   useImperativeHandle(ref, () => rats, [rats]);
+
+  // Expose rat array to parent for plague exposure checks
+  if (ratsRef) {
+    ratsRef.current = rats;
+  }
 
   // Rat color - dark brown/gray
   const ratColor = useMemo(() => new THREE.Color('#2a1f1a'), []);
@@ -229,11 +264,23 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
       : 0;
     const activeCount = MIN_RATS + hygieneBonus;
 
-    // Update rats with throttled NPC positions
+    // Extract corpse positions for rat attraction (throttled to 10Hz like NPCs)
+    const corpsePositions: THREE.Vector3[] = [];
+    if (agentHashRef?.current && npcCheckFrameCounter.current === 0) {
+      // Query all nearby agents and filter for corpses
+      const allAgents = queryNearbyAgents(new THREE.Vector3(0, 0, 0), agentHashRef.current);
+      for (const agent of allAgents) {
+        if (agent.state === AgentState.DECEASED) {
+          corpsePositions.push(new THREE.Vector3(agent.x, 0, agent.z));
+        }
+      }
+    }
+
+    // Update rats with throttled NPC positions and corpse positions
     rats.forEach((rat, i) => {
       rat.active = i < activeCount;
       if (rat.active) {
-        rat.update(dt, params, playerPos, catPos, cachedNpcPositions.current);
+        rat.update(dt, params, playerPos, catPos, cachedNpcPositions.current, corpsePositions);
       }
     });
 

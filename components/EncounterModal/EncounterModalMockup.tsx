@@ -12,6 +12,9 @@ const SAMPLE_NPC: NPCStats = {
   profession: 'Spice Merchant',
   gender: 'Female',
   socialClass: SocialClass.MERCHANT,
+  ethnicity: 'Arab',
+  religion: 'Sunni Islam',
+  language: 'Arabic',
   height: 0.95,
   weight: 0.9,
   mood: 'Anxious',
@@ -157,7 +160,7 @@ export const EncounterModalMockup: React.FC<EncounterModalMockupProps> = ({
             {/* Portrait Container */}
             <div className="relative h-48 sm:h-56 md:h-64 bg-gradient-to-b from-amber-950/30 to-black/50">
               <Canvas
-                camera={{ position: [0, 0.3, 1.8], fov: 35 }}
+                camera={{ position: [0, 1.2, 1.8], fov: 35 }}
                 style={{ background: 'transparent' }}
               >
                 <ambientLight intensity={0.4} />
@@ -227,6 +230,24 @@ export const EncounterModalMockup: React.FC<EncounterModalMockupProps> = ({
                     'bg-stone-800/40 text-stone-300'
                   }`}>
                     {npc.socialClass}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-amber-100/40 uppercase tracking-wider">Ethnicity</span>
+                  <span className="text-sm text-amber-100/90">{npc.ethnicity}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-amber-100/40 uppercase tracking-wider">Religion</span>
+                  <span className={`text-sm px-2 py-0.5 rounded text-xs ${
+                    npc.religion === 'Sunni Islam' ? 'bg-amber-900/40 text-amber-200' :
+                    npc.religion === 'Shia Islam' ? 'bg-amber-900/40 text-amber-300' :
+                    npc.religion === 'Eastern Orthodox' ? 'bg-sky-900/40 text-sky-200' :
+                    npc.religion === 'Armenian Apostolic' ? 'bg-rose-900/40 text-rose-200' :
+                    npc.religion === 'Syriac Orthodox' ? 'bg-cyan-900/40 text-cyan-200' :
+                    npc.religion === 'Jewish' ? 'bg-emerald-900/40 text-emerald-200' :
+                    'bg-stone-800/40 text-stone-300'
+                  }`}>
+                    {npc.religion}
                   </span>
                 </div>
               </div>

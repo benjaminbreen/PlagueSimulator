@@ -3,7 +3,7 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, us
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, PointerLockControls } from '@react-three/drei';
-import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent } from '../types';
+import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent, AgentState } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
@@ -11,6 +11,8 @@ import { PushableObject, PickupInfo, PushableMaterial } from '../utils/pushables
 import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
 import { calculateTerrainGradient } from '../utils/terrain-gradient';
 import { collisionSounds, CollisionMaterial } from './audio/CollisionSounds';
+import { EXPOSURE_CONFIG, calculatePlagueProtection } from '../utils/plagueExposure';
+import { Rat } from './Rats';
 
 // Map pushable materials to collision sound materials
 const materialToSound = (mat: PushableMaterial): CollisionMaterial => {
@@ -58,6 +60,9 @@ interface PlayerProps {
   dossierMode?: boolean;
   actionEvent?: PlayerActionEvent | null;
   sprintStateRef?: React.MutableRefObject<boolean>;
+  ratsRef?: React.MutableRefObject<Rat[] | null>;
+  onPlagueExposure?: (type: 'flea' | 'airborne' | 'contact', intensity: number) => void;
+  simTime?: number;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -80,7 +85,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onPushCharge,
   dossierMode = false,
   actionEvent,
-  sprintStateRef
+  sprintStateRef,
+  ratsRef,
+  onPlagueExposure,
+  simTime
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -121,6 +129,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const audioCtxRef = useRef<AudioContext | null>(null);
   const noiseBufferRef = useRef<AudioBuffer | null>(null);
   const jumpChargeRef = useRef(0);
+  const exposureCheckTimer = useRef(0);
   const chargingRef = useRef(false);
   const npcImpactCooldownRef = useRef<Map<string, number>>(new Map());
   const objectSoundCooldownRef = useRef(0);
@@ -166,8 +175,19 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   useImperativeHandle(ref, () => group.current!, []);
 
+  // Track if we've initialized position for this initialPosition
+  const lastInitialPosRef = useRef<string>('');
+
   useEffect(() => {
     if (!group.current) return;
+
+    // Create a key from initialPosition to detect actual changes
+    const posKey = `${initialPosition[0]},${initialPosition[1]},${initialPosition[2]}`;
+
+    // Skip if we've already initialized for this position
+    if (lastInitialPosRef.current === posKey) return;
+    lastInitialPosRef.current = posKey;
+
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
     const ground = sampleTerrainHeight(heightmap, initialPosition[0], initialPosition[2]);
     const spawnPos = new THREE.Vector3(initialPosition[0], ground + initialPosition[1], initialPosition[2]);
@@ -1404,7 +1424,80 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       occludedMeshesRef.current.clear();
     }
 
-    // 5. Marker positioning
+    // 5. Plague exposure check (once per second)
+    exposureCheckTimer.current += delta;
+    if (exposureCheckTimer.current >= EXPOSURE_CONFIG.CHECK_INTERVAL_SECONDS) {
+      exposureCheckTimer.current = 0;
+
+      if (playerStats?.plague.state === AgentState.HEALTHY && onPlagueExposure) {
+        const pos = group.current.position;
+
+        // Calculate plague protection from inventory items
+        const protectionMultiplier = calculatePlagueProtection(playerStats.inventory);
+
+        // 5a. RAT-FLEA EXPOSURE (Primary vector)
+        if (ratsRef?.current) {
+          const nearbyRats = ratsRef.current.filter(rat => {
+            const dist = Math.hypot(rat.position.x - pos.x, rat.position.z - pos.z);
+            return dist < EXPOSURE_CONFIG.RAT_RADIUS;
+          });
+
+          if (nearbyRats.length > 0) {
+            const ratDensity = Math.min(1, nearbyRats.length / EXPOSURE_CONFIG.MAX_RAT_DENSITY);
+            const exposureChance = EXPOSURE_CONFIG.RAT_BASE_CHANCE * ratDensity * protectionMultiplier;
+
+            if (Math.random() < exposureChance) {
+              onPlagueExposure('flea', 1.0);
+              // Visual feedback - small particle at feet
+              onImpactPuff?.(new THREE.Vector3(pos.x, 0.1, pos.z), EXPOSURE_CONFIG.FLEA_BITE_PARTICLE_SIZE);
+              return; // One exposure per check max
+            }
+          }
+        }
+
+        // 5b. INFECTED NPC PROXIMITY (Secondary - pneumonic)
+        if (agentHashRef?.current) {
+          const nearbyAgents = queryNearbyAgents(pos, agentHashRef.current);
+          const nearbyInfected = nearbyAgents.filter(agent => {
+            if (agent.state !== AgentState.INFECTED) return false;
+            const dist = Math.hypot(agent.x - pos.x, agent.z - pos.z);
+            return dist < EXPOSURE_CONFIG.INFECTED_RADIUS;
+          });
+
+          if (nearbyInfected.length > 0) {
+            const infectedDensity = Math.min(1, nearbyInfected.length / EXPOSURE_CONFIG.MAX_INFECTED_DENSITY);
+            const exposureChance = EXPOSURE_CONFIG.INFECTED_BASE_CHANCE * infectedDensity * protectionMultiplier;
+
+            if (Math.random() < exposureChance) {
+              onPlagueExposure('airborne', 0.8);
+              return;
+            }
+          }
+        }
+
+        // 5c. CORPSE CONTACT (Tertiary - materials)
+        // Only when player is stationary (not walking/sprinting)
+        if (agentHashRef?.current && !walkingRef.current && !sprintingRef.current) {
+          const nearbyAgents = queryNearbyAgents(pos, agentHashRef.current);
+          const nearbyCorpses = nearbyAgents.filter(agent => {
+            if (agent.state !== AgentState.DECEASED) return false;
+            const dist = Math.hypot(agent.x - pos.x, agent.z - pos.z);
+            return dist < EXPOSURE_CONFIG.CORPSE_RADIUS;
+          });
+
+          if (nearbyCorpses.length > 0) {
+            const exposureChance = EXPOSURE_CONFIG.CORPSE_BASE_CHANCE * protectionMultiplier;
+
+            if (Math.random() < exposureChance) {
+              onPlagueExposure('contact', 0.6);
+              return;
+            }
+          }
+        }
+      }
+    }
+
+    // 6. Marker positioning
     if (markerRef.current) {
       // Keep marker on ground while jumping
       markerRef.current.position.y = groundHeightNow - group.current.position.y + 0.05;

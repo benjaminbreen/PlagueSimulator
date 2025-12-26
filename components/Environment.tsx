@@ -63,6 +63,7 @@ import { CaravanseraiComplex } from './environment/districts/CaravanseraiComplex
 import { OutskirtsFarmlandDecor } from './environment/districts/OutskirtsFarmlandDecor';
 import { OutskirtsDesertDecor } from './environment/districts/OutskirtsDesertDecor';
 import { SouthernRoadDecor } from './environment/districts/SouthernRoadDecor';
+import { ChristianQuarterDecor } from './environment/districts/ChristianQuarterDecor';
 import { MosqueBackground } from './environment/landmarks/MosqueBackground';
 import { HorizonBackdrop } from './environment/landmarks/HorizonBackdrop';
 import { CentralWell } from './environment/landmarks/CentralWell';
@@ -4602,7 +4603,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
           <Ground onClick={onGroundClick} district={district} seed={groundSeed} terrainSeed={terrainSeed} timeOfDay={timeOfDay} fogColor={fogColor} onHeightmapBuilt={onHeightmapBuilt} />
           <Buildings mapX={mapX} mapY={mapY} sessionSeed={sessionSeed} onBuildingsGenerated={handleBuildingsGenerated} nearBuildingId={nearBuildingId} torchIntensity={torchIntensity} nightFactor={nightFactor} heightmap={heightmap} />
           <MosqueBackground mapX={mapX} mapY={mapY} />
-          <HorizonBackdrop timeOfDay={timeOfDay} showCityWalls={displayCityWalls} wallRadius={CONSTANTS.BOUNDARY + 8} district={district} />
+          <HorizonBackdrop timeOfDay={timeOfDay} showCityWalls={displayCityWalls} wallRadius={CONSTANTS.BOUNDARY + 8} district={district} mapX={mapX} mapY={mapY} />
           <CentralWell mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} catPositionRef={catPositionRef} ratPositions={ratPositions} npcPositions={npcPositions} playerPosition={playerPosition} isSprinting={isSprinting} />
           <MarketplaceDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
            <BirdFlock mapX={mapX} mapY={mapY} center={[0, 7, 0]} count={5} bounds={22} />
@@ -4612,6 +4613,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
           <OutskirtsDesertDecor mapX={mapX} mapY={mapY} />
           <SouthernRoadDecor mapX={mapX} mapY={mapY} />
           <SalhiyyaDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} onTreePositionsGenerated={onTreePositionsGenerated} buildingPositions={buildingPositions} heightmap={heightmap} />
+          <ChristianQuarterDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} heightmap={heightmap} />
           <MountainShrineDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} onTreePositionsGenerated={onTreePositionsGenerated} />
           <CaravanseraiComplex mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
           {pushables.length > 0 && <PushableDecorations items={pushables} />}

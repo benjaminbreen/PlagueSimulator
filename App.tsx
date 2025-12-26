@@ -8,7 +8,7 @@ import { MoraleStats } from './components/Agents';
 import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
 import { MerchantModal } from './components/MerchantModal';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
 import { initializePlague, progressPlague } from './utils/plague';
@@ -48,6 +48,8 @@ function App() {
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showEncounterModal, setShowEncounterModal] = useState(false);
   const [showEncounterModal3, setShowEncounterModal3] = useState(false);
+  const [showDemographicsOverlay, setShowDemographicsOverlay] = useState(false);
+  const [npcStateOverride, setNpcStateOverride] = useState<NpcStateOverride | null>(null);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
@@ -66,6 +68,19 @@ function App() {
     setConversationHistories(prev => [...prev, summary]);
   }, []);
 
+  const handleForceNpcState = useCallback((id: string, state: AgentState) => {
+    setNpcStateOverride({ id, state, nonce: Date.now() });
+    setSelectedNpc((prev) => {
+      if (!prev || prev.stats.id !== id) return prev;
+      return { ...prev, state };
+    });
+  }, []);
+
+  const handleForceAllNpcState = useCallback((state: AgentState) => {
+    setNpcStateOverride({ id: '*', state, nonce: Date.now() });
+    setSelectedNpc((prev) => (prev ? { ...prev, state } : prev));
+  }, []);
+
   // Action system state
   const [actionSlots, setActionSlots] = useState<ActionSlotState>({
     slot1: 'warn',
@@ -80,7 +95,7 @@ function App() {
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
   const [playerStats, setPlayerStats] = useState<PlayerStats>(() => {
-    const stats = generatePlayerStats(playerSeed);
+    const stats = generatePlayerStats(playerSeed, { districtType: getDistrictType(params.mapX, params.mapY) });
 
     // Generate starting inventory
     const rand = () => seededRandom(playerSeed + 999);
@@ -154,6 +169,7 @@ function App() {
     showRats: true,
     showMiasma: true,
     showCityWalls: true,
+    showSoundDebug: false,
   });
 
   useEffect(() => {
@@ -527,6 +543,13 @@ function App() {
     });
   }, [stats.simTime]);
 
+  const handlePlagueExposure = useCallback((updatedPlague: import('./types').PlagueStatus) => {
+    setPlayerStats(prev => ({
+      ...prev,
+      plague: updatedPlague
+    }));
+  }, []);
+
   useEffect(() => {
     if (interiorNarrator) {
       (window as any).__interiorState = interiorNarrator;
@@ -597,6 +620,10 @@ function App() {
         setShowEncounterModal3={setShowEncounterModal3}
         conversationHistories={conversationHistories}
         onConversationSummary={handleConversationSummary}
+        showDemographicsOverlay={showDemographicsOverlay}
+        setShowDemographicsOverlay={setShowDemographicsOverlay}
+        onForceNpcState={handleForceNpcState}
+        onForceAllNpcState={handleForceAllNpcState}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -737,19 +764,25 @@ function App() {
               onPushCharge={setPushCharge}
               onMoraleUpdate={setMoraleStats}
               actionEvent={actionEvent}
+              showDemographicsOverlay={showDemographicsOverlay}
+              npcStateOverride={npcStateOverride}
               onPlayerPositionUpdate={(pos) => playerPositionRef.current.copy(pos)}
               dossierMode={showPlayerModal}
+              onPlagueExposure={handlePlagueExposure}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
             <InteriorScene
               spec={interiorSpec}
               params={params}
+              simTime={stats.simTime}
               playerStats={playerStats}
               onPickupPrompt={setPickupPrompt}
               onPickupItem={handlePickupItem}
               onNpcSelect={setSelectedNpc}
               selectedNpcId={selectedNpc?.stats.id ?? null}
+              showDemographicsOverlay={showDemographicsOverlay}
+              npcStateOverride={npcStateOverride}
             />
           )}
         </Suspense>

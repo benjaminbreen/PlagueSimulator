@@ -1,7 +1,8 @@
 import React, { useMemo, useEffect, useRef, useCallback, useState } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
-import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState } from '../types';
+import { Html } from '@react-three/drei';
+import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState, CONSTANTS, PANIC_SUSCEPTIBILITY, NpcStateOverride } from '../types';
 import { seededRandom } from '../utils/procedural';
 import { Player } from './Player';
 import { Humanoid } from './Humanoid';
@@ -16,17 +17,20 @@ import InteriorRoomMesh from './interior/RoomMesh';
 interface InteriorSceneProps {
   spec: InteriorSpec;
   params: SimulationParams;
+  simTime: number;
   playerStats: PlayerStats;
   onPickupPrompt?: (label: string | null) => void;
   onPickupItem?: (pickup: import('../utils/pushables').PickupInfo) => void;
   onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   selectedNpcId?: string | null;
+  showDemographicsOverlay?: boolean;
+  npcStateOverride?: NpcStateOverride | null;
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, selectedNpcId }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, selectedNpcId, showDemographicsOverlay = false, npcStateOverride }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | null>(null);
@@ -42,12 +46,47 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
     speed: number;
     wait: number;
     action: 'sit' | 'stand' | 'read' | 'cook';
+    state: AgentState;
+    stateStartTime: number;
+    awareness: number;
+    panic: number;
+    infectionTimer: number;
+    rumorTimer: number;
   }>>([]);
   const npcWalkRef = useRef<Map<string, boolean>>(new Map());
   const [npcWalkState, setNpcWalkState] = useState<Record<string, boolean>>({});
+  const [, setHealthTick] = useState(0);
+  const lastOverrideNonceRef = useRef<number | null>(null);
+  const getReligionColor = (value: string) => {
+    switch (value) {
+      case 'Sunni Islam': return 'text-amber-200';
+      case 'Shia Islam': return 'text-amber-300';
+      case 'Eastern Orthodox': return 'text-sky-200';
+      case 'Armenian Apostolic': return 'text-rose-200';
+      case 'Syriac Orthodox': return 'text-cyan-200';
+      case 'Jewish': return 'text-emerald-200';
+      case 'Druze': return 'text-violet-200';
+      default: return 'text-amber-100';
+    }
+  };
+
+  const getEthnicityColor = (value: string) => {
+    switch (value) {
+      case 'Arab': return 'text-amber-100';
+      case 'Aramaean/Syriac': return 'text-cyan-200';
+      case 'Kurdish': return 'text-lime-200';
+      case 'Turkic': return 'text-sky-200';
+      case 'Circassian': return 'text-indigo-200';
+      case 'Armenian': return 'text-rose-200';
+      case 'Greek/Rum': return 'text-blue-200';
+      case 'Persian': return 'text-purple-200';
+      default: return 'text-amber-100';
+    }
+  };
   const playerRef = useRef<THREE.Group>(null);
   const [pickedUpIds, setPickedUpIds] = useState<Set<string>>(new Set());
   const [hoveredNpcId, setHoveredNpcId] = useState<string | null>(null);
+  const npcStatsMap = useMemo(() => new Map(spec.npcs.map((npc) => [npc.id, npc.stats])), [spec.npcs]);
 
   // Helper function to determine ring color based on health state
   const getHealthRingColor = (state: AgentState) => {
@@ -589,17 +628,57 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
         target: hotspot ? hotspot.position.clone() : new THREE.Vector3(nearestRoom.center[0] + offsetX, npc.position[1], nearestRoom.center[2] + offsetZ),
         speed: 0.35 + seededRandom(seed + 7) * 0.25,
         wait: seededRandom(seed + 13) * 1.5,
-        action: hotspot ? hotspot.action : 'stand'
+        action: hotspot ? hotspot.action : 'stand',
+        state: npc.state ?? AgentState.HEALTHY,
+        stateStartTime: simTime,
+        awareness: npc.stats.awarenessLevel,
+        panic: npc.stats.panicLevel,
+        infectionTimer: 0,
+        rumorTimer: 0,
       };
     });
-  }, [spec, entryRoom, spec.rooms, roomHotspots]);
+  }, [spec, entryRoom, spec.rooms, roomHotspots, simTime]);
+
+  useEffect(() => {
+    if (!npcStateOverride) return;
+    if (lastOverrideNonceRef.current === npcStateOverride.nonce) return;
+    lastOverrideNonceRef.current = npcStateOverride.nonce;
+    if (npcStateOverride.id === '*') {
+      npcStatesRef.current.forEach((npc) => {
+        npc.state = npcStateOverride.state;
+        npc.stateStartTime = simTime;
+      });
+      setHealthTick((prev) => prev + 1);
+      return;
+    }
+    const target = npcStatesRef.current.find((npc) => npc.id === npcStateOverride.id);
+    if (target) {
+      target.state = npcStateOverride.state;
+      target.stateStartTime = simTime;
+      setHealthTick((prev) => prev + 1);
+    }
+  }, [npcStateOverride, simTime]);
 
   useFrame((state, delta) => {
     let walkChanged = false;
     const nextWalkState: Record<string, boolean> = { ...npcWalkState };
+    let healthChanged = false;
+    const npcSnapshots = npcStatesRef.current.map((npc) => ({
+      id: npc.id,
+      pos: npc.position,
+      state: npc.state,
+      awareness: npc.awareness,
+      panic: npc.panic
+    }));
     npcStatesRef.current.forEach((npc) => {
       const room = roomMap.get(npc.roomId) ?? entryRoom;
       const group = npcGroupRefs.current.get(npc.id);
+      if (npc.state === AgentState.DECEASED) {
+        if (group) {
+          group.position.copy(npc.position);
+        }
+        return;
+      }
       if (npc.wait > 0) {
         npc.wait = Math.max(0, npc.wait - delta);
       } else {
@@ -745,8 +824,69 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
         walkChanged = true;
       }
     });
+
+    npcStatesRef.current.forEach((npc) => {
+      const npcStats = npcStatsMap.get(npc.id);
+      const panicMod = npcStats ? (PANIC_SUSCEPTIBILITY[npcStats.socialClass] ?? 1.0) : 1.0;
+
+      const hoursInState = simTime - npc.stateStartTime;
+      if (npc.state === AgentState.INCUBATING && hoursInState >= CONSTANTS.HOURS_TO_INFECTED) {
+        npc.state = AgentState.INFECTED;
+        npc.stateStartTime = simTime;
+        healthChanged = true;
+      } else if (npc.state === AgentState.INFECTED && hoursInState >= (CONSTANTS.HOURS_TO_DEATH - CONSTANTS.HOURS_TO_INFECTED)) {
+        npc.state = AgentState.DECEASED;
+        npc.stateStartTime = simTime;
+        healthChanged = true;
+      }
+
+      if (npc.state === AgentState.HEALTHY) {
+        npc.infectionTimer += delta * params.simulationSpeed;
+        if (npc.infectionTimer >= 1.0) {
+          npc.infectionTimer = 0;
+          for (const other of npcSnapshots) {
+            if (other.id === npc.id) continue;
+            if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
+              if (npc.position.distanceToSquared(other.pos) < 4.0) {
+                if (Math.random() < params.infectionRate * params.simulationSpeed * 0.5 * 60) {
+                  npc.state = AgentState.INCUBATING;
+                  npc.stateStartTime = simTime;
+                  healthChanged = true;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      npc.rumorTimer += delta * params.simulationSpeed;
+      if (npc.rumorTimer >= 0.6) {
+        npc.rumorTimer = 0;
+        for (const other of npcSnapshots) {
+          if (other.id === npc.id) continue;
+          const distSq = npc.position.distanceToSquared(other.pos);
+          if (other.state === AgentState.DECEASED && distSq < 9) {
+            npc.awareness = Math.min(100, npc.awareness + 25);
+            npc.panic = Math.min(100, npc.panic + 18 * panicMod);
+          } else if (other.state === AgentState.INFECTED && distSq < 6) {
+            npc.awareness = Math.min(100, npc.awareness + 3);
+            npc.panic = Math.min(100, npc.panic + 1.4 * panicMod);
+          }
+          if (distSq < 16 && other.awareness > npc.awareness + 10) {
+            const transfer = (other.awareness - npc.awareness) * 0.08;
+            npc.awareness = Math.min(100, npc.awareness + transfer);
+            npc.panic = Math.min(100, npc.panic + transfer * 0.4 * panicMod);
+          }
+        }
+      }
+    });
+
     if (walkChanged) {
       setNpcWalkState(nextWalkState);
+    }
+    if (healthChanged) {
+      setHealthTick((prev) => prev + 1);
     }
     if (playerRef.current) {
       const playerPos = playerRef.current.position;
@@ -1224,17 +1364,56 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
           }}
           onClick={(e) => {
             e.stopPropagation();
+            const stateEntry = npcStatesRef.current.find((entry) => entry.id === npc.id);
+            const healthState = stateEntry?.state ?? npc.state ?? AgentState.HEALTHY;
             if (onNpcSelect) {
-              onNpcSelect({ stats: npc.stats, state: AgentState.HEALTHY });
+              onNpcSelect({ stats: npc.stats, state: healthState });
             }
           }}
         >
-          {selectedNpcId === npc.id && (
+          {selectedNpcId === npc.id && (() => {
+            const stateEntry = npcStatesRef.current.find((entry) => entry.id === npc.id);
+            const healthState = stateEntry?.state ?? npc.state ?? AgentState.HEALTHY;
+            return (
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
               <ringGeometry args={[0.75, 0.95, 32]} />
-              <meshBasicMaterial color={getHealthRingColor(AgentState.HEALTHY)} transparent opacity={0.7} />
+              <meshBasicMaterial color={getHealthRingColor(healthState)} transparent opacity={0.7} />
             </mesh>
-          )}
+            );
+          })()}
+          {showDemographicsOverlay && (() => {
+            const stateEntry = npcStatesRef.current.find((entry) => entry.id === npc.id);
+            const healthState = stateEntry?.state ?? npc.state ?? AgentState.HEALTHY;
+            return (
+            <Html transform={false} position={[0, 2.7, 0]} center>
+              <div className={`rounded-md px-3 py-2 text-[12px] text-amber-100/80 backdrop-blur-sm shadow-lg pointer-events-none border ${
+                healthState === AgentState.INFECTED
+                  ? 'bg-black/85 border-red-500/80 shadow-[0_0_18px_rgba(239,68,68,0.55)]'
+                  : healthState === AgentState.INCUBATING
+                    ? 'bg-black/85 border-yellow-400/80 shadow-[0_0_14px_rgba(251,191,36,0.5)]'
+                    : 'bg-black/80 border-amber-900/40'
+              }`}>
+                {(healthState === AgentState.INFECTED || healthState === AgentState.INCUBATING) && (
+                  <div className={`mb-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest font-semibold ${
+                    healthState === AgentState.INFECTED ? 'bg-red-500/20 text-red-200' : 'bg-yellow-400/20 text-yellow-100'
+                  }`}>
+                    {healthState === AgentState.INFECTED ? 'Infected' : 'Incubating'}
+                  </div>
+                )}
+                <div className="font-semibold text-amber-100">
+                  {npc.stats.gender}, {npc.stats.age}
+                  <span className="text-amber-500/40 mx-1">•</span>
+                  <span className="text-amber-100/90">{npc.stats.profession}</span>
+                </div>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <span className={`uppercase tracking-widest text-[10px] ${getReligionColor(npc.stats.religion)}`}>{npc.stats.religion}</span>
+                  <span className="text-amber-500/40">•</span>
+                  <span className={`uppercase tracking-widest text-[10px] ${getEthnicityColor(npc.stats.ethnicity)}`}>{npc.stats.ethnicity}</span>
+                </div>
+              </div>
+            </Html>
+            );
+          })()}
           <Humanoid
             color={npc.stats.socialClass === SocialClass.NOBILITY ? '#6a5b4a' : '#6b5a45'}
             headColor="#e2c6a2"
@@ -1256,7 +1435,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
             accessories={npc.stats.accessories}
             enableArmSwing
             isWalking={npcWalkState[npc.id] ?? true}
-            isDead={false}
+            isDead={(npcStatesRef.current.find((entry) => entry.id === npc.id)?.state ?? npc.state) === AgentState.DECEASED}
+            sicknessLevel={(npcStatesRef.current.find((entry) => entry.id === npc.id)?.state ?? npc.state) === AgentState.INFECTED ? 1 : (npcStatesRef.current.find((entry) => entry.id === npc.id)?.state ?? npc.state) === AgentState.INCUBATING ? 0.4 : 0}
           />
         </group>
       ))}

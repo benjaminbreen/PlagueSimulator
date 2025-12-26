@@ -55,6 +55,7 @@ export interface LayerVolumes {
   sacred: number;
   social: number;
   plague: number;
+  biome: number;
 }
 
 const DEFAULT_VOLUMES: LayerVolumes = {
@@ -64,6 +65,7 @@ const DEFAULT_VOLUMES: LayerVolumes = {
   sacred: 0.2,
   social: 0.15,
   plague: 0.08,
+  biome: 0.12,
 };
 
 export class AmbientSoundEngine {

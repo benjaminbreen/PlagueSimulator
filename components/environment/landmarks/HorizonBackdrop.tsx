@@ -8,9 +8,118 @@ import * as THREE from 'three';
 import { DistrictType } from '../../../types';
 import { SANDSTONE_PALETTE } from '../constants';
 
-export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boolean; wallRadius?: number; district?: DistrictType }> = ({ timeOfDay, showCityWalls = true, wallRadius = 82, district }) => {
+// Horizon profile types based on urban density
+type HorizonProfile = 'DENSE_URBAN' | 'RESIDENTIAL' | 'SUBURBAN' | 'RURAL' | 'DESERT';
+
+interface HorizonConfig {
+  buildingCount: number;
+  minaretCount: number;
+  domeCount: number;
+  treeCount: number;
+  heightRange: [number, number];
+  buildingWidthRange: [number, number];
+}
+
+// Profile configurations for different district types
+const HORIZON_CONFIGS: Record<HorizonProfile, HorizonConfig> = {
+  DENSE_URBAN: {
+    buildingCount: 80,
+    minaretCount: 10,
+    domeCount: 7,
+    treeCount: 8,
+    heightRange: [1.5, 4.0],
+    buildingWidthRange: [3, 9]
+  },
+  RESIDENTIAL: {
+    buildingCount: 60,
+    minaretCount: 7,
+    domeCount: 5,
+    treeCount: 12,
+    heightRange: [1.2, 2.5],
+    buildingWidthRange: [3, 7]
+  },
+  SUBURBAN: {
+    buildingCount: 40,
+    minaretCount: 4,
+    domeCount: 3,
+    treeCount: 20,
+    heightRange: [1.0, 2.0],
+    buildingWidthRange: [3, 6]
+  },
+  RURAL: {
+    buildingCount: 20,
+    minaretCount: 2,
+    domeCount: 0,
+    treeCount: 30,
+    heightRange: [0.8, 1.5],
+    buildingWidthRange: [2, 5]
+  },
+  DESERT: {
+    buildingCount: 32,
+    minaretCount: 0,
+    domeCount: 0,
+    treeCount: 16,
+    heightRange: [1.0, 2.2],
+    buildingWidthRange: [4, 8]
+  }
+};
+
+// Determine horizon profile based on district type
+const getHorizonProfile = (district?: DistrictType): HorizonProfile => {
+  if (!district) return 'RESIDENTIAL';
+
+  switch (district) {
+    case 'MARKET':
+    case 'CIVIC':
+    case 'WEALTHY':
+      return 'DENSE_URBAN';
+
+    case 'RESIDENTIAL':
+    case 'ALLEYS':
+    case 'HOVELS':
+      return 'RESIDENTIAL';
+
+    case 'CARAVANSERAI':
+    case 'SOUTHERN_ROAD':
+    case 'SALHIYYA':
+      return 'SUBURBAN';
+
+    case 'OUTSKIRTS_FARMLAND':
+    case 'MOUNTAIN_SHRINE':
+      return 'RURAL';
+
+    case 'OUTSKIRTS_DESERT':
+      return 'DESERT';
+
+    default:
+      return 'RESIDENTIAL';
+  }
+};
+
+export const HorizonBackdrop: React.FC<{
+  timeOfDay?: number;
+  showCityWalls?: boolean;
+  wallRadius?: number;
+  district?: DistrictType;
+  mapX?: number;
+  mapY?: number;
+}> = ({ timeOfDay, showCityWalls = true, wallRadius = 82, district, mapX = 0, mapY = 0 }) => {
   const time = timeOfDay ?? 12;
-  const isDesert = district === 'OUTSKIRTS_DESERT';
+
+  // Get horizon profile and configuration based on district
+  const profile = useMemo(() => getHorizonProfile(district), [district]);
+  const config = HORIZON_CONFIGS[profile];
+  const isDesert = profile === 'DESERT';
+
+  // Rotate horizon based on district coordinates for variety
+  const horizonRotation = useMemo(() => {
+    const seed = (mapX * 37 + mapY * 73) % 360;
+    return (seed / 360) * Math.PI * 2;
+  }, [mapX, mapY]);
+
+  // Procedural variation seed for building placement
+  const buildingSeed = useMemo(() => Math.abs(mapX * 127 + mapY * 251), [mapX, mapY]);
+
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
   const twilightFactor = time >= 17 && time < 19 ? (time - 17) / 2 : time >= 5 && time < 7 ? (7 - time) / 2 : 0;
   const dayFactor = time >= 7 && time < 17 ? 1 : time >= 5 && time < 7 ? (time - 5) / 2 : time >= 17 && time < 19 ? (19 - time) / 2 : 0;
@@ -51,9 +160,9 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
     ? (nightFactor > 0.8 ? 0.08 : twilightFactor > 0 ? 0.16 : 0.12)
     : (nightFactor > 0.8 ? 0.1 : twilightFactor > 0 ? 0.18 : 0.14)) * (0.8 + atmosphericHaze * 0.4);
 
-  // Instanced city buildings - SINGLE DRAW CALL
+  // Instanced city buildings - SINGLE DRAW CALL (count from profile config)
   const buildingInstancesRef = useRef<THREE.InstancedMesh>(null);
-  const buildingCount = isDesert ? 32 : 70;
+  const buildingCount = config.buildingCount;
 
   const wallTexture = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -90,18 +199,25 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
     const baseRadius = isDesert ? 120 : 105; // Pushed farther out
 
     for (let i = 0; i < buildingCount; i++) {
-      const angle = (i / buildingCount) * Math.PI * 2;
-      const radiusVariation = ((i * 7) % 5) * 3;
+      // Add procedural variation to angle based on district seed
+      const angleOffset = ((buildingSeed + i * 7) % 100) / 100 * 0.1; // Small random offset
+      const angle = (i / buildingCount) * Math.PI * 2 + angleOffset;
+      const radiusVariation = ((i * 7 + buildingSeed) % 5) * 3;
       const radius = baseRadius + radiusVariation;
 
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
 
-      // Realistic distant building proportions - low and wide
-      const height = (isDesert ? 1.0 : 1.2) + ((i * 11) % (isDesert ? 8 : 12)) * 0.15; // 1.0-2.2 units (desert) or 1.2-3.0 units (city)
-      // Wider buildings for realistic squat appearance
-      const width = (isDesert ? 4 : 3) + ((i * 13) % (isDesert ? 4 : 5)); // 4-8 units (desert) or 3-8 units (city)
-      const depth = (isDesert ? 4 : 3) + ((i * 17) % (isDesert ? 4 : 5)); // 4-8 units (desert) or 3-8 units (city)
+      // Use profile config for height range
+      const [minHeight, maxHeight] = config.heightRange;
+      const heightVariation = maxHeight - minHeight;
+      const height = minHeight + ((i * 11 + buildingSeed) % (heightVariation * 10)) / 10;
+
+      // Use profile config for width range
+      const [minWidth, maxWidth] = config.buildingWidthRange;
+      const widthRange = maxWidth - minWidth;
+      const width = minWidth + ((i * 13 + buildingSeed) % widthRange);
+      const depth = minWidth + ((i * 17 + buildingSeed) % widthRange);
 
       tempObj.position.set(x, height / 2, z);
       tempObj.scale.set(width, height, depth);
@@ -111,10 +227,10 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
     }
 
     buildingInstancesRef.current.instanceMatrix.needsUpdate = true;
-  }, []);
+  }, [buildingCount, buildingSeed, config, isDesert]);
 
   return (
-    <group>
+    <group rotation={[0, horizonRotation, 0]}>
       {/* INSTANCED DISTANT CITY - Single draw call for buildings at horizon */}
       <instancedMesh ref={buildingInstancesRef} args={[undefined, undefined, buildingCount]} castShadow={false} receiveShadow={false}>
         <boxGeometry args={[1, 1, 1]} />
@@ -165,36 +281,32 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
       {/* PERFORMANCE OPTIMIZED: Using instanced meshes instead of individual meshes (46 → 6 draw calls) */}
 
       {/* Distant minarets scattered on horizon - INSTANCED */}
-      {!isDesert && (() => {
+      {config.minaretCount > 0 && (() => {
         const minaretInstancesRef = useRef<THREE.InstancedMesh>(null);
-        const minaretData = [
-          { angle: 0, radius: 145, height: 5.5 },      // North
-          { angle: Math.PI / 4, radius: 150, height: 4.5 },   // NE
-          { angle: Math.PI / 2, radius: 155, height: 6.0 },   // East
-          { angle: 3 * Math.PI / 4, radius: 148, height: 4.0 }, // SE
-          { angle: Math.PI, radius: 152, height: 5.0 },      // South
-          { angle: 5 * Math.PI / 4, radius: 147, height: 5.8 }, // SW
-          { angle: 3 * Math.PI / 2, radius: 160, height: 5.2 }, // West
-          { angle: 7 * Math.PI / 4, radius: 143, height: 4.8 }, // NW
-        ];
 
         React.useEffect(() => {
           if (!minaretInstancesRef.current) return;
           const tempObj = new THREE.Object3D();
-          minaretData.forEach((minaret, i) => {
-            const x = Math.cos(minaret.angle) * minaret.radius;
-            const z = Math.sin(minaret.angle) * minaret.radius;
-            tempObj.position.set(x, minaret.height / 2, z);
-            // Scale to vary height per minaret
-            tempObj.scale.set(0.6, minaret.height / 5, 0.6); // Slender, realistic proportions
+
+          for (let i = 0; i < config.minaretCount; i++) {
+            // Distribute minarets around horizon with procedural variation
+            const angleOffset = ((buildingSeed + i * 31) % 100) / 100 * 0.3;
+            const angle = (i / config.minaretCount) * Math.PI * 2 + angleOffset;
+            const radius = 145 + ((i * 13 + buildingSeed) % 15);
+            const height = 4.0 + ((i * 7 + buildingSeed) % 20) / 10; // 4.0-6.0 units
+
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            tempObj.position.set(x, height / 2, z);
+            tempObj.scale.set(0.6, height / 5, 0.6); // Slender, realistic proportions
             tempObj.updateMatrix();
             minaretInstancesRef.current.setMatrixAt(i, tempObj.matrix);
-          });
+          }
           minaretInstancesRef.current.instanceMatrix.needsUpdate = true;
         }, []);
 
         return (
-          <instancedMesh ref={minaretInstancesRef} args={[undefined, undefined, 8]} castShadow={false}>
+          <instancedMesh ref={minaretInstancesRef} args={[undefined, undefined, config.minaretCount]} castShadow={false}>
             <cylinderGeometry args={[0.5, 0.6, 5, 6]} />
             <meshStandardMaterial
               color={silhouetteColor}
@@ -210,23 +322,22 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
       })()}
 
       {/* Distant dome clusters - INSTANCED (bases and caps separate) */}
-      {!isDesert && (() => {
+      {config.domeCount > 0 && (() => {
         const domeBasesRef = useRef<THREE.InstancedMesh>(null);
         const domeCapsRef = useRef<THREE.InstancedMesh>(null);
-        const domeData = [
-          { angle: Math.PI / 6, radius: 142 },       // North
-          { angle: Math.PI / 3, radius: 158 },       // NE
-          { angle: 5 * Math.PI / 6, radius: 149 },   // SE
-          { angle: 4 * Math.PI / 3, radius: 146 },   // SW
-          { angle: 5 * Math.PI / 3, radius: 154 },   // NW
-        ];
 
         React.useEffect(() => {
           if (!domeBasesRef.current || !domeCapsRef.current) return;
           const tempObj = new THREE.Object3D();
-          domeData.forEach((dome, i) => {
-            const x = Math.cos(dome.angle) * dome.radius;
-            const z = Math.sin(dome.angle) * dome.radius;
+
+          for (let i = 0; i < config.domeCount; i++) {
+            // Distribute domes around horizon with procedural variation
+            const angleOffset = ((buildingSeed + i * 43) % 100) / 100 * 0.4;
+            const angle = (i / config.domeCount) * Math.PI * 2 + angleOffset;
+            const radius = 142 + ((i * 17 + buildingSeed) % 16);
+
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
 
             // Base cylinder
             tempObj.position.set(x, 2, z);
@@ -238,14 +349,14 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
             tempObj.position.set(x, 4.5, z); // Lower position
             tempObj.updateMatrix();
             domeCapsRef.current.setMatrixAt(i, tempObj.matrix);
-          });
+          }
           domeBasesRef.current.instanceMatrix.needsUpdate = true;
           domeCapsRef.current.instanceMatrix.needsUpdate = true;
         }, []);
 
         return (
           <>
-            <instancedMesh ref={domeBasesRef} args={[undefined, undefined, 5]} castShadow={false}>
+            <instancedMesh ref={domeBasesRef} args={[undefined, undefined, config.domeCount]} castShadow={false}>
               <cylinderGeometry args={[2.5, 2.5, 4, 8]} />
               <meshStandardMaterial
                 color={silhouetteColor}
@@ -257,7 +368,7 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
                 emissiveIntensity={twilightFactor * 0.18}
               />
             </instancedMesh>
-            <instancedMesh ref={domeCapsRef} args={[undefined, undefined, 5]} castShadow={false}>
+            <instancedMesh ref={domeCapsRef} args={[undefined, undefined, config.domeCount]} castShadow={false}>
               <sphereGeometry args={[2.8, 8, 8, 0, Math.PI * 2, 0, Math.PI/2]} />
               <meshStandardMaterial
                 color={silhouetteColor}
@@ -275,7 +386,7 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
 
       {/* Distant tree silhouettes - INSTANCED (trunks and canopies separate) */}
       {(() => {
-        const count = isDesert ? 16 : 12;
+        const count = config.treeCount;
         const trunksRef = useRef<THREE.InstancedMesh>(null);
         const canopiesRef = useRef<THREE.InstancedMesh>(null);
 
@@ -284,12 +395,14 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
           const tempObj = new THREE.Object3D();
 
           for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2 + 0.2;
-            const radius = (isDesert ? 150 : 140) + ((i * 7) % 4) * 4;
+            // Add procedural variation to angle
+            const angleOffset = ((buildingSeed + i * 19) % 100) / 100 * 0.2;
+            const angle = (i / count) * Math.PI * 2 + angleOffset;
+            const radius = (isDesert ? 150 : 140) + ((i * 7 + buildingSeed) % 4) * 4;
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
             // Realistic distant tree heights - much shorter
-            const height = (isDesert ? 1.5 : 2.0) + ((i * 5) % (isDesert ? 4 : 5)) * 0.2; // 1.5-2.3 (desert) or 2.0-3.0 (city)
+            const height = (isDesert ? 1.5 : 2.0) + ((i * 5 + buildingSeed) % (isDesert ? 4 : 5)) * 0.2; // 1.5-2.3 (desert) or 2.0-3.0 (city)
 
             // Trunk - proportionally scaled
             const trunkScale = height / (isDesert ? 2.0 : 2.5);
@@ -299,7 +412,7 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
             trunksRef.current.setMatrixAt(i, tempObj.matrix);
 
             // Canopy - wider and flatter for distant perspective
-            const canopyScale = 0.7 + ((i * 3) % 5) * 0.15; // Variation: 0.7-1.3
+            const canopyScale = 0.7 + ((i * 3 + buildingSeed) % 5) * 0.15; // Variation: 0.7-1.3
             tempObj.position.set(x, height + (isDesert ? 0.4 : 0.6), z);
             tempObj.scale.set(canopyScale * 1.2, canopyScale * 0.8, canopyScale * 1.2); // Wider, flatter
             tempObj.updateMatrix();

@@ -2,14 +2,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
-interface GeminiMessage {
-  role: 'user' | 'model';
-  parts: { text: string }[];
-}
-
 interface ChatRequest {
   systemPrompt: string;
-  messages: GeminiMessage[];
+  messages: { role: 'user' | 'model'; parts: { text: string }[] }[];
   playerMessage: string;
 }
 
@@ -31,22 +26,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    // Build the conversation history with system prompt as first user message
-    const contents: GeminiMessage[] = [
-      // System prompt as initial context
-      {
-        role: 'user',
-        parts: [{ text: systemPrompt + '\n\n[The conversation begins. A stranger approaches you.]' }]
-      },
-      {
-        role: 'model',
-        parts: [{ text: 'I understand. I am ready to speak as this character.' }]
-      },
-      // Previous messages
+    const contents = [
       ...messages,
-      // Current player message
       {
-        role: 'user',
+        role: 'user' as const,
         parts: [{ text: playerMessage }]
       }
     ];
@@ -57,6 +40,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
+        systemInstruction: {
+          role: 'system',
+          parts: [{ text: systemPrompt }]
+        },
         contents,
         generationConfig: {
           maxOutputTokens: 300,

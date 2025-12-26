@@ -55,6 +55,29 @@ export enum SocialClass {
   NOBILITY = 'Nobility',
 }
 
+export type Ethnicity =
+  | 'Arab'
+  | 'Aramaean/Syriac'
+  | 'Kurdish'
+  | 'Turkic'
+  | 'Circassian'
+  | 'Armenian'
+  | 'Greek/Rum'
+  | 'Persian'
+  | 'Frankish';  // Italian, Venetian, Genoese, Provençal merchants and visitors
+
+export type Religion =
+  | 'Sunni Islam'
+  | 'Shia Islam'
+  | 'Eastern Orthodox'
+  | 'Armenian Apostolic'
+  | 'Syriac Orthodox'
+  | 'Jewish'
+  | 'Druze'
+  | 'Latin Christian';  // Roman Catholic - Frankish/Italian visitors
+
+export type Language = 'Arabic' | 'Syriac' | 'Armenian' | 'Greek' | 'Persian' | 'Turkic' | 'Latin';
+
 export enum CameraMode {
   FIRST_PERSON = 'FIRST_PERSON',
   OVER_SHOULDER = 'OVER_SHOULDER',
@@ -84,9 +107,14 @@ export interface NPCStats {
   profession: string;
   gender: 'Male' | 'Female';
   socialClass: SocialClass;
+  ethnicity: Ethnicity;
+  religion: Religion;
+  language: Language;
   height: number;
   weight: number;
-  mood: string;
+  // Personality system
+  disposition: number;        // 0-100: baseline friendliness/personality (persistent)
+  mood: string;               // Current emotional state (derived from disposition)
   // Morale/Rumor system
   awarenessLevel: number;     // 0-100: knowledge of plague spreading in city
   panicLevel: number;         // 0-100: fear/anxiety response
@@ -111,6 +139,9 @@ export interface PlayerStats {
   profession: string;
   gender: 'Male' | 'Female';
   socialClass: SocialClass;
+  ethnicity: Ethnicity;
+  religion: Religion;
+  language: Language;
   height: number;
   weight: number;
   family: string;
@@ -319,10 +350,11 @@ export interface InteriorProp {
 
 export interface InteriorNPC {
   id: string;
-  role: 'owner' | 'family' | 'guest' | 'servant' | 'apprentice';
+  role: 'owner' | 'family' | 'guest' | 'servant' | 'apprentice' | 'worshipper';
   position: [number, number, number];
   rotation: [number, number, number];
   stats: NPCStats;
+  state: AgentState;
 }
 
 export interface InteriorNarratorState {
@@ -392,7 +424,7 @@ export enum MerchantType {
 }
 
 export interface ItemEffect {
-  type: 'heal' | 'buff' | 'debuff';
+  type: 'heal' | 'buff' | 'debuff' | 'plagueProtection';
   value: number;
   duration?: number; // For temporary effects
 }
@@ -474,6 +506,7 @@ export interface DevSettings {
   showRats: boolean;
   showMiasma: boolean;
   showCityWalls: boolean;
+  showSoundDebug: boolean;
 }
 
 export interface SimulationStats {
@@ -490,6 +523,12 @@ export interface SimulationCounts {
   incubating: number;
   infected: number;
   deceased: number;
+}
+
+export interface NpcStateOverride {
+  id: string;
+  state: AgentState;
+  nonce: number;
 }
 
 export const CONSTANTS = {

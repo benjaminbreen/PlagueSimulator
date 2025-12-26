@@ -1,8 +1,8 @@
-import React, { useRef, useState, useMemo, memo } from 'react';
+import React, { useRef, useState, useMemo, memo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
-import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle, PANIC_SUSCEPTIBILITY, PlayerActionEvent } from '../types';
+import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle, PANIC_SUSCEPTIBILITY, PlayerActionEvent, NpcStateOverride } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
@@ -132,6 +132,8 @@ interface NPCProps {
   terrainSeed?: number;
   heightmap?: TerrainHeightmap | null;
   actionEvent?: PlayerActionEvent | null;
+  showDemographicsOverlay?: boolean;
+  npcStateOverride?: NpcStateOverride | null;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
@@ -156,7 +158,9 @@ export const NPC: React.FC<NPCProps> = memo(({
   district,
   terrainSeed,
   heightmap,
-  actionEvent
+  actionEvent,
+  showDemographicsOverlay = false,
+  npcStateOverride
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -272,6 +276,41 @@ export const NPC: React.FC<NPCProps> = memo(({
     return { skin, scarf, robe, accent, hair, headwear };
   }, [stats.headwearStyle, stats.id, stats.profession]);
   const moodDisplay = moodOverride ?? stats.mood;
+  const lastOverrideNonceRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!npcStateOverride || (npcStateOverride.id !== stats.id && npcStateOverride.id !== '*')) return;
+    if (lastOverrideNonceRef.current === npcStateOverride.nonce) return;
+    lastOverrideNonceRef.current = npcStateOverride.nonce;
+    stateRef.current = npcStateOverride.state;
+    stateStartTimeRef.current = getSimTime();
+  }, [npcStateOverride, stats.id, getSimTime]);
+  const getReligionColor = (value: string) => {
+    switch (value) {
+      case 'Sunni Islam': return 'text-amber-200';
+      case 'Shia Islam': return 'text-amber-300';
+      case 'Eastern Orthodox': return 'text-sky-200';
+      case 'Armenian Apostolic': return 'text-rose-200';
+      case 'Syriac Orthodox': return 'text-cyan-200';
+      case 'Jewish': return 'text-emerald-200';
+      case 'Druze': return 'text-violet-200';
+      default: return 'text-amber-100';
+    }
+  };
+
+  const getEthnicityColor = (value: string) => {
+    switch (value) {
+      case 'Arab': return 'text-amber-100';
+      case 'Aramaean/Syriac': return 'text-cyan-200';
+      case 'Kurdish': return 'text-lime-200';
+      case 'Turkic': return 'text-sky-200';
+      case 'Circassian': return 'text-indigo-200';
+      case 'Armenian': return 'text-rose-200';
+      case 'Greek/Rum': return 'text-blue-200';
+      case 'Persian': return 'text-purple-200';
+      default: return 'text-amber-100';
+    }
+  };
 
   const pickNewTarget = (avoidDirection?: THREE.Vector3, isStuck = false) => {
     const range = CONSTANTS.MARKET_SIZE - 12;
@@ -982,11 +1021,17 @@ export const NPC: React.FC<NPCProps> = memo(({
         footwearColor={stats.footwearColor}
         accessories={stats.accessories}
         sicknessLevel={stateRef.current === AgentState.INFECTED ? 1.0 : stateRef.current === AgentState.INCUBATING ? 0.4 : 0}
+        isInfected={stateRef.current === AgentState.INFECTED}
+        isIncubating={stateRef.current === AgentState.INCUBATING}
         enableArmSwing
         armSwingMode="both"
         isWalking={simulationSpeed > 0 && stateRef.current !== AgentState.DECEASED && (!quarantine || stateRef.current !== AgentState.INFECTED)}
         isDead={stateRef.current === AgentState.DECEASED}
-        walkSpeed={10 * simulationSpeed}
+        walkSpeed={10 * simulationSpeed * (
+          stateRef.current === AgentState.INFECTED ? 0.5 :  // 50% slower when infected
+          stateRef.current === AgentState.INCUBATING ? 0.8 : // 20% slower when incubating
+          1.0 // Normal speed
+        )}
         distanceFromCamera={distanceFromCameraRef.current}
         />
         {stats.heldItem && stats.heldItem !== 'none' && (
@@ -1100,6 +1145,36 @@ export const NPC: React.FC<NPCProps> = memo(({
       {/* PLAGUE: Miasma effect around corpses */}
       {displayState === AgentState.DECEASED && (
         <CorpseMiasma />
+      )}
+
+      {showDemographicsOverlay && displayState !== AgentState.DECEASED && (
+        <Html transform={false} position={[0, 2.9, 0]} center>
+          <div className={`rounded-md px-3 py-2 text-[12px] text-amber-100/80 backdrop-blur-sm shadow-lg pointer-events-none border ${
+            displayState === AgentState.INFECTED
+              ? 'bg-black/85 border-red-500/80 shadow-[0_0_18px_rgba(239,68,68,0.55)]'
+              : displayState === AgentState.INCUBATING
+                ? 'bg-black/85 border-yellow-400/80 shadow-[0_0_14px_rgba(251,191,36,0.5)]'
+                : 'bg-black/80 border-amber-900/40'
+          }`}>
+            {(displayState === AgentState.INFECTED || displayState === AgentState.INCUBATING) && (
+              <div className={`mb-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] uppercase tracking-widest font-semibold ${
+                displayState === AgentState.INFECTED ? 'bg-red-500/20 text-red-200' : 'bg-yellow-400/20 text-yellow-100'
+              }`}>
+                {displayState === AgentState.INFECTED ? 'Infected' : 'Incubating'}
+              </div>
+            )}
+            <div className="font-semibold text-amber-100">
+              {stats.gender}, {stats.age}
+              <span className="text-amber-500/40 mx-1">•</span>
+              <span className="text-amber-100/90">{stats.profession}</span>
+            </div>
+            <div className="mt-1 flex items-center gap-1.5">
+              <span className={`uppercase tracking-widest text-[10px] ${getReligionColor(stats.religion)}`}>{stats.religion}</span>
+              <span className="text-amber-500/40">•</span>
+              <span className={`uppercase tracking-widest text-[10px] ${getEthnicityColor(stats.ethnicity)}`}>{stats.ethnicity}</span>
+            </div>
+          </div>
+        </Html>
       )}
 
       {hovered && (
