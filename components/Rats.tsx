@@ -16,7 +16,7 @@ const SAFE_DISTANCE = 12.0;
 
 // Minimum rats always present
 const MIN_RATS = 3;
-const MAX_RATS = 50;
+const MAX_RATS = 8; // PERFORMANCE: Reduced from 50 to 8
 
 // Temp objects for instanced mesh updates
 const tempBody = new THREE.Object3D();
@@ -197,6 +197,10 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
   const tailRef = useRef<THREE.InstancedMesh>(null);
   const earRef = useRef<THREE.InstancedMesh>(null);
 
+  // PERFORMANCE: Throttle NPC distance checks to 10Hz (every 6 frames at 60fps)
+  const npcCheckFrameCounter = useRef(0);
+  const cachedNpcPositions = useRef<THREE.Vector3[] | undefined>(undefined);
+
   const rats = useMemo(() => {
     const arr: Rat[] = [];
     for (let i = 0; i < MAX_RATS; i++) arr.push(new Rat(i));
@@ -212,21 +216,28 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
   useFrame((state, delta) => {
     const dt = Math.min(delta, 0.1) * params.simulationSpeed;
 
+    // PERFORMANCE: Throttle NPC distance checks - only update every 6 frames (10Hz)
+    npcCheckFrameCounter.current++;
+    if (npcCheckFrameCounter.current >= 6) {
+      cachedNpcPositions.current = npcPositions;
+      npcCheckFrameCounter.current = 0;
+    }
+
     // Calculate active rat count: minimum + hygiene bonus
     const hygieneBonus = params.hygieneLevel < 0.4
       ? Math.floor((MAX_RATS - MIN_RATS) * (0.4 - params.hygieneLevel) / 0.4)
       : 0;
     const activeCount = MIN_RATS + hygieneBonus;
 
-    // Update rats
+    // Update rats with throttled NPC positions
     rats.forEach((rat, i) => {
       rat.active = i < activeCount;
       if (rat.active) {
-        rat.update(dt, params, playerPos, catPos, npcPositions);
+        rat.update(dt, params, playerPos, catPos, cachedNpcPositions.current);
       }
     });
 
-    // Update instanced meshes
+    // Update instanced meshes - PERFORMANCE: Only 8 instances now (was 50)
     if (!bodyRef.current || !headRef.current || !tailRef.current || !earRef.current) return;
 
     rats.forEach((rat, i) => {
@@ -327,20 +338,20 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
 
   return (
     <group>
-      {/* Body */}
-      <instancedMesh ref={bodyRef} args={[undefined, undefined, MAX_RATS]} castShadow>
+      {/* Body - PERFORMANCE: castShadow removed (rats too small for visible shadows) */}
+      <instancedMesh ref={bodyRef} args={[undefined, undefined, MAX_RATS]}>
         <sphereGeometry args={[1, 6, 5]} />
         <meshStandardMaterial color={ratColor} roughness={0.95} />
       </instancedMesh>
 
-      {/* Head */}
-      <instancedMesh ref={headRef} args={[undefined, undefined, MAX_RATS]} castShadow>
+      {/* Head - PERFORMANCE: castShadow removed */}
+      <instancedMesh ref={headRef} args={[undefined, undefined, MAX_RATS]}>
         <sphereGeometry args={[1, 5, 4]} />
         <meshStandardMaterial color={ratColor} roughness={0.95} />
       </instancedMesh>
 
-      {/* Tail */}
-      <instancedMesh ref={tailRef} args={[undefined, undefined, MAX_RATS]} castShadow>
+      {/* Tail - PERFORMANCE: castShadow removed */}
+      <instancedMesh ref={tailRef} args={[undefined, undefined, MAX_RATS]}>
         <cylinderGeometry args={[0.3, 1, 1, 4]} />
         <meshStandardMaterial color={ratColorDark} roughness={0.9} />
       </instancedMesh>

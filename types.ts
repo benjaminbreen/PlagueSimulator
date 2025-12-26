@@ -6,6 +6,48 @@ export enum AgentState {
   DECEASED = 3,
 }
 
+export enum PlagueType {
+  NONE = 'none',
+  BUBONIC = 'bubonic',    // 80% chance when infected - flea-borne
+  PNEUMONIC = 'pneumonic', // 15% chance - airborne
+  SEPTICEMIC = 'septicemic' // 5% chance - blood infection
+}
+
+export enum BuboLocation {
+  NONE = 'none',
+  GROIN = 'groin',     // 60% of bubonic cases
+  ARMPIT = 'armpit',   // 30% of bubonic cases
+  NECK = 'neck'        // 10% of bubonic cases
+}
+
+export interface PlagueStatus {
+  // State
+  plagueType: PlagueType;
+  state: AgentState;
+
+  // Timeline (in game time)
+  exposureTime: number | null;
+  onsetTime: number | null;
+  daysInfected: number;
+
+  // Bubonic-specific
+  buboLocation: BuboLocation;
+  buboBurst: boolean; // Has bubo been lanced or burst naturally
+
+  // Core symptoms (0-100 severity)
+  fever: number;
+  weakness: number;
+  buboes: number;          // Only for bubonic
+  coughingBlood: number;   // Only for pneumonic
+  skinBleeding: number;    // Late stage or septicemic
+  delirium: number;        // Late stage
+  gangrene: number;        // Very late stage
+
+  // Derived metrics
+  overallSeverity: number; // 0-100 for UI display
+  survivalChance: number;  // 0-100% estimated survival
+}
+
 export enum SocialClass {
   PEASANT = 'Peasant',
   MERCHANT = 'Merchant',
@@ -14,9 +56,10 @@ export enum SocialClass {
 }
 
 export enum CameraMode {
+  FIRST_PERSON = 'FIRST_PERSON',
+  OVER_SHOULDER = 'OVER_SHOULDER',
   THIRD_PERSON = 'THIRD_PERSON',
   OVERHEAD = 'OVERHEAD',
-  FIRST_PERSON = 'FIRST_PERSON',
 }
 
 // Panic susceptibility by social class (wealthy are more insulated from panic)
@@ -114,6 +157,7 @@ export interface PlayerStats {
   currency: number;         // Dirhams (Islamic currency)
   inventory: PlayerItem[];
   maxInventorySlots: number; // Start with 20
+  plague: PlagueStatus;      // Plague infection status
 }
 
 export interface BuildingMetadata {
@@ -187,8 +231,73 @@ export enum InteriorPropType {
   TOOL_RACK = 'TOOL_RACK',
   MORTAR = 'MORTAR',
   HERB_RACK = 'HERB_RACK',
+  MEDICINE_SHELF = 'MEDICINE_SHELF',  // Wide shelf with drug jars for apothecaries
   ARCH_COLUMN = 'ARCH_COLUMN',  // Decorative arch columns for religious buildings
+  // Bed types (historically accurate for medieval Damascus)
+  SLEEPING_MAT = 'SLEEPING_MAT',    // Simple reed/straw mat for poorest
+  LOW_BED = 'LOW_BED',              // Low wooden platform with cushions (middle class)
+  RAISED_BED = 'RAISED_BED',        // Raised platform bed with curtains (wealthy)
+  // Profession-specific props
+  WORKBENCH = 'WORKBENCH',          // Artisan work surface
+  WEAPON_RACK = 'WEAPON_RACK',      // Military weapon storage
+  PRODUCE_BASKET = 'PRODUCE_BASKET', // Agricultural produce storage
+  ROPE_COIL = 'ROPE_COIL',          // Transport/travel equipment
+  WATER_JUG = 'WATER_JUG',          // Simple water container
 }
+
+// Profession lifestyle categories for interior generation
+export type ProfessionCategory =
+  | 'LABORER'      // Minimal furniture, small rooms (Day-Laborer, Porter, Beggar)
+  | 'ARTISAN'      // Workshop tools, work materials (Spinner, Dyer, Tailor)
+  | 'AGRICULTURAL' // Garden tools, produce storage (Gardener, Orchard Keeper)
+  | 'SCHOLARLY'    // Books, writing materials (Copyist, Madrasa Student)
+  | 'MILITARY'     // Weapons, armor, functional (City Guard, Mamluk Soldier)
+  | 'SERVICE'      // Utilitarian, work-related (Servant, Cook)
+  | 'TRANSPORT'    // Ropes, harnesses, travel gear (Donkey Driver, Camel Driver)
+  | 'MERCHANT';    // Handled by COMMERCIAL building type
+
+export const getProfessionCategory = (profession: string): ProfessionCategory => {
+  const prof = profession.toLowerCase();
+
+  // Military
+  if (/guard|soldier|mamluk|retired guard/i.test(prof)) return 'MILITARY';
+
+  // Scholarly/Religious
+  if (/copyist|student|scribe|imam|qadi|mufti|muezzin|teacher/i.test(prof)) return 'SCHOLARLY';
+
+  // Agricultural
+  if (/garden|orchard|farmer|shepherd|goatherd|miller|cheese/i.test(prof)) return 'AGRICULTURAL';
+
+  // Transport
+  if (/driver|muleteer|porter|camel|donkey|stable/i.test(prof)) return 'TRANSPORT';
+
+  // Service
+  if (/servant|cook|bath attendant|launderer|messenger/i.test(prof)) return 'SERVICE';
+
+  // Artisan (textile, construction, skilled crafts)
+  if (/spinner|dyer|embroid|tailor|silk|felt|weaver|cobbler|rope|mat|basket|woodcarv|mason|plaster|whitewash|brick|tile/i.test(prof)) return 'ARTISAN';
+
+  // Laborer (default for unskilled/poor)
+  if (/labor|sweep|grave|rag|night watch|beggar|unemployed|widow|pilgrim|tanner/i.test(prof)) return 'LABORER';
+
+  // Commercial professions
+  if (/merchant|seller|shop|keeper|trader/i.test(prof)) return 'MERCHANT';
+
+  // Default to laborer for unknown
+  return 'LABORER';
+};
+
+// Size multipliers for profession categories
+export const PROFESSION_SIZE_SCALE: Record<ProfessionCategory, number> = {
+  LABORER: 0.7,
+  SERVICE: 0.8,
+  TRANSPORT: 0.85,
+  ARTISAN: 1.0,
+  AGRICULTURAL: 1.0,
+  SCHOLARLY: 0.9,
+  MILITARY: 1.0,
+  MERCHANT: 1.1,
+};
 
 export interface InteriorRoom {
   id: string;
@@ -326,10 +435,13 @@ export interface PlayerItem {
   acquiredAt: number; // Sim time
 }
 
+export type SpecialNPCType = 'SUFI_MYSTIC' | 'ASTROLOGER' | 'SCRIBE';
+
 export interface MiniMapData {
   player: { x: number; z: number; yaw: number; cameraYaw: number };
   buildings: Array<{ x: number; z: number; type: BuildingType; size: number; doorSide: number }>;
   npcs: Array<{ x: number; z: number; state: AgentState }>;
+  specialNPCs: Array<{ x: number; z: number; type: SpecialNPCType }>;
   district: DistrictType;
   radius: number;
 }
@@ -530,3 +642,51 @@ export const getDistrictType = (x: number, y: number): DistrictType => {
   if (x === 1 && y === -3) return 'SOUTHERN_ROAD';
   return 'RESIDENTIAL';
 };
+
+// ============================================
+// CONVERSATION SYSTEM
+// ============================================
+
+export interface ConversationMessage {
+  id: string;
+  role: 'player' | 'npc' | 'system';
+  content: string;
+  timestamp: number;
+}
+
+export interface ConversationSummary {
+  npcId: string;
+  simTime: number;
+  summary: string;
+  sentiment: 'positive' | 'neutral' | 'negative';
+}
+
+export interface ConversationState {
+  messages: ConversationMessage[];
+  isLoading: boolean;
+  error: string | null;
+}
+
+export interface EncounterEnvironment {
+  timeOfDay: number;
+  weather: string;
+  district: string;
+  nearbyInfected: number;
+  nearbyDeceased: number;
+}
+
+// Note: Also defined in components/Agents.tsx - keep in sync
+export interface MoraleStats {
+  avgAwareness: number;
+  avgPanic: number;
+  agentCount: number;
+}
+
+export interface EncounterContext {
+  npc: NPCStats;
+  player: PlayerStats;
+  environment: EncounterEnvironment;
+  publicMorale: MoraleStats;
+  simulationStats: SimulationStats;
+  conversationHistory: ConversationSummary[];
+}

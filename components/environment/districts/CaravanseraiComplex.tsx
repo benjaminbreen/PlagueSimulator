@@ -555,7 +555,7 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
       ))}
 
       {/* Ground paving pattern in courtyard */}
-      <mesh position={[0, 0.15, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+      <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[courtyardSize, courtyardSize]} />
         <meshStandardMaterial color="#c8b896" roughness={0.95} displacementScale={0} />
       </mesh>

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { InteriorRoom, InteriorRoomType, BuildingType, SocialClass } from '../../types';
-import { buildWallWithDoorGeometry, darkenHex } from './geometry';
+import { buildWallWithDoorGeometry, buildWallWithGrandArchway, darkenHex } from './geometry';
 
 type Side = 'north' | 'south' | 'east' | 'west';
 
@@ -95,6 +95,17 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
     if (!hasDoor) {
       return <boxGeometry args={[width, height, thickness]} />;
     }
+
+    // Civic buildings get grand archways
+    if (buildingType === BuildingType.CIVIC) {
+      const archType = doorVariant % 4; // 0=horseshoe, 1=pointed, 2=multifoil, 3=ogee
+      return (
+        <primitive
+          object={buildWallWithGrandArchway(width, height, thickness, archType)}
+        />
+      );
+    }
+
     return (
       <primitive
         object={buildWallWithDoorGeometry(width, height, Math.min(doorWidthBase, width * 0.5), doorHeight, thickness, isArch)}
@@ -127,6 +138,113 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
     }
   };
 
+  const renderCivicArchDecoration = (side: Side, zOffset: number) => {
+    const width = side === 'north' || side === 'south' ? w : d;
+    const archWidth = Math.min(width * 0.65, 3.4);
+    const archHeight = Math.min(height * 0.95, 3.6);
+    const halfArchW = archWidth / 2;
+    const stoneColor = darkenHex(wallColor, 0.88);
+    const accentColor = darkenHex(wallColor, 0.72);
+    const archType = doorVariant % 4;
+
+    return (
+      <group position={[0, -height / 2, zOffset]}>
+        {/* Flanking columns */}
+        {[-1, 1].map((dir) => (
+          <group key={`column-${dir}`} position={[halfArchW * dir * 1.08, 0, 0]}>
+            {/* Column base */}
+            <mesh position={[0, 0.2, 0]} castShadow receiveShadow>
+              <cylinderGeometry args={[0.18, 0.22, 0.4, 8]} />
+              <meshStandardMaterial color={stoneColor} roughness={0.85} />
+            </mesh>
+            {/* Column shaft */}
+            <mesh position={[0, archHeight * 0.5, 0]} castShadow receiveShadow>
+              <cylinderGeometry args={[0.14, 0.16, archHeight - 0.4, 8]} />
+              <meshStandardMaterial color={stoneColor} roughness={0.88} />
+            </mesh>
+            {/* Decorative rings on shaft */}
+            {[0.3, 0.5, 0.7].map((ratio) => (
+              <mesh key={`ring-${ratio}`} position={[0, archHeight * ratio, 0]} receiveShadow>
+                <cylinderGeometry args={[0.17, 0.17, 0.06, 8]} />
+                <meshStandardMaterial color={accentColor} roughness={0.82} />
+              </mesh>
+            ))}
+            {/* Capital (top of column) */}
+            <mesh position={[0, archHeight - 0.15, 0]} castShadow receiveShadow>
+              <cylinderGeometry args={[0.24, 0.16, 0.28, 8]} />
+              <meshStandardMaterial color={accentColor} roughness={0.8} />
+            </mesh>
+            {/* Capital details */}
+            <mesh position={[0, archHeight - 0.05, 0]} receiveShadow>
+              <cylinderGeometry args={[0.26, 0.24, 0.08, 8]} />
+              <meshStandardMaterial color={stoneColor} roughness={0.85} />
+            </mesh>
+          </group>
+        ))}
+
+        {/* Arch frame/molding */}
+        {archType === 0 && ( // Horseshoe arch frame
+          <mesh position={[0, archHeight - 0.8, 0.05]} castShadow receiveShadow>
+            <torusGeometry args={[archWidth * 0.52, 0.08, 8, 24, Math.PI + 0.6]} />
+            <meshStandardMaterial color={accentColor} roughness={0.8} />
+          </mesh>
+        )}
+        {archType === 1 && ( // Pointed arch frame - decorative keystone
+          <mesh position={[0, archHeight, 0]} castShadow receiveShadow>
+            <coneGeometry args={[0.18, 0.32, 4]} />
+            <meshStandardMaterial color={accentColor} roughness={0.82} />
+          </mesh>
+        )}
+
+        {/* Geometric patterns above arch (spandrels) */}
+        {[-1, 1].map((dir) => (
+          <group key={`spandrel-${dir}`} position={[halfArchW * 0.6 * dir, archHeight * 0.82, 0]}>
+            {/* Geometric star pattern */}
+            {Array.from({ length: 6 }).map((_, i) => {
+              const angle = (i / 6) * Math.PI * 2;
+              const radius = 0.15;
+              return (
+                <mesh
+                  key={`star-${i}`}
+                  position={[Math.cos(angle) * radius, Math.sin(angle) * radius, 0]}
+                  receiveShadow
+                >
+                  <cylinderGeometry args={[0.03, 0.03, 0.06, 4]} />
+                  <meshStandardMaterial color={accentColor} roughness={0.75} />
+                </mesh>
+              );
+            })}
+            <mesh receiveShadow>
+              <cylinderGeometry args={[0.05, 0.05, 0.06, 6]} />
+              <meshStandardMaterial color={accentColor} roughness={0.8} />
+            </mesh>
+          </group>
+        ))}
+
+        {/* Horizontal band above arch with carved pattern */}
+        <mesh position={[0, archHeight + 0.15, 0]} receiveShadow castShadow>
+          <boxGeometry args={[archWidth * 1.3, 0.16, 0.08]} />
+          <meshStandardMaterial color={accentColor} roughness={0.82} />
+        </mesh>
+        {/* Carved detail on band */}
+        {Array.from({ length: 9 }).map((_, i) => (
+          <mesh
+            key={`band-detail-${i}`}
+            position={[
+              -archWidth * 0.6 + (archWidth * 1.2 / 8) * i,
+              archHeight + 0.15,
+              0.05
+            ]}
+            receiveShadow
+          >
+            <boxGeometry args={[0.08, 0.08, 0.04]} />
+            <meshStandardMaterial color={stoneColor} roughness={0.8} />
+          </mesh>
+        ))}
+      </group>
+    );
+  };
+
   const renderWall = (side: Side) => {
     // Skip walls that are cut away or shared with adjacent rooms (to avoid z-fighting)
     if (cutawaySide === side || sharedWalls.includes(side)) return null;
@@ -147,23 +265,37 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
           ? [w / 2, height / 2, 0]
           : [-w / 2, height / 2, 0];
     const hasDoor = side === interiorDoorSide || side === exteriorDoorSide;
+    const isCivicDoor = hasDoor && buildingType === BuildingType.CIVIC;
+
     return (
       <group key={`wall-${side}`} position={position} rotation={rotation}>
-        <mesh castShadow receiveShadow>
+        <mesh
+          castShadow
+          receiveShadow
+          userData={{ isBuildingWall: true, buildingId: `interior-${side}` }}
+        >
           {geometry}
           <primitive object={wallMat} attach="material" />
         </mesh>
-        <mesh position={[0, 0.45, 0]} castShadow receiveShadow>
-          <boxGeometry args={[width, 0.9, thickness + 0.02]} />
-          <primitive object={bandMat} attach="material" />
-        </mesh>
+        {!hasDoor && (
+          <mesh position={[0, 0.45, 0]} castShadow receiveShadow>
+            <boxGeometry args={[width, 0.9, thickness + 0.02]} />
+            <primitive object={bandMat} attach="material" />
+          </mesh>
+        )}
+        {isCivicDoor && (
+          <>
+            {renderCivicArchDecoration(side, thickness / 2 + 0.08)}
+            {renderCivicArchDecoration(side, -thickness / 2 - 0.08)}
+          </>
+        )}
         {hasDoor && doorLabel && (
           <mesh
             position={[0, 1.1, thickness / 2 + 0.02]}
             rotation={[0, 0, 0]}
             {...doorHoverHandlers(side)}
           >
-            <planeGeometry args={[1.6, 2.2]} />
+            <planeGeometry args={[2.2, 2.8]} />
             <meshStandardMaterial transparent opacity={0} />
           </mesh>
         )}
@@ -208,12 +340,94 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
       ? 'east'
       : 'south';
 
+  // Civic building floor decorations
+  const renderCivicFloorInlays = () => {
+    if (buildingType !== BuildingType.CIVIC) return null;
+
+    const inlayColor = '#1a1a1a'; // Dark black/charcoal for inlays
+    const borderWidth = 0.12; // Width of border strips
+    const innerInset = 0.8; // Distance from wall to inner border
+    const cornerSize = 0.35; // Size of corner medallions
+
+    return (
+      <group>
+        {/* Perimeter border - outer frame */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, d / 2 - borderWidth / 2]} receiveShadow>
+          <planeGeometry args={[w, borderWidth]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, -d / 2 + borderWidth / 2]} receiveShadow>
+          <planeGeometry args={[w, borderWidth]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w / 2 - borderWidth / 2, 0.005, 0]} receiveShadow>
+          <planeGeometry args={[borderWidth, d]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-w / 2 + borderWidth / 2, 0.005, 0]} receiveShadow>
+          <planeGeometry args={[borderWidth, d]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+
+        {/* Inner decorative border */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, d / 2 - innerInset]} receiveShadow>
+          <planeGeometry args={[w - innerInset * 2, 0.08]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, -d / 2 + innerInset]} receiveShadow>
+          <planeGeometry args={[w - innerInset * 2, 0.08]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w / 2 - innerInset, 0.005, 0]} receiveShadow>
+          <planeGeometry args={[0.08, d - innerInset * 2]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-w / 2 + innerInset, 0.005, 0]} receiveShadow>
+          <planeGeometry args={[0.08, d - innerInset * 2]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+
+        {/* Corner medallions - decorative geometric shapes */}
+        {[
+          [w / 2 - innerInset, d / 2 - innerInset],
+          [-w / 2 + innerInset, d / 2 - innerInset],
+          [w / 2 - innerInset, -d / 2 + innerInset],
+          [-w / 2 + innerInset, -d / 2 + innerInset]
+        ].map(([x, z], idx) => (
+          <group key={`corner-${idx}`}>
+            {/* Octagonal medallion */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.006, z]} receiveShadow>
+              <cylinderGeometry args={[cornerSize, cornerSize, 0.01, 8]} />
+              <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+            </mesh>
+            {/* Inner star pattern */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.007, z]} receiveShadow>
+              <cylinderGeometry args={[cornerSize * 0.5, cornerSize * 0.5, 0.01, 8]} />
+              <meshStandardMaterial color={inlayColor} roughness={0.25} metalness={0.15} />
+            </mesh>
+          </group>
+        ))}
+
+        {/* Center medallion */}
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.006, 0]} receiveShadow>
+          <cylinderGeometry args={[0.6, 0.6, 0.01, 12]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.25} metalness={0.15} />
+        </mesh>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.007, 0]} receiveShadow>
+          <cylinderGeometry args={[0.35, 0.35, 0.01, 8]} />
+          <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
+        </mesh>
+      </group>
+    );
+  };
+
   return (
     <group position={[room.center[0], 0, room.center[2]]}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[w, d]} />
         <primitive object={floorMat} attach="material" />
       </mesh>
+      {renderCivicFloorInlays()}
       {renderWall('north')}
       {renderWall('south')}
       {renderWall('east')}

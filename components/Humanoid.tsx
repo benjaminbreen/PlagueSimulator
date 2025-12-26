@@ -166,6 +166,7 @@ interface HumanoidProps {
   enableArmSwing?: boolean;
   armSwingMode?: 'both' | 'left' | 'right' | 'none';
   interactionSwingRef?: React.MutableRefObject<number>;
+  interactionChargeRef?: React.MutableRefObject<number>; // Wind-up charge (0-1) while holding
   robeAccentColor?: string;
   robeHasSash?: boolean;
   robeSleeves?: boolean;
@@ -182,6 +183,14 @@ interface HumanoidProps {
   accessories?: string[];
   distanceFromCamera?: number;  // PERFORMANCE: LOD - skip detail when far
   showGroundShadow?: boolean;
+  // Gaze tracking - world position to look toward (e.g., player position)
+  gazeTarget?: { x: number; y: number; z: number };
+  // This humanoid's world position (needed for calculating gaze direction)
+  worldPosition?: { x: number; y: number; z: number };
+  // Action animation - for warn, encourage, observe gestures
+  actionAnimationRef?: React.MutableRefObject<{ action: string; progress: number } | null>;
+  // Sickness level (0 = healthy, 1 = fully sick) - affects skin pallor
+  sicknessLevel?: number;
 }
 
 export const Humanoid: React.FC<HumanoidProps> = memo(({
@@ -207,6 +216,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   enableArmSwing = false,
   armSwingMode = 'both',
   interactionSwingRef,
+  interactionChargeRef,
   robeAccentColor = '#d0b992',
   robeHasSash = false,
   robeSleeves = true,
@@ -222,28 +232,50 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   footwearColor = '#9b7b4f',
   accessories = [],
   distanceFromCamera = 0,
-  showGroundShadow = true
+  showGroundShadow = true,
+  gazeTarget,
+  worldPosition,
+  actionAnimationRef,
+  sicknessLevel = 0
 }) => {
   // PERFORMANCE: LOD - skip facial details beyond 25 units
   const showFacialDetails = distanceFromCamera < 25;
+
+  // PLAGUE VISUAL: Apply sickly pallor to skin based on sickness level
+  const sickHeadColor = useMemo(() => {
+    if (sicknessLevel <= 0) return headColor;
+    const baseColor = new THREE.Color(headColor);
+    // Sickly greenish-gray pallor
+    const sickColor = new THREE.Color('#8a9a7a'); // Pale greenish-gray
+    baseColor.lerp(sickColor, sicknessLevel * 0.4); // Up to 40% tint
+    // Also desaturate
+    const hsl = { h: 0, s: 0, l: 0 };
+    baseColor.getHSL(hsl);
+    baseColor.setHSL(hsl.h, hsl.s * (1 - sicknessLevel * 0.5), hsl.l * (1 - sicknessLevel * 0.15));
+    return baseColor.getStyle();
+  }, [headColor, sicknessLevel]);
   const leftLeg = useRef<THREE.Group>(null);
   const rightLeg = useRef<THREE.Group>(null);
+  const leftKnee = useRef<THREE.Group>(null);
+  const rightKnee = useRef<THREE.Group>(null);
   const leftArm = useRef<THREE.Group>(null);
   const rightArm = useRef<THREE.Group>(null);
   const leftForearm = useRef<THREE.Group>(null);
   const rightForearm = useRef<THREE.Group>(null);
   const sashFrontRef = useRef<THREE.Mesh>(null);
   const trimFrontRef = useRef<THREE.Mesh>(null);
+  const robeHemRef = useRef<THREE.Group>(null);
   const leftFoot = useRef<THREE.Group>(null);
   const rightFoot = useRef<THREE.Group>(null);
   const bodyGroup = useRef<THREE.Group>(null);
+  const torsoGroup = useRef<THREE.Group>(null);
   const hipGroup = useRef<THREE.Group>(null);
   const headGroup = useRef<THREE.Group>(null);
   const leftShoulder = useRef<THREE.Group>(null);
   const rightShoulder = useRef<THREE.Group>(null);
   const isFemale = gender === 'Female';
-  const faceShadowColor = useMemo(() => new THREE.Color(headColor).multiplyScalar(0.85).getStyle(), [headColor]);
-  const faceHighlightColor = useMemo(() => new THREE.Color(headColor).multiplyScalar(1.08).getStyle(), [headColor]);
+  const faceShadowColor = useMemo(() => new THREE.Color(sickHeadColor).multiplyScalar(0.85).getStyle(), [sickHeadColor]);
+  const faceHighlightColor = useMemo(() => new THREE.Color(sickHeadColor).multiplyScalar(1.08).getStyle(), [sickHeadColor]);
   const lipColor = useMemo(() => {
     const color = new THREE.Color(headColor);
     const hsl = { h: 0, s: 0, l: 0 };
@@ -345,15 +377,40 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const lowerLidLeft = useRef<THREE.Mesh>(null);
   const lowerLidRight = useRef<THREE.Mesh>(null);
   const blinkTimer = useRef(0);
-  const blinkCooldown = useRef(6 + Math.random() * 10);
+  const blinkCooldown = useRef(2 + Math.random() * 3); // 2-5 seconds initial
   const blinkProgress = useRef(0);
   const isBlinking = useRef(false);
+
+  // Idle weight shifting state
+  const idleShiftTimer = useRef(0);
+  const idleShiftCooldown = useRef(3 + Math.random() * 4);
+  const idleShiftProgress = useRef(0);
+  const idleShiftDirection = useRef(Math.random() > 0.5 ? 1 : -1);
+  const isIdleShifting = useRef(false);
+  const idleHeadTurnTimer = useRef(0);
+  const idleHeadTurnTarget = useRef(0);
+
+  // Eye gaze refs
+  const leftEye = useRef<THREE.Group>(null);
+  const rightEye = useRef<THREE.Group>(null);
+  // Gaze tracking state
+  const currentGazeYaw = useRef(0);
+  const currentGazePitch = useRef(0);
+  // Eye scanning state (eyes shift while walking)
+  const eyeScanTimer = useRef(Math.random() * 3);
+  const eyeScanTargetX = useRef(0);
+  const eyeScanTargetY = useRef(0);
+  const eyeScanCooldown = useRef(0.8 + Math.random() * 1.5);
 
   useFrame((state) => {
     if (isDead) {
       if (bodyGroup.current) {
+        // Corpse falls forward and lies on the ground
         bodyGroup.current.rotation.x = THREE.MathUtils.lerp(bodyGroup.current.rotation.x, Math.PI / 2, 0.1);
-        bodyGroup.current.position.y = THREE.MathUtils.lerp(bodyGroup.current.position.y, -0.85, 0.1);
+        // Keep corpse at ground level (y = 0.15 to account for body thickness when lying flat)
+        bodyGroup.current.position.y = THREE.MathUtils.lerp(bodyGroup.current.position.y, 0.15, 0.1);
+        // Offset forward slightly so body lies naturally
+        bodyGroup.current.position.z = THREE.MathUtils.lerp(bodyGroup.current.position.z, 0.5, 0.1);
       }
       return;
     }
@@ -365,34 +422,269 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const jumpBoost = jumpChargeRef ? jumpChargeRef.current : 0;
     const effectiveWalkSpeed = isSprinting ? walkSpeed * 2.2 : walkSpeed;
     const t = state.clock.elapsedTime * effectiveWalkSpeed;
-    const amp = isWalking ? (isSprinting ? 0.7 : 0.4) : 0;
-    
-    // Leg swinging with foot travel for basic foot planting
-    const leftPhase = Math.sin(t);
-    const rightPhase = Math.sin(t + Math.PI);
-    if (leftLeg.current) leftLeg.current.rotation.x = leftPhase * amp;
-    if (rightLeg.current) rightLeg.current.rotation.x = rightPhase * amp;
+    const amp = isWalking ? (isSprinting ? 0.85 : 0.4) : 0; // Bigger stride when sprinting
+
+    // Easing function for more organic, weighted movement
+    const easeInOutQuad = (x: number) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+    const easeOutQuad = (x: number) => 1 - (1 - x) * (1 - x);
+
+    // Convert sine wave to 0-1 range, apply easing, convert back
+    const rawLeftPhase = Math.sin(t);
+    const rawRightPhase = Math.sin(t + Math.PI);
+    const leftNorm = (rawLeftPhase + 1) / 2; // 0 to 1
+    const rightNorm = (rawRightPhase + 1) / 2;
+    const leftPhase = easeInOutQuad(leftNorm) * 2 - 1; // Back to -1 to 1 with easing
+    const rightPhase = easeInOutQuad(rightNorm) * 2 - 1;
+
+    // Leg swinging with eased motion for weight transfer feel
+    if (leftLeg.current) {
+      const targetRotation = isWalking ? leftPhase * amp : 0;
+      leftLeg.current.rotation.x = THREE.MathUtils.lerp(leftLeg.current.rotation.x, targetRotation, 0.15);
+    }
+    if (rightLeg.current) {
+      const targetRotation = isWalking ? rightPhase * amp : 0;
+      rightLeg.current.rotation.x = THREE.MathUtils.lerp(rightLeg.current.rotation.x, targetRotation, 0.15);
+    }
+
+    // Knee bending - flexes during swing phase, extends during stance
+    // Knee bends more when sprinting (leg kicks up higher behind)
+    const leftKneeFlexion = isWalking ? Math.max(0, -leftPhase) * (isSprinting ? 1.1 : 0.5) : 0;
+    const rightKneeFlexion = isWalking ? Math.max(0, -rightPhase) * (isSprinting ? 1.1 : 0.5) : 0;
+    if (leftKnee.current) {
+      leftKnee.current.rotation.x = THREE.MathUtils.lerp(leftKnee.current.rotation.x, leftKneeFlexion, 0.15);
+    }
+    if (rightKnee.current) {
+      rightKnee.current.rotation.x = THREE.MathUtils.lerp(rightKnee.current.rotation.x, rightKneeFlexion, 0.15);
+    }
 
     // Hip counter-rotation for natural weight shift
     if (hipGroup.current && isWalking) {
-      const hipRotation = Math.sin(t) * amp * 0.15;
+      const hipRotation = leftPhase * amp * (isSprinting ? 0.28 : 0.22);
+      const hipTilt = Math.abs(leftPhase) * amp * (isSprinting ? 0.1 : 0.08); // More tilt during sprint
       hipGroup.current.rotation.y = hipRotation;
+      hipGroup.current.rotation.z = leftPhase * amp * 0.06;
     } else if (hipGroup.current) {
       hipGroup.current.rotation.y = THREE.MathUtils.lerp(hipGroup.current.rotation.y, 0, 0.1);
+      hipGroup.current.rotation.z = THREE.MathUtils.lerp(hipGroup.current.rotation.z, 0, 0.1);
+    }
+
+    // Torso twist - counter-rotates against hips for natural contra-posto
+    if (torsoGroup.current && isWalking) {
+      const torsoTwist = -leftPhase * amp * 0.15; // Opposite to hip rotation
+      const torsoLean = leftPhase * amp * 0.04; // Subtle side lean
+      torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, torsoTwist, 0.15);
+      torsoGroup.current.rotation.z = THREE.MathUtils.lerp(torsoGroup.current.rotation.z, torsoLean, 0.12);
+    } else if (torsoGroup.current) {
+      torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, 0, 0.1);
+      torsoGroup.current.rotation.z = THREE.MathUtils.lerp(torsoGroup.current.rotation.z, 0, 0.1);
+    }
+
+    // Idle weight shifting - periodic subtle movement when standing still
+    const dt = state.clock.getDelta();
+    if (!isWalking && !jumping) {
+      idleShiftTimer.current += dt;
+
+      // Trigger new weight shift periodically
+      if (!isIdleShifting.current && idleShiftTimer.current > idleShiftCooldown.current) {
+        isIdleShifting.current = true;
+        idleShiftProgress.current = 0;
+        idleShiftDirection.current *= -1; // Alternate sides
+        idleShiftCooldown.current = 3 + Math.random() * 5; // 3-8 seconds between shifts
+      }
+
+      // Animate the weight shift
+      if (isIdleShifting.current) {
+        idleShiftProgress.current += dt * 0.8; // Slow, natural movement
+        const shiftT = Math.min(1, idleShiftProgress.current);
+        const shiftEased = Math.sin(shiftT * Math.PI); // Smooth in and out
+        const shiftAmount = shiftEased * idleShiftDirection.current;
+
+        // Hip tilts toward weight-bearing leg
+        if (hipGroup.current) {
+          hipGroup.current.rotation.z = THREE.MathUtils.lerp(hipGroup.current.rotation.z, shiftAmount * 0.04, 0.08);
+        }
+
+        // Torso compensates in opposite direction
+        if (torsoGroup.current) {
+          torsoGroup.current.rotation.z = THREE.MathUtils.lerp(torsoGroup.current.rotation.z, -shiftAmount * 0.03, 0.06);
+        }
+
+        // Shoulders drop slightly on weight-bearing side
+        if (leftShoulder.current) {
+          leftShoulder.current.position.y = THREE.MathUtils.lerp(leftShoulder.current.position.y || 0, shiftAmount * 0.02, 0.08);
+        }
+        if (rightShoulder.current) {
+          rightShoulder.current.position.y = THREE.MathUtils.lerp(rightShoulder.current.position.y || 0, -shiftAmount * 0.02, 0.08);
+        }
+
+        if (shiftT >= 1) {
+          isIdleShifting.current = false;
+          idleShiftTimer.current = 0;
+        }
+      }
+
+      // Occasional idle head turn/glance
+      idleHeadTurnTimer.current += dt;
+      if (idleHeadTurnTimer.current > 5 + Math.random() * 8) {
+        idleHeadTurnTarget.current = (Math.random() - 0.5) * 0.4; // Random head turn angle
+        idleHeadTurnTimer.current = 0;
+      }
+      if (headGroup.current) {
+        const currentHeadY = headGroup.current.rotation.y || 0;
+        headGroup.current.rotation.y = THREE.MathUtils.lerp(currentHeadY, idleHeadTurnTarget.current, 0.02);
+      }
+    } else {
+      // Reset idle animation state when walking
+      isIdleShifting.current = false;
+      idleShiftTimer.current = 0;
+      idleHeadTurnTarget.current = 0;
+    }
+
+    // Gaze tracking - look toward target (e.g., player) when nearby
+    if (gazeTarget && worldPosition && headGroup.current) {
+      // Calculate direction to target
+      const dx = gazeTarget.x - worldPosition.x;
+      const dz = gazeTarget.z - worldPosition.z;
+      const dy = gazeTarget.y - (worldPosition.y + 1.75); // Head height
+      const distToTarget = Math.sqrt(dx * dx + dz * dz);
+
+      // Only track targets within 8 units
+      if (distToTarget < 8 && distToTarget > 0.5) {
+        // Calculate yaw (horizontal turn) and pitch (vertical tilt) to target
+        const targetYaw = Math.atan2(-dx, -dz); // Negate for correct direction
+        const targetPitch = Math.atan2(dy, distToTarget);
+
+        // Clamp to natural head turn limits
+        const maxYaw = 0.7; // ~40 degrees
+        const maxPitch = 0.35; // ~20 degrees
+        const clampedYaw = THREE.MathUtils.clamp(targetYaw, -maxYaw, maxYaw);
+        const clampedPitch = THREE.MathUtils.clamp(targetPitch, -maxPitch, maxPitch);
+
+        // Smoothly interpolate toward target gaze
+        currentGazeYaw.current = THREE.MathUtils.lerp(currentGazeYaw.current, clampedYaw, 0.04);
+        currentGazePitch.current = THREE.MathUtils.lerp(currentGazePitch.current, clampedPitch, 0.04);
+
+        // Apply head rotation (combine with existing head movement)
+        const existingY = headGroup.current.rotation.y || 0;
+        headGroup.current.rotation.y = THREE.MathUtils.lerp(existingY, currentGazeYaw.current, 0.06);
+        headGroup.current.rotation.x = (headGroup.current.rotation.x || 0) + currentGazePitch.current * 0.5;
+
+        // Eye gaze - eyes move faster and track more precisely
+        const eyeYaw = THREE.MathUtils.clamp(targetYaw - currentGazeYaw.current, -0.25, 0.25);
+        const eyePitch = THREE.MathUtils.clamp(targetPitch - currentGazePitch.current, -0.15, 0.15);
+
+        // Shift eye position to look at target
+        const gazeOffsetX = eyeYaw * 0.015;
+        const gazeOffsetY = eyePitch * 0.01;
+        if (leftEye.current) {
+          const baseX = -faceVariant.eyeSpacing;
+          leftEye.current.position.x = THREE.MathUtils.lerp(leftEye.current.position.x, baseX + gazeOffsetX, 0.15);
+          leftEye.current.position.y = THREE.MathUtils.lerp(leftEye.current.position.y, eyeY + gazeOffsetY, 0.15);
+        }
+        if (rightEye.current) {
+          const baseX = faceVariant.eyeSpacing;
+          rightEye.current.position.x = THREE.MathUtils.lerp(rightEye.current.position.x, baseX + gazeOffsetX, 0.15);
+          rightEye.current.position.y = THREE.MathUtils.lerp(rightEye.current.position.y, eyeY + gazeOffsetY, 0.15);
+        }
+      } else {
+        // Target out of range - return to forward gaze
+        currentGazeYaw.current = THREE.MathUtils.lerp(currentGazeYaw.current, 0, 0.02);
+        currentGazePitch.current = THREE.MathUtils.lerp(currentGazePitch.current, 0, 0.02);
+
+        if (leftEye.current) {
+          const baseX = -faceVariant.eyeSpacing;
+          leftEye.current.position.x = THREE.MathUtils.lerp(leftEye.current.position.x, baseX, 0.08);
+          leftEye.current.position.y = THREE.MathUtils.lerp(leftEye.current.position.y, eyeY, 0.08);
+        }
+        if (rightEye.current) {
+          const baseX = faceVariant.eyeSpacing;
+          rightEye.current.position.x = THREE.MathUtils.lerp(rightEye.current.position.x, baseX, 0.08);
+          rightEye.current.position.y = THREE.MathUtils.lerp(rightEye.current.position.y, eyeY, 0.08);
+        }
+      }
+    }
+
+    // Eye scanning - eyes shift around while walking (when not tracking a target)
+    if (!gazeTarget && (leftEye.current || rightEye.current)) {
+      const dt = state.clock.getDelta();
+      eyeScanTimer.current += dt;
+
+      // Pick new random eye target periodically
+      if (eyeScanTimer.current > eyeScanCooldown.current) {
+        eyeScanTimer.current = 0;
+        eyeScanCooldown.current = isWalking ? (0.6 + Math.random() * 1.2) : (1.5 + Math.random() * 3);
+
+        if (isWalking) {
+          // While walking, eyes scan more actively - look ahead and to sides
+          eyeScanTargetX.current = (Math.random() - 0.5) * 0.35; // Horizontal scan
+          eyeScanTargetY.current = (Math.random() - 0.3) * 0.15; // Slight vertical, biased down
+        } else {
+          // While standing, occasional glances
+          eyeScanTargetX.current = (Math.random() - 0.5) * 0.25;
+          eyeScanTargetY.current = (Math.random() - 0.5) * 0.1;
+        }
+      }
+
+      // Smoothly move eyes toward scan target (shift position, not rotation)
+      const scanOffsetX = eyeScanTargetX.current * 0.012; // Scale down for subtle movement
+      const scanOffsetY = eyeScanTargetY.current * 0.008;
+      if (leftEye.current) {
+        const baseX = -faceVariant.eyeSpacing;
+        leftEye.current.position.x = THREE.MathUtils.lerp(leftEye.current.position.x, baseX + scanOffsetX, 0.08);
+        leftEye.current.position.y = THREE.MathUtils.lerp(leftEye.current.position.y, eyeY + scanOffsetY, 0.08);
+      }
+      if (rightEye.current) {
+        const baseX = faceVariant.eyeSpacing;
+        rightEye.current.position.x = THREE.MathUtils.lerp(rightEye.current.position.x, baseX + scanOffsetX, 0.08);
+        rightEye.current.position.y = THREE.MathUtils.lerp(rightEye.current.position.y, eyeY + scanOffsetY, 0.08);
+      }
+    }
+
+    // Robe/clothing secondary motion - follows movement with delay
+    if (robeHemRef.current) {
+      if (isWalking) {
+        // Cloth sways with delayed follow-through
+        const clothDelay = Math.sin(t - 0.4) * amp * 0.12;
+        const clothSway = Math.sin(t * 0.7) * amp * 0.06;
+        robeHemRef.current.rotation.x = THREE.MathUtils.lerp(robeHemRef.current.rotation.x, clothDelay, 0.08);
+        robeHemRef.current.rotation.z = THREE.MathUtils.lerp(robeHemRef.current.rotation.z, clothSway, 0.06);
+      } else if (jumping) {
+        // Cloth billows during jump
+        const jumpBillow = Math.sin(jumpT * Math.PI) * 0.15;
+        robeHemRef.current.rotation.x = THREE.MathUtils.lerp(robeHemRef.current.rotation.x, jumpBillow, 0.1);
+      } else {
+        // Gentle settle back to rest
+        robeHemRef.current.rotation.x = THREE.MathUtils.lerp(robeHemRef.current.rotation.x, 0, 0.05);
+        robeHemRef.current.rotation.z = THREE.MathUtils.lerp(robeHemRef.current.rotation.z, 0, 0.05);
+      }
     }
 
     const footBaseY = isFemale ? 0.05 : -0.45;
     const footBaseZ = 0.1;
-    // Foot rotation for heel-to-toe movement
+    // Foot rotation for heel-to-toe movement - only when walking
     if (leftFoot.current) {
-      leftFoot.current.position.z = footBaseZ + leftPhase * (isSprinting ? 0.12 : 0.08);
-      leftFoot.current.position.y = footBaseY + Math.max(0, -leftPhase) * (isSprinting ? 0.06 : 0.04);
-      leftFoot.current.rotation.x = leftPhase * 0.3; // Heel up when leg swings back
+      if (isWalking) {
+        leftFoot.current.position.z = footBaseZ + leftPhase * (isSprinting ? 0.12 : 0.08);
+        leftFoot.current.position.y = footBaseY + Math.max(0, -leftPhase) * (isSprinting ? 0.06 : 0.04);
+        leftFoot.current.rotation.x = leftPhase * 0.3;
+      } else {
+        // Return to rest position when standing
+        leftFoot.current.position.z = THREE.MathUtils.lerp(leftFoot.current.position.z, footBaseZ, 0.15);
+        leftFoot.current.position.y = THREE.MathUtils.lerp(leftFoot.current.position.y, footBaseY, 0.15);
+        leftFoot.current.rotation.x = THREE.MathUtils.lerp(leftFoot.current.rotation.x, 0, 0.15);
+      }
     }
     if (rightFoot.current) {
-      rightFoot.current.position.z = footBaseZ + rightPhase * (isSprinting ? 0.12 : 0.08);
-      rightFoot.current.position.y = footBaseY + Math.max(0, -rightPhase) * (isSprinting ? 0.06 : 0.04);
-      rightFoot.current.rotation.x = rightPhase * 0.3; // Heel up when leg swings back
+      if (isWalking) {
+        rightFoot.current.position.z = footBaseZ + rightPhase * (isSprinting ? 0.12 : 0.08);
+        rightFoot.current.position.y = footBaseY + Math.max(0, -rightPhase) * (isSprinting ? 0.06 : 0.04);
+        rightFoot.current.rotation.x = rightPhase * 0.3;
+      } else {
+        // Return to rest position when standing
+        rightFoot.current.position.z = THREE.MathUtils.lerp(rightFoot.current.position.z, footBaseZ, 0.15);
+        rightFoot.current.position.y = THREE.MathUtils.lerp(rightFoot.current.position.y, footBaseY, 0.15);
+        rightFoot.current.rotation.x = THREE.MathUtils.lerp(rightFoot.current.rotation.x, 0, 0.15);
+      }
     }
     // Shoulder movement drives arm swing
     if (leftShoulder.current && isWalking) {
@@ -414,86 +706,389 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     if (enableArmSwing) {
       if (!jumping) {
-        const armDrive = isSprinting ? 1.1 : 1.0;
-        if ((armSwingMode === 'both' || armSwingMode === 'left') && leftArm.current) {
-          const swing = Math.sin(t + Math.PI * 0.95) * amp * armDrive;
-          leftArm.current.rotation.x = swing;
-          leftArm.current.rotation.z = swing * 0.25;
-          if (leftForearm.current) {
-            leftForearm.current.rotation.x = -Math.max(0, Math.sin(t + Math.PI)) * 0.45;
+        // Check if interaction or action animation should take priority
+        const interactionCharge = interactionChargeRef?.current ?? 0;
+        const interactionSwing = interactionSwingRef?.current ?? 0;
+        const actionAnim = actionAnimationRef?.current;
+        const hasActionAnimation = actionAnim && actionAnim.progress > 0 && actionAnim.progress < 1;
+        const hasInteraction = interactionCharge > 0 || interactionSwing > 0 || hasActionAnimation;
+
+        // Normal walk arm swing - only when not in interaction
+        if (!hasInteraction) {
+          if (isSprinting) {
+            // SPRINT: Vigorous bent-elbow pumping motion with vertical drive
+            const pumpPhase = Math.sin(t + Math.PI);
+            const pumpAmp = 1.3; // Increased from 0.9 for more dramatic pump
+
+            // Add vertical component - arms pump UP toward chest, not just forward
+            const verticalPump = Math.max(0, pumpPhase) * 0.5; // Upward drive
+            const backswing = Math.min(0, pumpPhase) * 0.7; // Backswing behind body
+
+            if ((armSwingMode === 'both' || armSwingMode === 'left') && leftArm.current) {
+              // Arms pump forward AND upward (rotate shoulder forward + lift up)
+              leftArm.current.rotation.x = pumpPhase * pumpAmp - verticalPump * 0.4; // Forward swing + upward arc
+              leftArm.current.rotation.z = 0.25 + Math.abs(pumpPhase) * 0.15; // Arms held out from body
+              leftArm.current.rotation.y = pumpPhase * 0.2; // Slight inward rotation on upswing
+
+              if (leftForearm.current) {
+                // Elbow bends more on upswing (bring fist toward chest height)
+                const elbowBend = -1.1 - verticalPump * 0.6; // Deeper bend on upswing
+                leftForearm.current.rotation.x = elbowBend;
+                leftForearm.current.rotation.z = -0.1; // Hand angled slightly inward
+              }
+
+              // Drive left shoulder with arm pump
+              if (leftShoulder.current) {
+                leftShoulder.current.rotation.x = pumpPhase * 0.3; // Shoulder pumps with arm
+                leftShoulder.current.rotation.z = verticalPump * 0.15; // Shoulder lifts on upswing
+              }
+            }
+
+            if ((armSwingMode === 'both' || armSwingMode === 'right') && rightArm.current) {
+              const rightPump = Math.sin(t); // Opposite phase
+              const rightVertical = Math.max(0, rightPump) * 0.5;
+              const rightBack = Math.min(0, rightPump) * 0.7;
+
+              rightArm.current.rotation.x = rightPump * pumpAmp - rightVertical * 0.4;
+              rightArm.current.rotation.z = -0.25 - Math.abs(rightPump) * 0.15;
+              rightArm.current.rotation.y = -rightPump * 0.2;
+
+              if (rightForearm.current) {
+                const elbowBend = -1.1 - rightVertical * 0.6;
+                rightForearm.current.rotation.x = elbowBend;
+                rightForearm.current.rotation.z = 0.1;
+              }
+
+              // Drive right shoulder with arm pump
+              if (rightShoulder.current) {
+                rightShoulder.current.rotation.x = rightPump * 0.3;
+                rightShoulder.current.rotation.z = -rightVertical * 0.15;
+              }
+            }
+          } else if (isWalking) {
+            // WALK: Relaxed natural arm swing
+            if ((armSwingMode === 'both' || armSwingMode === 'left') && leftArm.current) {
+              const swing = Math.sin(t + Math.PI * 0.95) * amp;
+              leftArm.current.rotation.x = swing;
+              leftArm.current.rotation.z = swing * 0.2;
+              if (leftForearm.current) {
+                leftForearm.current.rotation.x = -Math.max(0, Math.sin(t + Math.PI)) * 0.35;
+              }
+            }
+            if ((armSwingMode === 'both' || armSwingMode === 'right') && rightArm.current) {
+              const swing = Math.sin(t * 1.03) * amp;
+              rightArm.current.rotation.x = swing;
+              rightArm.current.rotation.z = -swing * 0.2;
+              if (rightForearm.current) {
+                rightForearm.current.rotation.x = -Math.max(0, Math.sin(t)) * 0.35;
+              }
+            }
+          } else {
+            // IDLE: Arms at rest with subtle movement
+            if (leftArm.current) {
+              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, 0, 0.08);
+              leftArm.current.rotation.z = THREE.MathUtils.lerp(leftArm.current.rotation.z, 0, 0.08);
+            }
+            if (leftForearm.current) {
+              leftForearm.current.rotation.x = THREE.MathUtils.lerp(leftForearm.current.rotation.x, -0.1, 0.08);
+            }
+            if (rightArm.current) {
+              rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, 0, 0.08);
+              rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, 0, 0.08);
+            }
+            if (rightForearm.current) {
+              rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -0.1, 0.08);
+            }
           }
-        } else {
-          if (leftArm.current) {
-            leftArm.current.rotation.x = 0;
-            leftArm.current.rotation.z = 0;
-          }
-          if (leftForearm.current) leftForearm.current.rotation.x = 0;
         }
-        if ((armSwingMode === 'both' || armSwingMode === 'right') && rightArm.current) {
-          const swing = Math.sin(t * 1.03) * amp * armDrive;
-          rightArm.current.rotation.x = swing;
-          rightArm.current.rotation.z = -swing * 0.25;
-          if (rightForearm.current) {
-            rightForearm.current.rotation.x = -Math.max(0, Math.sin(t)) * 0.45;
+
+        // INTERACTION ANIMATIONS - Swing takes priority over wind-up
+        const charge = interactionChargeRef?.current ?? 0;
+        const swing = interactionSwingRef?.current ?? 0;
+
+        // SWING/RELEASE PHASE - check first so it takes priority
+        if (swing > 0 && rightArm.current && rightForearm.current) {
+          const s = Math.min(swing, 1);
+
+          if (s < 0.4) {
+            // Standard tap - noticeable forward reach
+            rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, -1.2, 0.3);
+            rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, 0.2, 0.25);
+            rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -0.6, 0.3);
+            if (leftArm.current) {
+              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, 0.4, 0.2);
+            }
+          } else {
+            // Power swing - dramatic full extension
+            const power = (s - 0.4) / 0.6; // 0 to 1 for power range
+            rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, -1.8 - power * 0.6, 0.35);
+            rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, 0.4 + power * 0.3, 0.3);
+            rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -0.8 - power * 0.5, 0.35);
+            if (leftArm.current) {
+              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, 0.6 + power * 0.4, 0.25);
+              leftArm.current.rotation.z = THREE.MathUtils.lerp(leftArm.current.rotation.z, -0.2 - power * 0.2, 0.2);
+            }
+            if (leftForearm.current) {
+              leftForearm.current.rotation.x = THREE.MathUtils.lerp(leftForearm.current.rotation.x, -0.3 - power * 0.2, 0.2);
+            }
           }
-        } else {
-          if (rightArm.current) {
-            rightArm.current.rotation.x = 0;
-            rightArm.current.rotation.z = 0;
-          }
-          if (rightForearm.current) rightForearm.current.rotation.x = 0;
         }
-        if (interactionSwingRef?.current && interactionSwingRef.current > 0 && rightArm.current && rightForearm.current) {
-          const swing = interactionSwingRef.current;
-          rightArm.current.rotation.x = -1.05 - swing * 0.35;
-          rightArm.current.rotation.z = 0.35 + swing * 0.25;
-          rightForearm.current.rotation.x = -0.8 - swing * 0.3;
+        // WIND-UP PHASE (while charging/holding shift)
+        else if (charge > 0 && rightArm.current && rightForearm.current) {
+          const c = Math.min(charge, 1);
+          // Arm pulls back
+          rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, 0.3 + c * 0.4, 0.12);
+          rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, -0.15 - c * 0.2, 0.12);
+          rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -0.6 - c * 0.4, 0.12);
           if (leftArm.current) {
-            leftArm.current.rotation.x = 0.25 + swing * 0.15;
-            leftArm.current.rotation.z = -0.1;
+            leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, -0.2 - c * 0.15, 0.1);
           }
-          if (leftForearm.current) {
-            leftForearm.current.rotation.x = -0.2;
+        }
+
+        // ============ ACTION ANIMATIONS (warn, encourage, observe) ============
+        // (actionAnim already declared above for hasInteraction check)
+        if (actionAnim && actionAnim.progress > 0) {
+          const p = actionAnim.progress; // 0 to 1
+          const action = actionAnim.action;
+
+          if (action === 'warn') {
+            // WARN: Dramatic stop gesture - both arms thrust up and out
+            // Phase 1 (0-0.3): Arms sweep up dramatically
+            // Phase 2 (0.3-0.7): Hold at peak, hands spread wide
+            // Phase 3 (0.7-1.0): Arms come down with authority
+            const phase1 = Math.min(1, p / 0.3);
+            const phase2 = p > 0.3 && p < 0.7 ? 1 : 0;
+            const phase3 = p > 0.7 ? (p - 0.7) / 0.3 : 0;
+
+            const armRaise = phase1 * (1 - phase3 * 0.7);
+            const armSpread = phase1 * (1 - phase3 * 0.5);
+
+            if (leftArm.current) {
+              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, -1.8 * armRaise, 0.25);
+              leftArm.current.rotation.z = THREE.MathUtils.lerp(leftArm.current.rotation.z, 0.9 * armSpread, 0.25);
+            }
+            if (leftForearm.current) {
+              leftForearm.current.rotation.x = THREE.MathUtils.lerp(leftForearm.current.rotation.x, -0.3 - 0.4 * armRaise, 0.25);
+            }
+            if (rightArm.current) {
+              rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, -1.8 * armRaise, 0.25);
+              rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, -0.9 * armSpread, 0.25);
+            }
+            if (rightForearm.current) {
+              rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -0.3 - 0.4 * armRaise, 0.25);
+            }
+            // Body leans forward aggressively
+            if (bodyGroup.current) {
+              bodyGroup.current.rotation.x = THREE.MathUtils.lerp(bodyGroup.current.rotation.x, 0.25 * armRaise, 0.2);
+            }
+            // Head tilts back then forward
+            if (headGroup.current) {
+              const headTilt = phase1 < 0.5 ? -0.3 * (phase1 * 2) : -0.3 + 0.5 * ((phase1 - 0.5) * 2 + phase3);
+              headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headTilt, 0.2);
+            }
+          }
+
+          else if (action === 'encourage') {
+            // ENCOURAGE: Warm welcoming gesture - arms open wide, then come together
+            // Phase 1 (0-0.4): Arms open wide to sides in welcoming embrace
+            // Phase 2 (0.4-0.7): Arms come together at chest, reassuring gesture
+            // Phase 3 (0.7-1.0): Gentle bow with hands together
+            const phase1 = Math.min(1, p / 0.4);
+            const phase2 = p > 0.4 ? Math.min(1, (p - 0.4) / 0.3) : 0;
+            const phase3 = p > 0.7 ? (p - 0.7) / 0.3 : 0;
+
+            const openArms = phase1 * (1 - phase2 * 0.8);
+            const handsToChest = phase2;
+
+            if (leftArm.current) {
+              const armX = -0.5 * openArms - 0.8 * handsToChest;
+              const armZ = 1.2 * openArms - 0.5 * handsToChest;
+              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, armX, 0.2);
+              leftArm.current.rotation.z = THREE.MathUtils.lerp(leftArm.current.rotation.z, armZ, 0.2);
+            }
+            if (leftForearm.current) {
+              leftForearm.current.rotation.x = THREE.MathUtils.lerp(leftForearm.current.rotation.x, -0.2 - 0.8 * handsToChest, 0.2);
+            }
+            if (rightArm.current) {
+              const armX = -0.5 * openArms - 0.8 * handsToChest;
+              const armZ = -1.2 * openArms + 0.5 * handsToChest;
+              rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, armX, 0.2);
+              rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, armZ, 0.2);
+            }
+            if (rightForearm.current) {
+              rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -0.2 - 0.8 * handsToChest, 0.2);
+            }
+            // Slight bow during phase 3
+            if (bodyGroup.current) {
+              bodyGroup.current.rotation.x = THREE.MathUtils.lerp(bodyGroup.current.rotation.x, 0.15 * phase3, 0.15);
+            }
+            // Head nods warmly
+            if (headGroup.current) {
+              const nod = phase2 * 0.2 + phase3 * 0.15;
+              headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, nod, 0.15);
+            }
+          }
+
+          else if (action === 'observe') {
+            // OBSERVE: Contemplative scanning gesture - hand to brow, head turns
+            // Phase 1 (0-0.3): Right hand raises to brow (shading eyes)
+            // Phase 2 (0.3-0.7): Head slowly scans left to right
+            // Phase 3 (0.7-1.0): Lower hand, contemplative pose
+            const phase1 = Math.min(1, p / 0.3);
+            const phase2 = p > 0.3 && p < 0.7 ? (p - 0.3) / 0.4 : (p >= 0.7 ? 1 : 0);
+            const phase3 = p > 0.7 ? (p - 0.7) / 0.3 : 0;
+
+            const handToBrow = phase1 * (1 - phase3 * 0.8);
+            const scanProgress = phase2;
+
+            // Right hand to brow
+            if (rightArm.current) {
+              rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, -1.4 * handToBrow, 0.2);
+              rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, -0.3 * handToBrow, 0.2);
+            }
+            if (rightForearm.current) {
+              rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -1.8 * handToBrow, 0.2);
+            }
+            // Left arm to hip/crossed
+            if (leftArm.current) {
+              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, 0.3 * phase1, 0.15);
+              leftArm.current.rotation.z = THREE.MathUtils.lerp(leftArm.current.rotation.z, 0.2 * phase1, 0.15);
+            }
+            if (leftForearm.current) {
+              leftForearm.current.rotation.x = THREE.MathUtils.lerp(leftForearm.current.rotation.x, -0.8 * phase1, 0.15);
+            }
+            // Head scans left to right
+            if (headGroup.current) {
+              const scanAngle = Math.sin((scanProgress - 0.5) * Math.PI) * 0.6;
+              headGroup.current.rotation.y = THREE.MathUtils.lerp(headGroup.current.rotation.y || 0, scanAngle, 0.1);
+              headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, -0.1 * handToBrow, 0.15);
+            }
+            // Body straightens, weight shifts
+            if (bodyGroup.current) {
+              bodyGroup.current.rotation.z = THREE.MathUtils.lerp(bodyGroup.current.rotation.z, 0.05 * Math.sin(scanProgress * Math.PI), 0.1);
+            }
           }
         }
       }
     }
-    
+
     if (bodyGroup.current) {
-      // Bobbing
-      const breathing = Math.sin(state.clock.elapsedTime * 1.6) * 0.02;
-      const runBob = Math.abs(Math.sin(t * 2)) * (isSprinting ? 0.1 : 0.04);
+      // Bobbing and breathing
+      const breathingSpeed = isSprinting ? 3.2 : 1.6; // Faster breathing when sprinting
+      const breathing = Math.sin(state.clock.elapsedTime * breathingSpeed) * (isSprinting ? 0.01 : 0.02);
+      const runBob = Math.abs(Math.sin(t * 2)) * (isSprinting ? 0.08 : 0.025);
       const jumpLiftBase = Math.sin(Math.min(1, jumpT) * Math.PI) * 0.08;
       const jumpLift = jumping ? jumpLiftBase * (1 + animationBoost * 0.35 + jumpBoost * 0.3) : 0;
       const crouch = -anticipate * 0.08;
       const settle = -landing * 0.06 * Math.sin((1 - landing) * Math.PI);
-      const sway = isWalking ? Math.sin(t) * (isSprinting ? 0.05 : 0.03) : 0;
-      bodyGroup.current.position.y = (isWalking ? runBob : breathing) + jumpLift + crouch + settle;
-      
-      // Sprinting lean
-      const targetRotationX = isSprinting ? 0.55 : 0;
+      const sway = isWalking ? Math.sin(t) * (isSprinting ? 0.06 : 0.03) : 0;
+
+      // Sprint torso counter-rotation (opposite to legs for natural running motion)
+      const sprintTwist = isSprinting ? Math.sin(t) * 0.22 : 0; // Increased from 0.15 for more dynamic twist
+
+      // INTERACTION BODY MECHANICS
+      const charge = interactionChargeRef?.current ?? 0;
+      const swing = interactionSwingRef?.current ?? 0;
+      let interactionCrouch = 0;
+      let interactionTwist = 0;
+      let interactionLean = 0;
+
+      // Wind-up body coil
+      if (charge > 0) {
+        const chargeEased = Math.pow(charge, 0.7);
+        interactionCrouch = -chargeEased * 0.06;
+        interactionTwist = chargeEased * 0.35;
+        interactionLean = -chargeEased * 0.12;
+      }
+      // Swing body drive
+      else if (swing > 0) {
+        const isPowerSwing = swing >= 0.7;
+        if (isPowerSwing) {
+          const power = (swing - 0.7) / 0.3;
+          interactionCrouch = power * 0.04;
+          interactionTwist = -power * 0.5;
+          interactionLean = power * 0.25;
+        } else {
+          interactionTwist = -swing * 0.25;
+          interactionLean = swing * 0.12;
+        }
+      }
+
+      bodyGroup.current.position.y = (isWalking ? runBob : breathing) + jumpLift + crouch + settle + interactionCrouch;
+
+      // Sprinting lean - more aggressive forward lean
+      const targetRotationX = isSprinting ? 0.42 : 0; // Increased from 0.35 for more dynamic sprint posture
       const idleLean = !isWalking ? Math.sin(state.clock.elapsedTime * 0.6) * 0.02 : 0;
       const jumpTilt = jumping ? (-0.15 + jumpT * 0.2) : 0;
       const crouchTilt = anticipate * 0.22;
       const landTilt = -landing * 0.18;
-      bodyGroup.current.rotation.x = THREE.MathUtils.lerp(bodyGroup.current.rotation.x, targetRotationX + idleLean + jumpTilt + crouchTilt + landTilt, 0.12);
+
+      bodyGroup.current.rotation.x = THREE.MathUtils.lerp(
+        bodyGroup.current.rotation.x,
+        targetRotationX + idleLean + jumpTilt + crouchTilt + landTilt + interactionLean,
+        0.15
+      );
       bodyGroup.current.rotation.z = THREE.MathUtils.lerp(bodyGroup.current.rotation.z, sway, 0.1);
-      const interaction = interactionSwingRef?.current ?? 0;
-      if (interaction > 0) {
-        bodyGroup.current.rotation.x = THREE.MathUtils.lerp(bodyGroup.current.rotation.x, bodyGroup.current.rotation.x + interaction * 0.22, 0.25);
-        bodyGroup.current.rotation.z = THREE.MathUtils.lerp(bodyGroup.current.rotation.z, bodyGroup.current.rotation.z + interaction * 0.16, 0.25);
-        if (leftLeg.current) leftLeg.current.rotation.x = -0.1 - interaction * 0.15;
-        if (rightLeg.current) rightLeg.current.rotation.x = 0.2 + interaction * 0.2;
+
+      // Hip and torso twist - for sprinting AND interaction
+      const hipTwistTarget = isSprinting ? sprintTwist * 0.6 : interactionTwist * 0.6; // Increased from 0.5
+      if (hipGroup.current) {
+        hipGroup.current.rotation.y = THREE.MathUtils.lerp(hipGroup.current.rotation.y, hipTwistTarget, 0.12);
+      }
+      const torsoTwistTarget = isSprinting ? -sprintTwist * 0.85 : interactionTwist; // Increased from 0.7 for stronger counter-rotation
+      if (torsoGroup.current) {
+        torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, torsoTwistTarget, 0.15);
+      }
+
+      // Leg positioning for power swing
+      if (swing >= 0.7) {
+        const power = (swing - 0.7) / 0.3;
+        if (leftLeg.current) leftLeg.current.rotation.x = THREE.MathUtils.lerp(leftLeg.current.rotation.x, -0.3 - power * 0.25, 0.12);
+        if (rightLeg.current) rightLeg.current.rotation.x = THREE.MathUtils.lerp(rightLeg.current.rotation.x, 0.4 + power * 0.3, 0.12);
+      } else if (charge > 0) {
+        // Weight on back foot during wind-up
+        const chargeEased = Math.pow(charge, 0.7);
+        if (leftLeg.current) leftLeg.current.rotation.x = THREE.MathUtils.lerp(leftLeg.current.rotation.x, 0.15 + chargeEased * 0.2, 0.1);
+        if (rightLeg.current) rightLeg.current.rotation.x = THREE.MathUtils.lerp(rightLeg.current.rotation.x, -0.1 - chargeEased * 0.15, 0.1);
       }
     }
 
     // Head lag/bob for natural independent movement
     if (headGroup.current) {
-      const headBob = isWalking ? Math.sin(t * 2) * 0.015 : 0;
-      const headLag = bodyGroup.current ? bodyGroup.current.rotation.x * -0.2 : 0; // Counter body lean
-      const headSway = isWalking ? Math.sin(t) * 0.02 : 0;
+      // Head counteracts body bob to stay more level (especially during sprint)
+      const bodyBobCompensation = isSprinting ? -0.04 : 0;
+      const headBob = isWalking ? Math.sin(t * 2) * (isSprinting ? 0.008 : 0.015) : 0;
+      // Counter body lean more during sprint for stable gaze
+      const headLag = bodyGroup.current ? bodyGroup.current.rotation.x * (isSprinting ? -0.35 : -0.2) : 0;
+      const headSway = isWalking ? Math.sin(t) * (isSprinting ? 0.01 : 0.02) : 0;
+
+      // Head follows interaction
+      const charge = interactionChargeRef?.current ?? 0;
+      const swing = interactionSwingRef?.current ?? 0;
+      let headInteractionX = 0;
+      let headInteractionY = 0;
+
+      if (charge > 0) {
+        // Look back during wind-up (focus on where swing will go)
+        const chargeEased = Math.pow(charge, 0.7);
+        headInteractionY = chargeEased * 0.25; // Turn head slightly back
+        headInteractionX = -chargeEased * 0.1; // Tilt down slightly
+      } else if (swing > 0) {
+        // Head follows through with swing
+        const isPowerSwing = swing >= 0.7;
+        if (isPowerSwing) {
+          const power = (swing - 0.7) / 0.3;
+          headInteractionY = -power * 0.35; // Snap head forward
+          headInteractionX = power * 0.15; // Look down at target
+        } else {
+          headInteractionY = -swing * 0.2;
+          headInteractionX = swing * 0.08;
+        }
+      }
+
       headGroup.current.position.y = 1.75 + headBob;
-      headGroup.current.rotation.x = headLag;
+      headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headLag + headInteractionX, 0.15);
+      headGroup.current.rotation.y = THREE.MathUtils.lerp(headGroup.current.rotation.y || 0, headInteractionY, 0.12);
       headGroup.current.rotation.z = -headSway * 0.5; // Subtle opposite sway
     }
 
@@ -519,14 +1114,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     } else {
       if (sashFrontRef.current) sashFrontRef.current.rotation.x = 0;
       if (trimFrontRef.current) trimFrontRef.current.rotation.x = 0;
-      if (anticipate > 0) {
-        const armDrop = anticipate * 0.25;
-        if (leftArm.current) leftArm.current.rotation.x = armDrop;
-        if (rightArm.current) rightArm.current.rotation.x = armDrop;
-      } else if (landing > 0.01) {
-        const armDrop = landing * 0.35;
-        if (leftArm.current) leftArm.current.rotation.x = armDrop;
-        if (rightArm.current) rightArm.current.rotation.x = armDrop;
+      // Only apply jump anticipation/landing arm drop if NOT in interaction swing
+      const swing = interactionSwingRef?.current ?? 0;
+      const charge = interactionChargeRef?.current ?? 0;
+      if (swing === 0 && charge === 0) {
+        if (anticipate > 0) {
+          const armDrop = anticipate * 0.25;
+          if (leftArm.current) leftArm.current.rotation.x = armDrop;
+          if (rightArm.current) rightArm.current.rotation.x = armDrop;
+        } else if (landing > 0.01) {
+          const armDrop = landing * 0.35;
+          if (leftArm.current) leftArm.current.rotation.x = armDrop;
+          if (rightArm.current) rightArm.current.rotation.x = armDrop;
+        }
       }
     }
 
@@ -553,7 +1153,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         if (phase >= 1) {
           isBlinking.current = false;
           blinkTimer.current = 0;
-          blinkCooldown.current = 10 + Math.random() * 20;
+          blinkCooldown.current = 2.5 + Math.random() * 4; // 2.5-6.5 seconds between blinks
         }
       } else {
         if (upperLidLeft.current) upperLidLeft.current.scale.y = 1;
@@ -660,18 +1260,27 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <meshStandardMaterial color={upperArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
               </mesh>
             <group ref={leftForearm} position={[0, -0.18, 0]}>
+              {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
-                <sphereGeometry args={[0.045, 8, 8]} />
+                <sphereGeometry args={[0.048, 8, 8]} />
                 <meshStandardMaterial color={upperArmColor} roughness={0.9} />
               </mesh>
-              <mesh castShadow>
-                <cylinderGeometry args={[0.05, 0.05, 0.32, 8]} />
-                  <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
+              {/* Forearm cylinder - offset down so it pivots from elbow */}
+              <mesh position={[0, -0.11, 0]} castShadow>
+                <cylinderGeometry args={[0.048, 0.042, 0.22, 8]} />
+                <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
               </mesh>
-              <mesh position={[0, -0.16, 0]} castShadow>
-                <sphereGeometry args={[0.05, 8, 8]} />
-                <meshStandardMaterial color={headColor} roughness={0.9} />
-              </mesh>
+              {/* Hand - palm pad with thumb, rotated so palm faces inward */}
+              <group position={[0, -0.24, 0]} rotation={[0, Math.PI / 2, 0]}>
+                <mesh castShadow rotation={[0.1, 0, 0]}>
+                  <boxGeometry args={[0.035, 0.08, 0.065]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+                <mesh position={[0.01, 0.01, 0.04]} rotation={[0, 0, 0.4]} castShadow>
+                  <capsuleGeometry args={[0.018, 0.035, 4, 6]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+              </group>
             </group>
             </group>
             <group ref={rightArm} position={[0.28, 1.14, 0.02]}>
@@ -680,18 +1289,27 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <meshStandardMaterial color={upperArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
               </mesh>
             <group ref={rightForearm} position={[0, -0.18, 0]}>
+              {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
-                <sphereGeometry args={[0.045, 8, 8]} />
+                <sphereGeometry args={[0.048, 8, 8]} />
                 <meshStandardMaterial color={upperArmColor} roughness={0.9} />
               </mesh>
-              <mesh castShadow>
-                <cylinderGeometry args={[0.05, 0.05, 0.32, 8]} />
-                  <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
+              {/* Forearm cylinder - offset down so it pivots from elbow */}
+              <mesh position={[0, -0.11, 0]} castShadow>
+                <cylinderGeometry args={[0.048, 0.042, 0.22, 8]} />
+                <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
               </mesh>
-              <mesh position={[0, -0.16, 0]} castShadow>
-                <sphereGeometry args={[0.05, 8, 8]} />
-                <meshStandardMaterial color={headColor} roughness={0.9} />
-              </mesh>
+              {/* Hand - palm pad with thumb, rotated so palm faces inward */}
+              <group position={[0, -0.24, 0]} rotation={[0, -Math.PI / 2, 0]}>
+                <mesh castShadow rotation={[0.1, 0, 0]}>
+                  <boxGeometry args={[0.035, 0.08, 0.065]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+                <mesh position={[-0.01, 0.01, 0.04]} rotation={[0, 0, -0.4]} castShadow>
+                  <capsuleGeometry args={[0.018, 0.035, 4, 6]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+              </group>
             </group>
             </group>
             <mesh position={[-0.2, 0.95, 0.02]} castShadow>
@@ -704,7 +1322,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             </mesh>
           </group>
         ) : (
-          <group>
+          <group ref={torsoGroup}>
+            {/* Upper torso */}
             <mesh position={[0, 1.1, 0]} castShadow>
               <cylinderGeometry args={[0.25, 0.35, 0.9, 8]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />
@@ -722,14 +1341,17 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 />
               </mesh>
             )}
-            <mesh position={[0, 0.7, 0]} castShadow>
-              <boxGeometry args={[0.5, 0.5, 0.3]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} />
-            </mesh>
-            <mesh position={[0, 0.55, 0.16]} castShadow>
-              <boxGeometry args={[0.32, 0.25, 0.05]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
-            </mesh>
+            {/* Lower robe with secondary motion */}
+            <group ref={robeHemRef}>
+              <mesh position={[0, 0.7, 0]} castShadow>
+                <boxGeometry args={[0.5, 0.5, 0.3]} />
+                <meshStandardMaterial color={color} roughness={clothRoughness} />
+              </mesh>
+              <mesh position={[0, 0.55, 0.16]} castShadow>
+                <boxGeometry args={[0.32, 0.25, 0.05]} />
+                <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
+              </mesh>
+            </group>
             <mesh position={[-0.12, 0.85, 0.17]} castShadow>
               <boxGeometry args={[0.08, 0.5, 0.04]} />
               <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
@@ -904,24 +1526,32 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <planeGeometry args={[0.05, 0.03]} />
                 <meshStandardMaterial color="#f2efe8" roughness={1} />
               </mesh>
-              {/* Eye irises */}
-              <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.202]} castShadow>
-                <planeGeometry args={[0.018, 0.018]} />
-                <meshStandardMaterial color={eyeColor} roughness={1} />
-              </mesh>
-              <mesh position={[faceVariant.eyeSpacing, eyeY, 0.202]} castShadow>
-                <planeGeometry args={[0.018, 0.018]} />
-                <meshStandardMaterial color={eyeColor} roughness={1} />
-              </mesh>
-              {/* Eye pupils */}
-              <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.206]} castShadow>
-                <planeGeometry args={[0.015, 0.015]} />
-                <meshStandardMaterial color="#2a2a2a" roughness={1} />
-              </mesh>
-              <mesh position={[faceVariant.eyeSpacing, eyeY, 0.206]} castShadow>
-                <planeGeometry args={[0.015, 0.015]} />
-                <meshStandardMaterial color="#2a2a2a" roughness={1} />
-              </mesh>
+              {/* Left eye - iris and pupil in group for gaze tracking */}
+              <group ref={leftEye} position={[-faceVariant.eyeSpacing, eyeY, 0.202]}>
+                {/* Iris */}
+                <mesh castShadow>
+                  <planeGeometry args={[0.018, 0.018]} />
+                  <meshStandardMaterial color={eyeColor} roughness={1} />
+                </mesh>
+                {/* Pupil */}
+                <mesh position={[0, 0, 0.004]} castShadow>
+                  <planeGeometry args={[0.015, 0.015]} />
+                  <meshStandardMaterial color="#2a2a2a" roughness={1} />
+                </mesh>
+              </group>
+              {/* Right eye - iris and pupil in group for gaze tracking */}
+              <group ref={rightEye} position={[faceVariant.eyeSpacing, eyeY, 0.202]}>
+                {/* Iris */}
+                <mesh castShadow>
+                  <planeGeometry args={[0.018, 0.018]} />
+                  <meshStandardMaterial color={eyeColor} roughness={1} />
+                </mesh>
+                {/* Pupil */}
+                <mesh position={[0, 0, 0.004]} castShadow>
+                  <planeGeometry args={[0.015, 0.015]} />
+                  <meshStandardMaterial color="#2a2a2a" roughness={1} />
+                </mesh>
+              </group>
               {/* Eyelids */}
               <mesh ref={upperLidLeft} position={[-faceVariant.eyeSpacing, eyeY + 0.018, 0.193]} castShadow>
                 <planeGeometry args={[0.05, 0.012]} />
@@ -1213,18 +1843,27 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <meshStandardMaterial color={upperArmColor} />
               </mesh>
             <group ref={leftForearm} position={[0, -0.2, 0]}>
+              {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
-                <sphereGeometry args={[0.055, 8, 8]} />
+                <sphereGeometry args={[0.058, 8, 8]} />
                 <meshStandardMaterial color={upperArmColor} roughness={0.9} />
               </mesh>
-              <mesh castShadow>
-                <cylinderGeometry args={[0.06, 0.06, 0.38, 8]} />
+              {/* Forearm cylinder - offset down so it pivots from elbow */}
+              <mesh position={[0, -0.12, 0]} castShadow>
+                <cylinderGeometry args={[0.055, 0.048, 0.24, 8]} />
                 <meshStandardMaterial color={lowerArmColor} />
               </mesh>
-              <mesh position={[0, -0.19, 0]} castShadow>
-                <sphereGeometry args={[0.06, 8, 8]} />
-                <meshStandardMaterial color={headColor} roughness={0.9} />
-              </mesh>
+              {/* Hand - palm pad with thumb, rotated so palm faces inward */}
+              <group position={[0, -0.26, 0]} rotation={[0, Math.PI / 2, 0]}>
+                <mesh castShadow rotation={[0.1, 0, 0]}>
+                  <boxGeometry args={[0.04, 0.09, 0.075]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+                <mesh position={[0.01, 0.01, 0.045]} rotation={[0, 0, 0.4]} castShadow>
+                  <capsuleGeometry args={[0.02, 0.04, 4, 6]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+              </group>
             </group>
             </group>
             <group ref={rightArm} position={[0.38, 1.12, 0]}>
@@ -1233,75 +1872,112 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <meshStandardMaterial color={upperArmColor} />
               </mesh>
             <group ref={rightForearm} position={[0, -0.2, 0]}>
+              {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
-                <sphereGeometry args={[0.055, 8, 8]} />
+                <sphereGeometry args={[0.058, 8, 8]} />
                 <meshStandardMaterial color={upperArmColor} roughness={0.9} />
               </mesh>
-              <mesh castShadow>
-                <cylinderGeometry args={[0.06, 0.06, 0.38, 8]} />
+              {/* Forearm cylinder - offset down so it pivots from elbow */}
+              <mesh position={[0, -0.12, 0]} castShadow>
+                <cylinderGeometry args={[0.055, 0.048, 0.24, 8]} />
                 <meshStandardMaterial color={lowerArmColor} />
               </mesh>
-              <mesh position={[0, -0.19, 0]} castShadow>
-                <sphereGeometry args={[0.06, 8, 8]} />
-                <meshStandardMaterial color={headColor} roughness={0.9} />
-              </mesh>
+              {/* Hand - palm pad with thumb, rotated so palm faces inward */}
+              <group position={[0, -0.26, 0]} rotation={[0, -Math.PI / 2, 0]}>
+                <mesh castShadow rotation={[0.1, 0, 0]}>
+                  <boxGeometry args={[0.04, 0.09, 0.075]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+                <mesh position={[-0.01, 0.01, 0.045]} rotation={[0, 0, -0.4]} castShadow>
+                  <capsuleGeometry args={[0.02, 0.04, 4, 6]} />
+                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                </mesh>
+              </group>
             </group>
             </group>
           </>
         )}
 
-        {/* Legs */}
+        {/* Legs with knee joints */}
         {!isFemale && (
           <group ref={hipGroup}>
             <group ref={leftLeg} position={[-0.15, 0.45, 0]}>
-              <mesh castShadow>
-                <boxGeometry args={[0.15, 0.8, 0.15]} />
+              {/* Upper leg (thigh) */}
+              <mesh position={[0, 0.1, 0]} castShadow>
+                <boxGeometry args={[0.15, 0.45, 0.15]} />
                 <meshStandardMaterial color={color} />
               </mesh>
-              {/* Sirwal (trousers) visible at ankle */}
-              <mesh position={[0, -0.35, 0]} castShadow>
-                <cylinderGeometry args={[0.11, 0.10, 0.22, 12]} />
-                <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
-              </mesh>
-              {footwearStyle !== 'bare' && (
-                <group ref={leftFoot} position={[0, -0.45, 0.1]}>
-                  <mesh castShadow>
-                    <boxGeometry args={[0.18, 0.06, 0.28]} />
-                    <meshStandardMaterial color={footwearColor} roughness={0.9} />
-                  </mesh>
-                  {footwearStyle === 'sandals' && (
-                    <mesh position={[0, 0.03, -0.02]} castShadow>
-                      <boxGeometry args={[0.14, 0.02, 0.08]} />
-                      <meshStandardMaterial color="#5c432a" roughness={0.9} />
+              {/* Knee joint */}
+              <group ref={leftKnee} position={[0, -0.15, 0]}>
+                {/* Knee cap */}
+                <mesh position={[0, 0, 0.02]} castShadow>
+                  <sphereGeometry args={[0.07, 8, 8]} />
+                  <meshStandardMaterial color={color} />
+                </mesh>
+                {/* Lower leg (shin) */}
+                <mesh position={[0, -0.22, 0]} castShadow>
+                  <boxGeometry args={[0.13, 0.4, 0.13]} />
+                  <meshStandardMaterial color={color} />
+                </mesh>
+                {/* Sirwal (trousers) visible at ankle */}
+                <mesh position={[0, -0.38, 0]} castShadow>
+                  <cylinderGeometry args={[0.11, 0.10, 0.18, 12]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
+                </mesh>
+                {footwearStyle !== 'bare' && (
+                  <group ref={leftFoot} position={[0, -0.45, 0.1]}>
+                    <mesh castShadow>
+                      <boxGeometry args={[0.18, 0.06, 0.28]} />
+                      <meshStandardMaterial color={footwearColor} roughness={0.9} />
                     </mesh>
-                  )}
-                </group>
-              )}
+                    {footwearStyle === 'sandals' && (
+                      <mesh position={[0, 0.03, -0.02]} castShadow>
+                        <boxGeometry args={[0.14, 0.02, 0.08]} />
+                        <meshStandardMaterial color="#5c432a" roughness={0.9} />
+                      </mesh>
+                    )}
+                  </group>
+                )}
+              </group>
             </group>
             <group ref={rightLeg} position={[0.15, 0.45, 0]}>
-              <mesh castShadow>
-                <boxGeometry args={[0.15, 0.8, 0.15]} />
+              {/* Upper leg (thigh) */}
+              <mesh position={[0, 0.1, 0]} castShadow>
+                <boxGeometry args={[0.15, 0.45, 0.15]} />
                 <meshStandardMaterial color={color} />
               </mesh>
-              {/* Sirwal (trousers) visible at ankle */}
-              <mesh position={[0, -0.35, 0]} castShadow>
-                <cylinderGeometry args={[0.11, 0.10, 0.22, 12]} />
-                <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
-              </mesh>
-              {footwearStyle !== 'bare' && (
-                <group ref={rightFoot} position={[0, -0.45, 0.1]}>
-                  <mesh castShadow>
-                    <boxGeometry args={[0.18, 0.06, 0.28]} />
-                    <meshStandardMaterial color={footwearColor} roughness={0.9} />
-                  </mesh>
-                  {footwearStyle === 'sandals' && (
-                    <mesh position={[0, 0.03, -0.02]} castShadow>
-                      <boxGeometry args={[0.14, 0.02, 0.08]} />
-                      <meshStandardMaterial color="#5c432a" roughness={0.9} />
+              {/* Knee joint */}
+              <group ref={rightKnee} position={[0, -0.15, 0]}>
+                {/* Knee cap */}
+                <mesh position={[0, 0, 0.02]} castShadow>
+                  <sphereGeometry args={[0.07, 8, 8]} />
+                  <meshStandardMaterial color={color} />
+                </mesh>
+                {/* Lower leg (shin) */}
+                <mesh position={[0, -0.22, 0]} castShadow>
+                  <boxGeometry args={[0.13, 0.4, 0.13]} />
+                  <meshStandardMaterial color={color} />
+                </mesh>
+                {/* Sirwal (trousers) visible at ankle */}
+                <mesh position={[0, -0.38, 0]} castShadow>
+                  <cylinderGeometry args={[0.11, 0.10, 0.18, 12]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
+                </mesh>
+                {footwearStyle !== 'bare' && (
+                  <group ref={rightFoot} position={[0, -0.45, 0.1]}>
+                    <mesh castShadow>
+                      <boxGeometry args={[0.18, 0.06, 0.28]} />
+                      <meshStandardMaterial color={footwearColor} roughness={0.9} />
                     </mesh>
-                  )}
-                </group>
-              )}
+                    {footwearStyle === 'sandals' && (
+                      <mesh position={[0, 0.03, -0.02]} castShadow>
+                        <boxGeometry args={[0.14, 0.02, 0.08]} />
+                        <meshStandardMaterial color="#5c432a" roughness={0.9} />
+                      </mesh>
+                    )}
+                  </group>
+                )}
+              </group>
             </group>
           </group>
         )}

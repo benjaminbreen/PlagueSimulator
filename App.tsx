@@ -8,9 +8,10 @@ import { MoraleStats } from './components/Agents';
 import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
 import { MerchantModal } from './components/MerchantModal';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
+import { initializePlague, progressPlague } from './utils/plague';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -45,6 +46,8 @@ function App() {
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
   const [showMerchantModal, setShowMerchantModal] = useState(false);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
+  const [showEncounterModal, setShowEncounterModal] = useState(false);
+  const [showEncounterModal3, setShowEncounterModal3] = useState(false);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
@@ -55,6 +58,13 @@ function App() {
     avgPanic: 0,
     agentCount: 0
   });
+
+  // Conversation history state (session-only, keyed by NPC id)
+  const [conversationHistories, setConversationHistories] = useState<ConversationSummary[]>([]);
+
+  const handleConversationSummary = useCallback((summary: ConversationSummary) => {
+    setConversationHistories(prev => [...prev, summary]);
+  }, []);
 
   // Action system state
   const [actionSlots, setActionSlots] = useState<ActionSlotState>({
@@ -124,7 +134,8 @@ function App() {
       ...stats,
       currency: 100, // Starting dirhams
       inventory: startingInventory,
-      maxInventorySlots: 20
+      maxInventorySlots: 20,
+      plague: initializePlague()
     };
   });
   const [devSettings, setDevSettings] = useState<DevSettings>({
@@ -162,6 +173,8 @@ function App() {
 
   // Performance tracking for adaptive resolution
   const [performanceDegraded, setPerformanceDegraded] = useState(false);
+  const lastPerfChangeRef = useRef(0);
+  const PERF_DEBOUNCE_MS = 2000; // Debounce performance state changes by 2 seconds
 
   // Time tracking
   useEffect(() => {
@@ -174,12 +187,22 @@ function App() {
 
       if (params.simulationSpeed > 0) {
         const simHoursDelta = dt * params.simulationSpeed / CONSTANTS.REAL_SECONDS_PER_SIM_HOUR;
-        
-        setStats(prev => ({
-          ...prev,
-          simTime: prev.simTime + simHoursDelta,
-          daysPassed: (prev.simTime + simHoursDelta) / 24,
-        }));
+
+        setStats(prev => {
+          const newSimTime = prev.simTime + simHoursDelta;
+
+          // Update player plague progression
+          setPlayerStats(prevPlayer => ({
+            ...prevPlayer,
+            plague: progressPlague(prevPlayer.plague, newSimTime)
+          }));
+
+          return {
+            ...prev,
+            simTime: newSimTime,
+            daysPassed: newSimTime / 24,
+          };
+        });
 
         setParams(prev => {
           let newTime = prev.timeOfDay + simHoursDelta;
@@ -216,10 +239,24 @@ function App() {
       if (e.key === 'Escape' && showMerchantModal) {
         setShowMerchantModal(false);
       }
+      if (e.key === '4' && selectedNpc && !showEncounterModal && !showEncounterModal3 && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        e.preventDefault();
+        setShowEncounterModal(true);
+      }
+      if (e.key === 'Escape' && showEncounterModal) {
+        setShowEncounterModal(false);
+      }
+      if (e.key === '3' && selectedNpc && !showEncounterModal3 && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        e.preventDefault();
+        setShowEncounterModal3(true);
+      }
+      if (e.key === 'Escape' && showEncounterModal3) {
+        setShowEncounterModal3(false);
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, showMerchantModal, sceneMode]);
+  }, [nearBuilding, showEnterModal, nearMerchant, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showEncounterModal3, showPlayerModal]);
 
   // Action trigger function
   const triggerAction = useCallback((actionId: ActionId) => {
@@ -273,8 +310,9 @@ function App() {
     const handleActionKey = (e: KeyboardEvent) => {
       // Don't trigger if typing in an input or modal is open
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (showMerchantModal || showEnterModal || showPlayerModal) return;
+      if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || showEncounterModal3) return;
       if (sceneMode !== 'outdoor') return;
+      if (e.key === '3' && selectedNpc) return;
 
       if (e.key === '1') {
         e.preventDefault();
@@ -290,7 +328,7 @@ function App() {
 
     window.addEventListener('keydown', handleActionKey);
     return () => window.removeEventListener('keydown', handleActionKey);
-  }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, showMerchantModal, showEnterModal, showPlayerModal, sceneMode]);
+  }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, showEncounterModal3, sceneMode, selectedNpc]);
 
   const handleMapChange = useCallback((dx: number, dy: number) => {
     setTransitioning(true);
@@ -553,6 +591,12 @@ function App() {
         simTime={stats.simTime}
         showPlayerModal={showPlayerModal}
         setShowPlayerModal={setShowPlayerModal}
+        showEncounterModal={showEncounterModal}
+        setShowEncounterModal={setShowEncounterModal}
+        showEncounterModal3={showEncounterModal3}
+        setShowEncounterModal3={setShowEncounterModal3}
+        conversationHistories={conversationHistories}
+        onConversationSummary={handleConversationSummary}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -646,12 +690,25 @@ function App() {
         }}
       >
         {/* Adaptive Performance - automatically adjusts resolution based on FPS */}
-        <AdaptiveDpr />
+        {/* AdaptiveDpr disabled - can cause resize loops with PerformanceMonitor */}
+        {/* <AdaptiveDpr /> */}
         <AdaptiveEvents />
         <PerformanceMonitor
-          onIncline={() => setPerformanceDegraded(false)}
-          onDecline={() => setPerformanceDegraded(true)}
-          flipflops={3}
+          onIncline={() => {
+            const now = Date.now();
+            if (now - lastPerfChangeRef.current > PERF_DEBOUNCE_MS) {
+              lastPerfChangeRef.current = now;
+              setPerformanceDegraded(false);
+            }
+          }}
+          onDecline={() => {
+            const now = Date.now();
+            if (now - lastPerfChangeRef.current > PERF_DEBOUNCE_MS) {
+              lastPerfChangeRef.current = now;
+              setPerformanceDegraded(true);
+            }
+          }}
+          flipflops={5}
           onChange={({ factor }) => {
             // Log performance changes in dev mode
             if (devSettings.enabled && devSettings.showPerfPanel) {

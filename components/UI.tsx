@@ -30,8 +30,16 @@ import {
   Navigation,
   Package,
   ArrowUpDown,
-  ChevronDown
+  ChevronDown,
+  Volume2,
+  Square,
+  Activity
 } from 'lucide-react';
+import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
+import { EncounterModal } from './EncounterModal/EncounterModal';
+import { ConversationSummary } from '../types';
+import { SicknessMeter } from './SicknessMeter';
+import { getPlagueTypeLabel } from '../utils/plague';
 
 interface UIProps {
   params: SimulationParams;
@@ -55,6 +63,12 @@ interface UIProps {
   simTime: number;
   showPlayerModal: boolean;
   setShowPlayerModal: React.Dispatch<React.SetStateAction<boolean>>;
+  showEncounterModal: boolean;
+  setShowEncounterModal: React.Dispatch<React.SetStateAction<boolean>>;
+  showEncounterModal3: boolean;
+  setShowEncounterModal3: React.Dispatch<React.SetStateAction<boolean>>;
+  conversationHistories: ConversationSummary[];
+  onConversationSummary: (summary: ConversationSummary) => void;
 }
 
 const WeatherModal: React.FC<{
@@ -600,6 +614,76 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       ctx.globalAlpha = 1;
     });
 
+    // Special NPCs - distinct markers with labels
+    data.specialNPCs.forEach((specialNPC) => {
+      const p = project(specialNPC.x, specialNPC.z);
+      const distSq = p.x * p.x + p.y * p.y;
+      if (distSq > radius * radius) return;
+      const dist = Math.sqrt(distSq) / radius;
+
+      // Less aggressive fade for special NPCs so they're visible from farther
+      const alpha = Math.pow(1 - dist, 1.5);
+      if (alpha < 0.15) return;
+
+      // Colors and labels for each type
+      let color = '#fff';
+      let label = '';
+      if (specialNPC.type === 'SUFI_MYSTIC') {
+        color = '#a78bfa'; // Purple for mystic
+        label = 'SUFI';
+      } else if (specialNPC.type === 'ASTROLOGER') {
+        color = '#60a5fa'; // Blue for scholar/astronomer
+        label = 'ASTRO';
+      } else if (specialNPC.type === 'SCRIBE') {
+        color = '#fbbf24'; // Gold for scribe
+        label = 'SCRIBE';
+      }
+
+      // Draw star shape marker
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.shadowBlur = 14;
+      ctx.shadowColor = color;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = alpha * 0.9;
+
+      // 5-pointed star
+      ctx.beginPath();
+      const spikes = 5;
+      const outerRadius = 5;
+      const innerRadius = 2.5;
+      for (let i = 0; i < spikes * 2; i++) {
+        const r = i % 2 === 0 ? outerRadius : innerRadius;
+        const angle = (i * Math.PI) / spikes - Math.PI / 2;
+        const x = Math.cos(angle) * r;
+        const y = Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Inner glow
+      ctx.globalAlpha = alpha * 0.5;
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Label text above star
+      ctx.globalAlpha = alpha * 0.85;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = '#000';
+      ctx.fillStyle = color;
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(label, 0, -8);
+
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    });
+
     ctx.shadowBlur = 12;
     ctx.shadowColor = '#f7c66a';
     ctx.fillStyle = '#f7c66a';
@@ -656,7 +740,23 @@ const PortraitRenderOnce: React.FC = () => {
   return null;
 };
 
-const NpcPortrait: React.FC<{ npc: NPCStats }> = ({ npc }) => {
+const NpcPortrait: React.FC<{
+  npc: NPCStats;
+  sizeClassName?: string;
+  frameClassName?: string;
+  cameraPosition?: [number, number, number];
+  cameraFov?: number;
+  lookAtY?: number;
+  groupOffsetY?: number;
+}> = ({
+  npc,
+  sizeClassName = 'w-12 h-12',
+  frameClassName = 'rounded-full',
+  cameraPosition = [0, 1.4, 2.3],
+  cameraFov = 24,
+  lookAtY = 1.4,
+  groupOffsetY = -1.45
+}) => {
   const seed = Number(npc.id.split('-')[1] || '1');
   const tone = seededRandom(seed + 11);
   const skin = `hsl(${26 + Math.round(tone * 8)}, ${28 + Math.round(tone * 18)}%, ${30 + Math.round(tone * 18)}%)`;
@@ -677,20 +777,20 @@ const NpcPortrait: React.FC<{ npc: NPCStats }> = ({ npc }) => {
       : headwearPalette[headwearIndex];
 
   return (
-    <div className="w-12 h-12 rounded-full border border-amber-800/50 bg-black/40 overflow-hidden">
+    <div className={`${sizeClassName} ${frameClassName} border border-amber-800/50 bg-black/40 overflow-hidden`}>
       <Canvas
         frameloop="demand"
-        camera={{ position: [0, 1.4, 2.3], fov: 24 }}
+        camera={{ position: cameraPosition, fov: cameraFov }}
         dpr={1}
         gl={{ alpha: true, antialias: true }}
         onCreated={({ camera }) => {
-          camera.lookAt(0, 1.4, 0);
+          camera.lookAt(0, lookAtY, 0);
         }}
       >
         <PortraitRenderOnce />
         <ambientLight intensity={0.9} />
         <directionalLight position={[1, 2, 2]} intensity={0.7} />
-        <group position={[0, -1.45, 0]}>
+        <group position={[0, groupOffsetY, 0]}>
           <Humanoid
             color={npc.gender === 'Female' ? robe : '#5c4b3a'}
             headColor={skin}
@@ -720,18 +820,279 @@ const NpcPortrait: React.FC<{ npc: NPCStats }> = ({ npc }) => {
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal }) => {
+const EncounterModalLegacy: React.FC<{
+  npc: { stats: NPCStats; state: AgentState };
+  timeOfDay: number;
+  currentWeather: string;
+  onClose: () => void;
+}> = ({ npc, timeOfDay, currentWeather, onClose }) => {
+  const [activeTab, setActiveTab] = useState<'conversation' | 'history'>('conversation');
+  const [styleVariant, setStyleVariant] = useState<'guild' | 'noir'>('guild');
+  const displayHour = Math.floor(timeOfDay);
+  const displayMin = Math.floor((timeOfDay - displayHour) * 60);
+  const suffix = displayHour >= 12 ? 'PM' : 'AM';
+  const hourLabel = displayHour % 12 === 0 ? 12 : displayHour % 12;
+  const timeLabel = `${hourLabel}:${displayMin.toString().padStart(2, '0')} ${suffix}`;
+
+  const conversation = useMemo(() => ([
+    {
+      role: 'npc',
+      text: `Peace upon you. I am ${npc.stats.name}, a ${npc.stats.profession} of Damascus. The streets feel restless today.`
+    },
+    {
+      role: 'player',
+      text: 'I seek a word of counsel. What rumors do you hear along the market road?'
+    },
+    {
+      role: 'npc',
+      text: 'Whispers speak of sickness in the southern quarter. Some shut their doors; others barter as if tomorrow is distant.'
+    }
+  ]), [npc.stats.name, npc.stats.profession]);
+
+  const history = useMemo(() => ([
+    {
+      title: 'A market-side warning',
+      summary: `${npc.stats.name} warned of rising fear and urged caution near crowded wells.`
+    },
+    {
+      title: 'A shared prayer',
+      summary: 'You exchanged blessings and agreed to keep watch over the neighbors.'
+    }
+  ]), [npc.stats.name]);
+
+  const containerClass = styleVariant === 'guild'
+    ? 'bg-gradient-to-br from-[#15100c]/95 via-[#0c0a08]/95 to-[#17110b]/95 border border-amber-900/40 shadow-[0_30px_80px_rgba(0,0,0,0.6)]'
+    : 'bg-gradient-to-br from-[#0b0b0b]/95 via-[#111111]/95 to-[#0d0d0d]/95 border border-stone-700/40 shadow-[0_30px_80px_rgba(0,0,0,0.6)]';
+  const textureClass = styleVariant === 'guild'
+    ? "opacity-12 bg-[url('https://www.transparenttextures.com/patterns/old-map.png')]"
+    : "opacity-10 bg-[url('https://www.transparenttextures.com/patterns/black-linen.png')]";
+  const panelClass = styleVariant === 'guild'
+    ? 'bg-black/50 border border-amber-900/30'
+    : 'bg-black/45 border border-stone-700/30';
+  const accentTextClass = styleVariant === 'guild'
+    ? 'text-amber-300'
+    : 'text-stone-200';
+  const mutedTextClass = styleVariant === 'guild'
+    ? 'text-amber-200/60'
+    : 'text-stone-200/60';
+  const tabActiveClass = styleVariant === 'guild'
+    ? 'text-amber-200 border-b border-amber-500'
+    : 'text-stone-100 border-b border-stone-300/70';
+  const tabInactiveClass = styleVariant === 'guild'
+    ? 'text-amber-200/50 hover:text-amber-200 border-b border-transparent'
+    : 'text-stone-300/70 hover:text-stone-100 border-b border-transparent';
+  const messageBaseClass = styleVariant === 'guild'
+    ? 'text-amber-50/90'
+    : 'text-stone-100/90';
+  const npcBubbleClass = styleVariant === 'guild'
+    ? 'bg-[#18120c] border border-amber-900/40'
+    : 'bg-[#151515] border border-stone-700/40';
+  const playerBubbleClass = styleVariant === 'guild'
+    ? 'bg-amber-500/15 border border-amber-500/40'
+    : 'bg-stone-500/15 border border-stone-400/30';
+
+  return (
+    <div className="absolute inset-0 z-[80] pointer-events-auto">
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative mx-auto mt-6 md:mt-10 w-[92vw] max-w-5xl">
+        <div className={`absolute inset-0 rounded-[28px] ${containerClass}`} />
+        <div className={`absolute inset-0 rounded-[28px] pointer-events-none ${textureClass}`} />
+        <div className="relative grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 p-5 md:p-7">
+          <div className="space-y-5">
+            <div className={`${panelClass} rounded-2xl p-4`}>
+              <div className={`text-[9px] uppercase tracking-[0.3em] ${mutedTextClass}`}>Portrait</div>
+              <div className="relative mt-3 aspect-[3/4] rounded-2xl bg-gradient-to-b from-black/60 to-black/90 p-2">
+                <div className="absolute inset-2 rounded-2xl border border-amber-500/20 pointer-events-none" />
+                <div className="absolute inset-4 pointer-events-none">
+                  <div className="absolute left-0 top-0 w-4 h-4 border-l border-t border-amber-500/40" />
+                  <div className="absolute right-0 top-0 w-4 h-4 border-r border-t border-amber-500/40" />
+                  <div className="absolute left-0 bottom-0 w-4 h-4 border-l border-b border-amber-500/40" />
+                  <div className="absolute right-0 bottom-0 w-4 h-4 border-r border-b border-amber-500/40" />
+                </div>
+                <NpcPortrait
+                  npc={npc.stats}
+                  sizeClassName="w-full h-full"
+                  frameClassName="rounded-2xl"
+                  cameraPosition={[0, 1.25, 2.0]}
+                  cameraFov={26}
+                  lookAtY={1.25}
+                  groupOffsetY={-1.1}
+                />
+              </div>
+              <div className="mt-4 border-t border-amber-900/40 pt-4 space-y-2 text-[11px] text-amber-100/80">
+                <div className="historical-font text-amber-100 text-lg">{npc.stats.name}</div>
+                <div className={`text-[10px] uppercase tracking-widest ${mutedTextClass}`}>
+                  {npc.stats.gender} · {npc.stats.age} years
+                </div>
+              </div>
+              <div className="mt-4 border-t border-amber-900/40 pt-3 space-y-3 text-[11px]">
+                <div className="flex items-center justify-between">
+                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Profession</span>
+                  <span className={accentTextClass}>{npc.stats.profession}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Class</span>
+                  <span className="px-2 py-0.5 rounded-full border border-amber-500/30 text-[10px] text-amber-200/90">
+                    {npc.stats.socialClass}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Mood</span>
+                  <span className="text-emerald-200">{npc.stats.mood}</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Awareness</span>
+                  <span className="text-amber-100/80">{Math.round(npc.stats.awarenessLevel)}%</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Panic</span>
+                  <span className="text-amber-100/80">{Math.round(npc.stats.panicLevel)}%</span>
+                </div>
+                {npc.stats.goalOfDay && (
+                  <div className="border-t border-amber-900/30 pt-3 text-[10px] text-amber-100/70">
+                    <div className={`uppercase tracking-widest ${mutedTextClass}`}>Today’s Goal</div>
+                    <div className="mt-2 italic">“{npc.stats.goalOfDay}”</div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className={`${panelClass} rounded-2xl p-4 space-y-3 text-[10px] ${mutedTextClass}`}>
+              <div className="flex items-center justify-between">
+                <span className="uppercase tracking-widest">Setting</span>
+                <span className="text-amber-100/80">{timeLabel}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="uppercase tracking-widest">Weather</span>
+                <span className="text-amber-100/80">{currentWeather}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="uppercase tracking-widest">Mood</span>
+                <span className="text-amber-100/80">{npc.stats.mood}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col min-h-[60vh]">
+            <div className="flex items-center justify-between border-b border-amber-900/30 pb-4">
+              <div>
+                <div className={`text-[10px] uppercase tracking-[0.35em] ${mutedTextClass}`}>Encounter</div>
+                <h3 className={`historical-font text-2xl tracking-widest ${accentTextClass}`}>
+                  {npc.stats.name}
+                </h3>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setStyleVariant(styleVariant === 'guild' ? 'noir' : 'guild')}
+                  className="text-[9px] uppercase tracking-widest text-amber-400/70 border border-amber-700/40 px-2 py-1 rounded-full hover:text-amber-200"
+                >
+                  {styleVariant === 'guild' ? 'Option A' : 'Option B'}
+                </button>
+                <button onClick={onClose} className="text-amber-400 hover:text-amber-300">
+                  <X size={22} />
+                </button>
+              </div>
+            </div>
+
+            <div className={`mt-4 flex items-center gap-6 text-[10px] uppercase tracking-[0.3em] ${mutedTextClass}`}>
+              <button
+                className={`pb-2 ${activeTab === 'conversation' ? tabActiveClass : tabInactiveClass}`}
+                onClick={() => setActiveTab('conversation')}
+              >
+                Conversation
+              </button>
+              <button
+                className={`pb-2 ${activeTab === 'history' ? tabActiveClass : tabInactiveClass}`}
+                onClick={() => setActiveTab('history')}
+              >
+                History
+              </button>
+            </div>
+
+            {activeTab === 'conversation' ? (
+              <div className="mt-4 flex flex-col gap-4 flex-1">
+                <div className="flex-1 overflow-y-auto max-h-[44vh] pr-2 space-y-3">
+                  {conversation.map((entry, index) => (
+                    <div
+                      key={`${entry.role}-${index}`}
+                      className={`rounded-xl px-4 py-3 text-[13px] leading-relaxed ${messageBaseClass} ${
+                        entry.role === 'player'
+                          ? `${playerBubbleClass} ml-auto`
+                          : npcBubbleClass
+                      }`}
+                    >
+                      <div className={`text-[9px] uppercase tracking-widest ${mutedTextClass} mb-1`}>
+                        {entry.role === 'player' ? 'You' : npc.stats.name}
+                      </div>
+                      {entry.text}
+                    </div>
+                  ))}
+                </div>
+                <div className="border-t border-amber-900/30 pt-3">
+                  <div className="flex items-center gap-2">
+                    <textarea
+                      rows={2}
+                      placeholder="Compose your response..."
+                      className="flex-1 resize-none rounded-xl bg-black/55 border border-amber-900/40 px-3 py-2 text-[12px] text-amber-100/80 placeholder:text-amber-300/30 focus:outline-none focus:ring-2 focus:ring-amber-600/30"
+                    />
+                    <button
+                      className="px-4 py-2 rounded-xl bg-amber-600/20 border border-amber-500/30 text-[11px] uppercase tracking-widest text-amber-200/70"
+                      disabled
+                    >
+                      Send
+                    </button>
+                  </div>
+                  <div className={`mt-2 text-[9px] uppercase tracking-[0.3em] ${mutedTextClass}`}>
+                    Press Enter to send · ESC to close
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-4 flex-1 overflow-y-auto max-h-[48vh] pr-2 space-y-3">
+                {history.map((entry) => (
+                  <div key={entry.title} className="rounded-xl border border-amber-900/40 bg-black/55 p-4">
+                    <div className={`text-[10px] uppercase tracking-widest ${mutedTextClass}`}>{entry.title}</div>
+                    <div className={`mt-2 text-[12px] leading-relaxed ${messageBaseClass}`}>{entry.summary}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationSummary }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
   const [reportTab, setReportTab] = useState<'epidemic' | 'player'>('epidemic');
-  const [settingsTab, setSettingsTab] = useState<'about' | 'dev'>('about');
+  const [settingsTab, setSettingsTab] = useState<'about' | 'music' | 'dev'>('about');
   const [showPerspective, setShowPerspective] = useState(true);
   const [fps, setFps] = useState(0);
   const [inventorySortBy, setInventorySortBy] = useState<'name' | 'rarity' | 'quantity'>('name');
   const [tabPulse, setTabPulse] = useState<'epidemic' | 'player' | null>(null);
   const [reportsPanelCollapsed, setReportsPanelCollapsed] = useState(false);
   const [alchemistTableCollapsed, setAlchemistTableCollapsed] = useState(true);
+  const [hasPlayerMoved, setHasPlayerMoved] = useState(false);
+
+  // Biome ambience preview for settings
+  const { currentPreview, playPreview, stopPreview } = useBiomeAmbiencePreview();
+
+  // Track player movement (for sickness meter visibility)
+  useEffect(() => {
+    if (hasPlayerMoved) return; // Already moved
+
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd'].includes(e.key.toLowerCase())) {
+        setHasPlayerMoved(true);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [hasPlayerMoved]);
 
   useEffect(() => {
     if (!tabPulse) return;
@@ -799,7 +1160,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   };
 
   const cyclePerspective = () => {
-    const order = [CameraMode.THIRD_PERSON, CameraMode.OVERHEAD, CameraMode.FIRST_PERSON];
+    const order = [CameraMode.FIRST_PERSON, CameraMode.OVER_SHOULDER, CameraMode.THIRD_PERSON, CameraMode.OVERHEAD];
     const idx = order.indexOf(params.cameraMode);
     const next = order[(idx + 1) % order.length];
     handleChange('cameraMode', next);
@@ -950,10 +1311,20 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         </div>
 
         <div className="flex items-center gap-4" onClick={e => e.stopPropagation()}>
-          <div className="hidden lg:flex flex-col items-end mr-4 text-[9px] text-amber-500/50 uppercase tracking-widest font-bold">
-            <div className="flex items-center gap-2"><span>Arrows to Move</span><Keyboard size={10}/></div>
-            <div className="flex items-center gap-2"><span>V to Change Perspective</span><MousePointer2 size={10}/></div>
-          </div>
+          {!hasPlayerMoved ? (
+            <div className="hidden lg:flex flex-col items-end mr-4 text-[9px] text-amber-500/50 uppercase tracking-widest font-bold">
+              <div className="flex items-center gap-2"><span>Arrows to Move</span><Keyboard size={10}/></div>
+              <div className="flex items-center gap-2"><span>V to Change Perspective</span><MousePointer2 size={10}/></div>
+            </div>
+          ) : (
+            <div className="hidden lg:block mr-4">
+              <SicknessMeter
+                plague={playerStats.plague}
+                hasPlayerMoved={hasPlayerMoved}
+                onClickDossier={() => setShowPlayerModal(true)}
+              />
+            </div>
+          )}
           <button 
             onClick={() => setShowSettings(!showSettings)}
             className="p-2 text-amber-500 hover:text-amber-400 transition-colors"
@@ -1431,6 +1802,16 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   </div>
                 </div>
               </div>
+
+              <div className="mt-4 flex items-center justify-between text-[10px] text-amber-100/70">
+                <span className="uppercase tracking-widest text-amber-500/60">Encounter</span>
+                <button
+                  onClick={() => setShowEncounterModal3(true)}
+                  className="px-3 py-1 rounded-full border border-amber-700/60 bg-amber-600/10 text-amber-200 hover:bg-amber-600/20"
+                >
+                  Press 3 to Speak
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -1467,23 +1848,29 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             <div className="bg-black/70 backdrop-blur-lg p-3 rounded-xl border border-amber-900/50 shadow-2xl flex flex-col gap-2">
               <span className="text-[9px] uppercase tracking-widest text-amber-500/80 font-bold mb-1 px-1">Observation Perspective</span>
               <div className="grid grid-cols-1 gap-1">
-                <button 
+                <button
+                  onClick={() => handleChange('cameraMode', CameraMode.FIRST_PERSON)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.FIRST_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+                >
+                  <Eye size={12} /> First Person
+                </button>
+                <button
+                  onClick={() => handleChange('cameraMode', CameraMode.OVER_SHOULDER)}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVER_SHOULDER ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+                >
+                  <User size={12} /> Over Shoulder
+                </button>
+                <button
                   onClick={() => handleChange('cameraMode', CameraMode.THIRD_PERSON)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.THIRD_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
                 >
                   <Camera size={12} /> Orbit View
                 </button>
-                <button 
+                <button
                   onClick={() => handleChange('cameraMode', CameraMode.OVERHEAD)}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVERHEAD ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
                 >
                   <Layers size={12} /> Overhead Map
-                </button>
-                <button 
-                  onClick={() => handleChange('cameraMode', CameraMode.FIRST_PERSON)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.FIRST_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-                >
-                  <Eye size={12} /> First Person
                 </button>
               </div>
             </div>
@@ -1517,6 +1904,15 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   About
                 </button>
                 <button
+                  onClick={() => { stopPreview(); setSettingsTab('music'); }}
+                  className={`px-4 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all flex items-center gap-1.5 ${
+                    settingsTab === 'music' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/60 hover:text-amber-200'
+                  }`}
+                >
+                  <Volume2 size={12} />
+                  Ambience
+                </button>
+                <button
                   onClick={() => setSettingsTab('dev')}
                   className={`px-4 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all ${
                     settingsTab === 'dev' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/60 hover:text-amber-200'
@@ -1531,7 +1927,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6 text-sm text-amber-50/80 leading-relaxed">
                 <div>
                   <h3 className="historical-font text-amber-400 text-lg mb-4">About</h3>
-                  <p>In 1348, the Black Death reached Damascus from Gaza. This simulation explores infection dynamics across the city’s marketplaces and quarters. Observe, intervene, and learn the patterns of spread.</p>
+                  <p>In 1348, the Black Death reached Damascus from Gaza. This simulation explores infection dynamics across the city's marketplaces and quarters. Observe, intervene, and learn the patterns of spread.</p>
                   <div className="mt-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg">
                     <h4 className="text-xs font-bold text-amber-500 uppercase mb-2">Controls</h4>
                     <ul className="text-[11px] space-y-1">
@@ -1552,6 +1948,99 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                     <li>Rats appear when sanitation falls below 40%.</li>
                   </ul>
                 </div>
+              </div>
+            ) : settingsTab === 'music' ? (
+              <div className="mt-6 space-y-6 text-amber-50/80">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-amber-400 uppercase tracking-widest text-xs font-bold">Ambient Sounds Preview</div>
+                    <p className="text-[11px] text-amber-100/50 mt-1">
+                      Environmental soundscapes for each district of Damascus
+                    </p>
+                  </div>
+                  {currentPreview && (
+                    <button
+                      onClick={stopPreview}
+                      className="flex items-center gap-2 px-3 py-1.5 bg-red-900/40 border border-red-700/50 rounded-lg text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-900/60 transition-colors"
+                    >
+                      <Square size={10} fill="currentColor" />
+                      Stop
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3">
+                  {(Object.keys(AMBIENCE_INFO) as BiomeType[]).map((biome) => {
+                    const info = AMBIENCE_INFO[biome];
+                    const isPlaying = currentPreview === biome;
+                    return (
+                      <div
+                        key={biome}
+                        className={`p-4 rounded-lg border transition-all ${
+                          isPlaying
+                            ? 'bg-amber-900/30 border-amber-600/60 shadow-lg shadow-amber-900/20'
+                            : 'bg-black/30 border-amber-900/30 hover:border-amber-700/50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <h4 className={`font-bold uppercase tracking-wide text-sm ${
+                                isPlaying ? 'text-amber-400' : 'text-amber-200'
+                              }`}>
+                                {info.name}
+                              </h4>
+                              {isPlaying && (
+                                <div className="flex gap-0.5">
+                                  {[0, 1, 2].map((i) => (
+                                    <div
+                                      key={i}
+                                      className="w-1 bg-amber-500 rounded-full animate-pulse"
+                                      style={{
+                                        height: `${8 + Math.sin(Date.now() / 200 + i) * 4}px`,
+                                        animationDelay: `${i * 0.15}s`,
+                                      }}
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-amber-100/50 mt-1">{info.description}</p>
+                          </div>
+                          <button
+                            onClick={() => isPlaying ? stopPreview() : playPreview(biome)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] uppercase tracking-widest font-bold transition-all ${
+                              isPlaying
+                                ? 'bg-amber-600 text-white hover:bg-amber-500'
+                                : 'bg-amber-900/40 border border-amber-700/50 text-amber-200 hover:bg-amber-800/50'
+                            }`}
+                          >
+                            {isPlaying ? (
+                              <>
+                                <Square size={10} fill="currentColor" />
+                                Stop
+                              </>
+                            ) : (
+                              <>
+                                <Play size={10} fill="currentColor" />
+                                Preview
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="text-[10px] text-amber-100/30 italic text-center pt-4 border-t border-white/5">
+                  Ambient sounds synthesized in real-time using Web Audio API
+                </div>
+
+                {/* Render the actual BiomeAmbience component when previewing */}
+                {currentPreview && (
+                  <BiomeAmbience biome={currentPreview} enabled={true} volume={0.6} />
+                )}
               </div>
             ) : (
               <div className="mt-6 space-y-6 text-amber-50/80">
@@ -1865,8 +2354,181 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 </div>
               </div>
             </div>
+
+            {/* Health Status Section */}
+            <div className="mt-8 border-t border-amber-900/40 pt-6">
+              <div className="text-[11px] uppercase tracking-widest text-amber-400/80 mb-4 flex items-center gap-2">
+                <Activity size={14} />
+                Health Status
+              </div>
+
+              {playerStats.plague.state === AgentState.HEALTHY && (
+                <div className="text-emerald-400 font-bold text-sm">
+                  ✓ Currently healthy and robust
+                </div>
+              )}
+
+              {playerStats.plague.state === AgentState.INCUBATING && (
+                <div className="bg-amber-950/30 border border-amber-600/30 rounded-lg p-4">
+                  <div className="text-amber-400 font-bold mb-2">Incubation Period</div>
+                  <div className="text-[11px] text-amber-200/70">
+                    Exposed to plague. No visible symptoms yet. The disease is developing silently.
+                  </div>
+                </div>
+              )}
+
+              {playerStats.plague.state === AgentState.INFECTED && (
+                <div className="space-y-4">
+                  <div className={`${playerStats.plague.overallSeverity > 70 ? 'bg-red-950/30 border-red-600/30' : 'bg-orange-950/30 border-orange-600/30'} border rounded-lg p-4`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <div className={`${playerStats.plague.overallSeverity > 70 ? 'text-red-400' : 'text-orange-400'} font-bold text-sm`}>
+                          {getPlagueTypeLabel(playerStats.plague.plagueType)} PLAGUE
+                        </div>
+                        <div className="text-[10px] text-amber-200/50 uppercase tracking-wider">
+                          Day {playerStats.plague.daysInfected} of Infection
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[10px] text-amber-200/50 uppercase">Survival</div>
+                        <div className={`font-bold ${playerStats.plague.survivalChance < 20 ? 'text-red-400' : playerStats.plague.survivalChance < 50 ? 'text-orange-400' : 'text-amber-400'}`}>
+                          {playerStats.plague.survivalChance}%
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Symptom Bars */}
+                    <div className="space-y-2">
+                      {playerStats.plague.fever > 0 && (
+                        <div>
+                          <div className="flex justify-between text-[10px] mb-1">
+                            <span className="text-amber-200/70">🔥 Fever</span>
+                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.fever)}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-orange-500 to-red-500" style={{ width: `${playerStats.plague.fever}%` }} />
+                          </div>
+                        </div>
+                      )}
+
+                      {playerStats.plague.buboes > 0 && (
+                        <div>
+                          <div className="flex justify-between text-[10px] mb-1">
+                            <span className="text-amber-200/70">
+                              💉 {playerStats.plague.buboLocation.charAt(0).toUpperCase() + playerStats.plague.buboLocation.slice(1)} Bubo
+                              {playerStats.plague.buboBurst && <span className="text-emerald-400"> (burst - improved prognosis)</span>}
+                            </span>
+                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.buboes)}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div className="h-full bg-purple-500" style={{ width: `${playerStats.plague.buboes}%` }} />
+                          </div>
+                        </div>
+                      )}
+
+                      {playerStats.plague.weakness > 0 && (
+                        <div>
+                          <div className="flex justify-between text-[10px] mb-1">
+                            <span className="text-amber-200/70">😓 Weakness</span>
+                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.weakness)}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-500" style={{ width: `${playerStats.plague.weakness}%` }} />
+                          </div>
+                        </div>
+                      )}
+
+                      {playerStats.plague.coughingBlood > 0 && (
+                        <div>
+                          <div className="flex justify-between text-[10px] mb-1">
+                            <span className="text-amber-200/70">🫁 Coughing Blood</span>
+                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.coughingBlood)}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div className="h-full bg-red-500" style={{ width: `${playerStats.plague.coughingBlood}%` }} />
+                          </div>
+                        </div>
+                      )}
+
+                      {playerStats.plague.skinBleeding > 0 && (
+                        <div>
+                          <div className="flex justify-between text-[10px] mb-1">
+                            <span className="text-amber-200/70">🩸 Skin Bleeding</span>
+                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.skinBleeding)}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div className="h-full bg-red-600" style={{ width: `${playerStats.plague.skinBleeding}%` }} />
+                          </div>
+                        </div>
+                      )}
+
+                      {playerStats.plague.delirium > 0 && (
+                        <div>
+                          <div className="flex justify-between text-[10px] mb-1">
+                            <span className="text-amber-200/70">😵‍💫 Delirium</span>
+                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.delirium)}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div className="h-full bg-purple-600" style={{ width: `${playerStats.plague.delirium}%` }} />
+                          </div>
+                        </div>
+                      )}
+
+                      {playerStats.plague.gangrene > 0 && (
+                        <div>
+                          <div className="flex justify-between text-[10px] mb-1">
+                            <span className="text-amber-200/70">☠️ Gangrene</span>
+                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.gangrene)}%</span>
+                          </div>
+                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
+                            <div className="h-full bg-gray-700" style={{ width: `${playerStats.plague.gangrene}%` }} />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Treatment Options (placeholder for future) */}
+                  <div className="bg-amber-950/20 border border-amber-900/30 rounded-lg p-4">
+                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60 mb-2">Medieval Remedies</div>
+                    <div className="text-[11px] text-amber-200/50 italic">
+                      Seek a physician to lance buboes, or try herbal remedies. Prayer may provide comfort.
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
+      )}
+
+      {showEncounterModal3 && selectedNpc && (
+        <EncounterModalLegacy
+          npc={selectedNpc}
+          timeOfDay={params.timeOfDay}
+          currentWeather={currentWeather}
+          onClose={() => setShowEncounterModal3(false)}
+        />
+      )}
+
+      {showEncounterModal && selectedNpc && (
+        <EncounterModal
+          npc={selectedNpc.stats}
+          player={playerStats}
+          environment={{
+            timeOfDay: params.timeOfDay,
+            weather: currentWeather,
+            mapX: params.mapX,
+            mapY: params.mapY,
+            nearbyInfected: stats.infected,
+            nearbyDeceased: stats.deceased
+          }}
+          publicMorale={moraleStats}
+          simulationStats={stats}
+          conversationHistory={conversationHistories}
+          onClose={() => setShowEncounterModal(false)}
+          onSummaryGenerated={onConversationSummary}
+        />
       )}
 
       {/* Action Bar - only show in outdoor mode */}

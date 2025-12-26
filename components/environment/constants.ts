@@ -47,7 +47,7 @@ export const HOVER_WIREFRAME_COLORS = {
 
 // Ground/terrain colors
 export const GROUND_PALETTE = {
-  MARKET: ['#e3c595', '#dbbe8e', '#d4b687', '#cdae80', '#c6a679'],
+  MARKET: ['#d4b68a', '#c9a77a', '#be9869', '#d0aa7d', '#c29a6d'], // Warmer sun-baked stone
   WEALTHY: ['#5a8a48', '#4f7d3d', '#649850', '#558a42'],  // Lush garden green like Salhiyya
   HOVELS: ['#b68a5f', '#a47b54', '#9a734d'],
   ALLEYS: ['#b68a5f', '#a47b54', '#9a734d'],

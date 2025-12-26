@@ -32,7 +32,70 @@ const COMMERCIAL_PROFESSIONS = [
   'Locksmith',            // Intricate metalwork, keys
   'Oil Presser',          // Olive oil, sesame oil
 ];
-const RESIDENTIAL_PROFESSIONS = ['Day-Laborer', 'Water-Carrier', 'Copyist', 'Tanner', 'Unemployed', 'City Guard', 'Mamluk Soldier', 'Retired Guard'];
+const RESIDENTIAL_PROFESSIONS = [
+  // Unskilled Labor
+  'Day-Laborer',
+  'Water-Carrier',
+  'Porter',
+  'Street Sweeper',
+  'Grave Digger',
+  'Rag Picker',
+  'Night Watchman',
+  'Stable Hand',
+  'Builder\'s Laborer',
+  // Transport
+  'Donkey Driver',
+  'Camel Driver',
+  'Muleteer',
+  // Textile Workers (Damascus famous for textiles)
+  'Spinner',
+  'Dyer',
+  'Embroiderer',
+  'Tailor',
+  'Silk Winder',
+  'Felt Maker',
+  // Food & Agriculture (Damascus had famous gardens/orchards)
+  'Gardener',
+  'Orchard Keeper',
+  'Miller',
+  'Cheese Maker',
+  'Butcher\'s Assistant',
+  'Vegetable Seller',
+  'Fruit Seller',
+  'Charcoal Seller',
+  'Firewood Seller',
+  // Construction
+  'Mason',
+  'Plasterer',
+  'Whitewasher',
+  'Brick Maker',
+  'Tile Maker',
+  // Service Workers
+  'Bath Attendant',
+  'Cook',
+  'Servant',
+  'Launderer',
+  'Messenger',
+  // Skilled Artisans (living residential, working in souks)
+  'Cobbler',
+  'Rope Maker',
+  'Mat Weaver',
+  'Basket Maker',
+  'Woodcarver',
+  // Scribal/Educated
+  'Copyist',
+  'Madrasa Student',
+  // Military
+  'City Guard',
+  'Mamluk Soldier',
+  'Retired Guard',
+  // Urban Poor/Other
+  'Tanner',
+  'Unemployed',
+  'Beggar',
+  'Widow',
+  'Pilgrim',
+];
 const CLERGY_PROFESSIONS = ['Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher'];
 
 // Religious building professions (architecture-specific)
@@ -451,7 +514,7 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   };
 };
 
-export const generatePlayerStats = (seed: number): PlayerStats => {
+export const generatePlayerStats = (seed: number): Omit<PlayerStats, 'currency' | 'inventory' | 'maxInventorySlots' | 'plague'> => {
   let s = seed * 7 + 13;
   const rand = () => seededRandom(s++);
 
@@ -839,7 +902,26 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
   const storyCount: 1 | 2 | 3 = height < 6 ? 1 : height < 10 ? 2 : 3;
 
   // Adjust footprint based on story count: 3-story buildings are ~10% wider
-  const footprintScale = storyCount === 3 ? sizeScale * 1.1 : storyCount === 2 ? sizeScale * 1.05 : sizeScale;
+  let footprintScale = storyCount === 3 ? sizeScale * 1.1 : storyCount === 2 ? sizeScale * 1.05 : sizeScale;
+
+  // Override footprint scale for civic buildings based on profession (matches Environment.tsx rendering)
+  if (type === BuildingType.CIVIC && ownerProfession) {
+    if (ownerProfession === 'Mamluk Governor') {
+      footprintScale = sizeScale * 1.4; // Large governor's palace
+    } else if (ownerProfession === 'Court Qadi') {
+      footprintScale = sizeScale * 1.2; // Large court hall
+    } else if (ownerProfession === 'Hammam Keeper') {
+      footprintScale = sizeScale * 1.2; // Public bath
+    } else if (ownerProfession === 'Court Physician') {
+      footprintScale = sizeScale * 1.1; // Medical clinic
+    } else if (ownerProfession === 'Market Inspector') {
+      footprintScale = sizeScale * 1.0; // Muhtasib office
+    } else if (ownerProfession === 'Notary') {
+      footprintScale = sizeScale * 0.9; // Document office
+    } else if (ownerProfession === 'Fountain Keeper') {
+      footprintScale = sizeScale * 0.6; // Small sabil
+    }
+  }
 
   return {
     id: `bld-${x}-${z}`,

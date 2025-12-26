@@ -5,9 +5,11 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { CONSTANTS, BuildingMetadata, BuildingType, DistrictType, getDistrictType } from '../types';
 import { generateBuildingMetadata, seededRandom } from '../utils/procedural';
+import { getProfessionSign, ProfessionSign } from '../utils/professionSignData';
 import { getTerrainHeight, buildHeightmapFromGeometry, TerrainHeightmap, sampleTerrainHeight } from '../utils/terrain';
 import { PushableObject } from '../utils/pushables';
 import { LaundryLine, getCatenaryPoint } from '../utils/laundry';
+import { bakeBoxAO, bakeBoxAO_TallBuilding, bakeBoxAO_Civic } from '../utils/vertexAO';
 import {
   HOVER_WIREFRAME_COLORS,
   SANDSTONE_PALETTE,
@@ -41,7 +43,9 @@ import {
   PushablePotteryShard,
   PushableLinenScrap,
   PushableCandleStub,
-  PushableTwine
+  PushableTwine,
+  PushableCrate,
+  PushableAmphora
 } from './environment/decorations/Pushables';
 import { PushableBoulder } from './environment/decorations/Boulder';
 import {
@@ -54,6 +58,7 @@ import {
 } from './environment/shared/HoverSystem';
 import { MountainShrineDecor } from './environment/districts/MountainShrineDecor';
 import { SalhiyyaDecor } from './environment/districts/SalhiyyaDecor';
+import { MarketplaceDecor } from './environment/districts/MarketplaceDecor';
 import { CaravanseraiComplex } from './environment/districts/CaravanseraiComplex';
 import { OutskirtsFarmlandDecor } from './environment/districts/OutskirtsFarmlandDecor';
 import { OutskirtsDesertDecor } from './environment/districts/OutskirtsDesertDecor';
@@ -61,6 +66,7 @@ import { SouthernRoadDecor } from './environment/districts/SouthernRoadDecor';
 import { MosqueBackground } from './environment/landmarks/MosqueBackground';
 import { HorizonBackdrop } from './environment/landmarks/HorizonBackdrop';
 import { CentralWell } from './environment/landmarks/CentralWell';
+import { BirdFlock } from './environment/landmarks/BirdFlock';
 import { WealthyGarden } from './environment/landmarks/WealthyGarden';
 import { CitadelComplex } from './environment/landmarks/CitadelComplex';
 
@@ -189,6 +195,7 @@ const BUILDING_COLOR_VARIANTS = {
 interface EnvironmentProps {
   mapX: number;
   mapY: number;
+  sessionSeed?: number; // Random seed per game session for procedural variation
   onGroundClick?: (point: THREE.Vector3) => void;
   onBuildingsGenerated?: (buildings: BuildingMetadata[]) => void;
   onHeightmapBuilt?: (heightmap: TerrainHeightmap | null) => void;
@@ -203,6 +210,9 @@ interface EnvironmentProps {
   laundryLines?: LaundryLine[];
   catPositionRef?: React.MutableRefObject<THREE.Vector3>;
   ratPositions?: THREE.Vector3[];
+  npcPositions?: THREE.Vector3[];
+  playerPosition?: THREE.Vector3;
+  isSprinting?: boolean;
   showCityWalls?: boolean;
 }
 
@@ -308,15 +318,37 @@ const CAT_HUNT_RANGE = 8.0;  // Distance at which cat notices rats
 const CAT_POUNCE_RANGE = 1.0;  // Distance at which cat pounces
 const CAT_WALK_SPEED = 0.5;
 const CAT_HUNT_SPEED = 1.2;
+const CAT_FLEE_SPEED = 1.8;
+const CAT_FLEE_RANGE = 3.0;  // Distance at which cat flees from NPCs
+const CAT_SPRINT_STARTLE_RANGE = 3.5;  // Distance at which sprinting player startles cat
+const CAT_COLLISION_RADIUS = 0.7;  // Cat's collision radius
+
+// Dog constants
+const DOG_WALK_SPEED = 0.8;
+const DOG_RUN_SPEED = 2.0;
+const DOG_FOLLOW_DISTANCE = 6.0;  // Distance at which dog follows NPCs
+const DOG_MIN_FOLLOW_DISTANCE = 3.0;  // Minimum distance to maintain from NPCs
+const DOG_COLLISION_RADIUS = 0.9;  // Dog's collision radius
+
+interface BallPhysics {
+  position: THREE.Vector3;
+  velocity: THREE.Vector3;
+  radius: number;
+  lastBatTime: number;
+}
 
 interface PlazaCatProps {
   waypoints: [number, number, number][];
   seed?: number;
   catPositionRef?: React.MutableRefObject<THREE.Vector3>;
   ratPositions?: THREE.Vector3[];
+  npcPositions?: THREE.Vector3[];
+  playerPosition?: THREE.Vector3;
+  isSprinting?: boolean;
+  ballPhysics?: React.MutableRefObject<BallPhysics>;
 }
 
-export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPositionRef, ratPositions }) => {
+export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, ballPhysics }) => {
   const groupRef = useRef<THREE.Group>(null);
   const bodyRef = useRef<THREE.Group>(null);
   const headRef = useRef<THREE.Group>(null);
@@ -328,12 +360,20 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
   const [hovered, setHovered] = useState(false);
   const state = useRef({
     targetIndex: 0,
-    mode: 'sleep' as 'sleep' | 'walk' | 'idle' | 'hunt' | 'pounce',
+    mode: 'sleep' as 'sleep' | 'walk' | 'idle' | 'hunt' | 'pounce' | 'flee' | 'jump' | 'stretch' | 'bat',
     timer: 0,
     walkCycle: 0,
     breathCycle: 0,
     huntTarget: null as THREE.Vector3 | null,
-    pounceTimer: 0
+    pounceTimer: 0,
+    fleeTarget: null as THREE.Vector3 | null,
+    headTrackTarget: null as THREE.Vector3 | null,
+    jumpStart: null as THREE.Vector3 | null,
+    jumpEnd: null as THREE.Vector3 | null,
+    jumpProgress: 0,
+    stretchProgress: 0,
+    batProgress: 0,
+    batDirection: new THREE.Vector3()
   });
 
   // Randomize cat appearance based on seed
@@ -343,7 +383,7 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
     const r1 = rng(s); s = r1.next;
     const r2 = rng(s);
     const variant = CAT_VARIANTS[Math.floor(r1.val * CAT_VARIANTS.length)];
-    const scale = 0.8 + r2.val * 0.5; // Size varies from 0.8 to 1.3
+    const scale = (0.8 + r2.val * 0.5) * 1.69; // Size varies from 1.35 to 2.2 (69% bigger)
     return { variant, scale };
   }, [seed]);
 
@@ -366,8 +406,83 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       catPositionRef.current.copy(current);
     }
 
-    // Check for nearby rats to hunt (unless sleeping or already pouncing)
-    if (ratPositions && ratPositions.length > 0 && state.current.mode !== 'sleep' && state.current.mode !== 'pounce') {
+    // Collision detection helper
+    const isPositionBlocked = (pos: THREE.Vector3): boolean => {
+      // Check fountain collision (center of plaza, outer basin radius ~3.8 + cat radius)
+      const fountainDist = Math.sqrt(pos.x * pos.x + pos.z * pos.z);
+      if (fountainDist < 4.6) return true; // Fountain outer basin + collision buffer
+
+      // Check player collision
+      if (playerPosition) {
+        const distToPlayer = pos.distanceTo(playerPosition);
+        if (distToPlayer < CAT_COLLISION_RADIUS + 0.5) return true;
+      }
+
+      // Check NPC collisions
+      if (npcPositions) {
+        for (const npcPos of npcPositions) {
+          const distToNPC = pos.distanceTo(npcPos);
+          if (distToNPC < CAT_COLLISION_RADIUS + 0.5) return true;
+        }
+      }
+
+      return false;
+    };
+
+    // Check for nearby NPCs/player to flee from (highest priority, even interrupts hunting)
+    let shouldFlee = false;
+    let nearestThreat: THREE.Vector3 | null = null;
+    let nearestThreatDist = Infinity;
+
+    // Check sprinting player first (more scary)
+    if (playerPosition && isSprinting) {
+      const distToPlayer = current.distanceTo(playerPosition);
+      if (distToPlayer < CAT_SPRINT_STARTLE_RANGE) {
+        shouldFlee = true;
+        nearestThreat = playerPosition.clone();
+        nearestThreatDist = distToPlayer;
+      }
+    }
+
+    // Check regular NPCs (including non-sprinting player)
+    if (npcPositions && npcPositions.length > 0) {
+      for (const npcPos of npcPositions) {
+        const dist = current.distanceTo(npcPos);
+        if (dist < CAT_FLEE_RANGE && dist < nearestThreatDist) {
+          shouldFlee = true;
+          nearestThreat = npcPos.clone();
+          nearestThreatDist = dist;
+        }
+      }
+    }
+
+    if (shouldFlee && nearestThreat) {
+      // Find farthest waypoint from threat
+      let farthestWaypoint: THREE.Vector3 | null = null;
+      let maxDist = 0;
+      for (const wp of waypoints) {
+        const wpVec = new THREE.Vector3(...wp);
+        const distFromThreat = wpVec.distanceTo(nearestThreat);
+        if (distFromThreat > maxDist) {
+          maxDist = distFromThreat;
+          farthestWaypoint = wpVec;
+        }
+      }
+
+      if (farthestWaypoint && state.current.mode !== 'flee') {
+        state.current.mode = 'flee';
+        state.current.fleeTarget = farthestWaypoint;
+        state.current.timer = 3; // Flee for at least 3 seconds
+      }
+    } else if (state.current.mode === 'flee' && state.current.timer <= 0) {
+      // Safe now, go back to normal behavior
+      state.current.mode = 'idle';
+      state.current.fleeTarget = null;
+      state.current.timer = 2 + Math.random() * 3;
+    }
+
+    // Check for nearby rats to hunt (unless sleeping, fleeing, or already pouncing)
+    if (ratPositions && ratPositions.length > 0 && state.current.mode !== 'sleep' && state.current.mode !== 'pounce' && state.current.mode !== 'flee') {
       let nearestRat: THREE.Vector3 | null = null;
       let nearestDist = CAT_HUNT_RANGE;
 
@@ -397,12 +512,31 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       }
     }
 
+    // Check for nearby ball to bat (playful behavior, not when fleeing, sleeping, or already batting)
+    if (ballPhysics && state.current.mode !== 'flee' && state.current.mode !== 'sleep' && state.current.mode !== 'bat' && state.current.mode !== 'pounce') {
+      const ball = ballPhysics.current;
+      const distToBall = current.distanceTo(ball.position);
+      const timeSinceLastBat = state.current.breathCycle - ball.lastBatTime;
+
+      // Cat notices ball within 5 units and hasn't batted recently
+      if (distToBall < 5.0 && timeSinceLastBat > 8.0) {
+        // 30% chance to bat when nearby (cats are selective)
+        if (Math.random() < 0.3) {
+          state.current.mode = 'bat';
+          state.current.batProgress = 0;
+          state.current.batDirection = ball.position.clone().sub(current).normalize();
+          ball.lastBatTime = state.current.breathCycle;
+        }
+      }
+    }
+
     // Breathing animation (subtle body scale pulse)
     const breathScale = 1 + Math.sin(state.current.breathCycle * 2) * 0.015;
     bodyRef.current.scale.setScalar(breathScale);
 
-    // Ear twitches (occasional, more frequent when hunting)
-    const earTwitchFreq = state.current.mode === 'hunt' ? 4 : 8;
+    // Ear twitches (occasional, more frequent when hunting or tracking)
+    const isTracking = state.current.headTrackTarget !== null;
+    const earTwitchFreq = state.current.mode === 'hunt' ? 4 : (isTracking ? 5 : 8);
     earRefs.current.forEach((ear, i) => {
       if (ear) {
         const twitch = Math.sin(state.current.breathCycle * earTwitchFreq + i * Math.PI) > 0.9 ? 0.15 : 0;
@@ -410,16 +544,128 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       }
     });
 
-    // Tail wave animation - faster when hunting
-    const tailSpeed = state.current.mode === 'hunt' ? 6 : 3;
-    const tailIntensity = state.current.mode === 'hunt' ? 0.4 : (state.current.mode === 'walk' ? 0.25 : 0.12);
+    // Tail wave animation - faster when hunting, rigid when fleeing
+    const tailSpeed = state.current.mode === 'hunt' ? 6 : (state.current.mode === 'flee' ? 8 : 3);
+    const tailIntensity = state.current.mode === 'flee' ? 0.15 : (state.current.mode === 'hunt' ? 0.4 : (state.current.mode === 'walk' ? 0.25 : 0.12));
     tailSegments.current.forEach((seg, i) => {
       if (seg) {
         const phase = state.current.breathCycle * tailSpeed - i * 0.4;
-        seg.rotation.z = Math.sin(phase) * tailIntensity;
-        seg.rotation.y = Math.cos(phase * 0.7) * tailIntensity * 0.4;
+        // When fleeing, tail is more rigid/straight (puffed up effect)
+        if (state.current.mode === 'flee') {
+          seg.rotation.z = 0.1 + Math.sin(phase) * tailIntensity;
+          seg.rotation.y = 0;
+        } else {
+          seg.rotation.z = Math.sin(phase) * tailIntensity;
+          seg.rotation.y = Math.cos(phase * 0.7) * tailIntensity * 0.4;
+        }
       }
     });
+
+    // Bat mode - playfully swat the ball
+    if (state.current.mode === 'bat' && ballPhysics) {
+      state.current.batProgress += delta * 3; // Quick bat motion
+
+      if (state.current.batProgress >= 1) {
+        // Bat complete, return to idle
+        state.current.mode = 'idle';
+        state.current.batProgress = 0;
+        state.current.timer = 1 + Math.random() * 2;
+        return;
+      }
+
+      const ball = ballPhysics.current;
+      const t = state.current.batProgress;
+
+      // Phase 1 (0-0.3): Crouch and aim
+      // Phase 2 (0.3-0.6): Quick swipe
+      // Phase 3 (0.6-1.0): Follow through
+      const phase = t < 0.3 ? 'aim' : (t < 0.6 ? 'swipe' : 'follow');
+
+      if (phase === 'aim') {
+        // Look at ball and crouch
+        groupRef.current.lookAt(new THREE.Vector3(ball.position.x, current.y, ball.position.z));
+
+        if (headRef.current) {
+          headRef.current.rotation.y = 0;
+          headRef.current.position.y = 0.10; // Lower head
+        }
+
+        legRefs.current.forEach((leg, i) => {
+          if (leg?.upper && leg?.lower) {
+            const isFront = i < 2;
+            if (isFront) {
+              // Front paws ready
+              leg.upper.rotation.z = 0.3;
+              leg.lower.rotation.z = 0.1;
+            } else {
+              // Haunches crouched
+              leg.upper.rotation.z = 0.8;
+              leg.lower.rotation.z = -1.0;
+            }
+          }
+        });
+      } else if (phase === 'swipe') {
+        // Quick swipe motion - apply force to ball at peak
+        const swipeT = (t - 0.3) / 0.3;
+
+        if (headRef.current) {
+          headRef.current.position.y = 0.12;
+        }
+
+        // Front left paw swipes
+        if (legRefs.current[0]?.upper && legRefs.current[0]?.lower) {
+          legRefs.current[0].upper.rotation.z = -0.4 - swipeT * 0.6;
+          legRefs.current[0].lower.rotation.z = 0.2 + swipeT * 0.3;
+        }
+
+        // Apply force to ball at swipe peak (t ~ 0.45)
+        if (t > 0.4 && t < 0.5) {
+          const distToBall = current.distanceTo(ball.position);
+          if (distToBall < 1.2) {
+            // Hit! Apply force away from cat
+            const forceDir = state.current.batDirection.clone();
+            const forceMag = 4.0 + Math.random() * 2.0;
+            ball.velocity.set(
+              forceDir.x * forceMag,
+              1.5 + Math.random() * 1.0, // Pop up
+              forceDir.z * forceMag
+            );
+          }
+        }
+      } else {
+        // Follow through - watch ball
+        if (headRef.current) {
+          const dir = ball.position.clone().sub(current);
+          dir.y = 0;
+          const angle = Math.atan2(dir.x, dir.z);
+          const bodyAngle = groupRef.current.rotation.y;
+          const targetHeadAngle = angle - bodyAngle + Math.PI / 2;
+          headRef.current.rotation.y = targetHeadAngle;
+          headRef.current.position.y = 0.14; // Head up watching
+        }
+
+        // Return legs to normal
+        legRefs.current.forEach((leg, i) => {
+          if (leg?.upper && leg?.lower) {
+            const isFront = i < 2;
+            leg.upper.rotation.z = isFront ? 0.1 : 0.6;
+            leg.lower.rotation.z = isFront ? 0 : -0.8;
+          }
+        });
+      }
+
+      // Tail swishing excitedly during bat
+      tailSegments.current.forEach((seg, i) => {
+        if (seg) {
+          const swishSpeed = 10;
+          const phase = state.current.breathCycle * swishSpeed - i * 0.3;
+          seg.rotation.z = Math.sin(phase) * 0.5;
+          seg.rotation.y = Math.cos(phase * 0.8) * 0.3;
+        }
+      });
+
+      return;
+    }
 
     // Pounce mode - quick lunge animation
     if (state.current.mode === 'pounce') {
@@ -447,8 +693,42 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
 
     if (state.current.mode === 'sleep') {
       // Sleeping: curled up, gentle breathing
+      // But still tracks nearby movement (like a real cat)
+      let trackTarget: THREE.Vector3 | null = null;
+      const SLEEP_TRACK_RANGE = 4.0; // Shorter range when sleeping
+
+      // Only track rats when sleeping (more interesting prey)
+      if (ratPositions && ratPositions.length > 0) {
+        for (const ratPos of ratPositions) {
+          const dist = current.distanceTo(ratPos);
+          if (dist < SLEEP_TRACK_RANGE) {
+            trackTarget = ratPos;
+            break;
+          }
+        }
+      }
+
       if (headRef.current) {
-        headRef.current.rotation.y = -0.3;
+        if (trackTarget) {
+          // Calculate head rotation to look at rat
+          const dir = trackTarget.clone().sub(current);
+          dir.y = 0;
+          const angle = Math.atan2(dir.x, dir.z);
+          const bodyAngle = groupRef.current.rotation.y;
+          const targetHeadAngle = angle - bodyAngle + Math.PI / 2;
+
+          // Very slow tracking when sleeping
+          headRef.current.rotation.y = THREE.MathUtils.lerp(
+            headRef.current.rotation.y,
+            targetHeadAngle,
+            0.02
+          );
+          state.current.headTrackTarget = trackTarget;
+        } else {
+          // Sleeping position, head tucked
+          headRef.current.rotation.y = -0.3;
+          state.current.headTrackTarget = null;
+        }
         headRef.current.position.y = 0.08;
       }
       legRefs.current.forEach((leg) => {
@@ -459,16 +739,138 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       });
 
       if (state.current.timer <= 0) {
-        state.current.mode = Math.random() > 0.3 ? 'walk' : 'idle';
-        state.current.targetIndex = (state.current.targetIndex + 1) % waypoints.length;
-        state.current.timer = 6 + Math.random() * 6;
+        // Wake up with a stretch
+        state.current.mode = 'stretch';
+        state.current.stretchProgress = 0;
+        state.current.timer = 1.2; // Stretch duration
       }
       return;
     }
 
-    if (state.current.mode === 'idle') {
+    if (state.current.mode === 'stretch') {
+      state.current.stretchProgress += delta;
+
+      if (state.current.stretchProgress >= 1.2) {
+        // Stretch complete, decide next action
+        state.current.mode = Math.random() > 0.3 ? 'walk' : 'idle';
+        state.current.targetIndex = (state.current.targetIndex + 1) % waypoints.length;
+        state.current.timer = 6 + Math.random() * 6;
+        state.current.stretchProgress = 0;
+        return;
+      }
+
+      const t = state.current.stretchProgress;
+      const stretchPhase = t < 0.4 ? 'extend' : (t < 0.8 ? 'arch' : 'release');
+
       if (headRef.current) {
-        headRef.current.rotation.y = Math.sin(state.current.breathCycle * 0.5) * 0.2;
+        if (stretchPhase === 'extend') {
+          // Head down, extending forward
+          headRef.current.rotation.y = 0;
+          headRef.current.position.y = 0.06;
+        } else if (stretchPhase === 'arch') {
+          // Head up, back arched
+          headRef.current.rotation.y = 0;
+          headRef.current.position.y = 0.15;
+        } else {
+          // Release back to normal
+          headRef.current.rotation.y = 0;
+          headRef.current.position.y = 0.12;
+        }
+      }
+
+      legRefs.current.forEach((leg, i) => {
+        if (leg?.upper && leg?.lower) {
+          const isFront = i < 2;
+
+          if (stretchPhase === 'extend') {
+            // Front legs extended forward, back legs crouched
+            if (isFront) {
+              leg.upper.rotation.z = -0.4;
+              leg.lower.rotation.z = 0.2;
+            } else {
+              leg.upper.rotation.z = 0.8;
+              leg.lower.rotation.z = -1.2;
+            }
+          } else if (stretchPhase === 'arch') {
+            // All legs extended, back arched
+            if (isFront) {
+              leg.upper.rotation.z = -0.2;
+              leg.lower.rotation.z = 0.1;
+            } else {
+              leg.upper.rotation.z = 0.2;
+              leg.lower.rotation.z = -0.3;
+            }
+          } else {
+            // Release to standing
+            leg.upper.rotation.z = isFront ? 0.1 : 0.6;
+            leg.lower.rotation.z = isFront ? 0 : -0.8;
+          }
+        }
+      });
+
+      // Tail raised during stretch
+      tailSegments.current.forEach((seg, i) => {
+        if (seg) {
+          if (stretchPhase === 'arch') {
+            seg.rotation.z = 0.3 - i * 0.05;
+            seg.rotation.y = 0;
+          }
+        }
+      });
+
+      return;
+    }
+
+    if (state.current.mode === 'idle') {
+      // Head tracking: Look at nearby rats or NPCs when idle
+      let trackTarget: THREE.Vector3 | null = null;
+      const TRACK_RANGE = 6.0;
+
+      // Prefer watching rats over NPCs
+      if (ratPositions && ratPositions.length > 0) {
+        for (const ratPos of ratPositions) {
+          const dist = current.distanceTo(ratPos);
+          if (dist < TRACK_RANGE) {
+            trackTarget = ratPos;
+            break;
+          }
+        }
+      }
+
+      // If no rats nearby, watch NPCs
+      if (!trackTarget && npcPositions && npcPositions.length > 0) {
+        for (const npcPos of npcPositions) {
+          const dist = current.distanceTo(npcPos);
+          if (dist < TRACK_RANGE) {
+            trackTarget = npcPos;
+            break;
+          }
+        }
+      }
+
+      if (headRef.current) {
+        if (trackTarget) {
+          // Calculate head rotation to look at target
+          const dir = trackTarget.clone().sub(current);
+          dir.y = 0; // Keep head level
+          const angle = Math.atan2(dir.x, dir.z);
+          const bodyAngle = groupRef.current.rotation.y;
+          const targetHeadAngle = angle - bodyAngle + Math.PI / 2;
+
+          // Smoothly rotate head
+          headRef.current.rotation.y = THREE.MathUtils.lerp(
+            headRef.current.rotation.y,
+            targetHeadAngle,
+            0.05
+          );
+
+          // Store track target for ear twitching
+          state.current.headTrackTarget = trackTarget;
+        } else {
+          // No target, gentle idle head movement
+          headRef.current.rotation.y = Math.sin(state.current.breathCycle * 0.5) * 0.2;
+          state.current.headTrackTarget = null;
+        }
         headRef.current.position.y = 0.12;
       }
       legRefs.current.forEach((leg, i) => {
@@ -486,6 +888,84 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       return;
     }
 
+    // Flee mode - run away from NPCs/player
+    if (state.current.mode === 'flee' && state.current.fleeTarget) {
+      const target = state.current.fleeTarget;
+      const dir = target.clone().sub(current);
+      dir.y = 0;
+      const dist = dir.length();
+
+      if (dist < 0.5) {
+        // Reached safe spot, idle briefly
+        state.current.mode = 'idle';
+        state.current.fleeTarget = null;
+        state.current.timer = 3 + Math.random() * 4;
+        return;
+      }
+
+      dir.normalize();
+      const nextPos = current.clone().add(dir.multiplyScalar(delta * CAT_FLEE_SPEED));
+
+      // Check for collision and try alternate angles if blocked
+      if (isPositionBlocked(nextPos)) {
+        let foundPath = false;
+        const angles = [Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2, Math.PI];
+        for (const angleOffset of angles) {
+          const altDir = dir.clone();
+          const cos = Math.cos(angleOffset);
+          const sin = Math.sin(angleOffset);
+          const newX = altDir.x * cos - altDir.z * sin;
+          const newZ = altDir.x * sin + altDir.z * cos;
+          altDir.set(newX, 0, newZ);
+          const altPos = current.clone().add(altDir.multiplyScalar(delta * CAT_FLEE_SPEED));
+          if (!isPositionBlocked(altPos)) {
+            current.copy(altPos);
+            foundPath = true;
+            break;
+          }
+        }
+        if (!foundPath) {
+          // Completely stuck, just stop
+          state.current.mode = 'idle';
+          state.current.timer = 1;
+          return;
+        }
+      } else {
+        current.copy(nextPos);
+      }
+
+      groupRef.current.lookAt(new THREE.Vector3(target.x, current.y, target.z));
+
+      // Very fast walk cycle when fleeing
+      state.current.walkCycle += delta * 18;
+
+      if (headRef.current) {
+        headRef.current.rotation.y = 0;
+        headRef.current.position.y = 0.11; // Slightly lowered, focused on escape
+      }
+
+      // Ears flattened back when fleeing
+      earRefs.current.forEach((ear, i) => {
+        if (ear) {
+          ear.rotation.z = (i === 0 ? -0.4 : 0.4); // Flattened backwards
+          ear.rotation.x = -0.3;
+        }
+      });
+
+      // Very fast leg movement
+      legRefs.current.forEach((leg, i) => {
+        if (leg?.upper && leg?.lower) {
+          const isFront = i < 2;
+          const isLeft = i % 2 === 0;
+          const phaseOffset = (isFront === isLeft) ? 0 : Math.PI;
+          const cycle = state.current.walkCycle + phaseOffset;
+          leg.upper.rotation.z = Math.sin(cycle) * 0.6;
+          leg.lower.rotation.z = Math.sin(cycle - 0.5) * 0.5 - 0.2;
+        }
+      });
+      return;
+    }
+
     // Hunt mode - chase the nearest rat
     if (state.current.mode === 'hunt' && state.current.huntTarget) {
       const target = state.current.huntTarget;
@@ -494,7 +974,38 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       const dist = dir.length();
 
       dir.normalize();
-      current.add(dir.multiplyScalar(delta * CAT_HUNT_SPEED));
+      const nextPos = current.clone().add(dir.multiplyScalar(delta * CAT_HUNT_SPEED));
+
+      // Check for collision during hunting
+      if (isPositionBlocked(nextPos)) {
+        // Try to go around obstacle
+        let foundPath = false;
+        const angles = [Math.PI / 4, -Math.PI / 4];
+        for (const angleOffset of angles) {
+          const altDir = dir.clone();
+          const cos = Math.cos(angleOffset);
+          const sin = Math.sin(angleOffset);
+          const newX = altDir.x * cos - altDir.z * sin;
+          const newZ = altDir.x * sin + altDir.z * cos;
+          altDir.set(newX, 0, newZ);
+          const altPos = current.clone().add(altDir.multiplyScalar(delta * CAT_HUNT_SPEED));
+          if (!isPositionBlocked(altPos)) {
+            current.copy(altPos);
+            foundPath = true;
+            break;
+          }
+        }
+        if (!foundPath) {
+          // Give up hunt if blocked
+          state.current.mode = 'idle';
+          state.current.huntTarget = null;
+          state.current.timer = 2;
+          return;
+        }
+      } else {
+        current.copy(nextPos);
+      }
+
       groupRef.current.lookAt(new THREE.Vector3(target.x, current.y, target.z));
 
       // Faster walk cycle when hunting
@@ -519,9 +1030,84 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       return;
     }
 
+    // Jump mode - arc over to elevated waypoints
+    if (state.current.mode === 'jump' && state.current.jumpStart && state.current.jumpEnd) {
+      state.current.jumpProgress += delta * 2.5; // Jump speed
+
+      if (state.current.jumpProgress >= 1) {
+        // Jump complete, land and idle
+        current.copy(state.current.jumpEnd);
+        state.current.mode = 'idle';
+        state.current.jumpStart = null;
+        state.current.jumpEnd = null;
+        state.current.jumpProgress = 0;
+        state.current.timer = 2 + Math.random() * 3;
+        return;
+      }
+
+      const t = state.current.jumpProgress;
+      const start = state.current.jumpStart;
+      const end = state.current.jumpEnd;
+
+      // Horizontal interpolation
+      current.x = THREE.MathUtils.lerp(start.x, end.x, t);
+      current.z = THREE.MathUtils.lerp(start.z, end.z, t);
+
+      // Parabolic arc for jump (peaks at t=0.5)
+      const arcHeight = 0.6; // Jump arc height
+      const baseY = THREE.MathUtils.lerp(start.y, end.y, t);
+      current.y = baseY + arcHeight * 4 * t * (1 - t);
+
+      // Look toward landing spot
+      groupRef.current.lookAt(new THREE.Vector3(end.x, current.y, end.z));
+
+      // Jump animation
+      const jumpPhase = t < 0.3 ? 'crouch' : (t < 0.7 ? 'spring' : 'land');
+
+      if (headRef.current) {
+        headRef.current.rotation.y = 0;
+        headRef.current.position.y = jumpPhase === 'crouch' ? 0.08 : 0.14;
+      }
+
+      legRefs.current.forEach((leg) => {
+        if (leg?.upper && leg?.lower) {
+          if (jumpPhase === 'crouch') {
+            // Crouch before jump
+            leg.upper.rotation.z = 0.9;
+            leg.lower.rotation.z = -1.4;
+          } else if (jumpPhase === 'spring') {
+            // Extend legs during jump
+            leg.upper.rotation.z = -0.2;
+            leg.lower.rotation.z = -0.1;
+          } else {
+            // Prepare for landing
+            leg.upper.rotation.z = 0.5;
+            leg.lower.rotation.z = -0.6;
+          }
+        }
+      });
+      return;
+    }
+
     // Walking mode
     const target = new THREE.Vector3(...waypoints[state.current.targetIndex]);
     const dir = target.clone().sub(current);
+    const heightDiff = Math.abs(target.y - current.y);
+
+    // Check if we need to jump (height difference > 0.15 units)
+    if (heightDiff > 0.15 && state.current.mode === 'walk') {
+      const dist2D = Math.sqrt(dir.x * dir.x + dir.z * dir.z);
+
+      // Only jump if we're close enough horizontally
+      if (dist2D < 2.0) {
+        state.current.mode = 'jump';
+        state.current.jumpStart = current.clone();
+        state.current.jumpEnd = target.clone();
+        state.current.jumpProgress = 0;
+        return;
+      }
+    }
+
     const dist = dir.length();
 
     if (dist < 0.1) {
@@ -531,7 +1117,38 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
     }
 
     dir.normalize();
-    current.add(dir.multiplyScalar(delta * CAT_WALK_SPEED));
+    const nextPos = current.clone().add(dir.multiplyScalar(delta * CAT_WALK_SPEED));
+
+    // Check for collision during walking
+    if (isPositionBlocked(nextPos)) {
+      // Try to go around obstacle
+      let foundPath = false;
+      const angles = [Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3];
+      for (const angleOffset of angles) {
+        const altDir = dir.clone();
+        const cos = Math.cos(angleOffset);
+        const sin = Math.sin(angleOffset);
+        const newX = altDir.x * cos - altDir.z * sin;
+        const newZ = altDir.x * sin + altDir.z * cos;
+        altDir.set(newX, 0, newZ);
+        const altPos = current.clone().add(altDir.multiplyScalar(delta * CAT_WALK_SPEED));
+        if (!isPositionBlocked(altPos)) {
+          current.copy(altPos);
+          foundPath = true;
+          break;
+        }
+      }
+      if (!foundPath) {
+        // Pick a new waypoint if completely blocked
+        state.current.targetIndex = (state.current.targetIndex + 1) % waypoints.length;
+        state.current.mode = 'idle';
+        state.current.timer = 1;
+        return;
+      }
+    } else {
+      current.copy(nextPos);
+    }
+
     groupRef.current.lookAt(target);
 
     state.current.walkCycle += delta * 8;
@@ -748,6 +1365,558 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
   );
 };
 
+// Dog color variants
+const DOG_VARIANTS = [
+  { name: 'Brown', primary: '#6b4423', secondary: '#4a3016', eyeColor: '#2a1a0a' },
+  { name: 'Gray', primary: '#6a6a6a', secondary: '#4a4a4a', eyeColor: '#2a2a2a' },
+  { name: 'Black', primary: '#2a2a2a', secondary: '#1a1a1a', eyeColor: '#0a0a0a' },
+  { name: 'White', primary: '#e8e8e8', secondary: '#d0d0d0', eyeColor: '#2a2a2a' },
+  { name: 'Mottled', primary: '#8b6843', secondary: '#d4a574', eyeColor: '#3a2814' },
+];
+
+interface StrayDogProps {
+  seed?: number;
+  npcPositions?: THREE.Vector3[];
+  playerPosition?: THREE.Vector3;
+  spawnPosition?: [number, number, number];
+}
+
+export const StrayDog: React.FC<StrayDogProps> = ({ seed = 0, npcPositions, playerPosition, spawnPosition = [10, 0, 10] }) => {
+  const groupRef = useRef<THREE.Group>(null);
+  const bodyRef = useRef<THREE.Group>(null);
+  const headRef = useRef<THREE.Group>(null);
+  const tailRef = useRef<THREE.Group>(null);
+  const earRefs = useRef<THREE.Mesh[]>([]);
+  const legRefs = useRef<{ upper: THREE.Group; lower: THREE.Group }[]>([]);
+  const wireframeEnabled = useContext(HoverWireframeContext);
+  const labelEnabled = useContext(HoverLabelContext);
+  const [hovered, setHovered] = useState(false);
+
+  const state = useRef({
+    mode: 'idle' as 'idle' | 'sniff' | 'walk' | 'run' | 'follow' | 'rest' | 'bark' | 'scratch',
+    timer: 0,
+    walkCycle: 0,
+    breathCycle: 0,
+    followTarget: null as THREE.Vector3 | null,
+    wanderTarget: null as THREE.Vector3 | null,
+    barkTimer: 0,
+    scratchProgress: 0,
+    tailWagSpeed: 1,
+    sniffProgress: 0
+  });
+
+  // Randomize dog appearance
+  const dogAppearance = useMemo(() => {
+    const rng = (s: number) => { s = (s * 1103515245 + 12345) & 0x7fffffff; return { val: s / 0x7fffffff, next: s }; };
+    let s = seed + 12345;
+    const r1 = rng(s); s = r1.next;
+    const r2 = rng(s); s = r2.next;
+    const r3 = rng(s);
+    const variant = DOG_VARIANTS[Math.floor(r1.val * DOG_VARIANTS.length)];
+    const scale = 1.2 + r2.val * 2.0; // Size varies from 1.2 to 3.2 (small to very large dog)
+    const tailLength = 0.08 + r3.val * 0.12; // Tail length varies from 0.08 to 0.20
+    return { variant, scale, tailLength };
+  }, [seed]);
+
+  const furMaterial = useMemo(() => (
+    <meshStandardMaterial color={dogAppearance.variant.primary} roughness={0.95} />
+  ), [dogAppearance]);
+  const darkFurMaterial = useMemo(() => (
+    <meshStandardMaterial color={dogAppearance.variant.secondary} roughness={0.95} />
+  ), [dogAppearance]);
+
+  useFrame((_, delta) => {
+    if (!groupRef.current || !bodyRef.current) return;
+    const current = groupRef.current.position;
+    state.current.timer -= delta;
+    state.current.breathCycle += delta;
+
+    // Collision detection helper
+    const isPositionBlocked = (pos: THREE.Vector3): boolean => {
+      // Check player collision
+      if (playerPosition) {
+        const distToPlayer = pos.distanceTo(playerPosition);
+        if (distToPlayer < DOG_COLLISION_RADIUS + 0.5) return true;
+      }
+
+      // Check NPC collisions
+      if (npcPositions) {
+        for (const npcPos of npcPositions) {
+          const distToNPC = pos.distanceTo(npcPos);
+          if (distToNPC < DOG_COLLISION_RADIUS + 0.5) return true;
+        }
+      }
+
+      return false;
+    };
+
+    // AI: Look for NPCs to follow (dogs are social and curious)
+    if (state.current.mode !== 'rest' && state.current.mode !== 'bark' && state.current.mode !== 'scratch') {
+      if (npcPositions && npcPositions.length > 0) {
+        let nearestNPC: THREE.Vector3 | null = null;
+        let nearestDist = DOG_FOLLOW_DISTANCE;
+
+        for (const npcPos of npcPositions) {
+          const dist = current.distanceTo(npcPos);
+          if (dist < DOG_FOLLOW_DISTANCE && dist > DOG_MIN_FOLLOW_DISTANCE) {
+            if (!nearestNPC || dist < nearestDist) {
+              nearestNPC = npcPos.clone();
+              nearestDist = dist;
+            }
+          }
+        }
+
+        if (nearestNPC && Math.random() < 0.4) {
+          state.current.followTarget = nearestNPC;
+          state.current.mode = 'follow';
+        } else if (state.current.mode === 'follow' && !nearestNPC) {
+          state.current.mode = 'idle';
+          state.current.followTarget = null;
+          state.current.timer = 2;
+        }
+      }
+    }
+
+    // Breathing animation
+    const breathScale = 1 + Math.sin(state.current.breathCycle * 1.5) * 0.02;
+    bodyRef.current.scale.setScalar(breathScale);
+
+    // Tail wagging animation (wags more when following or happy)
+    const wagIntensity = state.current.mode === 'follow' ? 0.6 : (state.current.mode === 'walk' ? 0.3 : 0.15);
+    if (tailRef.current) {
+      tailRef.current.rotation.y = Math.sin(state.current.breathCycle * state.current.tailWagSpeed * 4) * wagIntensity;
+    }
+
+    // Ear movements (perk up when alert)
+    const earAlert = state.current.mode === 'follow' || state.current.mode === 'bark';
+    earRefs.current.forEach((ear, i) => {
+      if (ear) {
+        const baseAngle = earAlert ? -0.1 : 0.2;
+        const flutter = Math.sin(state.current.breathCycle * 3 + i * Math.PI) > 0.85 ? 0.1 : 0;
+        ear.rotation.x = baseAngle + flutter;
+      }
+    });
+
+    // Mode-specific behaviors
+    if (state.current.mode === 'rest') {
+      // Lying down
+      if (headRef.current) {
+        headRef.current.position.y = 0.08;
+        headRef.current.rotation.x = 0.3;
+      }
+
+      legRefs.current.forEach((leg) => {
+        if (leg?.upper && leg?.lower) {
+          leg.upper.rotation.z = 1.2;
+          leg.lower.rotation.z = -1.5;
+        }
+      });
+
+      if (state.current.timer <= 0) {
+        state.current.mode = Math.random() > 0.5 ? 'sniff' : 'walk';
+        state.current.timer = 3 + Math.random() * 4;
+      }
+      return;
+    }
+
+    if (state.current.mode === 'bark') {
+      state.current.barkTimer -= delta;
+
+      if (headRef.current) {
+        const barkPhase = Math.sin(state.current.barkTimer * 20);
+        headRef.current.rotation.x = -0.3 + barkPhase * 0.2;
+        headRef.current.position.y = 0.16;
+      }
+
+      if (state.current.barkTimer <= 0) {
+        state.current.mode = 'idle';
+        state.current.timer = 2;
+      }
+      return;
+    }
+
+    if (state.current.mode === 'scratch') {
+      state.current.scratchProgress += delta * 4;
+
+      if (state.current.scratchProgress >= 1) {
+        state.current.mode = 'idle';
+        state.current.scratchProgress = 0;
+        state.current.timer = 2;
+        return;
+      }
+
+      // Sitting, scratching with back leg
+      if (headRef.current) {
+        headRef.current.rotation.z = Math.sin(state.current.scratchProgress * 15) * 0.15;
+        headRef.current.position.y = 0.14;
+      }
+
+      // Back right leg scratching motion
+      if (legRefs.current[3]?.upper && legRefs.current[3]?.lower) {
+        const scratchPhase = Math.sin(state.current.scratchProgress * 15);
+        legRefs.current[3].upper.rotation.z = 0.8 + scratchPhase * 0.4;
+        legRefs.current[3].lower.rotation.z = -1.0 + scratchPhase * 0.6;
+      }
+
+      return;
+    }
+
+    if (state.current.mode === 'sniff') {
+      state.current.sniffProgress += delta;
+
+      if (headRef.current) {
+        headRef.current.position.y = 0.04; // Nose to ground
+        headRef.current.rotation.x = 0.6;
+        headRef.current.rotation.y = Math.sin(state.current.sniffProgress * 2) * 0.3;
+      }
+
+      legRefs.current.forEach((leg, i) => {
+        if (leg?.upper && leg?.lower) {
+          const isFront = i < 2;
+          leg.upper.rotation.z = isFront ? 0.2 : 0.7;
+          leg.lower.rotation.z = isFront ? -0.1 : -1.0;
+        }
+      });
+
+      if (state.current.sniffProgress > 3) {
+        state.current.mode = 'walk';
+        state.current.sniffProgress = 0;
+        state.current.timer = 4;
+      }
+      return;
+    }
+
+    if (state.current.mode === 'follow' && state.current.followTarget) {
+      const target = state.current.followTarget;
+      const dir = target.clone().sub(current);
+      dir.y = 0;
+      const dist = dir.length();
+
+      // Maintain distance
+      if (dist < DOG_MIN_FOLLOW_DISTANCE) {
+        state.current.mode = 'idle';
+        state.current.followTarget = null;
+        state.current.timer = 1;
+        return;
+      }
+
+      dir.normalize();
+      const speed = dist > 10 ? DOG_RUN_SPEED : DOG_WALK_SPEED;
+      const nextPos = current.clone().add(dir.multiplyScalar(delta * speed));
+
+      if (!isPositionBlocked(nextPos)) {
+        current.copy(nextPos);
+      }
+
+      groupRef.current.lookAt(new THREE.Vector3(target.x, current.y, target.z));
+      state.current.walkCycle += delta * (speed > 1 ? 12 : 8);
+
+      // Walking/running animation
+      if (headRef.current) {
+        headRef.current.rotation.y = Math.sin(state.current.walkCycle * 0.3) * 0.08;
+        headRef.current.position.y = 0.16 + Math.sin(state.current.walkCycle * 2) * 0.02;
+      }
+
+      legRefs.current.forEach((leg, i) => {
+        if (leg?.upper && leg?.lower) {
+          const isFront = i < 2;
+          const isLeft = i % 2 === 0;
+          const phaseOffset = (isFront === isLeft) ? 0 : Math.PI;
+          const cycle = state.current.walkCycle + phaseOffset;
+          leg.upper.rotation.z = Math.sin(cycle) * 0.5;
+          leg.lower.rotation.z = Math.sin(cycle - 0.4) * 0.4 - 0.3;
+        }
+      });
+
+      return;
+    }
+
+    if (state.current.mode === 'idle') {
+      if (headRef.current) {
+        headRef.current.rotation.y = Math.sin(state.current.breathCycle * 0.4) * 0.3;
+        headRef.current.position.y = 0.16;
+      }
+
+      legRefs.current.forEach((leg, i) => {
+        if (leg?.upper && leg?.lower) {
+          const isFront = i < 2;
+          leg.upper.rotation.z = isFront ? 0.1 : 0.7;
+          leg.lower.rotation.z = isFront ? -0.1 : -1.0;
+        }
+      });
+
+      if (state.current.timer <= 0) {
+        const rand = Math.random();
+        if (rand > 0.7) {
+          state.current.mode = 'sniff';
+          state.current.sniffProgress = 0;
+        } else if (rand > 0.5) {
+          state.current.mode = 'rest';
+          state.current.timer = 8 + Math.random() * 10;
+        } else if (rand > 0.4) {
+          state.current.mode = 'bark';
+          state.current.barkTimer = 1 + Math.random() * 1;
+        } else if (rand > 0.3) {
+          state.current.mode = 'scratch';
+          state.current.scratchProgress = 0;
+        } else {
+          state.current.mode = 'walk';
+          state.current.timer = 5 + Math.random() * 5;
+          // Pick random wander target
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 8 + Math.random() * 15;
+          state.current.wanderTarget = new THREE.Vector3(
+            current.x + Math.cos(angle) * dist,
+            0,
+            current.z + Math.sin(angle) * dist
+          );
+        }
+      }
+      return;
+    }
+
+    // Walking mode
+    if (state.current.mode === 'walk') {
+      if (!state.current.wanderTarget) {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = 8 + Math.random() * 15;
+        state.current.wanderTarget = new THREE.Vector3(
+          current.x + Math.cos(angle) * dist,
+          0,
+          current.z + Math.sin(angle) * dist
+        );
+      }
+
+      const target = state.current.wanderTarget;
+      const dir = target.clone().sub(current);
+      dir.y = 0;
+      const dist = dir.length();
+
+      if (dist < 1.0) {
+        state.current.mode = 'idle';
+        state.current.wanderTarget = null;
+        state.current.timer = 2 + Math.random() * 3;
+        return;
+      }
+
+      dir.normalize();
+      const nextPos = current.clone().add(dir.multiplyScalar(delta * DOG_WALK_SPEED));
+
+      if (!isPositionBlocked(nextPos)) {
+        current.copy(nextPos);
+      } else {
+        // Try alternate angles
+        const angles = [Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2];
+        for (const angleOffset of angles) {
+          const altDir = dir.clone();
+          const cos = Math.cos(angleOffset);
+          const sin = Math.sin(angleOffset);
+          const newX = altDir.x * cos - altDir.z * sin;
+          const newZ = altDir.x * sin + altDir.z * cos;
+          altDir.set(newX, 0, newZ);
+          const altPos = current.clone().add(altDir.multiplyScalar(delta * DOG_WALK_SPEED));
+          if (!isPositionBlocked(altPos)) {
+            current.copy(altPos);
+            break;
+          }
+        }
+      }
+
+      groupRef.current.lookAt(target);
+      state.current.walkCycle += delta * 8;
+
+      if (headRef.current) {
+        headRef.current.rotation.y = Math.sin(state.current.walkCycle * 0.5) * 0.12;
+        headRef.current.position.y = 0.16 + Math.sin(state.current.walkCycle * 2) * 0.02;
+      }
+
+      legRefs.current.forEach((leg, i) => {
+        if (leg?.upper && leg?.lower) {
+          const isFront = i < 2;
+          const isLeft = i % 2 === 0;
+          const phaseOffset = (isFront === isLeft) ? 0 : Math.PI;
+          const cycle = state.current.walkCycle + phaseOffset;
+          leg.upper.rotation.z = Math.sin(cycle) * 0.5;
+          leg.lower.rotation.z = Math.sin(cycle - 0.4) * 0.4 - 0.3;
+        }
+      });
+    }
+  });
+
+  useHoverFade(groupRef, wireframeEnabled && hovered);
+
+  return (
+    <group
+      ref={groupRef}
+      position={spawnPosition}
+      scale={dogAppearance.scale}
+      onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
+      onPointerOut={(e) => { e.stopPropagation(); setHovered(false); }}
+    >
+      {labelEnabled && hovered && (
+        <HoverLabel
+          title={`${dogAppearance.variant.name} Stray Dog`}
+          lines={['Wandering the streets', 'Loyal but independent', 'Part of the city']}
+          offset={[0, 0.6 / dogAppearance.scale, 0]}
+        />
+      )}
+
+      {/* Body group */}
+      <group ref={bodyRef} position={[0, 0.1, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        {/* Main body - elongated for dog shape */}
+        <mesh position={[0, 0.18, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <capsuleGeometry args={[0.08, 0.28, 6, 10]} />
+          {furMaterial}
+        </mesh>
+
+        {/* Rear haunch */}
+        <mesh position={[-0.12, 0.16, 0]} castShadow>
+          <sphereGeometry args={[0.09, 10, 8]} />
+          {furMaterial}
+        </mesh>
+
+        {/* Chest */}
+        <mesh position={[0.14, 0.19, 0]} castShadow>
+          <sphereGeometry args={[0.075, 10, 8]} />
+          {furMaterial}
+        </mesh>
+
+        {/* Head group */}
+        <group ref={headRef} position={[0.22, 0.18, 0]}>
+          {/* Main head */}
+          <mesh castShadow>
+            <sphereGeometry args={[0.07, 10, 10]} />
+            {furMaterial}
+          </mesh>
+
+          {/* Snout - elongated for dog */}
+          <mesh position={[0.07, -0.01, 0]} castShadow>
+            <boxGeometry args={[0.08, 0.05, 0.05]} />
+            {darkFurMaterial}
+          </mesh>
+
+          {/* Nose */}
+          <mesh position={[0.11, -0.01, 0]}>
+            <sphereGeometry args={[0.015, 6, 6]} />
+            <meshStandardMaterial color="#1a1a1a" roughness={0.4} />
+          </mesh>
+
+          {/* Floppy ears */}
+          <mesh
+            ref={el => { if (el) earRefs.current[0] = el; }}
+            position={[-0.02, 0.05, 0.05]}
+            rotation={[0.2, 0, 0.4]}
+            castShadow
+          >
+            <boxGeometry args={[0.04, 0.08, 0.02]} />
+            {darkFurMaterial}
+          </mesh>
+          <mesh
+            ref={el => { if (el) earRefs.current[1] = el; }}
+            position={[-0.02, 0.05, -0.05]}
+            rotation={[-0.2, 0, -0.4]}
+            castShadow
+          >
+            <boxGeometry args={[0.04, 0.08, 0.02]} />
+            {darkFurMaterial}
+          </mesh>
+
+          {/* Eyes */}
+          <mesh position={[0.04, 0.02, 0.035]}>
+            <sphereGeometry args={[0.008, 6, 6]} />
+            <meshStandardMaterial color={dogAppearance.variant.eyeColor} roughness={0.2} />
+          </mesh>
+          <mesh position={[0.04, 0.02, -0.035]}>
+            <sphereGeometry args={[0.008, 6, 6]} />
+            <meshStandardMaterial color={dogAppearance.variant.eyeColor} roughness={0.2} />
+          </mesh>
+        </group>
+
+        {/* Legs - Front Left */}
+        <group position={[0.1, 0.08, 0.055]} ref={el => { if (el && !legRefs.current[0]) legRefs.current[0] = { upper: el, lower: null as any }; }}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.02, 0.025, 0.15, 6]} />
+            {furMaterial}
+          </mesh>
+          <group position={[0, -0.08, 0]} ref={el => { if (el && legRefs.current[0]) legRefs.current[0].lower = el; }}>
+            <mesh castShadow>
+              <cylinderGeometry args={[0.018, 0.02, 0.12, 6]} />
+              {darkFurMaterial}
+            </mesh>
+            {/* Paw */}
+            <mesh position={[0, -0.065, 0]} castShadow>
+              <sphereGeometry args={[0.025, 6, 6]} />
+              {darkFurMaterial}
+            </mesh>
+          </group>
+        </group>
+
+        {/* Legs - Front Right */}
+        <group position={[0.1, 0.08, -0.055]} ref={el => { if (el && !legRefs.current[1]) legRefs.current[1] = { upper: el, lower: null as any }; }}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.02, 0.025, 0.15, 6]} />
+            {furMaterial}
+          </mesh>
+          <group position={[0, -0.08, 0]} ref={el => { if (el && legRefs.current[1]) legRefs.current[1].lower = el; }}>
+            <mesh castShadow>
+              <cylinderGeometry args={[0.018, 0.02, 0.12, 6]} />
+              {darkFurMaterial}
+            </mesh>
+            <mesh position={[0, -0.065, 0]} castShadow>
+              <sphereGeometry args={[0.025, 6, 6]} />
+              {darkFurMaterial}
+            </mesh>
+          </group>
+        </group>
+
+        {/* Legs - Back Left */}
+        <group position={[-0.08, 0.08, 0.055]} ref={el => { if (el && !legRefs.current[2]) legRefs.current[2] = { upper: el, lower: null as any }; }}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.022, 0.028, 0.15, 6]} />
+            {furMaterial}
+          </mesh>
+          <group position={[0, -0.08, 0]} ref={el => { if (el && legRefs.current[2]) legRefs.current[2].lower = el; }}>
+            <mesh castShadow>
+              <cylinderGeometry args={[0.02, 0.022, 0.12, 6]} />
+              {darkFurMaterial}
+            </mesh>
+            <mesh position={[0, -0.065, 0]} castShadow>
+              <sphereGeometry args={[0.025, 6, 6]} />
+              {darkFurMaterial}
+            </mesh>
+          </group>
+        </group>
+
+        {/* Legs - Back Right */}
+        <group position={[-0.08, 0.08, -0.055]} ref={el => { if (el && !legRefs.current[3]) legRefs.current[3] = { upper: el, lower: null as any }; }}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.022, 0.028, 0.15, 6]} />
+            {furMaterial}
+          </mesh>
+          <group position={[0, -0.08, 0]} ref={el => { if (el && legRefs.current[3]) legRefs.current[3].lower = el; }}>
+            <mesh castShadow>
+              <cylinderGeometry args={[0.02, 0.022, 0.12, 6]} />
+              {darkFurMaterial}
+            </mesh>
+            <mesh position={[0, -0.065, 0]} castShadow>
+              <sphereGeometry args={[0.025, 6, 6]} />
+              {darkFurMaterial}
+            </mesh>
+          </group>
+        </group>
+
+        {/* Tail - curved upward with randomized length */}
+        <group ref={tailRef} position={[-0.18, 0.2, 0]}>
+          <mesh rotation={[0, 0, Math.PI / 6]} castShadow>
+            <capsuleGeometry args={[0.015, dogAppearance.tailLength, 4, 8]} />
+            {furMaterial}
+          </mesh>
+        </group>
+      </group>
+    </group>
+  );
+};
+
 const ClayJar: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <HoverableGroup
     position={position}
@@ -868,6 +2037,8 @@ const PushableDecorations: React.FC<{ items: PushableObject[] }> = ({ items }) =
       if (item.kind === 'linenScrap') return <PushableLinenScrap key={item.id} item={item} />;
       if (item.kind === 'candleStub') return <PushableCandleStub key={item.id} item={item} />;
       if (item.kind === 'twine') return <PushableTwine key={item.id} item={item} />;
+      if (item.kind === 'crate') return <PushableCrate key={item.id} item={item} />;
+      if (item.kind === 'amphora') return <PushableAmphora key={item.id} item={item} />;
       return null;
     })}
   </>
@@ -999,6 +2170,9 @@ const Building: React.FC<{
     if (!(mainMaterial instanceof THREE.MeshStandardMaterial)) return mainMaterial;
     const mat = mainMaterial.clone();
 
+    // PERFORMANCE: Vertex colors disabled (was causing severe FPS drop to 10 FPS)
+    // mat.vertexColors = true;
+
     // Apply color variant - each building gets one of 5 color options
     const colorVariants = BUILDING_COLOR_VARIANTS[data.type];
     if (colorVariants && colorVariants.length > 0) {
@@ -1074,6 +2248,22 @@ const Building: React.FC<{
     const dist = camera.position.distanceTo(groupRef.current.position);
     const fade = THREE.MathUtils.clamp((dist - 45) / 60, 0, 0.55); // Start fade at greater distance (45 instead of 18)
     buildingMaterial.color.copy(baseColorRef.current).lerp(fadeTargetRef.current, fade);
+
+    // GRAPHICS: Sun-baked emissive glow during peak daylight (10am-3pm)
+    // Applies to ALL buildings for warm sun-radiating effect
+    // Use torchIntensity as proxy for time-of-day (low = day, high = night)
+    const isDaytime = torchIntensity < 0.8; // Day when torch intensity is low
+    const isNoonish = torchIntensity < 0.4; // Peak sun when torches are minimal
+
+    if (isDaytime && isNoonish) {
+      // Sun-baked warm glow (subtle golden emissive)
+      const emissiveIntensity = (0.8 - torchIntensity) / 0.8 * 0.12; // Inverse of torch intensity
+      buildingMaterial.emissive.setRGB(0.92, 0.82, 0.62); // Warm sun-baked stone
+      buildingMaterial.emissiveIntensity = emissiveIntensity;
+    } else {
+      // Fade out emissive outside peak sun hours
+      buildingMaterial.emissiveIntensity = THREE.MathUtils.lerp(buildingMaterial.emissiveIntensity, 0, 0.1);
+    }
   });
   const baseResidentialColor = useMemo(() => {
     if (!(buildingMaterial instanceof THREE.MeshStandardMaterial)) return null;
@@ -1120,11 +2310,9 @@ const Building: React.FC<{
   const activeGlow = isNear || hovered;
   const wireColor = data.isQuarantined ? HOVER_WIREFRAME_COLORS.danger : data.isPointOfInterest ? HOVER_WIREFRAME_COLORS.poi : HOVER_WIREFRAME_COLORS.default;
   useHoverFade(groupRef, wireframeEnabled && hovered, 0.35);
-  const torchChance = seededRandom(localSeed + 17);
-  const torchCount = torchChance > 0.97 ? 2 : torchChance > 0.9 ? 1 : 0;
+  // PERFORMANCE: Torches disabled (user reported 10 FPS)
+  const torchCount = 0;
   const torchOffsets: [number, number, number][] = [];
-  if (torchCount >= 1) torchOffsets.push([finalBuildingSize / 2 + 0.2, -finalHeight * 0.15, 0]);
-  if (torchCount >= 2) torchOffsets.push([-finalBuildingSize / 2 - 0.2, -finalHeight * 0.15, 0]);
   const hasMarketOrnaments = district === 'MARKET' && seededRandom(localSeed + 81) > 0.6;
   const hasResidentialClutter = district !== 'MARKET' && seededRandom(localSeed + 83) > 0.5;
   const clutterType = Math.floor(seededRandom(localSeed + 84) * 3);
@@ -1218,7 +2406,11 @@ const Building: React.FC<{
         </>
       )}
       {/* Main weathered sandstone structure */}
-      <mesh castShadow receiveShadow>
+      <mesh
+        castShadow
+        receiveShadow
+        userData={{ isBuildingWall: true, buildingId: data.id }}
+      >
         <boxGeometry args={[finalBuildingSize, finalHeight, finalBuildingSize]} />
         <primitive object={buildingMaterial} />
       </mesh>
@@ -1613,6 +2805,419 @@ const Building: React.FC<{
           </mesh>
         )}
       </group>
+
+      {/* PROFESSION SIGNAGE - Historically accurate merchant signs */}
+      {data.type === BuildingType.COMMERCIAL && data.ownerProfession && (() => {
+        const professionSign = getProfessionSign(data.ownerProfession);
+        if (!professionSign) return null;
+
+        const signScale = professionSign.scale;
+        const signHeight = professionSign.heightOffset;
+        const bracketLen = professionSign.bracketOffset;
+
+        // Helper function to render different sign geometries
+        const renderSignGeometry = () => {
+          const mat = (
+            <meshStandardMaterial
+              color={professionSign.color}
+              metalness={professionSign.metalness ?? 0}
+              roughness={professionSign.roughness ?? 0.9}
+              emissive={professionSign.emissive ?? 'black'}
+              emissiveIntensity={professionSign.emissive ? (nightFactor * 0.4) : 0}
+              side={THREE.DoubleSide}
+            />
+          );
+
+          switch (professionSign.geometry) {
+            case 'bowl':
+              return (
+                <mesh castShadow>
+                  <sphereGeometry args={[0.18 * signScale, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                  {mat}
+                </mesh>
+              );
+
+            case 'vessel':
+            case 'pitcher':
+              return (
+                <group>
+                  {/* Main vessel body */}
+                  <mesh position={[0, -0.05, 0]} castShadow>
+                    <cylinderGeometry args={[0.12 * signScale, 0.15 * signScale, 0.3 * signScale, 12]} />
+                    {mat}
+                  </mesh>
+                  {/* Neck */}
+                  <mesh position={[0, 0.12, 0]} castShadow>
+                    <cylinderGeometry args={[0.06 * signScale, 0.08 * signScale, 0.15 * signScale, 10]} />
+                    {mat}
+                  </mesh>
+                  {/* Lip */}
+                  <mesh position={[0, 0.2, 0]} castShadow>
+                    <cylinderGeometry args={[0.08 * signScale, 0.06 * signScale, 0.04 * signScale, 10]} />
+                    {mat}
+                  </mesh>
+                </group>
+              );
+
+            case 'horseshoe':
+              return (
+                <mesh rotation={[0, 0, 0]} castShadow>
+                  <torusGeometry args={[0.15 * signScale, 0.04 * signScale, 8, 16, Math.PI]} />
+                  {mat}
+                </mesh>
+              );
+
+            case 'key':
+              return (
+                <group>
+                  {/* Key shaft */}
+                  <mesh position={[0, 0.15, 0]} castShadow>
+                    <cylinderGeometry args={[0.025 * signScale, 0.025 * signScale, 0.4 * signScale, 8]} />
+                    {mat}
+                  </mesh>
+                  {/* Key head (ring) */}
+                  <mesh position={[0, -0.08, 0]} castShadow>
+                    <torusGeometry args={[0.08 * signScale, 0.03 * signScale, 8, 12]} />
+                    {mat}
+                  </mesh>
+                  {/* Key teeth */}
+                  <mesh position={[0.03 * signScale, 0.33, 0]} castShadow>
+                    <boxGeometry args={[0.06 * signScale, 0.08 * signScale, 0.03 * signScale]} />
+                    {mat}
+                  </mesh>
+                </group>
+              );
+
+            case 'fabric':
+              return (
+                <group>
+                  {/* Fabric banner */}
+                  <mesh castShadow>
+                    <boxGeometry args={[0.6 * signScale, 0.5 * signScale, 0.02]} />
+                    {mat}
+                  </mesh>
+                  {/* Decorative fringe */}
+                  {professionSign.secondaryColor && (
+                    <mesh position={[0, -0.27 * signScale, 0.01]}>
+                      <boxGeometry args={[0.6 * signScale, 0.04 * signScale, 0.01]} />
+                      <meshStandardMaterial color={professionSign.secondaryColor} roughness={0.8} side={THREE.DoubleSide} />
+                    </mesh>
+                  )}
+                </group>
+              );
+
+            case 'mortar':
+              return (
+                <group>
+                  {/* Mortar bowl */}
+                  <mesh position={[0, 0, 0]} castShadow>
+                    <cylinderGeometry args={[0.12 * signScale, 0.08 * signScale, 0.15 * signScale, 12]} />
+                    {mat}
+                  </mesh>
+                  {/* Pestle */}
+                  <mesh position={[0.05 * signScale, 0.05, 0.05 * signScale]} rotation={[0, 0, -Math.PI / 4]} castShadow>
+                    <cylinderGeometry args={[0.025 * signScale, 0.035 * signScale, 0.25 * signScale, 8]} />
+                    {mat}
+                  </mesh>
+                  {/* Green healing symbol for apothecary */}
+                  {professionSign.secondaryColor && (
+                    <mesh position={[0, 0, 0.13 * signScale]}>
+                      <boxGeometry args={[0.08 * signScale, 0.15 * signScale, 0.02]} />
+                      <meshStandardMaterial color={professionSign.secondaryColor} roughness={0.7} />
+                    </mesh>
+                  )}
+                </group>
+              );
+
+            case 'bread':
+              return (
+                <group>
+                  {/* Pretzel/bread shape */}
+                  <mesh rotation={[0, 0, 0]} castShadow>
+                    <torusGeometry args={[0.15 * signScale, 0.05 * signScale, 10, 16]} />
+                    {mat}
+                  </mesh>
+                  {/* Cross piece for pretzel */}
+                  <mesh position={[0, 0, 0]} rotation={[0, Math.PI / 4, 0]} castShadow>
+                    <torusGeometry args={[0.12 * signScale, 0.045 * signScale, 10, 16, Math.PI / 2]} />
+                    {mat}
+                  </mesh>
+                </group>
+              );
+
+            case 'rug':
+              return (
+                <group>
+                  {/* Rug surface */}
+                  <mesh castShadow>
+                    <boxGeometry args={[0.5 * signScale, 0.6 * signScale, 0.03 * signScale]} />
+                    {mat}
+                  </mesh>
+                  {/* Pattern stripes */}
+                  {professionSign.secondaryColor && (
+                    <>
+                      <mesh position={[0, 0.15 * signScale, 0.02 * signScale]}>
+                        <boxGeometry args={[0.45 * signScale, 0.08 * signScale, 0.01]} />
+                        <meshStandardMaterial color={professionSign.secondaryColor} roughness={0.8} />
+                      </mesh>
+                      <mesh position={[0, -0.15 * signScale, 0.02 * signScale]}>
+                        <boxGeometry args={[0.45 * signScale, 0.08 * signScale, 0.01]} />
+                        <meshStandardMaterial color={professionSign.secondaryColor} roughness={0.8} />
+                      </mesh>
+                    </>
+                  )}
+                </group>
+              );
+
+            case 'lamp':
+              return (
+                <group>
+                  {/* Lantern frame */}
+                  <mesh castShadow>
+                    <cylinderGeometry args={[0.08 * signScale, 0.1 * signScale, 0.25 * signScale, 6]} />
+                    {mat}
+                  </mesh>
+                  {/* Top cap */}
+                  <mesh position={[0, 0.15 * signScale, 0]} castShadow>
+                    <coneGeometry args={[0.09 * signScale, 0.1 * signScale, 6]} />
+                    {mat}
+                  </mesh>
+                  {/* Glass panels (emissive) */}
+                  <mesh>
+                    <cylinderGeometry args={[0.075 * signScale, 0.095 * signScale, 0.22 * signScale, 6]} />
+                    <meshStandardMaterial
+                      color="#ffeed0"
+                      transparent
+                      opacity={0.3}
+                      emissive={professionSign.emissive ?? '#ff9944'}
+                      emissiveIntensity={nightFactor * 0.6}
+                    />
+                  </mesh>
+                </group>
+              );
+
+            case 'censer':
+              return (
+                <group>
+                  {/* Incense burner body */}
+                  <mesh castShadow>
+                    <sphereGeometry args={[0.1 * signScale, 10, 8]} />
+                    {mat}
+                  </mesh>
+                  {/* Top with holes */}
+                  <mesh position={[0, 0.08 * signScale, 0]} castShadow>
+                    <cylinderGeometry args={[0.05 * signScale, 0.08 * signScale, 0.06 * signScale, 8]} />
+                    {mat}
+                  </mesh>
+                  {/* Hanging chain segments */}
+                  <mesh position={[0, 0.2 * signScale, 0]}>
+                    <cylinderGeometry args={[0.01 * signScale, 0.01 * signScale, 0.2 * signScale, 6]} />
+                    <meshStandardMaterial color="#5a5a5a" metalness={0.6} roughness={0.5} />
+                  </mesh>
+                </group>
+              );
+
+            case 'medallion':
+              return (
+                <group>
+                  {/* Circular medallion base */}
+                  <mesh castShadow>
+                    <cylinderGeometry args={[0.2 * signScale, 0.2 * signScale, 0.05 * signScale, 16]} />
+                    {mat}
+                  </mesh>
+                  {/* Carved detail ring */}
+                  <mesh position={[0, 0, 0.03 * signScale]}>
+                    <torusGeometry args={[0.15 * signScale, 0.02 * signScale, 8, 16]} />
+                    <meshStandardMaterial
+                      color={professionSign.secondaryColor ?? '#6a5a4a'}
+                      metalness={professionSign.metalness ?? 0}
+                      roughness={(professionSign.roughness ?? 0.9) + 0.1}
+                    />
+                  </mesh>
+                </group>
+              );
+
+            case 'tools':
+              return (
+                <group>
+                  {/* Crossed tools (saw and plane) */}
+                  {/* Tool 1 - Saw */}
+                  <mesh position={[-0.05 * signScale, 0, 0]} rotation={[0, 0, Math.PI / 4]} castShadow>
+                    <boxGeometry args={[0.35 * signScale, 0.05 * signScale, 0.03 * signScale]} />
+                    {mat}
+                  </mesh>
+                  {/* Tool 2 - Plane/Chisel */}
+                  <mesh position={[0.05 * signScale, 0, 0]} rotation={[0, 0, -Math.PI / 4]} castShadow>
+                    <boxGeometry args={[0.35 * signScale, 0.04 * signScale, 0.03 * signScale]} />
+                    {mat}
+                  </mesh>
+                  {/* Metal blades */}
+                  {professionSign.secondaryColor && (
+                    <>
+                      <mesh position={[-0.05 * signScale, 0.12 * signScale, 0]} rotation={[0, 0, Math.PI / 4]} castShadow>
+                        <boxGeometry args={[0.15 * signScale, 0.04 * signScale, 0.02 * signScale]} />
+                        <meshStandardMaterial color={professionSign.secondaryColor} metalness={0.7} roughness={0.4} />
+                      </mesh>
+                      <mesh position={[0.05 * signScale, 0.12 * signScale, 0]} rotation={[0, 0, -Math.PI / 4]} castShadow>
+                        <boxGeometry args={[0.15 * signScale, 0.03 * signScale, 0.02 * signScale]} />
+                        <meshStandardMaterial color={professionSign.secondaryColor} metalness={0.7} roughness={0.4} />
+                      </mesh>
+                    </>
+                  )}
+                </group>
+              );
+
+            case 'amphora':
+              return (
+                <group>
+                  {/* Main body */}
+                  <mesh castShadow>
+                    <cylinderGeometry args={[0.12 * signScale, 0.08 * signScale, 0.35 * signScale, 12]} />
+                    {mat}
+                  </mesh>
+                  {/* Neck */}
+                  <mesh position={[0, 0.22 * signScale, 0]} castShadow>
+                    <cylinderGeometry args={[0.05 * signScale, 0.08 * signScale, 0.15 * signScale, 10]} />
+                    {mat}
+                  </mesh>
+                  {/* Handles */}
+                  <mesh position={[0.1 * signScale, 0.05 * signScale, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                    <torusGeometry args={[0.06 * signScale, 0.02 * signScale, 6, 8, Math.PI]} />
+                    {mat}
+                  </mesh>
+                  <mesh position={[-0.1 * signScale, 0.05 * signScale, 0]} rotation={[Math.PI / 2, 0, Math.PI]} castShadow>
+                    <torusGeometry args={[0.06 * signScale, 0.02 * signScale, 6, 8, Math.PI]} />
+                    {mat}
+                  </mesh>
+                </group>
+              );
+
+            case 'shuttle':
+              return (
+                <group>
+                  {/* Weaving shuttle body */}
+                  <mesh rotation={[0, 0, Math.PI / 6]} castShadow>
+                    <boxGeometry args={[0.4 * signScale, 0.06 * signScale, 0.05 * signScale]} />
+                    {mat}
+                  </mesh>
+                  {/* Pointed ends */}
+                  <mesh position={[0.18 * signScale, 0, 0]} rotation={[0, 0, Math.PI / 6 - Math.PI / 4]} castShadow>
+                    <coneGeometry args={[0.03 * signScale, 0.08 * signScale, 6]} />
+                    {mat}
+                  </mesh>
+                  {/* Colored thread */}
+                  {professionSign.secondaryColor && (
+                    <mesh rotation={[0, 0, Math.PI / 6]}>
+                      <cylinderGeometry args={[0.025 * signScale, 0.025 * signScale, 0.2 * signScale, 8]} />
+                      <meshStandardMaterial color={professionSign.secondaryColor} roughness={0.7} />
+                    </mesh>
+                  )}
+                </group>
+              );
+
+            case 'bag':
+              return (
+                <group>
+                  {/* Leather bag body */}
+                  <mesh castShadow>
+                    <boxGeometry args={[0.25 * signScale, 0.3 * signScale, 0.15 * signScale]} />
+                    {mat}
+                  </mesh>
+                  {/* Strap */}
+                  <mesh position={[0, 0.2 * signScale, 0]} castShadow>
+                    <cylinderGeometry args={[0.015 * signScale, 0.015 * signScale, 0.15 * signScale, 8]} />
+                    {mat}
+                  </mesh>
+                </group>
+              );
+
+            case 'soap':
+              return (
+                <group>
+                  {/* Stacked soap bars */}
+                  <mesh position={[0, 0, 0]} castShadow>
+                    <boxGeometry args={[0.15 * signScale, 0.08 * signScale, 0.12 * signScale]} />
+                    {mat}
+                  </mesh>
+                  <mesh position={[0.05 * signScale, 0.08 * signScale, 0]} castShadow>
+                    <boxGeometry args={[0.14 * signScale, 0.08 * signScale, 0.11 * signScale]} />
+                    {mat}
+                  </mesh>
+                  {/* Olive accent */}
+                  {professionSign.secondaryColor && (
+                    <mesh position={[0, 0.14 * signScale, 0.07 * signScale]}>
+                      <sphereGeometry args={[0.02 * signScale, 8, 6]} />
+                      <meshStandardMaterial color={professionSign.secondaryColor} roughness={0.7} />
+                    </mesh>
+                  )}
+                </group>
+              );
+
+            default:
+              return null;
+          }
+        };
+
+        // Position sign relative to door
+        return (
+          <group position={doorPos} rotation={[0, doorRotation, 0]}>
+            {/* Bracket for hanging signs */}
+            {professionSign.type === 'hanging' && bracketLen > 0 && (
+              <>
+                {/* Horizontal bracket arm extending from wall */}
+                <mesh position={[bracketLen / 2, signHeight, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                  <cylinderGeometry args={[0.03, 0.03, bracketLen, 6]} />
+                  <meshStandardMaterial color="#3a3430" roughness={0.9} />
+                </mesh>
+                {/* Vertical support */}
+                <mesh position={[0, signHeight - 0.1, 0]} castShadow>
+                  <cylinderGeometry args={[0.025, 0.025, 0.2, 6]} />
+                  <meshStandardMaterial color="#3a3430" roughness={0.9} />
+                </mesh>
+                {/* Diagonal brace */}
+                <mesh position={[bracketLen / 4, signHeight - 0.05, 0]} rotation={[0, 0, Math.PI / 4]} castShadow>
+                  <cylinderGeometry args={[0.02, 0.02, bracketLen * 0.6, 6]} />
+                  <meshStandardMaterial color="#3a3430" roughness={0.9} />
+                </mesh>
+                {/* Sign hanging from bracket */}
+                <group position={[bracketLen, signHeight - 0.25, 0]}>
+                  {renderSignGeometry()}
+                </group>
+              </>
+            )}
+
+            {/* Mounted signs (above door) */}
+            {professionSign.type === 'mounted' && (
+              <>
+                {/* Wooden shelf/mounting plate */}
+                <mesh position={[0, signHeight - 0.1, 0.2]} castShadow>
+                  <boxGeometry args={[0.5 * signScale, 0.05, 0.15]} />
+                  <meshStandardMaterial color="#6a4a2a" roughness={0.9} />
+                </mesh>
+                {/* Sign on shelf */}
+                <group position={[0, signHeight + 0.05, 0.2]}>
+                  {renderSignGeometry()}
+                </group>
+              </>
+            )}
+
+            {/* Banner signs (hanging from rod above door) */}
+            {professionSign.type === 'banner' && (
+              <>
+                {/* Horizontal hanging rod */}
+                <mesh position={[0, signHeight + 0.1, 0.1]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                  <cylinderGeometry args={[0.02, 0.02, 0.8 * signScale, 8]} />
+                  <meshStandardMaterial color="#3a3430" roughness={0.9} />
+                </mesh>
+                {/* Fabric/rug hanging from rod */}
+                <group position={[0, signHeight - 0.25, 0.15]}>
+                  {renderSignGeometry()}
+                </group>
+              </>
+            )}
+          </group>
+        );
+      })()}
 
       {/* Roof Parapet / Cap for Wealthy */}
       {district === 'WEALTHY' && seededRandom(localSeed + 31) > 0.6 && (
@@ -2061,7 +3666,7 @@ const InstancedWindows: React.FC<{
   const tempObj = useMemo(() => new THREE.Object3D(), []);
 
   const windowData = useMemo(() => {
-    const data: Array<{ matrix: THREE.Matrix4; hasGlow: boolean; glowIntensity: number }> = [];
+    const data: Array<{ matrix: THREE.Matrix4; hasGlow: boolean; glowIntensity: number; colorIndex: number }> = [];
     const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
 
     buildings.forEach((building) => {
@@ -2097,10 +3702,15 @@ const InstancedWindows: React.FC<{
         // Range from 0.8 (dim) to 2.5 (very bright) for realistic variation
         const glowIntensity = 0.8 + windowGlowRoll * 1.7;
 
+        // Three color variations: 0 = warm dull orange (candle), 1 = amber, 2 = brighter amber
+        const colorRoll = seededRandom(localSeed + side + 200);
+        const colorIndex = colorRoll < 0.33 ? 0 : colorRoll < 0.66 ? 1 : 2;
+
         data.push({
           matrix: tempObj.matrix.clone(),
           hasGlow,
-          glowIntensity
+          glowIntensity,
+          colorIndex
         });
       });
     });
@@ -2119,11 +3729,28 @@ const InstancedWindows: React.FC<{
     if (glowMeshRef.current) {
       let glowIndex = 0;
       const glowIntensities: number[] = [];
+      const glowColorIndices: number[] = [];
+      const tempMatrix = new THREE.Matrix4();
+      const tempPosition = new THREE.Vector3();
+      const tempQuaternion = new THREE.Quaternion();
+      const tempScale = new THREE.Vector3();
+      const forwardOffset = new THREE.Vector3(0, 0, 0.06); // Offset forward in local space
 
       windowData.forEach((data) => {
         if (data.hasGlow) {
-          glowMeshRef.current!.setMatrixAt(glowIndex, data.matrix);
+          // Decompose the original matrix
+          data.matrix.decompose(tempPosition, tempQuaternion, tempScale);
+
+          // Apply forward offset in local space (perpendicular to wall)
+          const offsetWorld = forwardOffset.clone().applyQuaternion(tempQuaternion);
+          tempPosition.add(offsetWorld);
+
+          // Recompose matrix with offset position
+          tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
+
+          glowMeshRef.current!.setMatrixAt(glowIndex, tempMatrix);
           glowIntensities.push(data.glowIntensity);
+          glowColorIndices.push(data.colorIndex);
           glowIndex++;
         }
       });
@@ -2137,6 +3764,13 @@ const InstancedWindows: React.FC<{
         glowMeshRef.current.geometry.setAttribute(
           'instanceGlowIntensity',
           new THREE.InstancedBufferAttribute(intensityArray, 1)
+        );
+
+        // GRAPHICS: Set per-instance color index as instance attribute
+        const colorIndexArray = new Float32Array(glowColorIndices);
+        glowMeshRef.current.geometry.setAttribute(
+          'instanceColorIndex',
+          new THREE.InstancedBufferAttribute(colorIndexArray, 1)
         );
       }
     }
@@ -2153,42 +3787,59 @@ const InstancedWindows: React.FC<{
 
   const glowCount = useMemo(() => windowData.filter(d => d.hasGlow).length, [windowData]);
 
-  // Create custom shader material with per-instance intensity variation
+  // Create custom shader material with per-instance intensity and color variation
   const glowMaterial = useMemo(() => {
     const material = new THREE.MeshStandardMaterial({
-      color: '#f5d7a3',
-      emissive: '#ff9a3c', // Warmer, more orange-amber glow
+      color: '#d4925f',
+      emissive: '#e67e36', // Base amber color
       emissiveIntensity: 1.8,
       roughness: 0.9,
       metalness: 0.05,
     });
 
-    // Modify shader to use per-instance glow intensity
+    // Modify shader to use per-instance glow intensity and color
     material.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader.replace(
         '#include <common>',
         `#include <common>
         attribute float instanceGlowIntensity;
-        varying float vGlowIntensity;`
+        attribute float instanceColorIndex;
+        varying float vGlowIntensity;
+        varying float vColorIndex;`
       );
 
       shader.vertexShader = shader.vertexShader.replace(
         '#include <begin_vertex>',
         `#include <begin_vertex>
-        vGlowIntensity = instanceGlowIntensity;`
+        vGlowIntensity = instanceGlowIntensity;
+        vColorIndex = instanceColorIndex;`
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <common>',
         `#include <common>
-        varying float vGlowIntensity;`
+        varying float vGlowIntensity;
+        varying float vColorIndex;`
       );
 
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        // Apply per-instance intensity variation
-        totalEmissiveRadiance *= vGlowIntensity;`
+        // Three color palettes: warm dull orange (candle), amber, brighter amber
+        vec3 color0 = vec3(0.82, 0.45, 0.20); // #d17233 - Warm dull orange (candlelit)
+        vec3 color1 = vec3(0.90, 0.55, 0.22); // #e68c38 - Amber
+        vec3 color2 = vec3(0.95, 0.65, 0.30); // #f2a64d - Brighter amber
+
+        // Select color based on index
+        vec3 selectedColor = color0;
+        if (vColorIndex > 1.5) {
+          selectedColor = color2;
+        } else if (vColorIndex > 0.5) {
+          selectedColor = color1;
+        }
+
+        // Apply per-instance color and intensity variation
+        totalEmissiveRadiance = selectedColor * vGlowIntensity;`
       );
     };
 
@@ -2217,12 +3868,13 @@ const InstancedWindows: React.FC<{
 export const Buildings: React.FC<{
   mapX: number,
   mapY: number,
+  sessionSeed?: number,
   onBuildingsGenerated?: (buildings: BuildingMetadata[]) => void,
   nearBuildingId?: string | null,
   torchIntensity: number;
   nightFactor: number;
   heightmap?: TerrainHeightmap | null;
-}> = ({ mapX, mapY, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap }) => {
+}> = ({ mapX, mapY, sessionSeed = 0, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap }) => {
   // PERFORMANCE: Use cached textures instead of recreating on every mount
   const noiseTextures = CACHED_NOISE_TEXTURES;
   const grimeTexture = useMemo(() => createGrimeTexture(256), []);
@@ -2262,34 +3914,39 @@ export const Buildings: React.FC<{
       new THREE.MeshStandardMaterial({ color: '#5a7a5a', roughness: 0.55, metalness: 0.1 }), // dark green
     ],
     awning: [
-      // Natural undyed fabrics (common)
+      // Warm natural linens (common)
+      new THREE.MeshStandardMaterial({ color: '#f0e8d8', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // bright cream linen
+      new THREE.MeshStandardMaterial({ color: '#ead9b7', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // warm flax
+      new THREE.MeshStandardMaterial({ color: '#e8d5b0', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // pale wheat
       new THREE.MeshStandardMaterial({ color: '#d8c39a', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // natural linen
-      new THREE.MeshStandardMaterial({ color: '#e0cfa6', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // pale hemp
-      new THREE.MeshStandardMaterial({ color: '#c8b08a', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // tan canvas
-      // Indigo blues (very popular in Damascus)
-      new THREE.MeshStandardMaterial({ color: '#3a5a7a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // deep indigo
-      new THREE.MeshStandardMaterial({ color: '#4a6b8a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // medium indigo
-      new THREE.MeshStandardMaterial({ color: '#5a7b9a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // light indigo
-      // Madder reds (common affordable dye)
-      new THREE.MeshStandardMaterial({ color: '#8b4a4a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // brick red
-      new THREE.MeshStandardMaterial({ color: '#a05555', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // terracotta red
-      // Earth tones - umbers and ochres
-      new THREE.MeshStandardMaterial({ color: '#9a7555', roughness: 0.92, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // raw umber
-      new THREE.MeshStandardMaterial({ color: '#b08040', roughness: 0.92, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // yellow ochre
-      new THREE.MeshStandardMaterial({ color: '#8b6040', roughness: 0.92, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // burnt umber
-      // Saffron yellows (more expensive but available)
-      new THREE.MeshStandardMaterial({ color: '#c9a550', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // saffron gold
+      // Warm tans
+      new THREE.MeshStandardMaterial({ color: '#d4b890', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // warm tan
+      new THREE.MeshStandardMaterial({ color: '#c8a878', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // golden tan
+      // Vibrant indigos
+      new THREE.MeshStandardMaterial({ color: '#4a6b9a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // bright indigo
+      new THREE.MeshStandardMaterial({ color: '#3a5a8a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // deep indigo
+      // Warm earth tones
+      new THREE.MeshStandardMaterial({ color: '#c09050', roughness: 0.92, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // golden ochre
+      new THREE.MeshStandardMaterial({ color: '#b88848', roughness: 0.92, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // warm amber
+      // Accent colors
+      new THREE.MeshStandardMaterial({ color: '#c85a4a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // warm terracotta
+      new THREE.MeshStandardMaterial({ color: '#b8654a', roughness: 0.9, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // burnt sienna
     ],
     awningStriped: [
-      // Natural striped linens
-      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[0], color: '#ead9b7', roughness: 0.95, side: THREE.DoubleSide }),
-      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[1], color: '#e0cdaa', roughness: 0.95, side: THREE.DoubleSide }),
-      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[2], color: '#e2d3b2', roughness: 0.95, side: THREE.DoubleSide }),
-      // Colorful striped awnings (indigo, red, ochre)
-      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[0], color: '#4a6b8a', roughness: 0.9, side: THREE.DoubleSide }), // indigo stripes
-      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[1], color: '#a05555', roughness: 0.9, side: THREE.DoubleSide }), // red stripes
-      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[2], color: '#b08040', roughness: 0.9, side: THREE.DoubleSide }), // ochre stripes
-      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[0], color: '#c9a550', roughness: 0.9, side: THREE.DoubleSide })  // saffron stripes
+      // White & indigo stripes (very common in Damascus)
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[0], color: '#5a7aaa', roughness: 0.9, side: THREE.DoubleSide }), // white & bright indigo
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[1], color: '#4a6a9a', roughness: 0.9, side: THREE.DoubleSide }), // white & deep indigo
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[2], color: '#6a8aba', roughness: 0.9, side: THREE.DoubleSide }), // white & light indigo
+      // White & green stripes (Ottoman style)
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[0], color: '#5a8a6a', roughness: 0.9, side: THREE.DoubleSide }), // white & emerald green
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[1], color: '#6a9a7a', roughness: 0.9, side: THREE.DoubleSide }), // white & sage green
+      // Warm linen & tan stripes
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[2], color: '#e8d0a8', roughness: 0.95, side: THREE.DoubleSide }), // cream & tan stripes
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[0], color: '#d8b888', roughness: 0.95, side: THREE.DoubleSide }), // linen & golden tan
+      // Accent color stripes
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[1], color: '#d86850', roughness: 0.9, side: THREE.DoubleSide }), // white & warm red
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[2], color: '#c89850', roughness: 0.9, side: THREE.DoubleSide }), // white & golden ochre
+      new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[0], color: '#b87a98', roughness: 0.9, side: THREE.DoubleSide })  // white & purple
     ],
     // Blue and white striped materials for civic buildings (authentic Mamluk/Ottoman style)
     civicStripes: [
@@ -2303,7 +3960,7 @@ export const Buildings: React.FC<{
     const bldMetadata: BuildingMetadata[] = [];
     const district = getDistrictType(mapX, mapY);
     const terrainSeed = mapX * 1000 + mapY * 13 + 19;
-    let seed = (mapX * 100) + mapY;
+    let seed = (mapX * 100) + mapY + sessionSeed; // Include session seed for procedural variation
 
     if (district === 'ALLEYS') {
       const cellSize = 7;
@@ -2314,6 +3971,8 @@ export const Buildings: React.FC<{
         const stepRoll = seededRandom(seed + z * 31);
         if (stepRoll > 0.66 && pathX < halfCells - 1) pathX += 1;
         else if (stepRoll < 0.33 && pathX > -halfCells + 1) pathX -= 1;
+        // Widen main path from 2 cells to 3 cells for better movement
+        openCells.add(`${pathX - 1},${z}`);
         openCells.add(`${pathX},${z}`);
         openCells.add(`${pathX + 1},${z}`);
       }
@@ -2336,7 +3995,8 @@ export const Buildings: React.FC<{
           const worldX = x * cellSize;
           const worldZ = z * cellSize;
           const localSeed = seed + Math.abs(worldX) * 1000 + Math.abs(worldZ);
-          if (seededRandom(localSeed) < 0.05) continue;
+          // Reduced from 0.05 to 0.18 for better movement (was 95% density, now 82%)
+          if (seededRandom(localSeed) < 0.18) continue;
           const data = generateBuildingMetadata(localSeed, worldX, worldZ);
           bldMetadata.push(data);
         }
@@ -2430,7 +4090,7 @@ export const Buildings: React.FC<{
     );
     const street = CONSTANTS.STREET_WIDTH * (
       district === 'WEALTHY' ? 2.2
-        : district === 'HOVELS' ? 0.85
+        : district === 'HOVELS' ? 1.3  // Increased from 0.85 to 1.3 for better movement (was 4.25 units, now 6.5 units)
           : district === 'CIVIC' ? 2.6
             : district === 'SALHIYYA' ? 1.8
               : district === 'OUTSKIRTS_FARMLAND' ? 2.0
@@ -2444,7 +4104,7 @@ export const Buildings: React.FC<{
         const localSeed = seed + Math.abs(x) * 1000 + Math.abs(z);
         const chance = seededRandom(localSeed);
         const skipChance = district === 'WEALTHY' ? 0.55
-          : district === 'HOVELS' ? 0.2
+          : district === 'HOVELS' ? 0.35  // Increased from 0.2 to 0.35 for better movement (was 80% density, now 65%)
             : district === 'CIVIC' ? 0.7
               : district === 'SALHIYYA' ? 0.2
                 : district === 'OUTSKIRTS_FARMLAND' ? 0.7
@@ -2504,7 +4164,7 @@ export const Buildings: React.FC<{
     });
 
     return filtered;
-  }, [mapX, mapY, heightmap]);
+  }, [mapX, mapY, sessionSeed, heightmap]);
 
   React.useEffect(() => {
     onBuildingsGenerated?.(metadata);
@@ -2578,8 +4238,10 @@ export const Buildings: React.FC<{
       }
     }
 
-    // Only update state if visibility changed
-    if (visible.length !== visibleBuildings.length) {
+    // PERFORMANCE: Only update state if visibility actually changed (avoid unnecessary re-renders)
+    // Check both length and content by comparing building IDs
+    if (visible.length !== visibleBuildings.length ||
+        visible.some((b, i) => b.id !== visibleBuildings[i]?.id)) {
       setVisibleBuildings(visible);
     }
   });
@@ -2802,6 +4464,17 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
         shader.uniforms.skyColor.value.copy(scene.background);
       }
     }
+
+    // GRAPHICS: Sun-baked ground emissive glow during peak sun (10am-3pm)
+    // dayFactor peaks at noon, use it to drive emissive
+    if (dayFactor > 0.7) {
+      // Subtle warm emissive for sun-baked ground during peak heat
+      const emissiveIntensity = (dayFactor - 0.7) / 0.3 * 0.15;
+      groundMaterial.emissive.setRGB(0.88, 0.78, 0.58);
+      groundMaterial.emissiveIntensity = emissiveIntensity;
+    } else {
+      groundMaterial.emissiveIntensity = THREE.MathUtils.lerp(groundMaterial.emissiveIntensity, 0, 0.05);
+    }
   });
 
   const groundOverlayMaterial = useMemo(() => {
@@ -2873,7 +4546,7 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
 
 // LaundryLines now imported from ./environment/decorations/LaundryLines
 
-export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundClick, onBuildingsGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [], fogColor, heightmap, laundryLines = [], catPositionRef, ratPositions, showCityWalls = true }) => {
+export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [], fogColor, heightmap, laundryLines = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
   const terrainSeed = mapX * 1000 + mapY * 13 + 19;
@@ -2894,15 +4567,45 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundCl
     onBuildingsGenerated?.(buildings);
   }, [onBuildingsGenerated]);
 
+  // Determine if stray dog should spawn (50% chance in non-marketplace biomes)
+  const dogSpawn = useMemo(() => {
+    if (mapX === 0 && mapY === 0) return null; // No dog in marketplace (has cat)
+
+    const dogSeed = mapX * 1000 + mapY * 13 + 999;
+    const spawnRoll = seededRandom(dogSeed);
+
+    if (spawnRoll < 0.5) return null; // 50% chance no dog
+
+    // Generate random spawn position near edges of map (dogs roam from outskirts)
+    const posRoll1 = seededRandom(dogSeed + 1);
+    const posRoll2 = seededRandom(dogSeed + 2);
+
+    const angle = posRoll1 * Math.PI * 2;
+    const dist = 15 + posRoll2 * 10; // Spawn 15-25 units from center
+
+    const position: [number, number, number] = [
+      Math.cos(angle) * dist,
+      0,
+      Math.sin(angle) * dist
+    ];
+
+    return {
+      seed: dogSeed,
+      position
+    };
+  }, [mapX, mapY]);
+
   return (
     <HoverWireframeContext.Provider value={enableHoverWireframe}>
       <HoverLabelContext.Provider value={enableHoverLabel}>
         <group>
           <Ground onClick={onGroundClick} district={district} seed={groundSeed} terrainSeed={terrainSeed} timeOfDay={timeOfDay} fogColor={fogColor} onHeightmapBuilt={onHeightmapBuilt} />
-          <Buildings mapX={mapX} mapY={mapY} onBuildingsGenerated={handleBuildingsGenerated} nearBuildingId={nearBuildingId} torchIntensity={torchIntensity} nightFactor={nightFactor} heightmap={heightmap} />
+          <Buildings mapX={mapX} mapY={mapY} sessionSeed={sessionSeed} onBuildingsGenerated={handleBuildingsGenerated} nearBuildingId={nearBuildingId} torchIntensity={torchIntensity} nightFactor={nightFactor} heightmap={heightmap} />
           <MosqueBackground mapX={mapX} mapY={mapY} />
           <HorizonBackdrop timeOfDay={timeOfDay} showCityWalls={displayCityWalls} wallRadius={CONSTANTS.BOUNDARY + 8} district={district} />
-          <CentralWell mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} catPositionRef={catPositionRef} ratPositions={ratPositions} />
+          <CentralWell mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} catPositionRef={catPositionRef} ratPositions={ratPositions} npcPositions={npcPositions} playerPosition={playerPosition} isSprinting={isSprinting} />
+          <MarketplaceDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+           <BirdFlock mapX={mapX} mapY={mapY} center={[0, 7, 0]} count={5} bounds={22} />
           <WealthyGarden mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} buildingPositions={buildingPositions} />
           <CitadelComplex mapX={mapX} mapY={mapY} />
           <OutskirtsFarmlandDecor mapX={mapX} mapY={mapY} />
@@ -2913,6 +4616,14 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, onGroundCl
           <CaravanseraiComplex mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
           {pushables.length > 0 && <PushableDecorations items={pushables} />}
           {laundryLines.length > 0 && <LaundryLines lines={laundryLines} time={time} />}
+          {dogSpawn && (
+            <StrayDog
+              seed={dogSpawn.seed}
+              spawnPosition={dogSpawn.position}
+              npcPositions={npcPositions}
+              playerPosition={playerPosition}
+            />
+          )}
         </group>
       </HoverLabelContext.Provider>
     </HoverWireframeContext.Provider>

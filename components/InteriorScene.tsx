@@ -8,7 +8,7 @@ import { Humanoid } from './Humanoid';
 import { generateInteriorObstacles } from '../utils/interior';
 import { PushableObject, createPushable } from '../utils/pushables';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
-import { createRugTexture, createNoiseTexture, createPlankTexture, createWallTexture, createPlasterTexture, createPatchTexture, createTileTexture, createReligiousWallTexture, createCivicWallTexture, createAdobeWallTexture, createGeometricBandTexture } from './interior/materials';
+import { createRugTexture, createNoiseTexture, createPlankTexture, createWallTexture, createPlasterTexture, createPatchTexture, createTileTexture, createReligiousWallTexture, createCivicWallTexture, createAdobeWallTexture, createGeometricBandTexture, createPackedEarthTexture, createWidePlankTexture, createNarrowPlankTexture, createHerringboneTexture, createTerracottaTileTexture, createStoneSlabTexture, createBrickFloorTexture, createReedMatTexture } from './interior/materials';
 import { FlickerLight } from './interior/primitives/Lighting';
 import { InteriorPropRenderer } from './interior/PropRenderer';
 import InteriorRoomMesh from './interior/RoomMesh';
@@ -99,12 +99,21 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
           || prop.type === InteriorPropType.DESK;
         const margin = needsInset ? 1.1 : 0.75;
         const [cx, , cz] = room.center;
-        const halfW = room.size[0] / 2 - margin;
-        const halfD = room.size[2] / 2 - margin;
+        // Ensure halfW/halfD are always positive (minimum 0.5 units from center)
+        const halfW = Math.max(0.5, room.size[0] / 2 - margin);
+        const halfD = Math.max(0.5, room.size[2] / 2 - margin);
+
+        // Check if prop position is valid (not NaN or outside room bounds)
+        let propX = prop.position[0];
+        let propZ = prop.position[2];
+        // Reset to center if prop is outside room (more than halfW/halfD from center)
+        if (isNaN(propX) || Math.abs(propX - cx) > room.size[0] / 2 + 0.5) propX = cx;
+        if (isNaN(propZ) || Math.abs(propZ - cz) > room.size[2] / 2 + 0.5) propZ = cz;
+
         let clamped: [number, number, number] = [
-          Math.max(cx - halfW, Math.min(cx + halfW, prop.position[0])),
+          Math.max(cx - halfW, Math.min(cx + halfW, propX)),
           prop.position[1],
-          Math.max(cz - halfD, Math.min(cz + halfD, prop.position[2])),
+          Math.max(cz - halfD, Math.min(cz + halfD, propZ)),
         ];
         if (room.type === InteriorRoomType.ENTRY) {
           clamped = keepInsideOpenSide(room, clamped, 2.0);
@@ -629,7 +638,92 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
           }
         } else {
           dir.normalize();
-          npc.position.add(dir.multiplyScalar(npc.speed * delta));
+          const step = dir.clone().multiplyScalar(npc.speed * delta);
+          const nextPos = npc.position.clone().add(step);
+
+          // COLLISION DETECTION: Check if path is blocked by interior obstacles
+          let blocked = false;
+          const NPC_RADIUS = 0.5;
+          for (const obstacle of obstacles) {
+            const dx = nextPos.x - obstacle.position[0];
+            const dz = nextPos.z - obstacle.position[2];
+            const distSq = dx * dx + dz * dz;
+            const limit = (obstacle.radius + NPC_RADIUS) * (obstacle.radius + NPC_RADIUS);
+            if (distSq < limit) {
+              blocked = true;
+              break;
+            }
+          }
+
+          if (!blocked) {
+            // Path is clear, move normally
+            npc.position.copy(nextPos);
+          } else {
+            // OBSTACLE AVOIDANCE: Try alternative angles (like outdoor NPCs)
+            const angles = [
+              Math.PI / 2,      // 90° left
+              -Math.PI / 2,     // 90° right
+              Math.PI / 3,      // 60° left
+              -Math.PI / 3,     // 60° right
+              2 * Math.PI / 3,  // 120° left
+              -2 * Math.PI / 3  // 120° right
+            ];
+
+            let foundPath = false;
+            for (const angle of angles) {
+              // Rotate direction vector by angle
+              const cos = Math.cos(angle);
+              const sin = Math.sin(angle);
+              const rotatedDir = new THREE.Vector3(
+                dir.x * cos - dir.z * sin,
+                0,
+                dir.x * sin + dir.z * cos
+              ).normalize().multiplyScalar(npc.speed * delta * 1.2);
+
+              const tryPos = npc.position.clone().add(rotatedDir);
+
+              // Check if this angle is clear of obstacles
+              let clearPath = true;
+              for (const obstacle of obstacles) {
+                const dx = tryPos.x - obstacle.position[0];
+                const dz = tryPos.z - obstacle.position[2];
+                const distSq = dx * dx + dz * dz;
+                const limit = (obstacle.radius + NPC_RADIUS) * (obstacle.radius + NPC_RADIUS);
+                if (distSq < limit) {
+                  clearPath = false;
+                  break;
+                }
+              }
+
+              if (clearPath) {
+                npc.position.copy(tryPos);
+                foundPath = true;
+                break;
+              }
+            }
+
+            // If all angles blocked, pick new target (stuck recovery)
+            if (!foundPath) {
+              let randOffset = 0;
+              const rand = () => seededRandom(spec.seed + npc.id.length * 19 + randOffset++);
+              const hotspots = roomHotspots.get(room.id) ?? [];
+              const pickHotspot = () => hotspots[Math.floor(rand() * hotspots.length)];
+              const hotspot = hotspots.length > 0 ? pickHotspot() : null;
+
+              if (hotspot) {
+                npc.target.copy(hotspot.position);
+                npc.action = hotspot.action;
+              } else {
+                const halfW = room.size[0] / 2 - 1.1;
+                const halfD = room.size[2] / 2 - 1.1;
+                const offsetX = (rand() - 0.5) * halfW * 1.4;
+                const offsetZ = (rand() - 0.5) * halfD * 1.4;
+                npc.target.set(room.center[0] + offsetX, npc.position.y, room.center[2] + offsetZ);
+                npc.action = 'stand';
+              }
+              npc.wait = 0.3; // Small pause before trying new path
+            }
+          }
         }
       }
       const halfW = room.size[0] / 2 - 0.7;
@@ -678,6 +772,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
     return base;
   }, [spec.socialClass]);
   const floorPalette = useMemo(() => {
+    // Civic buildings get marble or polished wood colors
+    if (spec.buildingType === BuildingType.CIVIC) {
+      const isMarbel = Math.random() > 0.5;
+      return isMarbel
+        ? ['#e8e4d8', '#ddd9cd', '#f0ece0'] // Cream marble tones
+        : ['#8a6b4f', '#7a5b3f', '#9a7b5f']; // Polished wood tones
+    }
     const base = spec.socialClass === SocialClass.NOBILITY
       ? ['#a98c6d', '#9b7f61', '#b09474']
       : spec.socialClass === SocialClass.MERCHANT
@@ -686,25 +787,118 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
           ? ['#8f785e', '#836d55', '#9a8063']
           : ['#8a7359', '#7b664e', '#957b60'];
     return base;
-  }, [spec.socialClass]);
+  }, [spec.socialClass, spec.buildingType]);
   const floorMaterials = useMemo(() => {
+    // Floor type selection based on building type, social class, and variation
+    const floorVariant = seededRandom(styleSeed * 3.7);
+
     const base = floorPalette.map((color, index) => {
+      const accent = '#5a4737';
+      const grout = '#6a5a4a';
+
+      // Civic buildings - marble or stone slabs
+      if (spec.buildingType === BuildingType.CIVIC) {
+        const isMarble = floorPalette[0].startsWith('#e') || floorPalette[0].startsWith('#d') || floorPalette[0].startsWith('#f');
+        if (isMarble) {
+          // Polished marble - solid color, very smooth
+          return new THREE.MeshStandardMaterial({
+            color,
+            roughness: 0.2,
+            metalness: 0.08
+          });
+        }
+        // Stone slabs for non-marble civic
+        const tex = createStoneSlabTexture(color, grout);
+        return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.75 });
+      }
+
+      // Religious buildings - keep existing marble treatment
+      if (spec.buildingType === BuildingType.RELIGIOUS) {
+        return new THREE.MeshStandardMaterial({
+          color,
+          roughness: 0.25,
+          metalness: 0.05
+        });
+      }
+
+      // Commercial buildings - stone slabs, brick, or terracotta
+      if (spec.buildingType === BuildingType.COMMERCIAL) {
+        if (floorVariant < 0.4) {
+          const tex = createStoneSlabTexture(color, grout);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.8 });
+        } else if (floorVariant < 0.7) {
+          const tex = createBrickFloorTexture('#a07050', '#7a6a5a');
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color: '#a07050', roughness: 0.85 });
+        } else {
+          const tex = createTerracottaTileTexture('#c08060', grout);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color: '#c08060', roughness: 0.75 });
+        }
+      }
+
+      // Peasant dwellings - packed earth, reed mats, or rough planks
       if (spec.socialClass === SocialClass.PEASANT) {
-        const tex = createNoiseTexture(color, '#6f5a45');
-        return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.95 });
+        if (floorVariant < 0.5) {
+          // Packed earth floor
+          const tex = createPackedEarthTexture(color, '#5a4a3a');
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.95 });
+        } else if (floorVariant < 0.8) {
+          // Reed mat over earth
+          const tex = createReedMatTexture('#a09070', '#8a7a60');
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color: '#a09070', roughness: 0.9 });
+        } else {
+          // Rough worn planks
+          const tex = createPlankTexture(color, accent);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.92 });
+        }
       }
+
+      // Nobility - herringbone wood, fine tile, or terracotta
       if (spec.socialClass === SocialClass.NOBILITY) {
-        const tex = createTileTexture(color, '#6d5a45');
-        return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.8 });
+        if (floorVariant < 0.45) {
+          // Herringbone parquet
+          const tex = createHerringboneTexture(color, accent);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.7 });
+        } else if (floorVariant < 0.75) {
+          // Fine geometric tile
+          const tex = createTileTexture(color, '#6d5a45');
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.65 });
+        } else {
+          // Terracotta with fine grout
+          const tex = createTerracottaTileTexture('#b87858', '#6a5a4a');
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color: '#b87858', roughness: 0.7 });
+        }
       }
-      if (spec.socialClass === SocialClass.MERCHANT || spec.socialClass === SocialClass.CLERGY) {
-        const tex = createPlankTexture(color, '#5a4737');
-        return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.9 });
+
+      // Merchant class - wide planks, narrow planks, or terracotta
+      if (spec.socialClass === SocialClass.MERCHANT) {
+        if (floorVariant < 0.4) {
+          const tex = createWidePlankTexture(color, accent);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.8 });
+        } else if (floorVariant < 0.7) {
+          const tex = createNarrowPlankTexture(color, accent);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.82 });
+        } else {
+          const tex = createTerracottaTileTexture('#b08060', grout);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color: '#b08060', roughness: 0.75 });
+        }
       }
+
+      // Clergy - fine planks or tile
+      if (spec.socialClass === SocialClass.CLERGY) {
+        if (floorVariant < 0.5) {
+          const tex = createWidePlankTexture(color, accent);
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.78 });
+        } else {
+          const tex = createTileTexture(color, '#6d5a45');
+          return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.72 });
+        }
+      }
+
+      // Default fallback
       return new THREE.MeshStandardMaterial({ color, roughness: 0.85 });
     });
     return base;
-  }, [floorPalette, spec.socialClass]);
+  }, [floorPalette, spec.socialClass, spec.buildingType, styleSeed]);
   const wallMaterials = useMemo(() => {
     return wallPalette.map((color, index) => {
       const isReligious = spec.buildingType === BuildingType.RELIGIOUS;
@@ -720,10 +914,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
         return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.85 });
       }
 
-      // Civic buildings: formal stone-like appearance
+      // Civic buildings: use solid color to avoid texture limit (has many Damascus lanterns)
       if (isCivic) {
-        const tex = createCivicWallTexture(color, accent);
-        return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.88 });
+        return new THREE.MeshStandardMaterial({ color, roughness: 0.88 });
       }
 
       // Peasant dwellings: rough adobe/mud walls
@@ -752,8 +945,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, play
     const baseColor = isReligious ? '#d4c9b8' : isCivic ? '#c8bba8' : '#b8a890';
     const accent = '#8f7a5c';
 
-    // Use geometric band for religious/wealthy buildings
-    const tex = (isReligious || isCivic || isWealthy)
+    // Skip textures for civic buildings to avoid texture limit
+    const tex = isCivic ? null : (isReligious || isWealthy)
       ? createGeometricBandTexture(baseColor, accent)
       : createPatchTexture(baseColor, accent);
 

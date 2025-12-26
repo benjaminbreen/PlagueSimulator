@@ -44,6 +44,71 @@ const findNearestBuilding = (
   return nearest;
 };
 
+// Localized miasma effect around corpses
+const CorpseMiasma: React.FC = memo(() => {
+  const groupRef = useRef<THREE.Group>(null);
+  const particleCount = 6;
+
+  // Pre-generate particle positions and phases
+  const particles = useMemo(() => {
+    return Array.from({ length: particleCount }).map((_, i) => ({
+      angle: (i / particleCount) * Math.PI * 2,
+      radius: 0.8 + Math.random() * 0.4,
+      height: 0.3 + Math.random() * 0.5,
+      phase: Math.random() * Math.PI * 2,
+      speed: 0.3 + Math.random() * 0.3,
+      scale: 0.4 + Math.random() * 0.3
+    }));
+  }, []);
+
+  useFrame((state) => {
+    if (!groupRef.current) return;
+    const t = state.clock.elapsedTime;
+
+    // Animate each particle child
+    groupRef.current.children.forEach((child, i) => {
+      const p = particles[i];
+      if (!p) return;
+
+      // Circular drift with vertical bobbing
+      const angle = p.angle + t * p.speed;
+      child.position.x = Math.cos(angle) * p.radius;
+      child.position.z = Math.sin(angle) * p.radius;
+      child.position.y = p.height + Math.sin(t * 1.5 + p.phase) * 0.2;
+
+      // Pulse scale
+      const scale = p.scale * (0.8 + Math.sin(t * 2 + p.phase) * 0.2);
+      child.scale.setScalar(scale);
+    });
+  });
+
+  return (
+    <group ref={groupRef} position={[0, 0, 0.5]}>
+      {particles.map((p, i) => (
+        <mesh key={i} position={[0, p.height, 0]}>
+          <sphereGeometry args={[1, 8, 6]} />
+          <meshBasicMaterial
+            color="#4a5a3a"
+            transparent
+            opacity={0.25}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+      {/* Central darker core */}
+      <mesh position={[0, 0.4, 0]}>
+        <sphereGeometry args={[0.6, 8, 6]} />
+        <meshBasicMaterial
+          color="#2a3a2a"
+          transparent
+          opacity={0.35}
+          depthWrite={false}
+        />
+      </mesh>
+    </group>
+  );
+});
+
 interface NPCProps {
   stats: NPCStats;
   initialState?: AgentState;
@@ -150,6 +215,11 @@ export const NPC: React.FC<NPCProps> = memo(({
   const targetBuildingRef = useRef<string | null>(null);
   const insideBuildingIdRef = useRef<string | null>(null);
   const buildingExitTimeRef = useRef(0);
+
+  // STUCK DETECTION: Jiggle counter to detect NPCs vibrating against walls
+  const lastPositionRef = useRef(position.clone());
+  const stuckFramesRef = useRef(0);
+  const STUCK_THRESHOLD = 90; // ~1.5 seconds at 60fps
 
   const colors = useMemo(() => {
     switch (stats.socialClass) {
@@ -326,13 +396,31 @@ export const NPC: React.FC<NPCProps> = memo(({
         const building = buildings.find(b => b.id === insideBuildingIdRef.current);
         if (building) {
           const doorPos = getDoorPosition(building);
-          // Spawn just outside the door with a small random offset
-          const exitOffset = new THREE.Vector3(
-            (Math.random() - 0.5) * 2,
-            0,
-            (Math.random() - 0.5) * 2
-          ).normalize().multiplyScalar(1.5);
-          currentPosRef.current.copy(doorPos).add(exitOffset);
+
+          // EXIT SPAWN VALIDATION: Try multiple positions to avoid spawning inside obstacles
+          let exitPos: THREE.Vector3 | null = null;
+          let attempts = 0;
+          const MAX_ATTEMPTS = 8;
+
+          while (!exitPos && attempts < MAX_ATTEMPTS) {
+            const testPos = doorPos.clone().add(
+              new THREE.Vector3(
+                (Math.random() - 0.5) * 3,
+                0,
+                (Math.random() - 0.5) * 3
+              ).normalize().multiplyScalar(1.5 + Math.random() * 1.0)
+            );
+
+            // Validate: not inside building, not blocked by obstacles
+            if (!isBlockedByBuildings(testPos, buildings, 0.5, buildingHash || undefined) &&
+                !isBlockedByObstacles(testPos, obstacles, 0.5)) {
+              exitPos = testPos;
+            }
+            attempts++;
+          }
+
+          // Use validated position, or fallback to door position if all attempts failed
+          currentPosRef.current.copy(exitPos || doorPos);
           if (group.current) {
             group.current.position.copy(currentPosRef.current);
             group.current.visible = true;
@@ -413,6 +501,28 @@ export const NPC: React.FC<NPCProps> = memo(({
         speed *= 1.15;
       }
 
+      // PLAGUE BEHAVIOR: Infected NPCs stumble and move erratically
+      if (stateRef.current === AgentState.INFECTED) {
+        // Random stumbling - occasionally veer off course
+        if (Math.random() < 0.08) { // 8% chance per frame to stumble
+          const stumbleAngle = (Math.random() - 0.5) * Math.PI * 0.5; // Up to 45 degrees either way
+          const cos = Math.cos(stumbleAngle);
+          const sin = Math.sin(stumbleAngle);
+          const newX = dir.x * cos - dir.z * sin;
+          const newZ = dir.x * sin + dir.z * cos;
+          dir.set(newX, 0, newZ).normalize();
+        }
+        // Occasional pause (staggering)
+        if (Math.random() < 0.03) {
+          speed *= 0.1; // Nearly stop briefly
+        }
+      } else if (stateRef.current === AgentState.INCUBATING) {
+        // Incubating NPCs occasionally slow down (feeling unwell)
+        if (Math.random() < 0.02) {
+          speed *= 0.5;
+        }
+      }
+
       const step = dir.multiplyScalar(speed * delta * simulationSpeed);
       const nextPos = currentPosRef.current.clone().add(step);
 
@@ -438,7 +548,7 @@ export const NPC: React.FC<NPCProps> = memo(({
             dir.x * cos - dir.z * sin,
             0,
             dir.x * sin + dir.z * cos
-          ).normalize().multiplyScalar(0.6);
+          ).normalize().multiplyScalar(1.8); // Increased from 0.6 to actually clear obstacles
 
           const tryPos = currentPosRef.current.clone().add(rotatedDir);
 
@@ -520,6 +630,24 @@ export const NPC: React.FC<NPCProps> = memo(({
           playerImpactCooldownRef.current = now;
         }
       }
+    }
+
+    // 1c. STUCK DETECTION: Jiggle counter to detect NPCs vibrating against walls
+    if (currentPosRef.current.distanceToSquared(lastPositionRef.current) < 0.01) {
+      // NPC hasn't moved significantly - might be stuck
+      stuckFramesRef.current++;
+      if (stuckFramesRef.current > STUCK_THRESHOLD) {
+        // TRULY STUCK: NPC has been vibrating in same spot for 1.5+ seconds
+        // Escape by teleporting to nearest building door
+        pickNewTarget(undefined, true); // isStuck=true triggers building door targeting
+        stuckFramesRef.current = 0;
+        retargetTimerRef.current = 0;
+        nextRetargetRef.current = 3 + Math.random() * 5;
+      }
+    } else {
+      // NPC is moving normally - reset counter
+      stuckFramesRef.current = 0;
+      lastPositionRef.current.copy(currentPosRef.current);
     }
 
     // 2. State Progression
@@ -658,6 +786,40 @@ export const NPC: React.FC<NPCProps> = memo(({
 
           setMoodOverride('Reassured');
           moodExpireRef.current = performance.now() + 6000;
+        } else if (actionEvent.effect === 'aoe_heal') {
+          // HEAL: Can cure incubating NPCs, reduce symptoms of infected
+          if (stateRef.current === AgentState.INCUBATING) {
+            // 60% chance to cure if caught early (incubating)
+            if (Math.random() < 0.6) {
+              stateRef.current = AgentState.HEALTHY;
+              stateStartTimeRef.current = simTime;
+              setMoodOverride('Grateful');
+              moodExpireRef.current = performance.now() + 15000;
+              panicRef.current = Math.max(0, panicRef.current - 30);
+            } else {
+              setMoodOverride('Hopeful');
+              moodExpireRef.current = performance.now() + 8000;
+            }
+          } else if (stateRef.current === AgentState.INFECTED) {
+            // 20% chance to cure if already infected (harder to heal)
+            if (Math.random() < 0.2) {
+              stateRef.current = AgentState.HEALTHY;
+              stateStartTimeRef.current = simTime;
+              setMoodOverride('Grateful');
+              moodExpireRef.current = performance.now() + 20000;
+              panicRef.current = Math.max(0, panicRef.current - 40);
+            } else {
+              // At least reduce panic and reset death timer slightly
+              panicRef.current = Math.max(0, panicRef.current - 15);
+              setMoodOverride('Comforted');
+              moodExpireRef.current = performance.now() + 10000;
+            }
+          } else if (stateRef.current === AgentState.HEALTHY) {
+            // Healthy NPCs are grateful for the attention
+            setMoodOverride('Appreciative');
+            moodExpireRef.current = performance.now() + 5000;
+            panicRef.current = Math.max(0, panicRef.current - 10);
+          }
         }
       }
     }
@@ -819,6 +981,7 @@ export const NPC: React.FC<NPCProps> = memo(({
         footwearStyle={stats.footwearStyle}
         footwearColor={stats.footwearColor}
         accessories={stats.accessories}
+        sicknessLevel={stateRef.current === AgentState.INFECTED ? 1.0 : stateRef.current === AgentState.INCUBATING ? 0.4 : 0}
         enableArmSwing
         armSwingMode="both"
         isWalking={simulationSpeed > 0 && stateRef.current !== AgentState.DECEASED && (!quarantine || stateRef.current !== AgentState.INFECTED)}
@@ -932,6 +1095,11 @@ export const NPC: React.FC<NPCProps> = memo(({
           </mesh>
           <pointLight intensity={1.1} distance={16} decay={2} color="#ffb347" />
         </group>
+      )}
+
+      {/* PLAGUE: Miasma effect around corpses */}
+      {displayState === AgentState.DECEASED && (
+        <CorpseMiasma />
       )}
 
       {hovered && (

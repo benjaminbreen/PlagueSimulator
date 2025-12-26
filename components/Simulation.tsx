@@ -19,6 +19,12 @@ import { generateMerchantNPC, mapStallTypeToMerchantType } from '../utils/mercha
 import { LaundryLine, generateLaundryLine, shouldGenerateLaundryLine } from '../utils/laundry';
 import { ActionEffects } from './ActionEffects';
 import { Footprints } from './Footprints';
+import { SkyGradient } from './SkyGradient';
+import { AmbientAudio } from './AmbientAudio';
+import { SnakeCharmer } from './npcs/SnakeCharmer';
+import { FluteMusic } from './audio/FluteMusic';
+import { Astrologer } from './npcs/Astrologer';
+import { Scribe } from './npcs/Scribe';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -268,62 +274,12 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
   const moonPhase = (simTime / 29.5) % 1; // 0-1, where 0=new, 0.5=full
 
   const moonMaterial = useMemo(() => {
-    // Use MeshBasicMaterial for self-lit moon (no lighting calculations needed)
+    // Simple bright moon - no shader modification needed
+    // Using emissive for self-illumination effect
     const mat = new THREE.MeshBasicMaterial({
       color: '#fffef5', // Ivory-white moon color
       transparent: false
     });
-
-    // GRAPHICS: Moon phases using shader modification
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.moonPhase = { value: 0.0 };
-
-      // Add varying for normal
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        `#include <common>
-        varying vec3 vNormal;`
-      );
-
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        vNormal = normalize(normalMatrix * normal);`
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        `#include <common>
-        uniform float moonPhase;
-        varying vec3 vNormal;`
-      );
-
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <dithering_fragment>',
-        `#include <dithering_fragment>
-
-        // Set base moon color (ivory white with slight warmth)
-        vec3 moonColor = vec3(1.0, 0.995, 0.94);
-
-        // Moon phase shadow: phase 0 = new moon (full shadow), 0.5 = full moon (no shadow)
-        vec3 moonNormal = normalize(vNormal);
-        float phase = moonPhase * 2.0 - 1.0; // Convert to -1 to 1
-        float terminator = moonNormal.x;
-
-        // Create shadow based on phase with softer transition
-        float shadow = smoothstep(phase - 0.18, phase + 0.18, terminator);
-        if (phase < 0.0) {
-          // Waxing (0 to 0.5) - shadow from right
-          shadow = 1.0 - shadow;
-        }
-        // Waning (0.5 to 1) - shadow from left
-
-        // Apply shadowing: 6% brightness on dark side, 100% on lit side (darker shadows for drama)
-        gl_FragColor.rgb = moonColor * mix(0.06, 1.0, shadow);`
-      );
-
-      mat.userData.shader = shader;
-    };
 
     return mat;
   }, []);
@@ -358,12 +314,6 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
     if (glowRef.current) glowRef.current.scale.setScalar(sizeScale);
     if (outerGlowRef.current) outerGlowRef.current.scale.setScalar(sizeScale);
     if (auraRef.current) auraRef.current.scale.setScalar(sizeScale);
-
-    // Update moon phase in shader
-    const shader = moonMaterial.userData.shader;
-    if (shader) {
-      shader.uniforms.moonPhase.value = moonPhase;
-    }
 
     // GRAPHICS: Moon light intensity varies with phase and elevation
     if (lightRef.current) {
@@ -459,9 +409,8 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
       </mesh>
 
       {/* Main moon body - the actual lunar surface */}
-      <mesh ref={meshRef}>
+      <mesh ref={meshRef} material={moonMaterial}>
         <sphereGeometry args={[4, 48, 48]} />
-        <primitive object={moonMaterial} />
         <pointLight ref={lightRef} intensity={1.2} distance={280} color="#d5e2ff" />
       </mesh>
     </group>
@@ -603,8 +552,8 @@ const WindowLightPool: React.FC<{ buildings: BuildingMetadata[]; timeOfDay: numb
   const lightPool = useRef<THREE.PointLight[]>([]);
   const windowPositions = useMemo(() => getWindowGlowPositions(buildings), [buildings]);
   const nightFactor = timeOfDay >= 19 || timeOfDay < 5 ? 1 : timeOfDay >= 17 ? (timeOfDay - 17) / 2 : timeOfDay < 7 ? (7 - timeOfDay) / 2 : 0;
-  // PERFORMANCE FIX: Reduced from 10 to 6 window lights
-  const activeCount = Math.min(6, windowPositions.length);
+  // PERFORMANCE FIX: Reduced from 10 to 6, then to 3 for nighttime performance
+  const activeCount = Math.min(3, windowPositions.length);
   const tickRef = useRef(0);
 
   useFrame((state) => {
@@ -625,8 +574,8 @@ const WindowLightPool: React.FC<{ buildings: BuildingMetadata[]; timeOfDay: numb
 
   return (
     <>
-      {/* PERFORMANCE FIX: Reduced from 10 to 6 window lights */}
-      {Array.from({ length: 6 }).map((_, i) => (
+      {/* PERFORMANCE FIX: Reduced from 10 to 6, then to 3 for nighttime performance */}
+      {Array.from({ length: 3 }).map((_, i) => (
         <pointLight
           key={`window-light-${i}`}
           ref={(el) => { if (el) lightPool.current[i] = el; }}
@@ -640,7 +589,7 @@ const WindowLightPool: React.FC<{ buildings: BuildingMetadata[]; timeOfDay: numb
   );
 };
 
-const MilkyWay: React.FC<{ visible: boolean }> = ({ visible }) => {
+const MilkyWay: React.FC<{ visible: boolean; simTime: number }> = ({ visible, simTime }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
@@ -669,12 +618,18 @@ const MilkyWay: React.FC<{ visible: boolean }> = ({ visible }) => {
     return tex;
   }, []);
 
+  // GRAPHICS: Moon phase affects Milky Way visibility (full moon washes it out)
+  const moonPhase = (simTime / 29.5) % 1; // 0=new moon, 0.5=full moon
+  const moonBrightness = 1 - Math.abs(moonPhase - 0.5) * 2; // 0 at new moon, 1 at full moon
+  const baseOpacity = 0.35;
+  const opacity = baseOpacity * (1 - moonBrightness * 0.5); // Reduce by 50% during full moon
+
   if (!texture) return null;
 
   return (
     <mesh ref={meshRef} rotation={[-Math.PI / 2.6, 0, 0]} visible={visible}>
       <sphereGeometry args={[220, 32, 16]} />
-      <meshBasicMaterial map={texture} transparent opacity={0.35} depthWrite={false} side={THREE.BackSide} />
+      <meshBasicMaterial map={texture} transparent opacity={opacity} depthWrite={false} side={THREE.BackSide} />
     </mesh>
   );
 };
@@ -728,13 +683,14 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
     gradient.addColorStop(1, `#${bottom.getHexString()}`);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // GRAPHICS: Enhanced dramatic sunset/sunrise gradient bands
     if (duskFactor > 0.05) {
       const tNorm = Math.min(1, duskFactor * 2);
       const bandStart = canvas.height * (0.5 + tNorm * 0.08);
       const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
-      flare.addColorStop(0, `rgba(255,95,60,${0.5 * sunsetBoost * duskFactor})`);
-      flare.addColorStop(0.6, `rgba(255,160,85,${0.35 * sunsetBoost * duskFactor})`);
-      flare.addColorStop(1, `rgba(255,215,125,${0.25 * sunsetBoost * duskFactor})`);
+      flare.addColorStop(0, `rgba(255,95,60,${0.7 * sunsetBoost * duskFactor})`); // Was 0.5
+      flare.addColorStop(0.6, `rgba(255,160,85,${0.55 * sunsetBoost * duskFactor})`); // Was 0.35
+      flare.addColorStop(1, `rgba(255,215,125,${0.4 * sunsetBoost * duskFactor})`); // Was 0.25
       ctx.fillStyle = flare;
       ctx.fillRect(0, bandStart, canvas.width, canvas.height - bandStart);
     } else if (dawnFactor > 0.05) {
@@ -742,23 +698,23 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
       const bandStart = canvas.height * (0.58 - tNorm * 0.08);
       const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
 
-      // Rosy fingers - variable dawn gradients
+      // Rosy fingers - variable dawn gradients (enhanced intensity)
       if (dawnVariant > 0.7) {
         // Pink-lavender dawn
-        flare.addColorStop(0, `rgba(212,168,232,${0.35 * sunriseBoost * dawnFactor})`); // Lavender
-        flare.addColorStop(0.4, `rgba(245,166,200,${0.45 * sunriseBoost * dawnFactor})`); // Rose pink
-        flare.addColorStop(0.7, `rgba(255,200,180,${0.35 * sunriseBoost * dawnFactor})`); // Soft peach
-        flare.addColorStop(1, `rgba(255,225,190,${0.25 * sunriseBoost * dawnFactor})`);
+        flare.addColorStop(0, `rgba(212,168,232,${0.5 * sunriseBoost * dawnFactor})`); // Was 0.35
+        flare.addColorStop(0.4, `rgba(245,166,200,${0.65 * sunriseBoost * dawnFactor})`); // Was 0.45
+        flare.addColorStop(0.7, `rgba(255,200,180,${0.5 * sunriseBoost * dawnFactor})`); // Was 0.35
+        flare.addColorStop(1, `rgba(255,225,190,${0.35 * sunriseBoost * dawnFactor})`); // Was 0.25
       } else if (dawnVariant > 0.4) {
         // Rose-amber dawn
-        flare.addColorStop(0, `rgba(180,120,160,${0.3 * sunriseBoost * dawnFactor})`); // Purple-rose
-        flare.addColorStop(0.5, `rgba(255,140,120,${0.4 * sunriseBoost * dawnFactor})`); // Coral
-        flare.addColorStop(1, `rgba(255,210,150,${0.3 * sunriseBoost * dawnFactor})`); // Golden
+        flare.addColorStop(0, `rgba(180,120,160,${0.45 * sunriseBoost * dawnFactor})`); // Was 0.3
+        flare.addColorStop(0.5, `rgba(255,140,120,${0.6 * sunriseBoost * dawnFactor})`); // Was 0.4
+        flare.addColorStop(1, `rgba(255,210,150,${0.45 * sunriseBoost * dawnFactor})`); // Was 0.3
       } else {
-        // Peachy-amber dawn (original with enhancement)
-        flare.addColorStop(0, `rgba(255,110,75,${0.38 * sunriseBoost * dawnFactor})`);
-        flare.addColorStop(0.6, `rgba(255,165,110,${0.35 * sunriseBoost * dawnFactor})`);
-        flare.addColorStop(1, `rgba(255,210,150,${0.25 * sunriseBoost * dawnFactor})`);
+        // Peachy-amber dawn (enhanced)
+        flare.addColorStop(0, `rgba(255,110,75,${0.55 * sunriseBoost * dawnFactor})`); // Was 0.38
+        flare.addColorStop(0.6, `rgba(255,165,110,${0.5 * sunriseBoost * dawnFactor})`); // Was 0.35
+        flare.addColorStop(1, `rgba(255,210,150,${0.4 * sunriseBoost * dawnFactor})`); // Was 0.25
       }
 
       ctx.fillStyle = flare;
@@ -962,6 +918,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const ratPositionsRef = useRef<THREE.Vector3[]>([]);
   const npcPositionsRef = useRef<THREE.Vector3[]>([]);
   const playerRef = useRef<THREE.Group>(null);
+  const sprintStateRef = useRef(false);
   const { scene, gl } = useThree();
 
   // PERFORMANCE: Reusable color objects to avoid garbage collection
@@ -991,18 +948,26 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
   const [playerSpawn, setPlayerSpawn] = useState<[number, number, number]>(() => {
-    return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0];
+    // Start at edge to avoid spawning inside buildings in dense districts
+    return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [28, 0, 28];
   });
   const [buildingsState, setBuildingsState] = useState<BuildingMetadata[]>([]);
   const buildingsRef = useRef<BuildingMetadata[]>([]);
   const [currentNearBuilding, setCurrentNearBuilding] = useState<BuildingMetadata | null>(null);
   const [currentNearMerchant, setCurrentNearMerchant] = useState<MerchantNPCType | null>(null);
+
+  // Ambient audio state
+  const moraleStatsRef = useRef<MoraleStats>({ avgAwareness: 0, avgPanic: 0, agentCount: 0 });
+  const nearbyInfectedRef = useRef(0);
+  const nearbyDeceasedRef = useRef(0);
+  const playerPositionRef = useRef<[number, number, number]>([0, 0, 0]);
   const terrainSeed = useMemo(() => params.mapX * 1000 + params.mapY * 13 + 19, [params.mapX, params.mapY]);
   const sessionSeed = useMemo(() => Math.floor(Math.random() * 1000000), []);
   const district = useMemo(() => getDistrictType(params.mapX, params.mapY), [params.mapX, params.mapY]);
   const isOutskirts = district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT';
   useEffect(() => {
-    setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [0, 0, 0]);
+    // Start at edge to avoid spawning inside buildings in dense districts
+    setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [28, 0, 28]);
   }, [params.mapX, params.mapY]);
   const pushableSeed = useMemo(
     () => params.mapX * 1000 + params.mapY * 100 + sessionSeed,
@@ -1067,6 +1032,39 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       addPickupItem('shard-market-1', 'potteryShard', [2.8, 0.05, -1.4], 'Pottery Shard', 'ground-pottery');
       addPickupItem('linen-market-1', 'linenScrap', [-6.2, 0.05, -0.6], 'Linen Scrap', 'ground-linen');
       addPickupItem('candle-market-1', 'candleStub', [5.6, 0.05, 2.8], 'Candle Stub', 'ground-candle');
+
+      // PHYSICS: Add pushable crates around edges (heavy wood boxes)
+      items.push(
+        createPushable('crate-1', 'crate', [-25, 0.4, 32], 0.5, 8.0, 0.1, 'wood'),
+        createPushable('crate-2', 'crate', [-22, 0.4, 34], 0.5, 8.0, -0.2, 'wood'),
+        createPushable('crate-3', 'crate', [28, 0.4, 30], 0.5, 8.0, 0.3, 'wood'),
+        createPushable('crate-4', 'crate', [30, 0.4, 32], 0.5, 8.0, -0.1, 'wood'),
+        createPushable('crate-5', 'crate', [32, 0.4, 31], 0.5, 8.0, 0.2, 'wood'),
+        createPushable('crate-6', 'crate', [-30, 0.4, -30], 0.5, 8.0, 0.0, 'wood'),
+        createPushable('crate-7', 'crate', [-28, 0.4, -32], 0.5, 8.0, 0.15, 'wood'),
+        createPushable('crate-8', 'crate', [26, 0.4, -28], 0.5, 8.0, -0.25, 'wood'),
+        createPushable('crate-9', 'crate', [24, 0.4, -30], 0.5, 8.0, 0.1, 'wood')
+      );
+
+      // PHYSICS: Add pushable amphorae in clusters (heavy ceramic jars - can shatter!)
+      items.push(
+        // Cluster near north (grounded: y=0.15 instead of 0.6)
+        createPushable('amphora-1', 'amphora', [2, 0.15, 36], 0.4, 6.5, 0, 'ceramic'),
+        createPushable('amphora-2', 'amphora', [4, 0.15, 36.5], 0.4, 6.5, 0.2, 'ceramic'),
+        createPushable('amphora-3', 'amphora', [3, 0.15, 37.5], 0.4, 6.5, -0.1, 'ceramic'),
+        // Cluster near west
+        createPushable('amphora-4', 'amphora', [-18, 0.15, 34], 0.4, 6.5, 0.3, 'ceramic'),
+        createPushable('amphora-5', 'amphora', [-17, 0.15, 35], 0.4, 6.5, -0.15, 'ceramic'),
+        createPushable('amphora-6', 'amphora', [-19, 0.15, 35.5], 0.4, 6.5, 0.1, 'ceramic'),
+        // Cluster near east
+        createPushable('amphora-7', 'amphora', [17, 0.15, 34], 0.4, 6.5, -0.2, 'ceramic'),
+        createPushable('amphora-8', 'amphora', [18, 0.15, 35], 0.4, 6.5, 0, 'ceramic'),
+        createPushable('amphora-9', 'amphora', [16, 0.15, 35.5], 0.4, 6.5, 0.25, 'ceramic'),
+        // Small cluster in corner
+        createPushable('amphora-10', 'amphora', [-32, 0.15, 22], 0.4, 6.5, 0.1, 'ceramic'),
+        createPushable('amphora-11', 'amphora', [-31, 0.15, 23], 0.4, 6.5, -0.1, 'ceramic')
+      );
+
       return items;
     }
     if (district === 'WEALTHY') {
@@ -1408,6 +1406,87 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     });
   }, [params.mapX, params.mapY, marketStalls, simTime, sessionSeed]);
 
+  // Snake Charmer Sufi - Saʿdiyya tariqa member
+  // Always spawns in marketplace corners, 20% chance in other districts
+  const snakeCharmerPosition = useMemo<[number, number, number] | null>(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    const spawnSeed = params.mapX * 1337 + params.mapY * 7331 + sessionSeed;
+    const roll = seededRandom(spawnSeed + 999);
+
+    if (district === 'MARKET') {
+      // Always spawn in marketplace - choose a corner
+      const corners: Array<[number, number, number]> = [
+        [-28, 0, -28],  // Northwest
+        [28, 0, -28],   // Northeast
+        [28, 0, 28],    // Southeast
+        [-28, 0, 28]    // Southwest
+      ];
+      const cornerIndex = Math.floor(seededRandom(spawnSeed + 1000) * corners.length);
+      return corners[cornerIndex];
+    } else if (roll < 0.2) {
+      // 20% chance in other districts - spawn near edge
+      const angle = seededRandom(spawnSeed + 1001) * Math.PI * 2;
+      const radius = 25 + seededRandom(spawnSeed + 1002) * 8;
+      return [
+        Math.cos(angle) * radius,
+        0,
+        Math.sin(angle) * radius
+      ];
+    }
+
+    return null; // No snake charmer in this district
+  }, [params.mapX, params.mapY, sessionSeed]);
+
+  const [snakeCharmerDistance, setSnakeCharmerDistance] = useState(100);
+
+  // Astrologer - 50% chance in marketplace and standard street biomes
+  const astrologerPosition = useMemo<[number, number, number] | null>(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'RESIDENTIAL', 'WEALTHY'];
+
+    if (!validDistricts.includes(district)) return null;
+
+    const spawnSeed = params.mapX * 1987 + params.mapY * 8971 + sessionSeed;
+    const roll = seededRandom(spawnSeed + 2000);
+
+    if (roll < 0.5) {
+      // 50% chance - spawn in a suitable location
+      const angle = seededRandom(spawnSeed + 2001) * Math.PI * 2;
+      const radius = 15 + seededRandom(spawnSeed + 2002) * 15;
+      return [
+        Math.cos(angle) * radius,
+        0,
+        Math.sin(angle) * radius
+      ];
+    }
+
+    return null;
+  }, [params.mapX, params.mapY, sessionSeed]);
+
+  // Scribe - 50% chance in marketplace and standard street biomes
+  const scribePosition = useMemo<[number, number, number] | null>(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'RESIDENTIAL', 'WEALTHY'];
+
+    if (!validDistricts.includes(district)) return null;
+
+    const spawnSeed = params.mapX * 2341 + params.mapY * 4321 + sessionSeed;
+    const roll = seededRandom(spawnSeed + 3000);
+
+    if (roll < 0.5) {
+      // 50% chance - spawn in a suitable location
+      const angle = seededRandom(spawnSeed + 3001) * Math.PI * 2;
+      const radius = 15 + seededRandom(spawnSeed + 3002) * 15;
+      return [
+        Math.cos(angle) * radius,
+        0,
+        Math.sin(angle) * radius
+      ];
+    }
+
+    return null;
+  }, [params.mapX, params.mapY, sessionSeed]);
+
   // Tree obstacles for boulder collision
   const [treeObstacles, setTreeObstacles] = useState<Obstacle[]>([]);
   const handleTreePositions = useCallback((positions: Array<[number, number, number]>) => {
@@ -1487,6 +1566,52 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     };
   }, []);
 
+  // Wrapper for morale updates that also stores locally for ambient audio
+  const handleMoraleUpdate = useCallback((morale: MoraleStats) => {
+    moraleStatsRef.current = morale;
+    onMoraleUpdate?.(morale);
+  }, [onMoraleUpdate]);
+
+  // Wrap onBuildingsGenerated to prevent infinite re-render loop
+  const handleBuildingsGenerated = useCallback((b: BuildingMetadata[]) => {
+    buildingsRef.current = b;
+    buildingHashRef.current = buildBuildingHash(b);
+    setBuildingsState(b);
+    const district = getDistrictType(params.mapX, params.mapY);
+    if (district === 'HOVELS' || district === 'ALLEYS') {
+      const spawnSeed = params.mapX * 1000 + params.mapY * 13 + 77;
+      const tryPoints: THREE.Vector3[] = [];
+      const base = new THREE.Vector3(0, 0, 0);
+      // Expand search to larger radii for dense districts, use larger collision radius for safety
+      const ring = [0, 3, 6, 9, 12, 16, 20, 24, 28];
+      ring.forEach((r) => {
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2 + seededRandom(spawnSeed + r * 13 + i) * 0.6;
+          tryPoints.push(new THREE.Vector3(base.x + Math.cos(angle) * r, 0, base.z + Math.sin(angle) * r));
+        }
+      });
+      const hash = buildingHashRef.current || undefined;
+      // Use larger collision radius (1.2 instead of 0.6) to ensure safe spawn away from buildings
+      const found = tryPoints.find((p) => !isBlockedByBuildings(p, b, 1.2, hash) && !isBlockedByObstacles(p, obstacles, 1.2));
+      if (found) {
+        setPlayerSpawn([found.x, 0, found.z]);
+      } else {
+        // Last resort: try edge positions with larger radius
+        const edgePoints = [
+          new THREE.Vector3(30, 0, 30),
+          new THREE.Vector3(-30, 0, 30),
+          new THREE.Vector3(30, 0, -30),
+          new THREE.Vector3(-30, 0, -30)
+        ];
+        const edgeFound = edgePoints.find((p) => !isBlockedByBuildings(p, b, 1.2, hash) && !isBlockedByObstacles(p, obstacles, 1.2));
+        setPlayerSpawn(edgeFound ? [edgeFound.x, 0, edgeFound.z] : [32, 0, 32]);
+      }
+    } else if (district === 'CARAVANSERAI') {
+      // Spawn near north gate/entrance (top center)
+      setPlayerSpawn([0, 0, -38]);
+    }
+  }, [params.mapX, params.mapY, obstacles]);
+
   useEffect(() => {
     gl.shadowMap.enabled = true;
     gl.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -1519,6 +1644,28 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
       });
       npcPositionsRef.current = positions;
+
+      // Update nearby infected/deceased counts for ambient audio
+      if (playerRef.current) {
+        const playerPos = playerRef.current.position;
+        playerPositionRef.current = [playerPos.x, playerPos.y, playerPos.z];
+        let nearbyInfected = 0;
+        let nearbyDeceased = 0;
+        const proximityRadius = 15;
+
+        agentHashRef.current.buckets.forEach(bucket => {
+          for (const agent of bucket) {
+            const dist = agent.pos.distanceTo(playerPos);
+            if (dist < proximityRadius) {
+              if (agent.state === AgentState.INFECTED) nearbyInfected++;
+              if (agent.state === AgentState.DECEASED) nearbyDeceased++;
+            }
+          }
+        });
+
+        nearbyInfectedRef.current = nearbyInfected;
+        nearbyDeceasedRef.current = nearbyDeceased;
+      }
     }
 
     const doAtmosphere = t - atmosphereTickRef.current >= 0.12;
@@ -1570,9 +1717,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         // Tier 2: Harsher sun for intense midday heat
-        const sunIntensity = Math.pow(Math.max(0, sunElevation), 0.45) * 5.2 * (1 - cloudCover * 0.4);
+        const sunIntensity = Math.pow(Math.max(0, sunElevation), 0.45) * 6.8 * (1 - cloudCover * 0.4);
         // Tier 1: Reduced ambient for darker, more vivid shadows
-        let ambientIntensity = 0.04 + dayFactor * 0.35 + cloudCover * 0.08;
+        let ambientIntensity = 0.02 + dayFactor * 0.28 + cloudCover * 0.08;
         // Tier 1: Boosted hemisphere for warm ground bounce
         let hemiIntensity = 0.22 + dayFactor * 0.6 + cloudCover * 0.16;
 
@@ -1589,7 +1736,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // PERFORMANCE: Reuse color objects instead of creating new ones
         const { sunColor, hemiSky, hemiGround, temp1, temp2, temp3 } = colorCache.current;
 
-        sunColor.set("#ffe8c5");
+        sunColor.set("#ffd9aa");
         temp1.set("#ffb46b");
         temp2.set("#3b4a6a");
         sunColor.lerp(temp1, twilightFactor).lerp(temp2, nightFactor);
@@ -1624,7 +1771,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // Base: use sky horizon color for seamless blending
         fogColor.copy(skyHorizon);
 
-        // Dawn: Rosy fingers - pink, lavender, soft orange gradients
+        // GRAPHICS: Dawn rosy fingers - enhanced pink, lavender, soft orange gradients
         const dawnFactor = smoothstep(-0.2, 0.05, sunElevation) * (1 - dayFactor);
         if (dawnFactor > 0.1) {
           // Variable dawn colors for beautiful variety
@@ -1634,10 +1781,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           temp2.set('#d4a8e8');
           temp3.set('#ffc4a3');
 
-          // Blend multiple dawn colors for gradient effect
-          fogColor.lerp(temp1, dawnFactor * 0.35);
-          fogColor.lerp(temp2, dawnFactor * 0.15);
-          fogColor.lerp(temp3, dawnFactor * 0.2);
+          // Blend multiple dawn colors for gradient effect (enhanced intensity)
+          fogColor.lerp(temp1, dawnFactor * 0.5); // Was 0.35
+          fogColor.lerp(temp2, dawnFactor * 0.25); // Was 0.15
+          fogColor.lerp(temp3, dawnFactor * 0.35); // Was 0.2
         }
 
         // Daytime: VERY SUBTLE atmospheric perspective (realistic haze)
@@ -1652,13 +1799,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           }
         }
 
-        // Twilight/Dusk: Subtle atmospheric glow at horizon (toned down)
+        // GRAPHICS: Twilight/Dusk enhanced atmospheric glow at horizon
         const duskFactor = smoothstep(0.05, -0.2, -sunElevation) * (1 - dayFactor);
         if (duskFactor > 0.1) {
-          temp1.set('#e8c488'); // Softer peachy-gold
-          temp2.set('#b8a8c4'); // Less saturated lavender
-          fogColor.lerp(temp1, duskFactor * 0.18); // Further reduced
-          fogColor.lerp(temp2, duskFactor * 0.08); // Further reduced
+          temp1.set('#e8c488'); // Peachy-gold
+          temp2.set('#b8a8c4'); // Lavender
+          fogColor.lerp(temp1, duskFactor * 0.35); // Was 0.18 (enhanced)
+          fogColor.lerp(temp2, duskFactor * 0.18); // Was 0.08 (enhanced)
         }
 
         // Night: Cool deep blue atmosphere
@@ -1759,11 +1906,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           rimColor.set(dayFactor > 0.5 ? '#fff0d8' : '#f2b27a');
           rimLightRef.current.color.lerp(rimColor, 0.05);
         }
-        // GRAPHICS: Shadow fill light - adds saturated blue tint to shadows during day (scattered skylight)
+        // GRAPHICS: Shadow fill light - adds rich colored tint to shadows (scattered skylight)
+        // ENHANCED: Time-of-day shadow colors for cinematic richness
         // WEATHER-AWARE: Color and intensity adjust based on atmospheric conditions
         if (shadowFillLightRef.current) {
           // Base intensity from dayFactor
-          let shadowFillIntensity = dayFactor * 0.4;
+          let shadowFillIntensity = dayFactor * 0.45;
 
           // Weather-based adjustments
           if (weatherType === WeatherType.OVERCAST) {
@@ -1777,8 +1925,21 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             // Warm ochre for dust-scattered light
             shadowFillColor.set('#b8a080');
           } else {
-            // Clear: saturated blue for Rayleigh scattering from clear sky
-            shadowFillColor.set('#5a8fd8');
+            // ENHANCED: Rich time-of-day shadow tinting
+            // Morning/evening: warm purple-blue shadows
+            // Midday: cooler saturated blue shadows (complementary to golden sun)
+            const midDayFactor = Math.max(0, 1 - Math.abs(12 - params.timeOfDay) / 5); // Peak at noon
+
+            if (twilightFactor > 0.3) {
+              // Twilight: rich purple-blue shadows
+              shadowFillColor.set('#6a5a9a');
+            } else if (midDayFactor > 0.6) {
+              // Midday: saturated cool blue (complementary to warm sun)
+              shadowFillColor.set('#4a7ac8');
+            } else {
+              // Morning/afternoon: medium blue-purple
+              shadowFillColor.set('#5a78b8');
+            }
           }
 
           shadowFillLightRef.current.intensity = THREE.MathUtils.lerp(
@@ -1850,7 +2011,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           fogRef.current.color.lerp(fogColor, 0.05);
         }
 
-        scene.background = skyColor;
+        // scene.background = skyColor; // DISABLED: Now using SkyGradient component for realistic gradient
       }
     }
 
@@ -1947,10 +2108,35 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           );
           const cameraYaw = Math.atan2(cameraOffset.x, cameraOffset.z);
 
+          // Add special NPCs to minimap
+          const specialNPCs: MiniMapData['specialNPCs'] = [];
+          if (snakeCharmerPosition) {
+            const dx = snakeCharmerPosition[0] - pos.x;
+            const dz = snakeCharmerPosition[2] - pos.z;
+            if ((dx * dx + dz * dz) <= maxDistSq) {
+              specialNPCs.push({ x: snakeCharmerPosition[0], z: snakeCharmerPosition[2], type: 'SUFI_MYSTIC' });
+            }
+          }
+          if (astrologerPosition) {
+            const dx = astrologerPosition[0] - pos.x;
+            const dz = astrologerPosition[2] - pos.z;
+            if ((dx * dx + dz * dz) <= maxDistSq) {
+              specialNPCs.push({ x: astrologerPosition[0], z: astrologerPosition[2], type: 'ASTROLOGER' });
+            }
+          }
+          if (scribePosition) {
+            const dx = scribePosition[0] - pos.x;
+            const dz = scribePosition[2] - pos.z;
+            if ((dx * dx + dz * dz) <= maxDistSq) {
+              specialNPCs.push({ x: scribePosition[0], z: scribePosition[2], type: 'SCRIBE' });
+            }
+          }
+
           onMinimapUpdate({
             player: { x: pos.x, z: pos.z, yaw: playerRef.current.rotation.y, cameraYaw },
             buildings,
             npcs,
+            specialNPCs,
             district,
             radius,
           });
@@ -1966,19 +2152,21 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <pointLight ref={marketBounceRef} position={[0, 6, 0]} intensity={0} color="#f3cfa0" distance={36} decay={2} />
       {/* Tier 1: Warmer ground color for sun-baked ambient bounce */}
       <hemisphereLight ref={hemiRef} intensity={0.28} color="#c7d2f0" groundColor="#a6917a" />
+      {/* PERFORMANCE: Shadow map configuration - 2048x2048 for quality, optimized bias for clean shadows */}
       <directionalLight
         ref={lightRef}
         position={[50, 50, 20]}
         castShadow={devSettings.showShadows}
-        shadow-mapSize={[768, 768]}
+        shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-40}
         shadow-camera-right={40}
         shadow-camera-top={40}
         shadow-camera-bottom={-40}
         shadow-camera-near={5}
         shadow-camera-far={140}
-        shadow-bias={-0.0004}
+        shadow-bias={-0.0001}
         shadow-normalBias={0.02}
+        shadow-radius={1.2}
       />
       <directionalLight
         ref={rimLightRef}
@@ -2003,17 +2191,27 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         blur={0.6}
         environmentIntensity={(0.35 + dayFactor * 0.75) * (1 - nightFactor * 0.7)}
       />
+      {/* GRAPHICS: Sky gradient dome with realistic zenith-to-horizon colors */}
+      <SkyGradient
+        timeOfDay={params.timeOfDay}
+        weatherType={weather.current.weatherType}
+        cloudCover={weather.current.cloudCover}
+      />
+
+      {/* GRAPHICS: Smooth star fade and increased saturation for dramatic night sky */}
+      {/* PERFORMANCE: Reduced from 9000 to 3000 stars for better nighttime FPS */}
       <Stars
         radius={180}
         depth={80}
-        count={dayFactor > 0.25 ? 0 : 9000}
+        count={3000}
         factor={5}
-        saturation={0.1}
+        saturation={0.35}
         fade
         speed={0.6}
+        opacity={Math.max(0, Math.min(1, (0.3 - dayFactor) / 0.3))}
       />
       <Moon timeOfDay={params.timeOfDay} simTime={simTime} />
-      <MilkyWay visible={dayFactor <= 0.2} />
+      <MilkyWay visible={dayFactor <= 0.2} simTime={simTime} />
 
       {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#c5ddf5', 0.004]} />}
       {devSettings.showClouds && <CloudLayer weather={weather} />}
@@ -2021,50 +2219,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <WorldEnvironment
         mapX={params.mapX}
         mapY={params.mapY}
+        sessionSeed={sessionSeed}
         onGroundClick={setPlayerTarget}
-        onBuildingsGenerated={(b) => {
-          buildingsRef.current = b;
-          buildingHashRef.current = buildBuildingHash(b);
-          setBuildingsState(b);
-          const district = getDistrictType(params.mapX, params.mapY);
-          if (district === 'HOVELS' || district === 'ALLEYS') {
-            const spawnSeed = params.mapX * 1000 + params.mapY * 13 + 77;
-            const tryPoints: THREE.Vector3[] = [];
-            const base = new THREE.Vector3(0, 0, 0);
-            const ring = [0, 3, 6, 9, 12];
-            ring.forEach((r) => {
-              for (let i = 0; i < 8; i++) {
-                const angle = (i / 8) * Math.PI * 2 + seededRandom(spawnSeed + r * 13 + i) * 0.6;
-                tryPoints.push(new THREE.Vector3(base.x + Math.cos(angle) * r, 0, base.z + Math.sin(angle) * r));
-              }
-            });
-            const hash = buildingHashRef.current || undefined;
-            const found = tryPoints.find((p) => !isBlockedByBuildings(p, b, 0.6, hash) && !isBlockedByObstacles(p, obstacles, 0.6));
-            if (found) {
-              setPlayerSpawn([found.x, 0, found.z]);
-            }
-          } else if (district === 'CARAVANSERAI') {
-            let spawnSeed = params.mapX * 1000 + params.mapY * 13 + 177;
-            const tryPoints = [
-              new THREE.Vector3(12, 0, 12),
-              new THREE.Vector3(-12, 0, 12),
-              new THREE.Vector3(12, 0, -12),
-              new THREE.Vector3(-12, 0, -12),
-              new THREE.Vector3(0, 0, 18),
-              new THREE.Vector3(18, 0, 0),
-              new THREE.Vector3(-18, 0, 0),
-              new THREE.Vector3(0, 0, -18)
-            ];
-            const shuffled = tryPoints.sort(() => seededRandom(spawnSeed++) - 0.5);
-            const hash = buildingHashRef.current || undefined;
-            const found = shuffled.find((p) => !isBlockedByBuildings(p, b, 1.0, hash) && !isBlockedByObstacles(p, obstacles, 1.0));
-            if (found) {
-              setPlayerSpawn([found.x, 0, found.z]);
-            } else {
-              setPlayerSpawn([14, 0, 14]);
-            }
-          }
-        }}
+        onBuildingsGenerated={handleBuildingsGenerated}
         onHeightmapBuilt={(heightmap) => {
           heightmapRef.current = heightmap;
         }}
@@ -2080,6 +2237,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         laundryLines={laundryLines}
         catPositionRef={catPositionRef}
         ratPositions={ratPositionsRef.current}
+        npcPositions={npcPositionsRef.current}
+        playerPosition={playerRef.current?.position}
+        isSprinting={sprintStateRef.current}
       />
 
       {/* Market Stalls - procedurally generated with variety */}
@@ -2100,8 +2260,46 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         );
       })}
 
+      {/* Snake Charmer Sufi - Saʿdiyya tariqa member */}
+      {snakeCharmerPosition && (
+        <SnakeCharmer
+          position={snakeCharmerPosition}
+          timeOfDay={params.timeOfDay}
+          onApproach={setSnakeCharmerDistance}
+          onSelect={onNpcSelect}
+          isSelected={selectedNpcId === `sufi-mystic-${snakeCharmerPosition[0]}-${snakeCharmerPosition[2]}`}
+        />
+      )}
+
+      {/* Al-Nāy flute music - distance-based ambient audio */}
+      <FluteMusic
+        distance={snakeCharmerDistance}
+        enabled={snakeCharmerPosition !== null}
+      />
+
+      {/* Astrologer - celestial scholar with brass astrolabe */}
+      {astrologerPosition && (
+        <Astrologer
+          position={astrologerPosition}
+          timeOfDay={params.timeOfDay}
+          onSelect={onNpcSelect}
+          isSelected={selectedNpcId === `astrologer-${astrologerPosition[0]}-${astrologerPosition[2]}`}
+        />
+      )}
+
+      {/* Scribe - calligrapher and letter writer */}
+      {scribePosition && (
+        <Scribe
+          position={scribePosition}
+          timeOfDay={params.timeOfDay}
+          onSelect={onNpcSelect}
+          isSelected={selectedNpcId === `scribe-${scribePosition[0]}-${scribePosition[2]}`}
+        />
+      )}
+
       {/* Tier 3: Contact Shadows - adds depth and grounding to buildings */}
-      {devSettings.showShadows && (
+      {/* PERFORMANCE: Disabled at night (dayFactor < 0.1) to improve nighttime FPS */}
+      {devSettings.showShadows && dayFactor > 0.1 && (
         <ContactShadows
           position={[0, 0.01, 0]}
           opacity={dayFactor * 0.5}
@@ -2126,7 +2324,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           params={params}
           simTime={simTime}
           onStatsUpdate={onStatsUpdate}
-          onMoraleUpdate={onMoraleUpdate}
+          onMoraleUpdate={handleMoraleUpdate}
           actionEvent={actionEvent}
           rats={ratsRef.current}
           buildings={buildingsRef.current}
@@ -2169,6 +2367,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onPickup={handlePickupItem}
         onPushCharge={onPushCharge}
         dossierMode={dossierMode}
+        sprintStateRef={sprintStateRef}
       />
 
       {/* Footprints in sand (OUTSKIRTS_DESERT only) */}
@@ -2183,6 +2382,26 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
       {/* Action visual effects */}
       <ActionEffects actionEvent={actionEvent} />
+
+      {/* Ambient sound system */}
+      <AmbientAudio
+        timeOfDay={params.timeOfDay}
+        mapX={params.mapX}
+        mapY={params.mapY}
+        weatherType={weather.current.weatherType as 'CLEAR' | 'OVERCAST' | 'SANDSTORM'}
+        windDirection={Math.atan2(weather.current.wind.y, weather.current.wind.x)}
+        windStrength={weather.current.wind.length()}
+        humidity={weather.current.humidity}
+        activeNpcCount={moraleStatsRef.current.agentCount}
+        avgPanic={moraleStatsRef.current.avgPanic}
+        avgAwareness={moraleStatsRef.current.avgAwareness}
+        sceneMode="outdoor"
+        playerPosition={playerPositionRef.current}
+        nearbyInfected={nearbyInfectedRef.current}
+        nearbyDeceased={nearbyDeceasedRef.current}
+        enabled={true}
+        masterVolume={0.4}
+      />
     </>
   );
 };

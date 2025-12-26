@@ -15,13 +15,18 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
   const twilightFactor = time >= 17 && time < 19 ? (time - 17) / 2 : time >= 5 && time < 7 ? (7 - time) / 2 : 0;
   const dayFactor = time >= 7 && time < 17 ? 1 : time >= 5 && time < 7 ? (time - 5) / 2 : time >= 17 && time < 19 ? (19 - time) / 2 : 0;
 
-  // Distant silhouette colors - very dark, low opacity
+  // ATMOSPHERIC SCATTERING: More haze at twilight/midday heat, clearer at night
+  const atmosphericHaze = nightFactor > 0.8 ? 0.5 : twilightFactor > 0 ? 1.2 : dayFactor * 0.9;
+
+  // Distant silhouette colors - warm sun-bleached tones
   const silhouetteColor = isDesert
-    ? (nightFactor > 0.8 ? '#120c08' : twilightFactor > 0 ? '#2e1f14' : '#3b2a1b')
-    : (nightFactor > 0.8 ? '#0a0a0a' : twilightFactor > 0 ? '#1a1a1a' : '#2a2a2a');
-  const silhouetteOpacity = isDesert
-    ? (nightFactor > 0.8 ? 0.35 : twilightFactor > 0 ? 0.45 : 0.4)
-    : (nightFactor > 0.8 ? 0.4 : twilightFactor > 0 ? 0.5 : 0.45);
+    ? (nightFactor > 0.8 ? '#120c08' : twilightFactor > 0 ? '#4a3424' : '#8a7a6a')  // Day: warm sun-bleached tan
+    : (nightFactor > 0.8 ? '#0a0a0a' : twilightFactor > 0 ? '#2a2a3a' : '#6a5a4a'); // Day: warm dusty brown
+
+  // Reduced opacity for softer, more indistinct silhouettes
+  const silhouetteOpacity = (isDesert
+    ? (nightFactor > 0.8 ? 0.25 : twilightFactor > 0 ? 0.35 : 0.28)
+    : (nightFactor > 0.8 ? 0.3 : twilightFactor > 0 ? 0.4 : 0.32)) * (1.0 - atmosphericHaze * 0.15);
 
   // Wall color - weathered stone (kept close for boundary)
   const wallColor = isDesert
@@ -30,19 +35,21 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
   const wallOpacity = showCityWalls ? 1 : 0.45;
   const wallRadiusUsed = showCityWalls ? wallRadius : wallRadius + 60;
 
-  // Mountain ring - very dark, far distance
+  // Mountain ring - very faint, warm distant haze
   const mountainColor = isDesert
-    ? (nightFactor > 0.8 ? '#070503' : twilightFactor > 0 ? '#1c1510' : '#2b2016')
-    : (nightFactor > 0.8 ? '#000000' : twilightFactor > 0 ? '#0a0a14' : '#1a1a2a');
-  const mountainOpacity = nightFactor > 0.8 ? 0.35 : twilightFactor > 0 ? 0.45 : 0.5;
+    ? (nightFactor > 0.8 ? '#070503' : twilightFactor > 0 ? '#2c1f18' : '#a89878')  // Day: warm dusty tan
+    : (nightFactor > 0.8 ? '#000000' : twilightFactor > 0 ? '#1a1a24' : '#9a8a7a'); // Day: warm sandy brown
 
-  // Smoke color - atmospheric
-  const smokeColor = isDesert
-    ? (nightFactor > 0.8 ? '#2a2016' : twilightFactor > 0 ? '#7a5b3b' : '#8a6b45')
-    : (nightFactor > 0.8 ? '#1a1a1a' : twilightFactor > 0 ? '#4a4a4a' : '#6a6a6a');
-  const smokeOpacity = isDesert
-    ? (nightFactor > 0.8 ? 0.12 : twilightFactor > 0 ? 0.2 : 0.24)
-    : (nightFactor > 0.8 ? 0.15 : twilightFactor > 0 ? 0.25 : 0.3);
+  // Much fainter mountains for distance realism
+  const mountainOpacity = (nightFactor > 0.8 ? 0.2 : twilightFactor > 0 ? 0.3 : 0.35) * (1.0 - atmosphericHaze * 0.2);
+
+  // Atmospheric haze - warm dusty heat shimmer
+  const hazeColor = isDesert
+    ? (nightFactor > 0.8 ? '#2a2016' : twilightFactor > 0 ? '#c89a6a' : '#e8d4b8')  // Day: warm sandy haze
+    : (nightFactor > 0.8 ? '#1a1a1a' : twilightFactor > 0 ? '#8a8a9a' : '#d8c4a8'); // Day: warm dusty haze
+  const hazeOpacity = (isDesert
+    ? (nightFactor > 0.8 ? 0.08 : twilightFactor > 0 ? 0.16 : 0.12)
+    : (nightFactor > 0.8 ? 0.1 : twilightFactor > 0 ? 0.18 : 0.14)) * (0.8 + atmosphericHaze * 0.4);
 
   // Instanced city buildings - SINGLE DRAW CALL
   const buildingInstancesRef = useRef<THREE.InstancedMesh>(null);
@@ -90,11 +97,11 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
 
-      // Procedural height variation (3-8 units) - shorter for distance
-      const height = (isDesert ? 2 : 3) + ((i * 11) % (isDesert ? 4 : 6));
-      // Procedural width variation (2-5 units) - narrower
-      const width = (isDesert ? 3 : 2) + ((i * 13) % (isDesert ? 3 : 4));
-      const depth = (isDesert ? 3 : 2) + ((i * 17) % (isDesert ? 3 : 4));
+      // Realistic distant building proportions - low and wide
+      const height = (isDesert ? 1.0 : 1.2) + ((i * 11) % (isDesert ? 8 : 12)) * 0.15; // 1.0-2.2 units (desert) or 1.2-3.0 units (city)
+      // Wider buildings for realistic squat appearance
+      const width = (isDesert ? 4 : 3) + ((i * 13) % (isDesert ? 4 : 5)); // 4-8 units (desert) or 3-8 units (city)
+      const depth = (isDesert ? 4 : 3) + ((i * 17) % (isDesert ? 4 : 5)); // 4-8 units (desert) or 3-8 units (city)
 
       tempObj.position.set(x, height / 2, z);
       tempObj.scale.set(width, height, depth);
@@ -108,10 +115,18 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
 
   return (
     <group>
-      {/* INSTANCED DISTANT CITY - Single draw call for 70 buildings at horizon */}
+      {/* INSTANCED DISTANT CITY - Single draw call for buildings at horizon */}
       <instancedMesh ref={buildingInstancesRef} args={[undefined, undefined, buildingCount]} castShadow={false} receiveShadow={false}>
         <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+        <meshStandardMaterial
+          color={silhouetteColor}
+          roughness={1}
+          transparent
+          opacity={silhouetteOpacity}
+          depthWrite={false}
+          emissive={twilightFactor > 0 ? silhouetteColor : '#000000'}
+          emissiveIntensity={twilightFactor * 0.15}
+        />
       </instancedMesh>
 
       {/* DAMASCUS CITY WALLS - Octagonal ring with gate breaks */}
@@ -153,14 +168,14 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
       {!isDesert && (() => {
         const minaretInstancesRef = useRef<THREE.InstancedMesh>(null);
         const minaretData = [
-          { angle: 0, radius: 145, height: 12 },      // North
-          { angle: Math.PI / 4, radius: 150, height: 10 },   // NE
-          { angle: Math.PI / 2, radius: 155, height: 14 },   // East
-          { angle: 3 * Math.PI / 4, radius: 148, height: 9 }, // SE
-          { angle: Math.PI, radius: 152, height: 11 },      // South
-          { angle: 5 * Math.PI / 4, radius: 147, height: 13 }, // SW
-          { angle: 3 * Math.PI / 2, radius: 160, height: 11 }, // West
-          { angle: 7 * Math.PI / 4, radius: 143, height: 10 }, // NW
+          { angle: 0, radius: 145, height: 5.5 },      // North
+          { angle: Math.PI / 4, radius: 150, height: 4.5 },   // NE
+          { angle: Math.PI / 2, radius: 155, height: 6.0 },   // East
+          { angle: 3 * Math.PI / 4, radius: 148, height: 4.0 }, // SE
+          { angle: Math.PI, radius: 152, height: 5.0 },      // South
+          { angle: 5 * Math.PI / 4, radius: 147, height: 5.8 }, // SW
+          { angle: 3 * Math.PI / 2, radius: 160, height: 5.2 }, // West
+          { angle: 7 * Math.PI / 4, radius: 143, height: 4.8 }, // NW
         ];
 
         React.useEffect(() => {
@@ -171,7 +186,7 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
             const z = Math.sin(minaret.angle) * minaret.radius;
             tempObj.position.set(x, minaret.height / 2, z);
             // Scale to vary height per minaret
-            tempObj.scale.set(1, minaret.height / 11, 1); // normalize to avg height
+            tempObj.scale.set(0.6, minaret.height / 5, 0.6); // Slender, realistic proportions
             tempObj.updateMatrix();
             minaretInstancesRef.current.setMatrixAt(i, tempObj.matrix);
           });
@@ -180,8 +195,16 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
 
         return (
           <instancedMesh ref={minaretInstancesRef} args={[undefined, undefined, 8]} castShadow={false}>
-            <cylinderGeometry args={[0.8, 1.0, 11, 6]} />
-            <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+            <cylinderGeometry args={[0.5, 0.6, 5, 6]} />
+            <meshStandardMaterial
+              color={silhouetteColor}
+              roughness={1}
+              transparent
+              opacity={silhouetteOpacity * 0.95}
+              depthWrite={false}
+              emissive={twilightFactor > 0 ? silhouetteColor : '#000000'}
+              emissiveIntensity={twilightFactor * 0.12}
+            />
           </instancedMesh>
         );
       })()}
@@ -206,13 +229,13 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
             const z = Math.sin(dome.angle) * dome.radius;
 
             // Base cylinder
-            tempObj.position.set(x, 4, z);
-            tempObj.scale.set(1, 1, 1);
+            tempObj.position.set(x, 2, z);
+            tempObj.scale.set(1, 0.5, 1); // Shorter base
             tempObj.updateMatrix();
             domeBasesRef.current.setMatrixAt(i, tempObj.matrix);
 
             // Dome cap
-            tempObj.position.set(x, 9, z);
+            tempObj.position.set(x, 4.5, z); // Lower position
             tempObj.updateMatrix();
             domeCapsRef.current.setMatrixAt(i, tempObj.matrix);
           });
@@ -223,12 +246,28 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
         return (
           <>
             <instancedMesh ref={domeBasesRef} args={[undefined, undefined, 5]} castShadow={false}>
-              <cylinderGeometry args={[3, 3, 8, 8]} />
-              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+              <cylinderGeometry args={[2.5, 2.5, 4, 8]} />
+              <meshStandardMaterial
+                color={silhouetteColor}
+                roughness={1}
+                transparent
+                opacity={silhouetteOpacity * 0.92}
+                depthWrite={false}
+                emissive={twilightFactor > 0 ? silhouetteColor : '#000000'}
+                emissiveIntensity={twilightFactor * 0.18}
+              />
             </instancedMesh>
             <instancedMesh ref={domeCapsRef} args={[undefined, undefined, 5]} castShadow={false}>
-              <sphereGeometry args={[3.5, 8, 8, 0, Math.PI * 2, 0, Math.PI/2]} />
-              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity} />
+              <sphereGeometry args={[2.8, 8, 8, 0, Math.PI * 2, 0, Math.PI/2]} />
+              <meshStandardMaterial
+                color={silhouetteColor}
+                roughness={1}
+                transparent
+                opacity={silhouetteOpacity * 0.92}
+                depthWrite={false}
+                emissive={twilightFactor > 0 ? silhouetteColor : '#000000'}
+                emissiveIntensity={twilightFactor * 0.18}
+              />
             </instancedMesh>
           </>
         );
@@ -249,17 +288,20 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
             const radius = (isDesert ? 150 : 140) + ((i * 7) % 4) * 4;
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
-            const height = (isDesert ? 3 : 6) + ((i * 5) % (isDesert ? 3 : 4));
+            // Realistic distant tree heights - much shorter
+            const height = (isDesert ? 1.5 : 2.0) + ((i * 5) % (isDesert ? 4 : 5)) * 0.2; // 1.5-2.3 (desert) or 2.0-3.0 (city)
 
-            // Trunk
+            // Trunk - proportionally scaled
+            const trunkScale = height / (isDesert ? 2.0 : 2.5);
             tempObj.position.set(x, height / 2, z);
-            tempObj.scale.set(1, height / (isDesert ? 4.5 : 7.5), 1);
+            tempObj.scale.set(trunkScale * 0.8, trunkScale, trunkScale * 0.8);
             tempObj.updateMatrix();
             trunksRef.current.setMatrixAt(i, tempObj.matrix);
 
-            // Canopy
-            tempObj.position.set(x, height + (isDesert ? 0.9 : 1.5), z);
-            tempObj.scale.set(1, 1, 1);
+            // Canopy - wider and flatter for distant perspective
+            const canopyScale = 0.7 + ((i * 3) % 5) * 0.15; // Variation: 0.7-1.3
+            tempObj.position.set(x, height + (isDesert ? 0.4 : 0.6), z);
+            tempObj.scale.set(canopyScale * 1.2, canopyScale * 0.8, canopyScale * 1.2); // Wider, flatter
             tempObj.updateMatrix();
             canopiesRef.current.setMatrixAt(i, tempObj.matrix);
           }
@@ -271,77 +313,110 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
         return (
           <>
             <instancedMesh ref={trunksRef} args={[undefined, undefined, count]} castShadow={false}>
-              <cylinderGeometry args={[isDesert ? 0.25 : 0.3, isDesert ? 0.35 : 0.4, isDesert ? 4.5 : 7.5, 4]} />
-              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity * 0.8} />
+              <cylinderGeometry args={[isDesert ? 0.15 : 0.18, isDesert ? 0.22 : 0.25, isDesert ? 2.0 : 2.5, 4]} />
+              <meshStandardMaterial
+                color={silhouetteColor}
+                roughness={1}
+                transparent
+                opacity={silhouetteOpacity * 0.75}
+                depthWrite={false}
+              />
             </instancedMesh>
             <instancedMesh ref={canopiesRef} args={[undefined, undefined, count]} castShadow={false}>
-              <sphereGeometry args={[isDesert ? 1.2 : 1.8, 6, 4]} />
-              <meshStandardMaterial color={silhouetteColor} roughness={1} transparent opacity={silhouetteOpacity * 0.7} />
+              <sphereGeometry args={[isDesert ? 0.8 : 1.0, 6, 4]} />
+              <meshStandardMaterial
+                color={silhouetteColor}
+                roughness={1}
+                transparent
+                opacity={silhouetteOpacity * 0.65}
+                depthWrite={false}
+              />
             </instancedMesh>
           </>
         );
       })()}
 
-      {/* Chimney smoke - atmospheric detail - INSTANCED */}
+      {/* Atmospheric haze layers - multiple distances for depth */}
       {(() => {
-        const smokeInstancesRef = useRef<THREE.InstancedMesh>(null);
-        const smokeData = [
-          { x: 100, z: 100 },
-          { x: -110, z: 95 },
-          { x: 105, z: -100 },
-          { x: -95, z: -105 },
+        const hazeLayersRef = useRef<THREE.InstancedMesh>(null);
+        const hazeData = [
+          { x: 100, z: 100, height: 8, size: 1.5 },
+          { x: -110, z: 95, height: 10, size: 1.8 },
+          { x: 105, z: -100, height: 7, size: 1.4 },
+          { x: -95, z: -105, height: 9, size: 1.6 },
+          { x: 120, z: -80, height: 11, size: 2.0 },
+          { x: -130, z: 110, height: 8, size: 1.7 },
         ];
 
         React.useEffect(() => {
-          if (!smokeInstancesRef.current) return;
+          if (!hazeLayersRef.current) return;
           const tempObj = new THREE.Object3D();
-          smokeData.forEach((smoke, i) => {
-            tempObj.position.set(smoke.x, 8, smoke.z);
-            tempObj.scale.set(1, 1, 1);
+          hazeData.forEach((haze, i) => {
+            tempObj.position.set(haze.x, haze.height, haze.z);
+            tempObj.scale.set(haze.size, 1, haze.size);
             tempObj.updateMatrix();
-            smokeInstancesRef.current.setMatrixAt(i, tempObj.matrix);
+            hazeLayersRef.current.setMatrixAt(i, tempObj.matrix);
           });
-          smokeInstancesRef.current.instanceMatrix.needsUpdate = true;
+          hazeLayersRef.current.instanceMatrix.needsUpdate = true;
         }, []);
 
         return (
-          <instancedMesh ref={smokeInstancesRef} args={[undefined, undefined, 4]} castShadow={false}>
+          <instancedMesh ref={hazeLayersRef} args={[undefined, undefined, 6]} castShadow={false}>
             <cylinderGeometry args={[1.5, 0.5, 6, 6]} />
-            <meshStandardMaterial color={smokeColor} roughness={1} transparent opacity={smokeOpacity} />
+            <meshStandardMaterial color={hazeColor} roughness={1} transparent opacity={hazeOpacity} depthWrite={false} />
           </instancedMesh>
         );
       })()}
 
-      {/* Mount Qasioun - very distant mountain ring */}
+      {/* Mount Qasioun - very distant mountain ring with atmospheric fade */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 10, 0]}>
         <ringGeometry args={[165, 180, 64]} />
-        <meshStandardMaterial color={mountainColor} transparent opacity={mountainOpacity} roughness={1} />
+        <meshStandardMaterial
+          color={mountainColor}
+          transparent
+          opacity={mountainOpacity}
+          roughness={1}
+          depthWrite={false}
+          emissive={twilightFactor > 0 ? mountainColor : '#000000'}
+          emissiveIntensity={twilightFactor * 0.1}
+        />
       </mesh>
 
-      {/* HORIZON LINE GRADIENT - Smooth transition where ground meets sky */}
-      {/* Sky color for blending */}
+      {/* HORIZON LINE GRADIENT - Ultra-smooth atmospheric blending */}
+      {/* Enhanced multi-layer gradient for seamless ground-to-sky transition */}
       {(() => {
         const horizonSkyColor = isDesert
-          ? (nightFactor > 0.8 ? '#111825' : twilightFactor > 0 ? '#f2a24f' : '#7fb2dd')
-          : (nightFactor > 0.8 ? '#0f1829' : twilightFactor > 0 ? '#f7b25a' : '#2f95ee');
+          ? (nightFactor > 0.8 ? '#111825' : twilightFactor > 0 ? '#f2a24f' : '#f4d4a8')  // Day: warm sandy-golden
+          : (nightFactor > 0.8 ? '#0f1829' : twilightFactor > 0 ? '#f7b25a' : '#e8c8a0'); // Day: warm cream-golden
+
+        // ENHANCED: 12 gradient layers for ultra-smooth blending
+        const gradientLayers = [
+          { height: 0.05, radius: [100, 180], opacity: 0.45, colorMix: 0 },      // Near ground
+          { height: 0.2, radius: [100, 180], opacity: 0.42, colorMix: 0.08 },
+          { height: 0.5, radius: [100, 180], opacity: 0.38, colorMix: 0.16 },
+          { height: 0.9, radius: [100, 180], opacity: 0.35, colorMix: 0.24 },
+          { height: 1.4, radius: [100, 180], opacity: 0.32, colorMix: 0.34 },
+          { height: 2.0, radius: [100, 180], opacity: 0.28, colorMix: 0.44 },
+          { height: 2.8, radius: [100, 180], opacity: 0.25, colorMix: 0.54 },
+          { height: 3.8, radius: [100, 180], opacity: 0.22, colorMix: 0.64 },
+          { height: 5.0, radius: [100, 180], opacity: 0.18, colorMix: 0.74 },
+          { height: 6.5, radius: [100, 180], opacity: 0.14, colorMix: 0.84 },
+          { height: 8.5, radius: [100, 180], opacity: 0.10, colorMix: 0.92 },
+          { height: 11.0, radius: [100, 180], opacity: 0.06, colorMix: 0.98 },   // Blend to sky
+        ];
 
         return (
           <>
-            {/* Multiple thin rings creating gradient from ground to sky */}
-            {[
-              { height: 0.1, radius: [100, 180], opacity: 0.5, colorMix: 0 },    // Ground color
-              { height: 0.5, radius: [100, 180], opacity: 0.45, colorMix: 0.15 },
-              { height: 1.0, radius: [100, 180], opacity: 0.4, colorMix: 0.3 },
-              { height: 1.8, radius: [100, 180], opacity: 0.35, colorMix: 0.45 },
-              { height: 2.8, radius: [100, 180], opacity: 0.3, colorMix: 0.6 },
-              { height: 4.0, radius: [100, 180], opacity: 0.25, colorMix: 0.75 },
-              { height: 5.5, radius: [100, 180], opacity: 0.2, colorMix: 0.85 },
-              { height: 7.5, radius: [100, 180], opacity: 0.15, colorMix: 0.95 },  // Sky color
-            ].map((layer, i) => {
-              // Blend from ground color to sky color
-              const groundColor = new THREE.Color(isDesert ? '#cfa46a' : '#d4b894'); // Warm ground
+            {gradientLayers.map((layer, i) => {
+              // Blend from warm ground to warm atmospheric horizon
+              const groundColor = new THREE.Color(isDesert ? '#d4a870' : '#d8b898');  // Warmer ground
               const skyColor = new THREE.Color(horizonSkyColor);
               const blendedColor = groundColor.clone().lerp(skyColor, layer.colorMix);
+
+              // Atmospheric haze increases during peak sun
+              const adjustedOpacity = layer.opacity
+                * (nightFactor > 0.8 ? 0.4 : twilightFactor > 0 ? 0.85 : 0.65)
+                * (1.0 + atmosphericHaze * 0.25);
 
               return (
                 <mesh key={`horizon-gradient-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, layer.height, 0]}>
@@ -349,7 +424,7 @@ export const HorizonBackdrop: React.FC<{ timeOfDay?: number; showCityWalls?: boo
                   <meshStandardMaterial
                     color={blendedColor}
                     transparent
-                    opacity={layer.opacity * (nightFactor > 0.8 ? 0.6 : twilightFactor > 0 ? 0.8 : 1.0)}
+                    opacity={adjustedOpacity}
                     roughness={1}
                     depthWrite={false}
                   />

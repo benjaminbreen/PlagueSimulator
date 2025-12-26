@@ -3,13 +3,25 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, us
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, PointerLockControls } from '@react-three/drei';
-import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType } from '../types';
+import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
-import { PushableObject, PickupInfo } from '../utils/pushables';
+import { PushableObject, PickupInfo, PushableMaterial } from '../utils/pushables';
 import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
 import { calculateTerrainGradient } from '../utils/terrain-gradient';
+import { collisionSounds, CollisionMaterial } from './audio/CollisionSounds';
+
+// Map pushable materials to collision sound materials
+const materialToSound = (mat: PushableMaterial): CollisionMaterial => {
+  switch (mat) {
+    case 'ceramic': return 'ceramic';
+    case 'wood': return 'wood';
+    case 'stone': return 'stone';
+    case 'cloth': return 'cloth';
+    default: return 'stone';
+  }
+};
 
 const PLAYER_SPEED = 6;
 const RUN_SPEED = 11;
@@ -44,6 +56,8 @@ interface PlayerProps {
   onPickup?: (itemId: string, pickup: PickupInfo) => void;
   onPushCharge?: (charge: number) => void;
   dossierMode?: boolean;
+  actionEvent?: PlayerActionEvent | null;
+  sprintStateRef?: React.MutableRefObject<boolean>;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -64,7 +78,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onPickupPrompt,
   onPickup,
   onPushCharge,
-  dossierMode = false
+  dossierMode = false,
+  actionEvent,
+  sprintStateRef
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -131,6 +147,19 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const pickupPromptRef = useRef<string | null>(null);
   const nearestPickupRef = useRef<{ id: string; pickup: PickupInfo } | null>(null);
 
+  // Action animation state (warn, encourage, observe)
+  const actionAnimationRef = useRef<{ action: string; progress: number } | null>(null);
+  const actionStartTimeRef = useRef<number>(0);
+
+  // Wall occlusion system for over-shoulder camera
+  const occludedMeshesRef = useRef<Set<THREE.Mesh>>(new Set());
+  const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
+  const occlusionCheckFrameRef = useRef(0);
+  const ACTION_DURATION = 1.5; // seconds for full animation
+
+  // Sprint camera pullback (over-shoulder mode)
+  const sprintCameraOffsetRef = useRef(0); // 0 = normal, 1 = full sprint zoom
+
   // Dossier mode camera state
   const savedCameraPos = useRef<THREE.Vector3 | null>(null);
   const savedCameraTarget = useRef<THREE.Vector3 | null>(null);
@@ -141,10 +170,40 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     if (!group.current) return;
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
     const ground = sampleTerrainHeight(heightmap, initialPosition[0], initialPosition[2]);
-    group.current.position.set(initialPosition[0], ground + initialPosition[1], initialPosition[2]);
-    lastPlayerPos.current.copy(group.current.position);
-    lastMovePosRef.current.copy(group.current.position);
-  }, [initialPosition, heightmap]);
+    const spawnPos = new THREE.Vector3(initialPosition[0], ground + initialPosition[1], initialPosition[2]);
+
+    // Validate spawn isn't inside a building - if so, find safe position
+    if (isBlockedByBuildings(spawnPos, buildings, 0.6, buildingHash || undefined)) {
+      // Try to find a nearby safe position
+      const offsets = [2, 4, 6, 8];
+      let safePos: THREE.Vector3 | null = null;
+      for (const r of offsets) {
+        for (let i = 0; i < 8; i++) {
+          const angle = (i / 8) * Math.PI * 2;
+          const candidate = new THREE.Vector3(
+            spawnPos.x + Math.cos(angle) * r,
+            ground,
+            spawnPos.z + Math.sin(angle) * r
+          );
+          if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) &&
+              !isBlockedByObstacles(candidate, obstacles, 0.6)) {
+            safePos = candidate;
+            break;
+          }
+        }
+        if (safePos) break;
+      }
+      // Use safe position if found, otherwise use edge of map
+      const finalPos = safePos || new THREE.Vector3(30, ground, 30);
+      group.current.position.copy(finalPos);
+      lastPlayerPos.current.copy(finalPos);
+      lastMovePosRef.current.copy(finalPos);
+    } else {
+      group.current.position.copy(spawnPos);
+      lastPlayerPos.current.copy(spawnPos);
+      lastMovePosRef.current.copy(spawnPos);
+    }
+  }, [initialPosition, heightmap, buildings, buildingHash, obstacles]);
 
   const [keys, setKeys] = useState({ 
     up: false, down: false, left: false, right: false, 
@@ -228,6 +287,14 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
   }, []);
+
+  // Trigger action animation when actionEvent changes
+  useEffect(() => {
+    if (actionEvent && actionEvent.actionId) {
+      actionAnimationRef.current = { action: actionEvent.actionId, progress: 0 };
+      actionStartTimeRef.current = performance.now();
+    }
+  }, [actionEvent]);
 
   const playFootstep = (variant: 'walk' | 'run') => {
     const ctx = audioCtxRef.current;
@@ -319,35 +386,13 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     thudOsc.stop(ctx.currentTime + 0.16);
   };
 
-  const playObjectImpact = (material: PushableObject['material'], intensity: number) => {
-    const ctx = audioCtxRef.current;
-    const buffer = noiseBufferRef.current;
-    if (!ctx || !buffer) return;
-    if (ctx.state === 'suspended') ctx.resume();
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    if (material === 'ceramic') {
-      filter.frequency.value = 680 + intensity * 220;
-      filter.Q.value = 1.1;
-    } else if (material === 'wood') {
-      filter.frequency.value = 320 + intensity * 140;
-      filter.Q.value = 0.8;
-    } else if (material === 'cloth') {
-      filter.frequency.value = 220 + intensity * 80;
-      filter.Q.value = 0.5;
+  const playObjectImpact = (material: PushableObject['material'] | 'wall', intensity: number) => {
+    // Use the new collision sounds system
+    if (material === 'wall') {
+      collisionSounds.play('wall', intensity);
     } else {
-      filter.frequency.value = 420 + intensity * 160;
-      filter.Q.value = 0.9;
+      collisionSounds.play(materialToSound(material as PushableMaterial), intensity);
     }
-    const gain = ctx.createGain();
-    gain.gain.value = 0.1 + intensity * 0.14;
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    source.start();
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
   };
 
   const playNpcBump = (intensity: number) => {
@@ -483,14 +528,36 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
 
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
-    const groundHeight = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
+    let groundHeight = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
+
+    // PHYSICS: Check for crate platforms (player can stand on crates)
+    if (pushablesRef?.current) {
+      const CRATE_HEIGHT = 0.9; // Visual height of crate box
+      const CRATE_PLATFORM_RADIUS = 0.55; // Slightly larger than crate for easier landing
+
+      for (const item of pushablesRef.current) {
+        if (!item || item.kind !== 'crate' || !item.position) continue;
+
+        // Check horizontal distance to crate
+        const dx = group.current.position.x - item.position.x;
+        const dz = group.current.position.z - item.position.z;
+        const distSq = dx * dx + dz * dz;
+
+        if (distSq < CRATE_PLATFORM_RADIUS * CRATE_PLATFORM_RADIUS) {
+          // Player is above this crate - use crate top as ground
+          const crateTop = item.position.y + CRATE_HEIGHT / 2;
+          groundHeight = Math.max(groundHeight, crateTop);
+        }
+      }
+    }
 
     // 2. Jumping Physics + buffers
     const spacePressed = keys.space && !lastSpace.current;
     const spaceReleased = !keys.space && lastSpace.current;
     lastSpace.current = keys.space;
     if (spacePressed) {
-      if (stuckTimerRef.current > 0.6) {
+      // PERFORMANCE: Reduced unstuck timer from 0.6s to 0.3s for more responsive recovery
+      if (stuckTimerRef.current > 0.3) {
         const base = group.current.position.clone();
         const offsets = [0.8, 1.4, 2.0, 2.6];
         let moved = false;
@@ -601,6 +668,22 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             if (intensity > 0.4) {
               onImpactPuff?.(item.position, intensity);
             }
+
+            // PHYSICS: Shatter ceramic objects (amphorae) on hard impact
+            if (item.material === 'ceramic' && !item.isShattered) {
+              // Shatter threshold: medium speed or higher (0.7+)
+              // Power move with full charge can easily exceed this
+              const shatterThreshold = 0.65;
+              if (intensity > shatterThreshold) {
+                item.isShattered = true;
+                item.shatterTime = now;
+                // Extra impact puff for dramatic shatter
+                onImpactPuff?.(item.position, 1.0);
+                // Play shatter sound
+                collisionSounds.playShatter(intensity);
+              }
+            }
+
             objectImpactCooldownRef.current.set(item.id, now);
           }
         }
@@ -856,6 +939,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     if (sprintingRef.current !== sprinting) {
       sprintingRef.current = sprinting;
       setIsSprinting(sprinting);
+      if (sprintStateRef) {
+        sprintStateRef.current = sprinting;
+      }
     }
     if (moving && keys.shift) {
       interactChargingRef.current = false;
@@ -876,22 +962,55 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       currentSpeed = (keys.shift ? RUN_SPEED : PLAYER_SPEED) * airControl * damp;
       const moveDelta = moveVec.multiplyScalar(currentSpeed * delta);
       const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-      if (!isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(nextX, obstacles, 0.6)) {
+      const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6);
+      if (!blockedX) {
         group.current.position.x = nextX.x;
+      } else if (Math.abs(moveDelta.x) > 0.02) {
+        // Play wall collision sound when running into a wall
+        const intensity = Math.min(1, currentSpeed / RUN_SPEED);
+        playObjectImpact('wall', intensity * 0.6);
       }
       const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-      if (!isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(nextZ, obstacles, 0.6)) {
+      const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6);
+      if (!blockedZ) {
         group.current.position.z = nextZ.z;
+      } else if (Math.abs(moveDelta.z) > 0.02) {
+        // Play wall collision sound when running into a wall
+        const intensity = Math.min(1, currentSpeed / RUN_SPEED);
+        playObjectImpact('wall', intensity * 0.6);
       }
-      
+
       if (cameraMode !== CameraMode.FIRST_PERSON) {
         const targetRot = Math.atan2(moveVec.x, moveVec.z);
-        group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, targetRot, 0.1);
+        // OVER_SHOULDER: Fast rotation so character always faces movement direction
+        // THIRD_PERSON: Slower rotation for more controllable orbiting
+        const rotSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
+        group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, targetRot, rotSpeed);
       }
     }
 
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
-    const groundHeightNow = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
+    let groundHeightNow = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
+
+    // PHYSICS: Check for crate platforms when setting grounded position
+    if (pushablesRef?.current) {
+      const CRATE_HEIGHT = 0.9;
+      const CRATE_PLATFORM_RADIUS = 0.55;
+
+      for (const item of pushablesRef.current) {
+        if (!item || item.kind !== 'crate' || !item.position) continue;
+
+        const dx = group.current.position.x - item.position.x;
+        const dz = group.current.position.z - item.position.z;
+        const distSq = dx * dx + dz * dz;
+
+        if (distSq < CRATE_PLATFORM_RADIUS * CRATE_PLATFORM_RADIUS) {
+          const crateTop = item.position.y + CRATE_HEIGHT / 2;
+          groundHeightNow = Math.max(groundHeightNow, crateTop);
+        }
+      }
+    }
+
     if (isGrounded.current) {
       group.current.position.y = groundHeightNow;
     }
@@ -922,7 +1041,21 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
 
     if (interactSwingRef.current > 0) {
-      interactSwingRef.current = Math.max(0, interactSwingRef.current - delta * 3.5);
+      // Slower decay for more visible swing animation (was 3.5, now 1.8)
+      interactSwingRef.current = Math.max(0, interactSwingRef.current - delta * 1.8);
+    }
+
+    // Update action animation progress (warn, encourage, observe)
+    if (actionAnimationRef.current) {
+      const elapsed = (performance.now() - actionStartTimeRef.current) / 1000;
+      const progress = Math.min(1, elapsed / ACTION_DURATION);
+      actionAnimationRef.current.progress = progress;
+      if (progress >= 1) {
+        // Animation complete, clear after a small delay for smooth return
+        setTimeout(() => {
+          actionAnimationRef.current = null;
+        }, 200);
+      }
     }
 
     if (interactTriggerRef.current !== null && group.current) {
@@ -1011,13 +1144,15 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
           // Visual and audio feedback
           onImpactPuff?.(hitItem.position.clone(), 0.5 + strength * 0.4);
-          playObjectImpact('stone', 0.5 + strength * 0.3);
+          playObjectImpact(hitItem.material, 0.5 + strength * 0.3);
         } else {
           const testPoint = group.current.position.clone().add(forward.multiplyScalar(0.9));
           const blocked = isBlockedByBuildings(testPoint, buildings, 0.2, buildingHash || undefined)
             || isBlockedByObstacles(testPoint, obstacles, 0.2);
           if (blocked) {
             onImpactPuff?.(testPoint, 0.45 + strength * 0.35);
+            // Play wall sound for punching/pushing against wall
+            playObjectImpact('wall', 0.4 + strength * 0.3);
           }
         }
       }
@@ -1135,6 +1270,53 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         orbitRef.current.setAzimuthalAngle(0);
       }
       orbitRef.current.update();
+    } else if (cameraMode === CameraMode.OVER_SHOULDER && orbitRef.current) {
+      // Over-shoulder camera: tight follow with auto-rotation
+      const playerPos = group.current.position.clone();
+
+      // Sprint camera: smooth transition to show more of the world
+      const targetSprintOffset = sprintingRef.current ? 1.0 : 0.0;
+      sprintCameraOffsetRef.current = THREE.MathUtils.lerp(sprintCameraOffsetRef.current, targetSprintOffset, 0.08);
+
+      // When sprinting: look higher, camera pulls back and tilts up
+      const baseLookHeight = 2.0; // Raised from 1.2 for wider world view
+      const sprintLookHeight = 4.0; // Raised from 2.5 for dramatic sprint view
+      const lookHeight = THREE.MathUtils.lerp(baseLookHeight, sprintLookHeight, sprintCameraOffsetRef.current);
+
+      const targetLookAt = playerPos.clone().add(new THREE.Vector3(0, lookHeight, 0));
+      orbitRef.current.target.lerp(targetLookAt, 0.15);
+
+      // Auto-rotate camera to follow player facing direction (horizontal)
+      const targetAngle = group.current.rotation.y + Math.PI; // Behind player
+      const currentAngle = orbitRef.current.getAzimuthalAngle();
+
+      // Calculate shortest angular difference (accounting for wraparound at 2π)
+      const angleDiff = targetAngle - currentAngle;
+      const normalizedDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+
+      // Interpolate using the shortest path
+      const nextAngle = currentAngle + normalizedDiff * (ORBIT_RECENTER_SPEED * delta * 1.5);
+      orbitRef.current.setAzimuthalAngle(nextAngle);
+
+      // Set a lower viewing angle for cinematic upward look (vertical)
+      // When sprinting: tilt camera up to show more world ahead
+      const basePolarAngle = Math.PI / 2.2; // Higher angle (was π/2.0) for better world view
+      const sprintPolarAngle = Math.PI / 2.5; // Much higher when sprinting (was π/2.15)
+      const targetPolarAngle = THREE.MathUtils.lerp(basePolarAngle, sprintPolarAngle, sprintCameraOffsetRef.current);
+
+      const currentPolarAngle = orbitRef.current.getPolarAngle();
+      const nextPolarAngle = THREE.MathUtils.lerp(currentPolarAngle, targetPolarAngle, 0.05);
+      orbitRef.current.setPolarAngle(nextPolarAngle);
+
+      // Additional distance pullback when sprinting (move camera further back)
+      if (sprintCameraOffsetRef.current > 0.01) {
+        const cameraToTarget = camera.position.clone().sub(orbitRef.current.target);
+        const currentDistance = cameraToTarget.length();
+        const sprintExtraDistance = 5.0; // Pull back 5 units when sprinting (was 3.0)
+        const targetDistance = currentDistance + sprintExtraDistance * sprintCameraOffsetRef.current;
+        const direction = cameraToTarget.normalize();
+        camera.position.copy(orbitRef.current.target.clone().add(direction.multiplyScalar(targetDistance)));
+      }
     } else if (cameraMode === CameraMode.THIRD_PERSON && orbitRef.current) {
       orbitRef.current.target.lerp(group.current.position.clone().add(new THREE.Vector3(0, 1.5, 0)), 0.1);
       if (recenterRef.current || recenterAmount.current > 0) {
@@ -1144,6 +1326,82 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         orbitRef.current.setAzimuthalAngle(nextAngle);
         recenterAmount.current = Math.max(0, recenterAmount.current - delta * 2);
       }
+    }
+
+    // PHASE 2: Wall Occlusion System - Make walls transparent when blocking camera view
+    // Only active in over-shoulder mode for cinematic camera
+    if (cameraMode === CameraMode.OVER_SHOULDER && group.current) {
+      // Performance: Only check every 3 frames
+      occlusionCheckFrameRef.current++;
+      if (occlusionCheckFrameRef.current >= 3) {
+        occlusionCheckFrameRef.current = 0;
+
+        const playerPos = group.current.position;
+        const cameraPos = camera.position;
+        const direction = playerPos.clone().sub(cameraPos).normalize();
+        const distance = playerPos.distanceTo(cameraPos);
+
+        // Raycast from camera to player to find occluding walls
+        raycasterRef.current.set(cameraPos, direction);
+        raycasterRef.current.far = distance;
+
+        // Get all intersected objects
+        const intersects = raycasterRef.current.intersectObjects(camera.parent?.children || [], true);
+
+        // Track which meshes are currently occluding
+        const currentlyOccluded = new Set<THREE.Mesh>();
+
+        for (const hit of intersects) {
+          // Only process building walls that are between camera and player
+          if (hit.distance < distance && hit.object.userData?.isBuildingWall) {
+            const mesh = hit.object as THREE.Mesh;
+            currentlyOccluded.add(mesh);
+
+            // Make wall transparent if not already
+            if (!occludedMeshesRef.current.has(mesh)) {
+              occludedMeshesRef.current.add(mesh);
+              if (mesh.material) {
+                const mat = mesh.material as THREE.MeshStandardMaterial;
+                mat.transparent = true;
+                mat.depthWrite = false;
+              }
+            }
+
+            // Fade to ghosted opacity
+            if (mesh.material) {
+              const mat = mesh.material as THREE.MeshStandardMaterial;
+              mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.15, 0.1);
+            }
+          }
+        }
+
+        // Restore meshes that are no longer occluding
+        occludedMeshesRef.current.forEach((mesh) => {
+          if (!currentlyOccluded.has(mesh) && mesh.material) {
+            const mat = mesh.material as THREE.MeshStandardMaterial;
+            mat.opacity = THREE.MathUtils.lerp(mat.opacity, 1.0, 0.05);
+
+            // Fully restore when opacity is high enough
+            if (mat.opacity > 0.98) {
+              mat.opacity = 1.0;
+              mat.transparent = false;
+              mat.depthWrite = true;
+              occludedMeshesRef.current.delete(mesh);
+            }
+          }
+        });
+      }
+    } else {
+      // Restore all occluded meshes when not in over-shoulder mode
+      occludedMeshesRef.current.forEach((mesh) => {
+        if (mesh.material) {
+          const mat = mesh.material as THREE.MeshStandardMaterial;
+          mat.opacity = 1.0;
+          mat.transparent = false;
+          mat.depthWrite = true;
+        }
+      });
+      occludedMeshesRef.current.clear();
     }
 
     // 5. Marker positioning
@@ -1159,13 +1417,29 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   return (
     <>
       {cameraMode !== CameraMode.FIRST_PERSON ? (
-        <OrbitControls 
-          ref={orbitRef} 
-          makeDefault 
-          minDistance={cameraMode === CameraMode.OVERHEAD ? 12 : 7} 
-          maxDistance={cameraMode === CameraMode.OVERHEAD ? 120 : 50} 
-          minPolarAngle={cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE : 0.1}
-          maxPolarAngle={cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE : Math.PI / 2.1}
+        <OrbitControls
+          ref={orbitRef}
+          makeDefault
+          minDistance={
+            cameraMode === CameraMode.OVERHEAD ? 12 :
+            cameraMode === CameraMode.OVER_SHOULDER ? 7 :
+            7
+          }
+          maxDistance={
+            cameraMode === CameraMode.OVERHEAD ? 120 :
+            cameraMode === CameraMode.OVER_SHOULDER ? 18 :
+            50
+          }
+          minPolarAngle={
+            cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
+            cameraMode === CameraMode.OVER_SHOULDER ? 0.5 :
+            0.1
+          }
+          maxPolarAngle={
+            cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
+            cameraMode === CameraMode.OVER_SHOULDER ? Math.PI / 1.7 :
+            Math.PI / 2.1
+          }
           enablePan={cameraMode === CameraMode.OVERHEAD}
           enableRotate={cameraMode === CameraMode.THIRD_PERSON}
           enableDamping
@@ -1188,6 +1462,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             scale={playerStats ? [playerStats.weight, playerStats.height, playerStats.weight] : undefined}
             enableArmSwing
             interactionSwingRef={interactSwingRef}
+            interactionChargeRef={interactChargeRef}
+            actionAnimationRef={actionAnimationRef}
             armSwingMode={(timeOfDay >= 19 || timeOfDay < 5) ? 'left' : 'both'}
             robeAccentColor={playerStats?.robeAccentColor}
             robeHasSash={playerStats?.robeHasSash}
