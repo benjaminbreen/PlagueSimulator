@@ -334,11 +334,13 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
   const decorSeed = Math.abs(Math.sin(roomSeed * 0.137));
   const showBaseboards = socialClass !== SocialClass.PEASANT;
   const showTiles = (socialClass === SocialClass.MERCHANT || socialClass === SocialClass.NOBILITY) && decorSeed > 0.55;
-  const tileWall: Side = cutawaySide !== 'north'
-    ? 'north'
-    : cutawaySide !== 'east'
-      ? 'east'
-      : 'south';
+  const tileWall: Side = cutawaySide === 'north'
+    ? 'south'
+    : cutawaySide === 'south'
+      ? 'north'
+      : cutawaySide === 'east'
+        ? 'west'
+        : 'east';
 
   // Civic building floor decorations
   const renderCivicFloorInlays = () => {

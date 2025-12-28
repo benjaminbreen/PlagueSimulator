@@ -251,14 +251,18 @@ function calculateDismountJumpVelocity(
 
 /**
  * Calculate position when stepping onto roof from top of climbable
+ * Now uses dynamic step distance based on building size for reliable roof landing
  */
 export function calculateRoofEntryPosition(
   climbable: ClimbableAccessory
 ): THREE.Vector3 {
   const [topX, topY, topZ] = climbable.topPosition;
 
-  // Step onto roof (move toward building center, away from edge)
-  const stepDistance = CLIMBING_CONSTANTS.ROOF_ENTRY_STEP;
+  // Dynamic step distance based on building size
+  // Ladder is at buildingEdge + depth/2, we want to land ~30% inside the building
+  // stepDistance = depth/2 (to reach edge) + halfSize * 0.35 (to get well inside)
+  const halfSize = climbable.buildingHalfSize;
+  const stepDistance = (climbable.depth / 2) + (halfSize * 0.35);
 
   let x = topX;
   let z = topZ;

@@ -54,6 +54,7 @@ export const Astrologer: React.FC<AstrologerProps> = ({
       language: 'Persian',
       height: 162 + seededRandom(seed + 2) * 18,
       weight: 70 + seededRandom(seed + 3) * 25,
+      disposition: 60,
       mood: 'Contemplative',
       awarenessLevel: 75,
       panicLevel: 35,

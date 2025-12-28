@@ -139,6 +139,7 @@ interface NPCProps {
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   agentHash?: SpatialHash<AgentSnapshot> | null;
   obstacles?: Obstacle[];
+  obstacleHash?: SpatialHash<Obstacle> | null;
   impactMapRef?: React.MutableRefObject<Map<string, { time: number; intensity: number }>>;
   playerRef?: React.RefObject<THREE.Group>;
   playerStats?: { disposition?: number; charisma?: number; religion?: string; ethnicity?: string; socialClass?: string } | null;
@@ -171,6 +172,7 @@ export const NPC: React.FC<NPCProps> = memo(({
   buildingHash = null,
   agentHash = null,
   obstacles = [],
+  obstacleHash = null,
   impactMapRef,
   playerRef,
   playerStats = null,
@@ -186,6 +188,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   npcStateOverride,
   globalApproachCooldownRef
 }) => {
+  const ENABLE_SIMPLE_LOD = true;
+  const SIMPLE_LOD_DISTANCE = 45;
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
   const [displayState, setDisplayState] = useState<AgentState>(initialState);
@@ -255,10 +259,39 @@ export const NPC: React.FC<NPCProps> = memo(({
   const lastApproachCheckRef = useRef(0); // Throttle approach checks
   const approachCheckCountRef = useRef(0); // Counter for seeded random variation
 
+  const movementTempsRef = useRef({
+    dir: new THREE.Vector3(),
+    step: new THREE.Vector3(),
+    nextPos: new THREE.Vector3(),
+    repel: new THREE.Vector3(),
+    offset: new THREE.Vector3(),
+    rotatedDir: new THREE.Vector3(),
+    tryPos: new THREE.Vector3(),
+    lookAtTarget: new THREE.Vector3(),
+    playerOffset: new THREE.Vector3(),
+    playerNormal: new THREE.Vector3(),
+    playerPush: new THREE.Vector3(),
+    playerTargetPush: new THREE.Vector3()
+  });
+  const avoidanceRotations = useMemo(
+    () => ([
+      { cos: Math.cos(Math.PI / 2), sin: Math.sin(Math.PI / 2) },       // 90° left
+      { cos: Math.cos(-Math.PI / 2), sin: Math.sin(-Math.PI / 2) },     // 90° right
+      { cos: Math.cos(Math.PI / 3), sin: Math.sin(Math.PI / 3) },       // 60° left
+      { cos: Math.cos(-Math.PI / 3), sin: Math.sin(-Math.PI / 3) },     // 60° right
+      { cos: Math.cos(2 * Math.PI / 3), sin: Math.sin(2 * Math.PI / 3) },   // 120° left
+      { cos: Math.cos(-2 * Math.PI / 3), sin: Math.sin(-2 * Math.PI / 3) }  // 120° right
+    ]),
+    []
+  );
+
   // PERFORMANCE: Cache speed modifiers (only recalculate when hour or state changes)
   const cachedSpeedRef = useRef(2.0);
   const lastSpeedUpdateHourRef = useRef(-1);
   const lastSpeedUpdateStateRef = useRef<AgentState>(initialState);
+
+  // PERFORMANCE: Simplify far-away NPC steering without throttling visible movement
+  const FAR_SIMPLIFY_DISTANCE = 45;
 
   // BUILDING ENTRY/EXIT: Track when NPCs go inside buildings
   const activityStateRef = useRef<'WANDERING' | 'INSIDE_BUILDING'>('WANDERING');
@@ -281,17 +314,18 @@ export const NPC: React.FC<NPCProps> = memo(({
     }
   }, [stats.socialClass]);
 
-  // GRAPHICS: 1 in 5 NPCs carry a torch at night
+  // GRAPHICS: 1 in 2 NPCs carry a torch at night
   const carriesTorch = useMemo(() => {
     // Use stats.id to seed the random so it's consistent per NPC
     const idHash = stats.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return (idHash % 5) === 0; // 20% chance (1 in 5)
+    return (idHash % 2) === 0; // 50% chance (1 in 2)
   }, [stats.headwearStyle, stats.id]);
 
   const appearance = useMemo(() => {
     const seed = idSeed;
     const tone = seededRandom(seed + 11);
-    const skin = `hsl(${26 + Math.round(tone * 8)}, ${28 + Math.round(tone * 18)}%, ${30 + Math.round(tone * 18)}%)`;
+    // Levantine/Mediterranean skin tones - olive to light brown (hue 24-34, sat 25-42%, light 48-66%)
+    const skin = `hsl(${24 + Math.round(tone * 10)}, ${25 + Math.round(tone * 17)}%, ${48 + Math.round(tone * 18)}%)`;
     // Use stats.hairColor (includes age-based graying) or fallback to generated
     const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626', '#3a2c22'];
     const hair = stats.hairColor ?? hairPalette[Math.floor(seededRandom(seed + 17) * hairPalette.length)];
@@ -501,6 +535,8 @@ export const NPC: React.FC<NPCProps> = memo(({
     const simTime = getSimTime();
     // Freeze movement and logic if simulation is paused
     if (simulationSpeed <= 0) return;
+    const baseDelta = Math.min(delta, 0.1);
+    const simDelta = baseDelta * simulationSpeed;
 
     // BUILDING ENTRY/EXIT: Handle NPCs inside buildings
     if (activityStateRef.current === 'INSIDE_BUILDING') {
@@ -531,7 +567,7 @@ export const NPC: React.FC<NPCProps> = memo(({
 
             // Validate: not inside building, not blocked by obstacles
             if (!isBlockedByBuildings(testPos, buildings, 0.5, buildingHash || undefined) &&
-                !isBlockedByObstacles(testPos, obstacles, 0.5)) {
+                !isBlockedByObstacles(testPos, obstacles, 0.5, obstacleHash || undefined)) {
               exitPos = testPos;
             }
             attempts++;
@@ -564,10 +600,13 @@ export const NPC: React.FC<NPCProps> = memo(({
 
     // PERFORMANCE: Calculate distance from camera for visual LOD (used by Humanoid component)
     distanceFromCameraRef.current = currentPosRef.current.distanceTo(camera.position);
+    const isFar = distanceFromCameraRef.current > FAR_SIMPLIFY_DISTANCE;
+
+    const temps = movementTempsRef.current;
 
     // 1. Movement Logic
     retargetTimerRef.current += delta;
-    const dir = currentTargetRef.current.clone().sub(currentPosRef.current);
+    const dir = temps.dir.copy(currentTargetRef.current).sub(currentPosRef.current);
     const dist = dir.length();
     
     if (dist < 1.0 || retargetTimerRef.current > nextRetargetRef.current) {
@@ -576,7 +615,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       nextRetargetRef.current = 3 + Math.random() * 5;
     } else {
       dir.normalize();
-      if (agentHash) {
+      if (agentHash && !isFar) {
         // PERFORMANCE: Only query spatial hash every 3 frames (3x reduction in queries)
         spatialQueryFrameCountRef.current++;
         if (spatialQueryFrameCountRef.current >= 3) {
@@ -585,163 +624,152 @@ export const NPC: React.FC<NPCProps> = memo(({
         }
 
         // Use cached neighbors for steering calculation
-        const repel = new THREE.Vector3();
+        const repel = temps.repel.set(0, 0, 0);
         for (const other of cachedNeighborsRef.current) {
           if (other.id === stats.id) continue;
-          const offset = currentPosRef.current.clone().sub(other.pos);
+          const offset = temps.offset.copy(currentPosRef.current).sub(other.pos);
           const d2 = offset.lengthSq();
           if (d2 > 0.0001 && d2 < 4.0) {
-            repel.add(offset.normalize().multiplyScalar(0.35 / d2));
+            offset.normalize();
+            repel.addScaledVector(offset, 0.35 / d2);
           }
         }
         if (repel.lengthSq() > 0.0001) {
           dir.add(repel).normalize();
         }
       }
-      // PERFORMANCE: Cache speed calculation - only recalculate when hour or state changes
-      const currentHour = Math.floor(simTime % 24);
-      const stateChanged = stateRef.current !== lastSpeedUpdateStateRef.current;
-      if (currentHour !== lastSpeedUpdateHourRef.current || stateChanged) {
-        const time = simTime % 24;
-        const nightSlow = time < 6 || time > 20 ? 0.8 : 1.0;
-        const baseSpeed = stateRef.current === AgentState.INFECTED ? 0.7 : 2.0;
-        cachedSpeedRef.current = baseSpeed * nightSlow;
-        lastSpeedUpdateHourRef.current = currentHour;
-        lastSpeedUpdateStateRef.current = stateRef.current;
-      }
-      let speed = cachedSpeedRef.current;
-      if (quarantine && stateRef.current === AgentState.INFECTED) speed = 0;
-
-      // MORALE: Panicked NPCs move faster (fleeing behavior)
-      if (panicRef.current > 70) {
-        speed *= 1.35;
-      } else if (panicRef.current > 40) {
-        speed *= 1.15;
-      }
-
-      // PLAGUE BEHAVIOR: Infected NPCs stumble and move erratically
-      if (stateRef.current === AgentState.INFECTED) {
-        // Random stumbling - occasionally veer off course
-        if (Math.random() < 0.08) { // 8% chance per frame to stumble
-          const stumbleAngle = (Math.random() - 0.5) * Math.PI * 0.5; // Up to 45 degrees either way
-          const cos = Math.cos(stumbleAngle);
-          const sin = Math.sin(stumbleAngle);
-          const newX = dir.x * cos - dir.z * sin;
-          const newZ = dir.x * sin + dir.z * cos;
-          dir.set(newX, 0, newZ).normalize();
+        // PERFORMANCE: Cache speed calculation - only recalculate when hour or state changes
+        const currentHour = Math.floor(simTime % 24);
+        const stateChanged = stateRef.current !== lastSpeedUpdateStateRef.current;
+        if (currentHour !== lastSpeedUpdateHourRef.current || stateChanged) {
+          const time = simTime % 24;
+          const nightSlow = time < 6 || time > 20 ? 0.8 : 1.0;
+          const baseSpeed = stateRef.current === AgentState.INFECTED ? 0.7 : 2.0;
+          cachedSpeedRef.current = baseSpeed * nightSlow;
+          lastSpeedUpdateHourRef.current = currentHour;
+          lastSpeedUpdateStateRef.current = stateRef.current;
         }
-        // Occasional pause (staggering)
-        if (Math.random() < 0.03) {
-          speed *= 0.1; // Nearly stop briefly
+        let speed = cachedSpeedRef.current;
+        if (quarantine && stateRef.current === AgentState.INFECTED) speed = 0;
+
+        // MORALE: Panicked NPCs move faster (fleeing behavior)
+        if (panicRef.current > 70) {
+          speed *= 1.35;
+        } else if (panicRef.current > 40) {
+          speed *= 1.15;
         }
-      } else if (stateRef.current === AgentState.INCUBATING) {
-        // Incubating NPCs occasionally slow down (feeling unwell)
-        if (Math.random() < 0.02) {
-          speed *= 0.5;
-        }
-      }
 
-      const step = dir.multiplyScalar(speed * delta * simulationSpeed);
-      const nextPos = currentPosRef.current.clone().add(step);
-
-      // PERFORMANCE & BEHAVIOR: Multi-angle obstacle avoidance (6 directions instead of 2)
-      if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined) || isBlockedByObstacles(nextPos, obstacles, 0.5)) {
-        // Try 6 angles: 90° left/right, 60° diagonals, 120° half-back
-        // This prevents NPCs from getting stuck in corners
-        const angles = [
-          Math.PI / 2,      // 90° left
-          -Math.PI / 2,     // 90° right
-          Math.PI / 3,      // 60° left (diagonal)
-          -Math.PI / 3,     // 60° right (diagonal)
-          2 * Math.PI / 3,  // 120° left (half-back)
-          -2 * Math.PI / 3  // 120° right (half-back)
-        ];
-
-        let foundPath = false;
-        for (const angle of angles) {
-          // Rotate direction vector by angle
-          const cos = Math.cos(angle);
-          const sin = Math.sin(angle);
-          const rotatedDir = new THREE.Vector3(
-            dir.x * cos - dir.z * sin,
-            0,
-            dir.x * sin + dir.z * cos
-          ).normalize().multiplyScalar(1.8); // Increased from 0.6 to actually clear obstacles
-
-          const tryPos = currentPosRef.current.clone().add(rotatedDir);
-
-          // Check if this angle is clear
-          if (!isBlockedByBuildings(tryPos, buildings, 0.5, buildingHash || undefined) &&
-              !isBlockedByObstacles(tryPos, obstacles, 0.5)) {
-            currentPosRef.current.copy(tryPos);
-            foundPath = true;
-            break;
+        // PLAGUE BEHAVIOR: Infected NPCs stumble and move erratically
+        if (stateRef.current === AgentState.INFECTED) {
+          // Random stumbling - occasionally veer off course
+          if (Math.random() < 0.08) { // 8% chance per frame to stumble
+            const stumbleAngle = (Math.random() - 0.5) * Math.PI * 0.5; // Up to 45 degrees either way
+            const cos = Math.cos(stumbleAngle);
+            const sin = Math.sin(stumbleAngle);
+            const newX = dir.x * cos - dir.z * sin;
+            const newZ = dir.x * sin + dir.z * cos;
+            dir.set(newX, 0, newZ).normalize();
+          }
+          // Occasional pause (staggering)
+          if (Math.random() < 0.03) {
+            speed *= 0.1; // Nearly stop briefly
+          }
+        } else if (stateRef.current === AgentState.INCUBATING) {
+          // Incubating NPCs occasionally slow down (feeling unwell)
+          if (Math.random() < 0.02) {
+            speed *= 0.5;
           }
         }
 
-        // Only retarget if all 6 directions are blocked (truly stuck)
-        if (!foundPath) {
-          pickNewTarget(dir, true); // Pass direction to avoid and isStuck=true
-          retargetTimerRef.current = 0;
-          nextRetargetRef.current = 3 + Math.random() * 5;
+        const step = temps.step.copy(dir).multiplyScalar(speed * simDelta);
+        const nextPos = temps.nextPos.copy(currentPosRef.current).add(step);
+
+        // PERFORMANCE & BEHAVIOR: Multi-angle obstacle avoidance (6 directions instead of 2)
+        if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined) || isBlockedByObstacles(nextPos, obstacles, 0.5, obstacleHash || undefined)) {
+          let foundPath = false;
+          if (!isFar) {
+            for (const rot of avoidanceRotations) {
+              // Rotate direction vector by angle
+              const rotatedDir = temps.rotatedDir.set(
+                dir.x * rot.cos - dir.z * rot.sin,
+                0,
+                dir.x * rot.sin + dir.z * rot.cos
+              ).normalize().multiplyScalar(1.8); // Increased from 0.6 to actually clear obstacles
+
+              const tryPos = temps.tryPos.copy(currentPosRef.current).add(rotatedDir);
+
+              // Check if this angle is clear
+              if (!isBlockedByBuildings(tryPos, buildings, 0.5, buildingHash || undefined) &&
+                  !isBlockedByObstacles(tryPos, obstacles, 0.5, obstacleHash || undefined)) {
+                currentPosRef.current.copy(tryPos);
+                foundPath = true;
+                break;
+              }
+            }
+          }
+
+          // Only retarget if all 6 directions are blocked (truly stuck)
+          if (!foundPath) {
+            pickNewTarget(dir, true); // Pass direction to avoid and isStuck=true
+            retargetTimerRef.current = 0;
+            nextRetargetRef.current = 3 + Math.random() * 5;
+          }
+        } else {
+          currentPosRef.current.copy(nextPos);
         }
-      } else {
-        currentPosRef.current.copy(nextPos);
-      }
-      if (group.current) {
-        group.current.position.copy(currentPosRef.current);
-        group.current.lookAt(currentPosRef.current.clone().add(dir));
-      }
+        if (group.current) {
+          group.current.position.copy(currentPosRef.current);
+          group.current.lookAt(temps.lookAtTarget.copy(currentPosRef.current).add(dir));
+        }
 
-      // BUILDING ENTRY: Check if NPC reached their target building door
-      if (targetBuildingRef.current) {
-        const building = buildings.find(b => b.id === targetBuildingRef.current);
-        if (building) {
-          const doorPos = getDoorPosition(building);
-          const distToDoor = currentPosRef.current.distanceTo(doorPos);
+        // BUILDING ENTRY: Check if NPC reached their target building door
+        if (targetBuildingRef.current) {
+          const building = buildings.find(b => b.id === targetBuildingRef.current);
+          if (building) {
+            const doorPos = getDoorPosition(building);
+            const distToDoor = currentPosRef.current.distanceTo(doorPos);
 
-          if (distToDoor < 1.5) {
-            // Enter the building!
-            activityStateRef.current = 'INSIDE_BUILDING';
-            insideBuildingIdRef.current = building.id;
+            if (distToDoor < 1.5) {
+              // Enter the building!
+              activityStateRef.current = 'INSIDE_BUILDING';
+              insideBuildingIdRef.current = building.id;
 
-            // MORALE: Panicked people hide longer, high awareness people avoid public
-            let stayDuration = 1 + Math.random() * 4; // Base: 1-5 sim minutes
-            if (panicRef.current > 60) {
-              stayDuration += 2 + Math.random() * 3; // +2-5 extra minutes if panicked
+              // MORALE: Panicked people hide longer, high awareness people avoid public
+              let stayDuration = 1 + Math.random() * 4; // Base: 1-5 sim minutes
+              if (panicRef.current > 60) {
+                stayDuration += 2 + Math.random() * 3; // +2-5 extra minutes if panicked
+              }
+              if (awarenessRef.current > 70 && Math.random() < 0.4) {
+                stayDuration += 4; // Sometimes stay much longer if very aware
+              }
+              buildingExitTimeRef.current = simTime + stayDuration;
+              targetBuildingRef.current = null;
+
+              // Hide the NPC
+              if (group.current) {
+                group.current.visible = false;
+              }
+
+              return; // Stop processing this frame
             }
-            if (awarenessRef.current > 70 && Math.random() < 0.4) {
-              stayDuration += 4; // Sometimes stay much longer if very aware
-            }
-            buildingExitTimeRef.current = simTime + stayDuration;
-            targetBuildingRef.current = null;
-
-            // Hide the NPC
-            if (group.current) {
-              group.current.visible = false;
-            }
-
-            return; // Stop processing this frame
           }
         }
       }
-    }
-
     // 1b. Player collision bounceback
-    if (playerRef?.current) {
+    if (!isFar && playerRef?.current) {
       const playerPos = playerRef.current.position;
-      const offset = currentPosRef.current.clone().sub(playerPos);
+      const offset = temps.playerOffset.copy(currentPosRef.current).sub(playerPos);
       offset.y = 0;
       const distSq = offset.lengthSq();
       const limit = 1.05;
       if (distSq > 0.0001 && distSq < limit * limit) {
         const dist = Math.sqrt(distSq);
-        const normal = offset.multiplyScalar(1 / dist);
-        currentPosRef.current.add(normal.clone().multiplyScalar(0.12));
+        const normal = temps.playerNormal.copy(offset).multiplyScalar(1 / dist);
+        currentPosRef.current.add(temps.playerPush.copy(normal).multiplyScalar(0.12));
         if (group.current) {
           group.current.position.copy(currentPosRef.current);
         }
-        currentTargetRef.current.add(normal.clone().multiplyScalar(2.0));
+        currentTargetRef.current.add(temps.playerTargetPush.copy(normal).multiplyScalar(2.0));
         const now = performance.now();
         if (impactMapRef?.current && now - playerImpactCooldownRef.current > 400) {
           impactMapRef.current.set(stats.id, { time: now, intensity: 0.7 });
@@ -894,7 +922,7 @@ export const NPC: React.FC<NPCProps> = memo(({
 
     // 3. Infection Spread (Throttled to once per second for performance)
     if (stateRef.current === AgentState.HEALTHY && agentHash) {
-      infectionCheckTimerRef.current += delta * simulationSpeed;
+      infectionCheckTimerRef.current += simDelta;
 
       // Only check infection once per second instead of every frame (60x performance improvement)
       if (infectionCheckTimerRef.current >= 1.0) {
@@ -931,7 +959,7 @@ export const NPC: React.FC<NPCProps> = memo(({
 
     // 3b. RUMOR SPREAD & PANIC (Throttled to twice per second - faster than plague)
     if (agentHash) {
-      rumorCheckTimerRef.current += delta * simulationSpeed;
+      rumorCheckTimerRef.current += simDelta;
 
       if (rumorCheckTimerRef.current >= 0.5) {
         rumorCheckTimerRef.current = 0;
@@ -1272,6 +1300,8 @@ export const NPC: React.FC<NPCProps> = memo(({
           1.0 // Normal speed
         )}
         distanceFromCamera={distanceFromCameraRef.current}
+        enableSimpleLod={ENABLE_SIMPLE_LOD}
+        simpleLodDistance={SIMPLE_LOD_DISTANCE}
         />
         {stats.heldItem && stats.heldItem !== 'none' && (
           <group ref={propGroupRef} position={[0.38, 1.02, 0.15]}>

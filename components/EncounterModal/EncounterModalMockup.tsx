@@ -17,6 +17,7 @@ const SAMPLE_NPC: NPCStats = {
   language: 'Arabic',
   height: 0.95,
   weight: 0.9,
+  disposition: 55,
   mood: 'Anxious',
   awarenessLevel: 67,
   panicLevel: 45,
@@ -42,9 +43,9 @@ const SAMPLE_MESSAGES = [
 ];
 
 // Sample history for the History tab
-const SAMPLE_HISTORY = [
-  { date: 'Day 2, Morning', summary: 'Discussed trade routes and the rising price of cumin. She mentioned her family in Aleppo.', sentiment: 'positive' as const },
-  { date: 'Day 1, Evening', summary: 'First meeting. She was suspicious but warmed up after I purchased some cardamom.', sentiment: 'neutral' as const },
+const SAMPLE_HISTORY: Array<{ date: string; summary: string; sentiment: 'positive' | 'neutral' | 'negative' }> = [
+  { date: 'Day 2, Morning', summary: 'Discussed trade routes and the rising price of cumin. She mentioned her family in Aleppo.', sentiment: 'positive' },
+  { date: 'Day 1, Evening', summary: 'First meeting. She was suspicious but warmed up after I purchased some cardamom.', sentiment: 'neutral' },
 ];
 
 interface EncounterModalMockupProps {

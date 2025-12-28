@@ -375,6 +375,8 @@ interface HumanoidProps {
   footwearColor?: string;
   accessories?: string[];
   distanceFromCamera?: number;  // PERFORMANCE: LOD - skip detail when far
+  enableSimpleLod?: boolean;
+  simpleLodDistance?: number;
   showGroundShadow?: boolean;
   // Gaze tracking - world position to look toward (e.g., player position)
   gazeTarget?: { x: number; y: number; z: number };
@@ -388,6 +390,8 @@ interface HumanoidProps {
   isInfected?: boolean;
   isIncubating?: boolean;
   age?: number;
+  // Eye color - if not provided, generated based on hairColor seed
+  eyeColor?: string;
   // Portrait mode - enables enhanced facial animations (only for encounter modal)
   portraitMode?: boolean;
   isSpeaking?: boolean;
@@ -440,6 +444,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   footwearColor = '#9b7b4f',
   accessories = [],
   distanceFromCamera = 0,
+  enableSimpleLod = false,
+  simpleLodDistance = 45,
   showGroundShadow = true,
   gazeTarget,
   worldPosition,
@@ -448,12 +454,14 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   isInfected = false,
   isIncubating = false,
   age,
+  eyeColor: eyeColorProp,
   // Portrait mode props (only used in encounter modal)
   portraitMode = false,
   isSpeaking = false,
   mood = 'neutral',
   panicLevel = 0,
 }) => {
+  const simpleLodActive = enableSimpleLod && distanceFromCamera > simpleLodDistance;
   // PERFORMANCE: LOD - skip facial details beyond 25 units
   const showFacialDetails = distanceFromCamera < 25;
   // PERFORMANCE: Hair LOD tiers - high detail when close, simplified when far
@@ -461,19 +469,34 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     distanceFromCamera < 15 ? 'high' :
     distanceFromCamera < 35 ? 'medium' : 'low';
 
-  // PLAGUE VISUAL: Apply sickly pallor to skin based on sickness level
+  // Apply age and sickness modifications to skin
   const sickHeadColor = useMemo(() => {
-    if (sicknessLevel <= 0) return headColor;
     const baseColor = new THREE.Color(headColor);
-    // Sickly greenish-gray pallor
-    const sickColor = new THREE.Color('#8a9a7a'); // Pale greenish-gray
-    baseColor.lerp(sickColor, sicknessLevel * 0.4); // Up to 40% tint
-    // Also desaturate
     const hsl = { h: 0, s: 0, l: 0 };
     baseColor.getHSL(hsl);
-    baseColor.setHSL(hsl.h, hsl.s * (1 - sicknessLevel * 0.5), hsl.l * (1 - sicknessLevel * 0.15));
+
+    // Age-based skin changes (weathered, less saturated, subtle tone shift)
+    if (age !== undefined && age >= 50) {
+      const ageFactor = Math.min(1, (age - 50) / 40); // 0 at 50, 1 at 90+
+      // Reduce saturation (weathered look)
+      hsl.s *= (1 - ageFactor * 0.25);
+      // Slightly shift hue toward more neutral (less warm orange)
+      hsl.h = hsl.h - ageFactor * 0.01;
+      // Add slight sun damage (tiny bit darker in spots implied by overall tone)
+      hsl.l *= (1 - ageFactor * 0.05);
+      baseColor.setHSL(hsl.h, hsl.s, hsl.l);
+    }
+
+    // Sickness overlay (greenish-gray pallor)
+    if (sicknessLevel > 0) {
+      const sickColor = new THREE.Color('#8a9a7a'); // Pale greenish-gray
+      baseColor.lerp(sickColor, sicknessLevel * 0.4); // Up to 40% tint
+      baseColor.getHSL(hsl);
+      baseColor.setHSL(hsl.h, hsl.s * (1 - sicknessLevel * 0.5), hsl.l * (1 - sicknessLevel * 0.15));
+    }
+
     return baseColor.getStyle();
-  }, [headColor, sicknessLevel]);
+  }, [headColor, sicknessLevel, age]);
   const leftLeg = useRef<THREE.Group>(null);
   const rightLeg = useRef<THREE.Group>(null);
   const leftKnee = useRef<THREE.Group>(null);
@@ -614,23 +637,53 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     return getHairTexture(hairColor, isGraying) ?? null;
   }, [hairColor, hairLOD, headwearStyle, hairStyle]);
 
+  // Levantine eye colors - seeded from hairColor for consistency
   const eyeColor = useMemo(() => {
-    const roll = Math.random();
-    if (roll > 0.98) return '#6aa0c8'; // rare blue
-    if (roll > 0.92) return '#4a6b3f'; // occasional green
-    if (roll > 0.6) return '#3b2a1a'; // deep brown
-    return '#2a1a12'; // very dark brown
-  }, []);
+    if (eyeColorProp) return eyeColorProp;
+    // Create seed from hairColor string
+    const seed = hairColor.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const roll = (seed % 100) / 100;
+    // Levantine population eye color distribution:
+    // ~40% dark brown, ~25% medium brown, ~15% light brown/amber,
+    // ~10% hazel, ~6% green, ~3% honey/light hazel, ~1% blue-gray
+    if (roll > 0.99) return '#7a9bb8'; // rare blue-gray (1%)
+    if (roll > 0.96) return '#9a8b6f'; // honey/light hazel (3%)
+    if (roll > 0.90) return '#5a7a4a'; // green (6%)
+    if (roll > 0.80) return '#6b7a52'; // hazel/brown-green (10%)
+    if (roll > 0.65) return '#8b6b3a'; // light brown/amber (15%)
+    if (roll > 0.40) return '#5a4030'; // medium warm brown (25%)
+    return '#3a2a1a'; // dark brown (40%)
+  }, [eyeColorProp, hairColor]);
   const strideVariance = useMemo(() => 0.85 + Math.random() * 0.3, []);
   const armVariance = useMemo(() => 0.85 + Math.random() * 0.3, []);
   const gaitPhaseOffset = useMemo(() => Math.random() * Math.PI * 2, []);
+  // Age affects multiple aspects of appearance and movement
   const ageScale = useMemo(() => {
     if (age === undefined) return 1;
-    if (age < 18) return 1.08;
-    if (age < 35) return 1.0;
-    if (age < 55) return 0.92;
-    return 0.82;
+    if (age < 18) return 1.08; // Youth - slightly faster/bouncier
+    if (age < 35) return 1.0;  // Prime
+    if (age < 55) return 0.92; // Middle-aged - slightly slower
+    return 0.78; // Elderly - noticeably slower
   }, [age]);
+
+  // Posture changes with age - elderly have slight forward hunch
+  const agePosture = useMemo(() => {
+    if (age === undefined) return { torsoLean: 0, shoulderDrop: 0, headForward: 0 };
+    if (age < 45) return { torsoLean: 0, shoulderDrop: 0, headForward: 0 };
+    if (age < 60) return { torsoLean: 0.04, shoulderDrop: 0.02, headForward: 0.03 }; // Slight stoop
+    if (age < 75) return { torsoLean: 0.08, shoulderDrop: 0.04, headForward: 0.06 }; // Noticeable stoop
+    return { torsoLean: 0.12, shoulderDrop: 0.06, headForward: 0.08 }; // Pronounced stoop
+  }, [age]);
+
+  // Stride length decreases with age
+  const ageStrideModifier = useMemo(() => {
+    if (age === undefined) return 1;
+    if (age < 45) return 1;
+    if (age < 60) return 0.92;
+    if (age < 75) return 0.82;
+    return 0.7;
+  }, [age]);
+
   const healthScale = useMemo(() => Math.max(0.6, 1 - sicknessLevel * 0.35), [sicknessLevel]);
   const upperLidLeft = useRef<THREE.Mesh>(null);
   const upperLidRight = useRef<THREE.Mesh>(null);
@@ -678,6 +731,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const eyeScanCooldown = useRef(0.8 + Math.random() * 1.5);
 
   useFrame((state) => {
+    if (simpleLodActive) return;
     if (isDead) {
       if (bodyGroup.current) {
         // Corpse falls forward and lies on the ground
@@ -739,9 +793,10 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const landing = landingImpulseRef ? landingImpulseRef.current : 0;
     const jumpBoost = jumpChargeRef ? jumpChargeRef.current : 0;
     const baseSpeed = isSprinting ? walkSpeed * 2.2 : walkSpeed;
-    const effectiveWalkSpeed = baseSpeed * ageScale * healthScale * (0.9 + strideVariance * 0.15);
+    // Age affects both speed (ageScale) and stride length (ageStrideModifier)
+    const effectiveWalkSpeed = baseSpeed * ageScale * ageStrideModifier * healthScale * (0.9 + strideVariance * 0.15);
     const t = state.clock.elapsedTime * effectiveWalkSpeed + gaitPhaseOffset;
-    const strideScale = (isFemale ? 0.88 : 1) * (age < 18 ? 1.05 : age !== undefined && age > 55 ? 0.9 : 1);
+    const strideScale = (isFemale ? 0.88 : 1) * ageStrideModifier;
     const amp = isWalking ? (isSprinting ? 0.85 : 0.55) * strideScale * strideVariance : 0; // Stronger walk stride
 
     // Easing function for more organic, weighted movement
@@ -789,14 +844,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     }
 
     // Torso twist - counter-rotates against hips for natural contra-posto
+    // Age posture adds forward lean for elderly NPCs
     if (torsoGroup.current && isWalking) {
       const torsoTwist = -leftPhase * amp * 0.15; // Opposite to hip rotation
       const torsoLean = leftPhase * amp * 0.04; // Subtle side lean
       torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, torsoTwist, 0.15);
       torsoGroup.current.rotation.z = THREE.MathUtils.lerp(torsoGroup.current.rotation.z, torsoLean, 0.12);
+      // Age-based forward lean while walking
+      torsoGroup.current.rotation.x = THREE.MathUtils.lerp(torsoGroup.current.rotation.x, agePosture.torsoLean, 0.1);
     } else if (torsoGroup.current) {
       torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, 0, 0.1);
       torsoGroup.current.rotation.z = THREE.MathUtils.lerp(torsoGroup.current.rotation.z, 0, 0.1);
+      // Age-based forward lean at rest
+      torsoGroup.current.rotation.x = THREE.MathUtils.lerp(torsoGroup.current.rotation.x, agePosture.torsoLean, 0.08);
     }
 
     // Idle weight shifting - periodic subtle movement when standing still
@@ -1423,7 +1483,9 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       }
 
       headGroup.current.position.y = 1.75 + headBob;
-      headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headLag + headInteractionX, 0.15);
+      // Include age-based head forward lean (elderly have head jutting forward)
+      const ageHeadLean = agePosture.headForward;
+      headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headLag + headInteractionX + ageHeadLean, 0.15);
       headGroup.current.rotation.y = THREE.MathUtils.lerp(headGroup.current.rotation.y || 0, headInteractionY, 0.12);
       headGroup.current.rotation.z = -headSway * 0.5; // Subtle opposite sway
     }
@@ -1593,6 +1655,21 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       }
     }
   });
+
+  if (simpleLodActive) {
+    return (
+      <group scale={scale}>
+        <mesh position={[0, 1.0, 0]} castShadow>
+          <cylinderGeometry args={[0.35, 0.45, 1.2, 8]} />
+          <meshStandardMaterial color={color} roughness={0.9} />
+        </mesh>
+        <mesh position={[0, 1.65, 0]} castShadow>
+          <sphereGeometry args={[0.26, 10, 8]} />
+          <meshStandardMaterial color={sickHeadColor} roughness={0.8} />
+        </mesh>
+      </group>
+    );
+  }
 
   return (
     <group scale={scale}>
@@ -1843,12 +1920,14 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             </mesh>
           </group>
         )}
-        <mesh position={[0, 1.55, 0]} castShadow>
-          <cylinderGeometry args={[0.07, 0.08, 0.12, 10]} />
-          <meshStandardMaterial color={headColor} roughness={0.9} />
+        {/* Neck - properly connects head to shoulders */}
+        <mesh position={[0, 1.58, 0]} castShadow>
+          <cylinderGeometry args={[0.06, 0.09, 0.24, 10]} />
+          <meshStandardMaterial color={sickHeadColor} roughness={0.9} />
         </mesh>
+        {/* Collar/neckline */}
         <mesh position={[0, 1.47, 0]} castShadow>
-          <torusGeometry args={[0.16, 0.03, 8, 16]} />
+          <torusGeometry args={[0.14, 0.035, 8, 16]} />
           <meshStandardMaterial color={robeAccentColor} roughness={0.9} />
         </mesh>
         

@@ -592,7 +592,7 @@ const JewishQuarterDecor: React.FC<{
         attempts++;
       }
 
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
       const rotation = rand(400 + i * 50) * Math.PI * 2;
 
       items.push(
@@ -621,7 +621,7 @@ const JewishQuarterDecor: React.FC<{
         attempts++;
       }
 
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
       const rotation = rand(580 + i * 50) * Math.PI * 2;
 
       items.push(
@@ -650,7 +650,7 @@ const JewishQuarterDecor: React.FC<{
         attempts++;
       }
 
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
 
       items.push(
         <group key={`butcher-${idCounter++}`} position={[x, y, z]}>
@@ -678,7 +678,7 @@ const JewishQuarterDecor: React.FC<{
         attempts++;
       }
 
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
       const rotation = rand(1100 + i * 50) * Math.PI * 2;
 
       items.push(
@@ -707,7 +707,7 @@ const JewishQuarterDecor: React.FC<{
         attempts++;
       }
 
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
       const rotation = rand(880 + i * 50) * Math.PI * 2;
 
       items.push(
@@ -724,7 +724,7 @@ const JewishQuarterDecor: React.FC<{
       const distance = 5 + rand(1400 + i * 30) * 15;
       const x = Math.cos(angle) * distance;
       const z = Math.sin(angle) * distance;
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
 
       items.push(
         <group key={`sign-${idCounter++}`} position={[x, y, z]}>
@@ -740,7 +740,7 @@ const JewishQuarterDecor: React.FC<{
       const distance = 7 + rand(1700 + i * 40) * 12;
       const x = Math.cos(angle) * distance;
       const z = Math.sin(angle) * distance;
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z) + 2;
+      const y = sampleTerrainHeight(terrainHeightmap, x, z) + 2;
 
       items.push(
         <group key={`symbol-${idCounter++}`} position={[x, y, z]}>

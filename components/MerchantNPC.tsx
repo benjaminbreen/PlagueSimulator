@@ -12,9 +12,13 @@ export const MerchantNPC: React.FC<MerchantNPCProps> = ({ merchant, stall, night
   const { stats, position } = merchant;
 
   // Extract appearance from stats - use procedurally generated colors
-  const skinTone = '#e0ac69'; // Default skin tone
-  const robeBaseColor = '#4a3c2a'; // Brown robe for merchants
-  const robeAccentColor = '#8b7355'; // Lighter brown accent
+  // Generate skin tone from merchant ID for consistency
+  const idSeed = stats.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const tone = (idSeed % 100) / 100;
+  // Levantine/Mediterranean skin tones - olive to light brown
+  const skinTone = `hsl(${24 + Math.round(tone * 10)}, ${25 + Math.round(tone * 17)}%, ${48 + Math.round(tone * 18)}%)`;
+  const robeBaseColor = stats.robeBaseColor ?? '#4a3c2a'; // Brown robe for merchants
+  const robeAccentColor = stats.robeAccentColor ?? '#8b7355'; // Lighter brown accent
 
   // Merchants face outward from stall (toward customers)
   const rotation = useMemo<[number, number, number]>(() => {

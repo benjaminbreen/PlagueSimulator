@@ -340,10 +340,10 @@ const addCommercialLayout = (
   const profLower = profession.toLowerCase();
   const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY);
   const hall = rooms.find((room) => room.type === InteriorRoomType.HALL) ?? rooms[0];
-  const clampToRoom = (room: InteriorRoom, pos: [number, number, number]): [number, number, number] => {
+  const clampToRoom = (room: InteriorRoom, pos: [number, number, number], margin = 0.6): [number, number, number] => {
     const [cx, , cz] = room.center;
-    const halfW = room.size[0] / 2 - 0.6;
-    const halfD = room.size[2] / 2 - 0.6;
+    const halfW = room.size[0] / 2 - margin;
+    const halfD = room.size[2] / 2 - margin;
     return [
       Math.max(cx - halfW, Math.min(cx + halfW, pos[0])),
       pos[1],
@@ -365,7 +365,7 @@ const addCommercialLayout = (
       const offsetX = (i - (tableCount - 1) / 2) * 3.2;
       const basePos: [number, number, number] = [cafeRoom.center[0] + offsetX, 0, cafeRoom.center[2] + (i % 2 === 0 ? 1.0 : -1.0)];
       addProp(props, cafeRoom, InteriorPropType.LOW_TABLE, 'Low table', clampToRoom(cafeRoom, basePos));
-      const pillows = [
+      const pillows: [number, number, number][] = [
         [basePos[0] + 1.0, 0, basePos[2]],
         [basePos[0] - 1.0, 0, basePos[2]],
         [basePos[0], 0, basePos[2] + 1.0],
@@ -509,7 +509,7 @@ const placePropPosition = (
     return pos;
   };
 
-  const wallAligned = () => {
+  const wallAligned = (): { position: [number, number, number]; rotation: [number, number, number] } => {
     if (wallPick === 0) {
       // South wall - face north (into room)
       return { position: adjustForDoor([cx + wallOffset(), 0, cz - halfD + wallInset]), rotation: [0, Math.PI, 0] };
@@ -519,11 +519,11 @@ const placePropPosition = (
       return { position: adjustForDoor([cx + wallOffset(), 0, cz + halfD - wallInset]), rotation: [0, 0, 0] };
     }
     if (wallPick === 2) {
-    // West wall - face east (into room)
-    return { position: adjustForDoor([cx - halfW + wallInset, 0, cz + wallZOffset()]), rotation: [0, Math.PI / 2, 0] };
-  }
-  // East wall - face west (into room)
-  return { position: adjustForDoor([cx + halfW - wallInset, 0, cz + wallZOffset()]), rotation: [0, -Math.PI / 2, 0] };
+      // West wall - face east (into room)
+      return { position: adjustForDoor([cx - halfW + wallInset, 0, cz + wallZOffset()]), rotation: [0, Math.PI / 2, 0] };
+    }
+    // East wall - face west (into room)
+    return { position: adjustForDoor([cx + halfW - wallInset, 0, cz + wallZOffset()]), rotation: [0, -Math.PI / 2, 0] };
   };
 
   switch (type) {
@@ -760,8 +760,8 @@ const pickProps = (
       if (profLower.includes('inn') || profLower.includes('sherbet')) return;
       const hasTable = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.LOW_TABLE);
       if (!hasTable) {
-        const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
-        const placement = placePropPosition(InteriorPropType.LOW_TABLE, room, rand, avoidSide);
+        // Non-entry rooms don't need to avoid door sides
+        const placement = placePropPosition(InteriorPropType.LOW_TABLE, room, rand, undefined);
         const clamped = clampToRoom(room, placement.position, 1.2); // Tables are fairly large
         props.push({
           id: `prop-table-${room.id}`,
@@ -774,8 +774,7 @@ const pickProps = (
         });
       }
       if (room.size[0] > 14 && rand() > 0.55) {
-        const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
-        const placement = placePropPosition(InteriorPropType.LOW_TABLE, room, rand, avoidSide);
+        const placement = placePropPosition(InteriorPropType.LOW_TABLE, room, rand, undefined);
         const clamped = clampToRoom(room, placement.position);
         props.push({
           id: `prop-table-${room.id}-extra`,
@@ -791,8 +790,7 @@ const pickProps = (
     if (room.type === InteriorRoomType.PRIVATE) {
       const hasBed = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.BEDROLL);
       if (!hasBed) {
-        const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
-        const placement = placePropPosition(InteriorPropType.BEDROLL, room, rand, avoidSide);
+        const placement = placePropPosition(InteriorPropType.BEDROLL, room, rand, undefined);
         const clamped = clampToRoom(room, placement.position);
         props.push({
           id: `prop-bed-${room.id}`,
@@ -808,8 +806,7 @@ const pickProps = (
     if (room.type === InteriorRoomType.WORKSHOP) {
       const hasDesk = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.DESK);
       if (!hasDesk) {
-        const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
-        const placement = placePropPosition(InteriorPropType.DESK, room, rand, avoidSide);
+        const placement = placePropPosition(InteriorPropType.DESK, room, rand, undefined);
         const clamped = clampToRoom(room, placement.position);
         props.push({
           id: `prop-desk-${room.id}`,
@@ -825,8 +822,7 @@ const pickProps = (
     if (room.type === InteriorRoomType.COURTYARD) {
       const hasBasin = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.WATER_BASIN);
       if (!hasBasin) {
-        const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
-        const placement = placePropPosition(InteriorPropType.WATER_BASIN, room, rand, avoidSide);
+        const placement = placePropPosition(InteriorPropType.WATER_BASIN, room, rand, undefined);
         const clamped = clampToRoom(room, placement.position);
         props.push({
           id: `prop-basin-${room.id}`,
@@ -1165,10 +1161,10 @@ const applyRoomLayouts = (
     return allWalls.filter(wall => !sharedWalls.includes(wall));
   };
 
-  const clampToRoom = (room: InteriorRoom, pos: [number, number, number]): [number, number, number] => {
+  const clampToRoom = (room: InteriorRoom, pos: [number, number, number], margin = 0.6): [number, number, number] => {
     const [cx, , cz] = room.center;
-    const halfW = room.size[0] / 2 - 0.6;
-    const halfD = room.size[2] / 2 - 0.6;
+    const halfW = room.size[0] / 2 - margin;
+    const halfD = room.size[2] / 2 - margin;
     return [
       Math.max(cx - halfW, Math.min(cx + halfW, pos[0])),
       pos[1],
@@ -1680,7 +1676,11 @@ export const generateInteriorSpec = (
   const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? rooms[0];
   const hasLightSource = props.some((prop) => prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.LANTERN);
   const wallHeight = Math.max(3.0, Math.min(5.2, 3.1 + sizeScale * 0.9 + (building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS ? 0.4 : 0)));
-  const ladderSide: 'north' | 'south' | 'east' | 'west' = entrySide === 'north' || entrySide === 'south' ? 'east' : 'north';
+  // Place ladder on perpendicular wall to entry (so all 4 directions are possible)
+  const ladderSide: 'north' | 'south' | 'east' | 'west' =
+    entrySide === 'north' ? 'east' :
+    entrySide === 'south' ? 'west' :
+    entrySide === 'east' ? 'north' : 'south';
   const isMultiStory = (building.sizeScale ?? 1) > 1.15 || building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS;
   const orientOffset = (offset: [number, number, number]): [number, number, number] => {
     if (entrySide === 'north') return [offset[0], offset[1], -Math.abs(offset[2])];

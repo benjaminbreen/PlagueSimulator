@@ -63,6 +63,7 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
       language: 'Arabic',
       height: 165 + seededRandom(seed + 2) * 15,
       weight: 65 + seededRandom(seed + 3) * 20,
+      disposition: 70,
       mood: 'Mystical',
       awarenessLevel: 45,
       panicLevel: 10,

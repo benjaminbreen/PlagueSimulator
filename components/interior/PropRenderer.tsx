@@ -354,8 +354,8 @@ const InteriorPropMesh: React.FC<{
                 <meshStandardMaterial color={woodColor} roughness={0.88} />
               </mesh>
               {/* Door handle */}
-              <mesh position={[x + (x > 0 ? -0.3 : 0.3), 0.7, 0.56]} receiveShadow castShadow>
-                <cylinderGeometry args={[0.025, 0.025, 0.08, 8]} rotation={[Math.PI / 2, 0, 0]} />
+              <mesh position={[x + (x > 0 ? -0.3 : 0.3), 0.7, 0.56]} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow>
+                <cylinderGeometry args={[0.025, 0.025, 0.08, 8]} />
                 <meshStandardMaterial color="#3a2a1a" roughness={0.7} metalness={0.2} />
               </mesh>
             </group>
@@ -742,8 +742,8 @@ const InteriorPropMesh: React.FC<{
             <meshStandardMaterial color="#7a5a4a" roughness={0.82} />
           </mesh>
           {/* Bolster pillows */}
-          <mesh position={[1.0, 0.48, 0]} receiveShadow>
-            <cylinderGeometry args={[0.12, 0.12, 0.8, 8]} rotation={[0, 0, Math.PI / 2]} />
+          <mesh position={[1.0, 0.48, 0]} rotation={[0, 0, Math.PI / 2]} receiveShadow>
+            <cylinderGeometry args={[0.12, 0.12, 0.8, 8]} />
             <meshStandardMaterial color="#b8a088" roughness={0.8} />
           </mesh>
           <mesh position={[1.0, 0.48, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
@@ -987,8 +987,8 @@ const InteriorPropMesh: React.FC<{
             <meshStandardMaterial color={brass} roughness={0.4} metalness={0.85} />
           </mesh>
           {/* Keyhole */}
-          <mesh position={[0, 0.05, 0.35]} receiveShadow castShadow>
-            <cylinderGeometry args={[0.02, 0.015, 0.02, 8]} rotation={[Math.PI / 2, 0, 0]} />
+          <mesh position={[0, 0.05, 0.35]} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow>
+            <cylinderGeometry args={[0.02, 0.015, 0.02, 8]} />
             <meshStandardMaterial color="#1a1a1a" roughness={0.6} metalness={0.3} />
           </mesh>
           <mesh position={[0, 0.02, 0.35]} receiveShadow castShadow>
@@ -1017,8 +1017,8 @@ const InteriorPropMesh: React.FC<{
                 <boxGeometry args={[0.08, 0.04, 0.06]} />
                 <meshStandardMaterial color={ironHardware} roughness={0.5} metalness={0.8} />
               </mesh>
-              <mesh position={[x, 0.28, -0.33]} castShadow>
-                <cylinderGeometry args={[0.015, 0.015, 0.1, 6]} rotation={[0, 0, Math.PI / 2]} />
+              <mesh position={[x, 0.28, -0.33]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                <cylinderGeometry args={[0.015, 0.015, 0.1, 6]} />
                 <meshStandardMaterial color={brass} roughness={0.4} metalness={0.85} />
               </mesh>
             </group>
@@ -1136,8 +1136,8 @@ const InteriorPropMesh: React.FC<{
 
           {/* Nails visible on slats */}
           {[-0.3, 0, 0.3].map((x, i) => (
-            <mesh key={`nail-${i}`} position={[x, crateHeight / 2 - 0.15, crateDepth / 2 + 0.02]} castShadow>
-              <cylinderGeometry args={[0.008, 0.01, 0.04, 6]} rotation={[Math.PI / 2, 0, 0]} />
+            <mesh key={`nail-${i}`} position={[x, crateHeight / 2 - 0.15, crateDepth / 2 + 0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+              <cylinderGeometry args={[0.008, 0.01, 0.04, 6]} />
               <meshStandardMaterial color="#3a3a3a" roughness={0.4} metalness={0.8} />
             </mesh>
           ))}

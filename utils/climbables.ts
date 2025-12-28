@@ -93,6 +93,18 @@ const DISTRICT_RULES: Record<DistrictType, ClimbableRule[]> = {
 // ==================== PLACEMENT ALGORITHM ====================
 
 /**
+ * Get district scale factor (must match Environment.tsx Building component)
+ */
+function getDistrictScale(district: DistrictType): number {
+  switch (district) {
+    case 'WEALTHY': return 1.35;
+    case 'HOVELS': return 0.65;
+    case 'CIVIC': return 1.2;
+    default: return 1.0;
+  }
+}
+
+/**
  * Pick a wall side that's not the door side
  */
 function pickNonDoorSide(doorSide: number, rand: () => number): 0 | 1 | 2 | 3 {
@@ -102,14 +114,17 @@ function pickNonDoorSide(doorSide: number, rand: () => number): 0 | 1 | 2 | 3 {
 
 /**
  * Calculate world position for a climbable on a building wall
+ * Now includes district scale to match actual rendered building size
  */
 function calculateWallPosition(
   building: BuildingMetadata,
   wallSide: 0 | 1 | 2 | 3,
   wallOffset: number,
-  depth: number
+  depth: number,
+  district: DistrictType
 ): [number, number, number] {
-  const buildingSize = CONSTANTS.BUILDING_SIZE * (building.sizeScale ?? 1);
+  const districtScale = getDistrictScale(district);
+  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
   const halfSize = buildingSize / 2;
   const [bx, , bz] = building.position;
 
@@ -137,17 +152,23 @@ function createClimbable(
   wallSide: 0 | 1 | 2 | 3,
   wallOffset: number,
   buildingHeight: number,
-  seed: number
+  seed: number,
+  district: DistrictType
 ): ClimbableAccessory {
   const config = CLIMBABLE_CONFIG[type];
   const rand = () => seededRandom(seed++);
+  const districtScale = getDistrictScale(district);
+
+  // Calculate building half size (needed for roof entry calculations)
+  const buildingHalfSize = (CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1)) / 2;
 
   // Vary dimensions slightly
   const width = config.baseWidth * (0.9 + rand() * 0.2);
-  const height = Math.min(config.baseHeight, buildingHeight - 0.5);
+  // Use building height so ladders reach the roof (minus small offset so they don't poke through)
+  const height = buildingHeight - 0.3;
   const depth = config.baseDepth;
 
-  const basePosition = calculateWallPosition(building, wallSide, wallOffset, depth);
+  const basePosition = calculateWallPosition(building, wallSide, wallOffset, depth, district);
 
   // For staircases, top position is offset by stair depth (they extend outward)
   const isStaircase = type === 'STONE_STAIRCASE' || type === 'LEAN_TO';
@@ -176,6 +197,7 @@ function createClimbable(
     wallOffset,
     basePosition,
     topPosition,
+    buildingHalfSize,
     width,
     height,
     depth,
@@ -185,20 +207,23 @@ function createClimbable(
 }
 
 /**
- * Calculate building height (matches Environment.tsx logic)
+ * Calculate building height (must match Environment.tsx Building component logic exactly)
  */
 function calculateBuildingHeight(building: BuildingMetadata, district: DistrictType): number {
-  const storyCount = building.storyCount ?? 1;
-  const baseHeight = 3.0 + storyCount * 2.5;
+  const localSeed = building.position[0] * 1000 + building.position[2];
 
-  // District multipliers
-  const districtMult =
+  // This matches the Building component in Environment.tsx (lines 2129-2133)
+  const baseHeight = district === 'HOVELS' && building.type !== 'RELIGIOUS' && building.type !== 'CIVIC'
+    ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
+    : building.type === 'RELIGIOUS' || building.type === 'CIVIC' ? 12 : 4 + seededRandom(localSeed + 1) * 6;
+
+  const districtScale =
     district === 'WEALTHY' ? 1.35 :
     district === 'HOVELS' ? 0.65 :
     district === 'CIVIC' ? 1.2 :
     1.0;
 
-  return baseHeight * districtMult * (building.sizeScale ?? 1);
+  return baseHeight * districtScale;
 }
 
 /**
@@ -245,7 +270,8 @@ export function generateClimbablesForBuilding(
       wallSide,
       wallOffset,
       buildingHeight,
-      localSeed
+      localSeed,
+      district
     );
 
     accessories.push(accessory);
@@ -318,8 +344,10 @@ export function isOnRooftop(
   buildings: BuildingMetadata[],
   district: DistrictType
 ): BuildingMetadata | null {
+  const districtScale = getDistrictScale(district);
   for (const building of buildings) {
-    const buildingSize = CONSTANTS.BUILDING_SIZE * (building.sizeScale ?? 1);
+    // Include district scale to match actual rendered building size
+    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
     const halfSize = buildingSize / 2;
     const [bx, , bz] = building.position;
     const roofHeight = calculateBuildingHeight(building, district);
@@ -329,9 +357,9 @@ export function isOnRooftop(
     const dz = Math.abs(position.z - bz);
 
     if (dx < halfSize && dz < halfSize) {
-      // Check if at roof height (within 0.5 units)
+      // Check if at roof height (within 1.0 units for more reliable detection)
       const heightDiff = Math.abs(position.y - roofHeight);
-      if (heightDiff < 0.5) {
+      if (heightDiff < 1.0) {
         return building;
       }
     }
@@ -348,8 +376,10 @@ export function getRoofHeightAt(
   buildings: BuildingMetadata[],
   district: DistrictType
 ): number | null {
+  const districtScale = getDistrictScale(district);
   for (const building of buildings) {
-    const buildingSize = CONSTANTS.BUILDING_SIZE * (building.sizeScale ?? 1);
+    // Include district scale to match actual rendered building size
+    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
     const halfSize = buildingSize / 2;
     const [bx, , bz] = building.position;
 
@@ -371,9 +401,12 @@ export function getRoofHeightAt(
 export function isNearRoofEdge(
   position: { x: number; z: number },
   building: BuildingMetadata,
+  district: DistrictType,
   edgeThreshold: number = 0.5
 ): boolean {
-  const buildingSize = CONSTANTS.BUILDING_SIZE * (building.sizeScale ?? 1);
+  const districtScale = getDistrictScale(district);
+  // Include district scale to match actual rendered building size
+  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
   const halfSize = buildingSize / 2;
   const [bx, , bz] = building.position;
 

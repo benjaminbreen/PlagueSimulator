@@ -2,6 +2,11 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
+const smoothstep = (edge0: number, edge1: number, x: number) => {
+  const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
 interface SkyGradientProps {
   timeOfDay: number;
   weatherType: 'CLEAR' | 'OVERCAST' | 'SANDSTORM';
@@ -47,8 +52,8 @@ export const SkyGradient: React.FC<SkyGradientProps> = ({
         uniform vec3 zenithColor;
         uniform vec3 horizonColor;
         uniform vec3 sunDirection;
-        uniform float sunIntensity;
         uniform float atmosphericDensity;
+        uniform float sunIntensity;
 
         varying vec3 vWorldPosition;
         varying vec3 vNormal;
@@ -74,6 +79,11 @@ export const SkyGradient: React.FC<SkyGradientProps> = ({
           vec3 sunColor = vec3(1.0, 0.95, 0.85);
           skyColor += sunGlow * sunColor;
 
+          // Subtle horizon warmth near sunrise/sunset
+          float horizonBand = smoothstep(-0.05, 0.1, elevation) * (1.0 - smoothstep(0.2, 0.45, sunIntensity));
+          vec3 warmBand = vec3(1.0, 0.78, 0.55);
+          skyColor = mix(skyColor, warmBand, horizonBand * 0.2);
+
           gl_FragColor = vec4(skyColor, 1.0);
         }
       `,
@@ -86,11 +96,12 @@ export const SkyGradient: React.FC<SkyGradientProps> = ({
   // Update colors based on time of day
   useFrame(() => {
     if (!meshRef.current) return;
-
     const time = timeOfDay;
-    const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
-    const twilightFactor = time >= 17 && time < 19 ? (time - 17) / 2 : time >= 5 && time < 7 ? (7 - time) / 2 : 0;
-    const dayFactor = time >= 7 && time < 17 ? 1 : time >= 5 && time < 7 ? (time - 5) / 2 : time >= 17 && time < 19 ? (19 - time) / 2 : 0;
+    const sunAngle = (time / 24) * Math.PI * 2;
+    const elevation = Math.sin(sunAngle - Math.PI / 2);
+    const dayFactor = smoothstep(-0.1, 0.35, elevation);
+    const twilightFactor = smoothstep(-0.35, 0.05, elevation) * (1 - dayFactor);
+    const nightFactor = 1 - smoothstep(-0.45, 0.1, elevation);
 
     // TIME-OF-DAY SKY COLORS
     let zenith, horizon;
@@ -135,11 +146,10 @@ export const SkyGradient: React.FC<SkyGradientProps> = ({
     // Update shader uniforms
     material.uniforms.zenithColor.value.copy(zenith);
     material.uniforms.horizonColor.value.copy(horizon);
-    material.uniforms.sunIntensity.value = dayFactor * 0.5;
+    material.uniforms.sunIntensity.value = dayFactor * 0.6;
     material.uniforms.atmosphericDensity.value = 0.3 + cloudCover * 0.4 + (weatherType === 'SANDSTORM' ? 0.5 : 0);
 
     // Update sun direction
-    const sunAngle = (time / 24) * Math.PI * 2;
     material.uniforms.sunDirection.value.set(
       Math.cos(sunAngle - Math.PI / 2),
       Math.sin(sunAngle - Math.PI / 2),

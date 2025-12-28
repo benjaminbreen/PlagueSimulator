@@ -118,10 +118,10 @@ const AnimatedPortrait: React.FC<{
   return (
     <group ref={groupRef} position={[0, -1.65, 0.0]}>
       <Humanoid
-        color={npc.robeColor}
-        headColor={npc.skinTone}
+        color={npc.robeBaseColor}
+        headColor="#c9a87c"
         turbanColor={npc.headwearColor}
-        headscarfColor={npc.headscarfColor}
+        headscarfColor={npc.headwearColor}
         robeAccentColor={npc.robeAccentColor}
         hairColor={npc.hairColor}
         facialHair={npc.facialHair}
@@ -181,6 +181,17 @@ const SpeakingGlow: React.FC<{ isSpeaking: boolean }> = ({ isSpeaking }) => {
   );
 };
 
+function renderMessageContent(content: string): React.ReactNode[] {
+  const parts = content.split(/(\*[^*]+\*)/g);
+  return parts.map((part, index) => {
+    const isItalic = part.startsWith('*') && part.endsWith('*') && part.length > 2;
+    if (isItalic) {
+      return <em key={`italic-${index}`}>{part.slice(1, -1)}</em>;
+    }
+    return <React.Fragment key={`text-${index}`}>{part}</React.Fragment>;
+  });
+}
+
 export const EncounterModal: React.FC<EncounterModalProps> = ({
   npc,
   player,
@@ -198,6 +209,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   const [isExiting, setIsExiting] = useState(false);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [barsAnimated, setBarsAnimated] = useState(false);
+  const [nativeLanguageMode, setNativeLanguageMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -216,7 +228,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
     },
     publicMorale,
     simulationStats,
-    conversationHistory: conversationHistory.filter(h => h.npcId === npc.id)
+    conversationHistory: conversationHistory.filter(h => h.npcId === npc.id),
+    nativeLanguageMode
   };
 
   const {
@@ -613,6 +626,20 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                   </div>
                 )}
 
+                <div className="px-4 pt-3 pb-1 flex justify-end">
+                  <button
+                    onClick={() => setNativeLanguageMode(prev => !prev)}
+                    className={`text-[10px] uppercase tracking-[0.2em] px-3 py-1.5 rounded-full border transition-all duration-200 ${
+                      nativeLanguageMode
+                        ? 'bg-amber-600/80 text-amber-50 border-amber-400/60 shadow-[0_0_10px_rgba(251,191,36,0.25)]'
+                        : 'bg-stone-900/60 text-amber-100/50 border-amber-900/40 hover:text-amber-100/80 hover:border-amber-700/60'
+                    }`}
+                    title="Toggle real language mode"
+                  >
+                    Real language mode
+                  </button>
+                </div>
+
                 {/* Messages Area with proper scroll containment */}
                 <div
                   ref={messagesContainerRef}
@@ -634,7 +661,9 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                             : 'bg-stone-800/75 text-stone-100 rounded-bl-sm border border-stone-700/50 hover:bg-stone-800/85'
                         }`}
                       >
-                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
+                          {renderMessageContent(msg.content)}
+                        </p>
                         <p className={`text-[10px] mt-1 ${
                           msg.role === 'player' ? 'text-amber-400/50' : 'text-stone-400/50'
                         }`}>

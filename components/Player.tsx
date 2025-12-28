@@ -55,6 +55,7 @@ interface PlayerProps {
   buildings?: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   obstacles?: Obstacle[];
+  obstacleHash?: SpatialHash<Obstacle> | null;
   timeOfDay?: number;
   playerStats?: PlayerStats;
   agentHashRef?: React.MutableRefObject<SpatialHash<AgentSnapshot> | null>;
@@ -87,6 +88,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   buildings = [],
   buildingHash = null,
   obstacles = [],
+  obstacleHash = null,
   timeOfDay = 12,
   playerStats,
   agentHashRef,
@@ -165,6 +167,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const jumpAnticipationRef = useRef(0);
   const landingImpulseRef = useRef(0);
   const lastJumpChargeRef = useRef(0);
+  const boulderTempsRef = useRef({
+    normal: new THREE.Vector3(),
+    displacement: new THREE.Vector3(),
+    impulse: new THREE.Vector3(),
+    angularImpulse: new THREE.Vector3()
+  });
   
   // Physics states
   const velV = useRef(0);
@@ -243,7 +251,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             spawnPos.z + Math.sin(angle) * r
           );
           if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) &&
-              !isBlockedByObstacles(candidate, obstacles, 0.6)) {
+              !isBlockedByObstacles(candidate, obstacles, 0.6, obstacleHash || undefined)) {
             safePos = candidate;
             break;
           }
@@ -355,7 +363,22 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
   }, [actionEvent]);
 
-  // Reset climbing state when climbables change (map transition)
+  // Reset climbing state only if the climbable we're on no longer exists
+  // This prevents false resets when climbables array reference changes but content is the same
+  useEffect(() => {
+    if (climbingStateRef.current.isClimbing && activeClimbableRef.current) {
+      const stillExists = climbables.some(c => c.id === activeClimbableRef.current?.id);
+      if (!stillExists) {
+        climbingStateRef.current = stopClimbing(climbingStateRef.current);
+        activeClimbableRef.current = null;
+        setIsClimbing(false);
+        onClimbingStateChange?.(false);
+        onClimbablePrompt?.(null);
+      }
+    }
+  }, [climbables]);
+
+  // Reset climbing fully on district/map change
   useEffect(() => {
     if (climbingStateRef.current.isClimbing) {
       climbingStateRef.current = stopClimbing(climbingStateRef.current);
@@ -363,9 +386,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       setIsClimbing(false);
       onClimbingStateChange?.(false);
     }
-    // Clear prompt on climbables change
     onClimbablePrompt?.(null);
-  }, [climbables, onClimbingStateChange, onClimbablePrompt]);
+  }, [district]);
 
   const playFootstep = (variant: 'walk' | 'run') => {
     const ctx = audioCtxRef.current;
@@ -566,8 +588,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     if (dossierMode) return;
 
     // === CLIMBING SYSTEM ===
+
     // Skip climbing in first-person mode (W/S control camera pitch there)
     if (cameraMode !== CameraMode.FIRST_PERSON) {
+
       const playerPos = {
         x: group.current.position.x,
         y: group.current.position.y,
@@ -619,6 +643,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           climbAnimationPhaseRef.current = 0; // Reset animation phase
           onClimbingStateChange?.(true); // Notify UI of climbing state
           velV.current = 0;
+          // IMPORTANT: Mark C as already processed so the cancel check doesn't trigger on same frame
+          lastCRef.current = true;
         } else if (wantsClimbDown && nearbyFromRoof) {
           // Start climbing from top (descending)
           climbingStateRef.current = initiateClimbing(climbingStateRef.current, nearbyFromRoof, true);
@@ -627,6 +653,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           climbAnimationPhaseRef.current = 0;
           onClimbingStateChange?.(true); // Notify UI of climbing state
           velV.current = 0;
+          // IMPORTANT: Mark C as already processed so the cancel check doesn't trigger on same frame
+          lastCRef.current = true;
         }
       }
 
@@ -793,8 +821,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (roofHeight !== null) {
         // Player is within building bounds - check if they're at roof level
         const currentY = group.current.position.y;
-        // Only use roof as ground if player is coming from above or already on roof
-        if (currentY >= roofHeight - 0.5) {
+        // Use roof as ground if player is at or above roof level (1.0 unit tolerance for reliable detection)
+        if (currentY >= roofHeight - 1.0) {
           groundHeight = Math.max(groundHeight, roofHeight);
         }
       }
@@ -826,7 +854,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           for (let i = 0; i < 8; i++) {
             const angle = (i / 8) * Math.PI * 2;
             const candidate = new THREE.Vector3(base.x + Math.cos(angle) * r, 0, base.z + Math.sin(angle) * r);
-            if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(candidate, obstacles, 0.6)) {
+            if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) && !isBlockedByObstacles(candidate, obstacles, 0.6, obstacleHash || undefined)) {
               // BUGFIX: Use bilinear interpolation for accurate terrain sampling
               const candidateHeight = sampleTerrainHeight(heightmap, candidate.x, candidate.z);
               candidate.y = candidateHeight;
@@ -935,7 +963,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         const speed = item.velocity.length();
         const next = item.position.clone().add(item.velocity.clone().multiplyScalar(delta));
         const blocked = isBlockedByBuildings(next, buildings, item.radius, buildingHash || undefined)
-          || isBlockedByObstacles(next, obstacles, item.radius);
+          || isBlockedByObstacles(next, obstacles, item.radius, obstacleHash || undefined);
         if (!blocked) {
           item.position.copy(next);
         } else {
@@ -1084,6 +1112,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
     // 2d. Boulder-tree collision
     if (pushablesRef?.current && obstacles.length > 0) {
+      const temps = boulderTempsRef.current;
       for (const boulder of pushablesRef.current) {
         if (boulder.kind !== 'boulder') continue;
         if (boulder.velocity.lengthSq() < 0.01) continue; // Skip slow boulders
@@ -1097,11 +1126,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
           if (distSq < limit * limit && distSq > 0.0001) {
             const dist = Math.sqrt(distSq);
-            const normal = new THREE.Vector3(dx, 0, dz).normalize();
+            const normal = temps.normal.set(dx, 0, dz).normalize();
 
             // Push boulder out of tree
             const overlap = limit - dist;
-            boulder.position.add(normal.clone().multiplyScalar(overlap + 0.05));
+            boulder.position.add(temps.displacement.copy(normal).multiplyScalar(overlap + 0.05));
 
             // Bounce with momentum loss
             const TREE_RESTITUTION = 0.3; // Lose 70% energy on tree impact
@@ -1109,7 +1138,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
             if (velocityAlongNormal < 0) {
               // Reflect velocity and apply energy loss
-              boulder.velocity.add(normal.clone().multiplyScalar(-velocityAlongNormal * (1 + TREE_RESTITUTION)));
+              boulder.velocity.add(temps.impulse.copy(normal).multiplyScalar(-velocityAlongNormal * (1 + TREE_RESTITUTION)));
 
               // Impact sound/effect
               const intensity = Math.min(1, Math.abs(velocityAlongNormal) * 0.4);
@@ -1125,12 +1154,13 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
               // Apply angular impulse from off-center impacts
               if (boulder.angularVelocity) {
-                const angularImpulse = new THREE.Vector3(
-                  normal.z * velocityAlongNormal,
-                  0,
-                  -normal.x * velocityAlongNormal
-                ).multiplyScalar(0.5);
-                boulder.angularVelocity.add(angularImpulse);
+                boulder.angularVelocity.add(
+                  temps.angularImpulse.set(
+                    normal.z * velocityAlongNormal,
+                    0,
+                    -normal.x * velocityAlongNormal
+                  ).multiplyScalar(0.5)
+                );
               }
             }
           }
@@ -1241,7 +1271,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       currentSpeed = (keys.shift ? RUN_SPEED : PLAYER_SPEED) * airControl * damp;
       const moveDelta = moveVec.multiplyScalar(currentSpeed * delta);
       const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-      const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6);
+      const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6, obstacleHash || undefined);
       if (!blockedX) {
         group.current.position.x = nextX.x;
       } else if (Math.abs(moveDelta.x) > 0.02) {
@@ -1250,7 +1280,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         playObjectImpact('wall', intensity * 0.6);
       }
       const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-      const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6);
+      const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6, obstacleHash || undefined);
       if (!blockedZ) {
         group.current.position.z = nextZ.z;
       } else if (Math.abs(moveDelta.z) > 0.02) {
@@ -1290,7 +1320,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
         // Apply movement with collision detection
         const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-        const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6);
+        const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6, obstacleHash || undefined);
         if (!blockedX) {
           group.current.position.x = nextX.x;
         } else {
@@ -1299,7 +1329,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         }
 
         const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-        const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6);
+        const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6, obstacleHash || undefined);
         if (!blockedZ) {
           group.current.position.z = nextZ.z;
         } else {
@@ -1363,7 +1393,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         buildings,
         district
       );
-      if (roofHeight !== null && group.current.position.y >= roofHeight - 0.5) {
+      // Use 1.0 unit tolerance for reliable roof detection (matches first check)
+      if (roofHeight !== null && group.current.position.y >= roofHeight - 1.0) {
         groundHeightNow = Math.max(groundHeightNow, roofHeight);
       }
     }
@@ -1505,7 +1536,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         } else {
           const testPoint = group.current.position.clone().add(forward.multiplyScalar(0.9));
           const blocked = isBlockedByBuildings(testPoint, buildings, 0.2, buildingHash || undefined)
-            || isBlockedByObstacles(testPoint, obstacles, 0.2);
+            || isBlockedByObstacles(testPoint, obstacles, 0.2, obstacleHash || undefined);
           if (blocked) {
             onImpactPuff?.(testPoint, 0.45 + strength * 0.35);
             // Play wall sound for punching/pushing against wall
@@ -1565,7 +1596,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           item.velocity.add(impulse);
           const next = item.position.clone().add(impulse.clone().multiplyScalar(0.2));
           const blocked = isBlockedByBuildings(next, buildings, item.radius, buildingHash || undefined)
-            || isBlockedByObstacles(next, obstacles, item.radius);
+            || isBlockedByObstacles(next, obstacles, item.radius, obstacleHash || undefined);
           if (!blocked) {
             item.position.copy(next);
           } else {

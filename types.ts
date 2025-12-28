@@ -64,19 +64,33 @@ export type Ethnicity =
   | 'Armenian'
   | 'Greek/Rum'
   | 'Persian'
-  | 'Frankish';  // Italian, Venetian, Genoese, Provençal merchants and visitors
+  // Italian city-state merchants (replacing generic "Frankish")
+  | 'Venetian'      // La Serenissima - dominant Mediterranean traders
+  | 'Genoese'       // Rivals of Venice, strong presence in Levant
+  | 'Pisan'         // Tuscan traders, declining by 1348
+  | 'Catalan'       // Crown of Aragon merchants
+  // Additional groups
+  | 'Maghrebi'      // North African (Morocco, Tunisia, al-Andalus refugees)
+  | 'Coptic'        // Egyptian Christians
+  | 'Indian';       // Sindhi/Gujarati merchants on spice routes
 
 export type Religion =
   | 'Sunni Islam'
   | 'Shia Islam'
-  | 'Eastern Orthodox'
+  | 'Ismaili'       // Nizari Ismailis (post-Assassin communities)
+  | 'Eastern Orthodox'  // Melkite/Rum Orthodox
   | 'Armenian Apostolic'
-  | 'Syriac Orthodox'
+  | 'Syriac Orthodox'   // Jacobite
+  | 'Coptic Orthodox'   // Egyptian Church
   | 'Jewish'
+  | 'Samaritan'     // Distinct from Jewish, small community
   | 'Druze'
-  | 'Latin Christian';  // Roman Catholic - Frankish/Italian visitors
+  | 'Latin Christian';  // Roman Catholic - Italian merchants
 
-export type Language = 'Arabic' | 'Syriac' | 'Armenian' | 'Greek' | 'Persian' | 'Turkic' | 'Latin';
+// Sunni legal schools (madhab) - for detailed simulation
+export type Madhab = 'Shafii' | 'Hanafi' | 'Maliki' | 'Hanbali';
+
+export type Language = 'Arabic' | 'Syriac' | 'Armenian' | 'Greek' | 'Persian' | 'Turkic' | 'Latin' | 'Italian' | 'Catalan' | 'Coptic' | 'Hebrew' | 'Sindhi';
 
 export enum CameraMode {
   FIRST_PERSON = 'FIRST_PERSON',
@@ -240,6 +254,7 @@ export interface BuildingMetadata {
   isPointOfInterest?: boolean;
   isQuarantined?: boolean;
   isOpen?: boolean;
+  district?: DistrictType; // For district-specific building styling
 }
 
 export enum InteriorRoomType {
@@ -308,6 +323,8 @@ export enum InteriorPropType {
   PRODUCE_BASKET = 'PRODUCE_BASKET', // Agricultural produce storage
   ROPE_COIL = 'ROPE_COIL',          // Transport/travel equipment
   WATER_JUG = 'WATER_JUG',          // Simple water container
+  STORAGE_CHEST = 'STORAGE_CHEST',  // Large storage chest
+  BARREL = 'BARREL',                // Wooden storage barrel
 }
 
 // Profession lifestyle categories for interior generation
@@ -450,6 +467,9 @@ export interface ClimbableAccessory {
   // World positions (computed from building)
   basePosition: [number, number, number];
   topPosition: [number, number, number];
+
+  // Building info for roof calculations
+  buildingHalfSize: number;       // Half the building size (for stepping onto roof)
 
   // Dimensions
   width: number;
@@ -912,4 +932,5 @@ export interface EncounterContext {
   publicMorale: MoraleStats;
   simulationStats: SimulationStats;
   conversationHistory: ConversationSummary[];
+  nativeLanguageMode: boolean;
 }

@@ -112,7 +112,7 @@ export class WeatherLayer implements SoundLayer {
 
     // Waveshaper for more organic gusts
     this.gustShaper = ctx.createWaveShaper();
-    this.gustShaper.curve = this.createGustCurve();
+    this.gustShaper.curve = this.createGustCurve() as Float32Array<ArrayBuffer>;
     this.gustShaper.connect(this.gustGain);
     this.gustGain.connect(this.windGain.gain);
 

@@ -149,7 +149,7 @@ function App() {
     slot1: 'warn',
     slot2: 'encourage',
     slot3: 'observe',
-    cooldowns: {},
+    cooldowns: { heal: 0, warn: 0, encourage: 0, observe: 0, pray: 0, trade: 0 },
     lastTriggered: null
   });
   const [actionEvent, setActionEvent] = useState<PlayerActionEvent | null>(null);

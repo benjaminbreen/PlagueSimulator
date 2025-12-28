@@ -34,6 +34,8 @@ const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
   SOUTHERN_ROAD: 'desert',
   MOUNTAIN_SHRINE: 'desert',
   CIVIC: 'civic',
+  CHRISTIAN_QUARTER: 'wealthy',
+  UMAYYAD_MOSQUE: 'civic',
 };
 
 // Sound configuration per biome

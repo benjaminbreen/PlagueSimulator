@@ -112,8 +112,8 @@ export const ToolRack: React.FC<{ position: [number, number, number]; rotation: 
 
       {/* Mounting pegs */}
       {[[-0.5, 1.2], [-0.2, 0.8], [0.2, 1.0], [0.5, 0.7]].map((pos, idx) => (
-        <mesh key={`peg-${idx}`} position={[pos[0], pos[1], 0.02]} receiveShadow>
-          <cylinderGeometry args={[0.02, 0.025, 0.15, 6]} rotation={[Math.PI / 2, 0, 0]} />
+        <mesh key={`peg-${idx}`} position={[pos[0], pos[1], 0.02]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
+          <cylinderGeometry args={[0.02, 0.025, 0.15, 6]} />
           <meshStandardMaterial color={handleColor} roughness={0.88} />
         </mesh>
       ))}
@@ -221,8 +221,8 @@ export const HerbRack: React.FC<{ position: [number, number, number]; rotation: 
       </mesh>
 
       {/* Horizontal drying rod */}
-      <mesh position={[0, 1.3, 0]} receiveShadow>
-        <cylinderGeometry args={[0.02, 0.02, 1.6, 8]} rotation={[0, 0, Math.PI / 2]} />
+      <mesh position={[0, 1.3, 0]} rotation={[0, 0, Math.PI / 2]} receiveShadow>
+        <cylinderGeometry args={[0.02, 0.02, 1.6, 8]} />
         <meshStandardMaterial color="#5a4030" roughness={0.88} />
       </mesh>
 

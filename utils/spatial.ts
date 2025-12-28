@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { BuildingMetadata, PlagueType } from '../types';
+import { BuildingMetadata, Obstacle, PlagueType } from '../types';
 
 export interface SpatialHash<T> {
   cellSize: number;
   buckets: Map<string, T[]>;
+  maxRadius?: number;
 }
 
 const keyFor = (x: number, z: number, cellSize: number) => {
@@ -63,6 +64,34 @@ export const queryNearbyAgents = (pos: THREE.Vector3, hash: SpatialHash<AgentSna
   const ix = Math.floor(pos.x / cellSize);
   const iz = Math.floor(pos.z / cellSize);
   const results: AgentSnapshot[] = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const key = `${ix + dx},${iz + dz}`;
+      const bucket = buckets.get(key);
+      if (bucket) results.push(...bucket);
+    }
+  }
+  return results;
+};
+
+export const buildObstacleHash = (obstacles: Obstacle[], cellSize = 6): SpatialHash<Obstacle> => {
+  const buckets = new Map<string, Obstacle[]>();
+  let maxRadius = 0;
+  for (const obstacle of obstacles) {
+    if (obstacle.radius > maxRadius) maxRadius = obstacle.radius;
+    const key = keyFor(obstacle.position[0], obstacle.position[2], cellSize);
+    const bucket = buckets.get(key);
+    if (bucket) bucket.push(obstacle);
+    else buckets.set(key, [obstacle]);
+  }
+  return { cellSize, buckets, maxRadius };
+};
+
+export const queryNearbyObstacles = (pos: THREE.Vector3, hash: SpatialHash<Obstacle>) => {
+  const { cellSize, buckets } = hash;
+  const ix = Math.floor(pos.x / cellSize);
+  const iz = Math.floor(pos.z / cellSize);
+  const results: Obstacle[] = [];
   for (let dx = -1; dx <= 1; dx++) {
     for (let dz = -1; dz <= 1; dz++) {
       const key = `${ix + dx},${iz + dz}`;

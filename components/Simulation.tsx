@@ -10,13 +10,14 @@ import { Rats, Rat } from './Rats';
 import { Player } from './Player';
 import { MarketStall } from './MarketStall';
 import { MerchantNPC } from './MerchantNPC';
-import { AgentSnapshot, SpatialHash, buildBuildingHash } from '../utils/spatial';
+import { AgentSnapshot, SpatialHash, buildBuildingHash, buildObstacleHash } from '../utils/spatial';
 import { PushableObject, PickupInfo, createPushable } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
 import { generateMerchantNPC, mapStallTypeToMerchantType } from '../utils/merchantGeneration';
 import { LaundryLine, generateLaundryLine, shouldGenerateLaundryLine } from '../utils/laundry';
+import { HangingCarpet, generateMarketCarpets } from '../utils/hangingCarpets';
 import { ActionEffects } from './ActionEffects';
 import { Footprints } from './Footprints';
 import { SkyGradient } from './SkyGradient';
@@ -106,7 +107,7 @@ const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
 
 
 // GRAPHICS: Dust particles for sunny hot days - warm sun-baked atmosphere
-const DustParticles: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
+const DustParticles: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<WeatherState> }> = ({ timeOfDay, weather }) => {
   const pointsRef = useRef<THREE.Points>(null);
   const count = 150;
 
@@ -148,7 +149,11 @@ const DustParticles: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
 
     // Peak sun visibility (10am-2pm when dayFactor > 0.7)
     const peakSunFactor = dayFactor > 0.7 ? (dayFactor - 0.7) / 0.3 : 0;
-    const opacity = 0.15 + peakSunFactor * 0.1; // More visible at peak sun
+    const humidity = weather.current.humidity;
+    const windStrength = weather.current.wind.length();
+    const humidityBoost = THREE.MathUtils.clamp(humidity * 0.6, 0, 0.4);
+    const windDamp = THREE.MathUtils.clamp(1 - windStrength * 0.8, 0.4, 1);
+    const opacity = (0.15 + peakSunFactor * 0.1) * windDamp + humidityBoost * 0.2;
 
     const positions = pointsRef.current.geometry.attributes.position.array as Float32Array;
 
@@ -217,7 +222,7 @@ interface WeatherState {
   weatherBlend: number;
 }
 
-const CloudLayer: React.FC<{ weather: React.MutableRefObject<WeatherState> }> = ({ weather }) => {
+const CloudLayer: React.FC<{ weather: React.MutableRefObject<WeatherState>; timeOfDay: number }> = ({ weather, timeOfDay }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const tempObj = useMemo(() => new THREE.Object3D(), []);
   const count = 12;
@@ -258,7 +263,21 @@ const CloudLayer: React.FC<{ weather: React.MutableRefObject<WeatherState> }> = 
     meshRef.current.visible = true;
     const material = meshRef.current.material as THREE.MeshStandardMaterial;
     material.opacity = 0.12 + cloudCover * 0.3;
-    material.color.set(weather.current.weatherType === WeatherType.SANDSTORM ? '#c9a25f' : '#ffffff');
+    const sunAngle = (timeOfDay / 24) * Math.PI * 2;
+    const elevation = Math.sin(sunAngle - Math.PI / 2);
+    const dayFactor = smoothstep(-0.1, 0.35, elevation);
+    const duskFactor = smoothstep(0.05, -0.2, -elevation) * (1 - dayFactor);
+    const dawnFactor = smoothstep(-0.2, 0.05, elevation) * (1 - dayFactor);
+    const tint = new THREE.Color('#ffffff');
+    if (weather.current.weatherType === WeatherType.SANDSTORM) {
+      tint.set('#c9a25f');
+    } else {
+      const warm = new THREE.Color('#ffd5a8');
+      const cool = new THREE.Color('#c8e6ff');
+      tint.lerp(warm, Math.max(duskFactor, dawnFactor) * 0.6);
+      tint.lerp(cool, (1 - Math.max(duskFactor, dawnFactor)) * (1 - dayFactor) * 0.2);
+    }
+    material.color.lerp(tint, 0.2);
   });
 
   return (
@@ -274,6 +293,58 @@ const smoothstep = (edge0: number, edge1: number, x: number) => {
   return t * t * (3 - 2 * t);
 };
 
+const createHorizonHazeTexture = (size = 256) => {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const gradient = ctx.createLinearGradient(0, 0, 0, size);
+  gradient.addColorStop(0, 'rgba(180,210,240,0.0)');
+  gradient.addColorStop(0.35, 'rgba(180,210,240,0.08)');
+  gradient.addColorStop(0.65, 'rgba(190,200,190,0.18)');
+  gradient.addColorStop(1, 'rgba(210,185,150,0.35)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, size, size);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+};
+
+const HorizonHaze: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
+  const texture = useMemo(() => createHorizonHazeTexture(256), []);
+  if (!texture) return null;
+  const sunAngle = (timeOfDay / 24) * Math.PI * 2;
+  const elevation = Math.sin(sunAngle - Math.PI / 2);
+  const dayFactor = smoothstep(-0.1, 0.35, elevation);
+  const duskFactor = smoothstep(0.05, -0.2, -elevation) * (1 - dayFactor);
+  const dawnFactor = smoothstep(-0.2, 0.05, elevation) * (1 - dayFactor);
+  const nightFactor = 1 - smoothstep(-0.45, 0.1, elevation);
+  const tint = new THREE.Color('#cdd9e6')
+    .lerp(new THREE.Color('#f1c6a2'), Math.max(duskFactor, dawnFactor) * 0.7)
+    .lerp(new THREE.Color('#93a6bf'), (1 - dayFactor) * 0.25)
+    .lerp(new THREE.Color('#0f1829'), nightFactor * 0.55);
+  const opacity = 0.75 * (dayFactor * 0.9 + Math.max(duskFactor, dawnFactor) * 0.7) * (1 - nightFactor);
+  return (
+    <mesh position={[0, 10, 0]} renderOrder={-900}>
+      <cylinderGeometry args={[220, 220, 70, 48, 1, true]} />
+      <meshBasicMaterial
+        map={texture}
+        transparent
+        opacity={opacity}
+        depthWrite={false}
+        side={THREE.BackSide}
+        color={tint}
+      />
+    </mesh>
+  );
+};
+
 const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, simTime }) => {
   const meshRef = useRef<THREE.Mesh>(null);
   const earthshineRef = useRef<THREE.Mesh>(null);
@@ -286,16 +357,74 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
   // Moon phase cycles every 29.5 days
   const moonPhase = (simTime / 29.5) % 1; // 0-1, where 0=new, 0.5=full
 
+  const phaseKey = Math.round(moonPhase * 32) / 32;
+  const moonTexture = useMemo(() => {
+    const size = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    const center = size / 2;
+    const radius = size * 0.48;
+    const gradient = ctx.createRadialGradient(center, center, size * 0.05, center, center, size * 0.52);
+    gradient.addColorStop(0, '#ffffff');
+    gradient.addColorStop(0.5, '#f2efe3');
+    gradient.addColorStop(1, '#c9c1ad');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+
+    ctx.fillStyle = 'rgba(140,135,120,0.55)';
+    for (let i = 0; i < 55; i += 1) {
+      const r = 1 + Math.random() * 7;
+      const x = Math.random() * size;
+      const y = Math.random() * size;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Phase shadow: darken based on lunar phase
+    const illumination = 1 - Math.abs(phaseKey - 0.5) * 2; // 0=new, 1=full
+    const shadowAlpha = 0.9 * (1 - illumination);
+    const shadowOffset = (phaseKey - 0.5) * radius * 1.6;
+    if (shadowAlpha > 0.01) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = `rgba(20,20,28,${shadowAlpha})`;
+      ctx.beginPath();
+      ctx.arc(center + shadowOffset, center, radius * 1.02, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Subtle limb darkening
+    const limb = ctx.createRadialGradient(center, center, radius * 0.6, center, center, radius * 1.05);
+    limb.addColorStop(0, 'rgba(0,0,0,0)');
+    limb.addColorStop(1, 'rgba(0,0,0,0.25)');
+    ctx.fillStyle = limb;
+    ctx.fillRect(0, 0, size, size);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
+  }, [phaseKey]);
+
   const moonMaterial = useMemo(() => {
     // Simple bright moon - no shader modification needed
     // Using emissive for self-illumination effect
     const mat = new THREE.MeshBasicMaterial({
-      color: '#fffef5', // Ivory-white moon color
+      color: '#ffffff',
+      map: moonTexture ?? undefined,
       transparent: false
     });
+    mat.toneMapped = false;
+    mat.fog = false;
 
     return mat;
-  }, []);
+  }, [moonTexture]);
 
   useFrame(() => {
     if (!meshRef.current || !groupRef.current) return;
@@ -332,7 +461,7 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
     if (lightRef.current) {
       const phaseIntensity = Math.sin(moonPhase * Math.PI); // 0 at new/full cycle, 1 at full
       const elevationFactor = Math.max(0, moonElevation);
-      lightRef.current.intensity = 1.2 * phaseIntensity * elevationFactor;
+      lightRef.current.intensity = 2.2 * phaseIntensity * elevationFactor;
     }
 
     // GRAPHICS: Beautiful multi-layer glow system
@@ -371,7 +500,7 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
     <group ref={groupRef}>
       {/* Mystical outer aura - largest, most subtle, color-tinted */}
       <mesh ref={auraRef}>
-        <sphereGeometry args={[7.5, 32, 32]} />
+        <sphereGeometry args={[7.5, 24, 16]} />
         <meshBasicMaterial
           color="#a8c8ff"
           transparent
@@ -384,11 +513,11 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
 
       {/* Outer atmospheric glow - expansive halo */}
       <mesh ref={outerGlowRef}>
-        <sphereGeometry args={[6, 32, 32]} />
+        <sphereGeometry args={[5.4, 20, 12]} />
         <meshBasicMaterial
           color="#d5e5ff"
           transparent
-          opacity={0.18}
+          opacity={0.14}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           side={THREE.BackSide}
@@ -397,11 +526,11 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
 
       {/* Main atmospheric glow - bright silvery corona */}
       <mesh ref={glowRef}>
-        <sphereGeometry args={[4.75, 32, 32]} />
+        <sphereGeometry args={[4.4, 20, 12]} />
         <meshBasicMaterial
           color="#e8f2ff"
           transparent
-          opacity={0.4}
+          opacity={0.28}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
           side={THREE.BackSide}
@@ -410,7 +539,7 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
 
       {/* Earthshine - subtle glow on dark side */}
       <mesh ref={earthshineRef}>
-        <sphereGeometry args={[4.1, 24, 24]} />
+        <sphereGeometry args={[4.05, 16, 10]} />
         <meshBasicMaterial
           color="#7a9fcc"
           transparent
@@ -423,7 +552,7 @@ const Moon: React.FC<{ timeOfDay: number; simTime: number }> = ({ timeOfDay, sim
 
       {/* Main moon body - the actual lunar surface */}
       <mesh ref={meshRef} material={moonMaterial}>
-        <sphereGeometry args={[4, 48, 48]} />
+        <sphereGeometry args={[4, 28, 20]} />
         <pointLight ref={lightRef} intensity={1.2} distance={280} color="#d5e2ff" />
       </mesh>
     </group>
@@ -736,45 +865,68 @@ const MilkyWay: React.FC<{ visible: boolean; simTime: number }> = ({ visible, si
 const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
   const sunriseBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
   const sunsetBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
-  // Variable dawn colors for variety - rosy fingers
   const dawnVariant = useMemo(() => Math.random(), []);
-  const skyKey = Math.round(timeOfDay * 4) / 4;
+  const prevTextureRef = useRef<THREE.CanvasTexture | null>(null);
+  const skyKey = Math.round(timeOfDay * 12) / 12; // Update every 5 min of sim time
+
   const texture = useMemo(() => {
     const canvas = document.createElement('canvas');
     canvas.width = 1;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
+
     const t = skyKey;
     const sunAngle = (t / 24) * Math.PI * 2;
     const elevation = Math.sin(sunAngle - Math.PI / 2);
-    const dayFactor = smoothstep(-0.05, 0.3, elevation);
-    const dawnFactor = smoothstep(-0.2, 0.05, elevation) * (1 - dayFactor);
-    const duskFactor = smoothstep(0.05, -0.2, -elevation) * (1 - dayFactor);
+    const dayFactor = smoothstep(-0.1, 0.35, elevation);
+    const twilightFactor = smoothstep(-0.35, 0.05, elevation) * (1 - dayFactor);
+    const nightFactor = 1 - smoothstep(-0.45, 0.1, elevation);
 
-    // Variable dawn colors - rosy fingers
     const dawnTop = dawnVariant > 0.5 ? new THREE.Color('#3a2f52') : new THREE.Color('#1b2438');
     const dawnMid = dawnVariant > 0.7
-      ? new THREE.Color('#9a6a8a') // Lavender-rose
+      ? new THREE.Color('#9a6a8a')
       : dawnVariant > 0.3
-        ? new THREE.Color('#8a5a7a') // Deep rose
-        : new THREE.Color('#6a3f61'); // Purple-rose
+        ? new THREE.Color('#8a5a7a')
+        : new THREE.Color('#6a3f61');
     const dawnBottom = dawnVariant > 0.6
-      ? new THREE.Color('#f5b8a8') // Soft peachy-pink
-      : new THREE.Color('#f0a06a'); // Amber-peach
+      ? new THREE.Color('#f5b8a8')
+      : new THREE.Color('#f0a06a');
 
-    const top = new THREE.Color('#142243')
-      .lerp(new THREE.Color('#5aa6e8'), dayFactor)
-      .lerp(new THREE.Color('#2a3558'), duskFactor)
-      .lerp(dawnTop, dawnFactor);
-    const mid = new THREE.Color('#162341')
-      .lerp(new THREE.Color('#49a6ef'), dayFactor)
-      .lerp(new THREE.Color('#a05044'), duskFactor)
-      .lerp(dawnMid, dawnFactor);
-    const bottom = new THREE.Color('#1c2a4a')
-      .lerp(new THREE.Color('#2f95ee'), dayFactor)
-      .lerp(new THREE.Color('#f7b25a'), duskFactor)
-      .lerp(dawnBottom, dawnFactor);
+    const dayTop = new THREE.Color('#5aa6e8');
+    const dayMid = new THREE.Color('#49a6ef');
+    const dayBottom = new THREE.Color('#2f95ee');
+    const duskTop = new THREE.Color('#2a3558');
+    const duskMid = new THREE.Color('#a05044');
+    const duskBottom = new THREE.Color('#f7b25a');
+    const nightTop = new THREE.Color('#05080f');
+    const nightMid = new THREE.Color('#0a1220');
+    const nightBottom = new THREE.Color('#0c1426');
+
+    const soften = (v: number) => Math.pow(v, 0.7);
+    const dayMix = soften(dayFactor);
+    const duskMix = soften(twilightFactor);
+    const nightMix = soften(nightFactor);
+
+    const duskBlend = duskMix * (1 - nightMix * 0.8);
+    const top = nightTop.clone()
+      .lerp(dayTop, dayMix)
+      .lerp(duskTop, duskBlend)
+      .lerp(dawnTop, duskBlend * 0.9);
+    const mid = nightMid.clone()
+      .lerp(dayMid, dayMix)
+      .lerp(duskMid, duskBlend)
+      .lerp(dawnMid, duskBlend * 0.9);
+    const bottom = nightBottom.clone()
+      .lerp(dayBottom, dayMix)
+      .lerp(duskBottom, duskBlend)
+      .lerp(dawnBottom, duskBlend * 0.9);
+
+    // Midday desaturation for washed Damascus light
+    const desat = THREE.MathUtils.lerp(0.2, 0, Math.abs(elevation));
+    top.lerp(new THREE.Color(top).lerp(new THREE.Color('#cfd8e6'), desat), 0.25);
+    mid.lerp(new THREE.Color(mid).lerp(new THREE.Color('#d6dde8'), desat), 0.25);
+    bottom.lerp(new THREE.Color(bottom).lerp(new THREE.Color('#e6d6b8'), desat), 0.25);
 
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, `#${top.getHexString()}`);
@@ -782,54 +934,41 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
     gradient.addColorStop(1, `#${bottom.getHexString()}`);
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    // GRAPHICS: Enhanced dramatic sunset/sunrise gradient bands
-    if (duskFactor > 0.05) {
-      const tNorm = Math.min(1, duskFactor * 2);
-      const bandStart = canvas.height * (0.5 + tNorm * 0.08);
-      const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
-      flare.addColorStop(0, `rgba(255,95,60,${0.7 * sunsetBoost * duskFactor})`); // Was 0.5
-      flare.addColorStop(0.6, `rgba(255,160,85,${0.55 * sunsetBoost * duskFactor})`); // Was 0.35
-      flare.addColorStop(1, `rgba(255,215,125,${0.4 * sunsetBoost * duskFactor})`); // Was 0.25
-      ctx.fillStyle = flare;
-      ctx.fillRect(0, bandStart, canvas.width, canvas.height - bandStart);
-    } else if (dawnFactor > 0.05) {
-      const tNorm = Math.min(1, dawnFactor * 2);
-      const bandStart = canvas.height * (0.58 - tNorm * 0.08);
-      const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
 
-      // Rosy fingers - variable dawn gradients (enhanced intensity)
-      if (dawnVariant > 0.7) {
-        // Pink-lavender dawn
-        flare.addColorStop(0, `rgba(212,168,232,${0.5 * sunriseBoost * dawnFactor})`); // Was 0.35
-        flare.addColorStop(0.4, `rgba(245,166,200,${0.65 * sunriseBoost * dawnFactor})`); // Was 0.45
-        flare.addColorStop(0.7, `rgba(255,200,180,${0.5 * sunriseBoost * dawnFactor})`); // Was 0.35
-        flare.addColorStop(1, `rgba(255,225,190,${0.35 * sunriseBoost * dawnFactor})`); // Was 0.25
-      } else if (dawnVariant > 0.4) {
-        // Rose-amber dawn
-        flare.addColorStop(0, `rgba(180,120,160,${0.45 * sunriseBoost * dawnFactor})`); // Was 0.3
-        flare.addColorStop(0.5, `rgba(255,140,120,${0.6 * sunriseBoost * dawnFactor})`); // Was 0.4
-        flare.addColorStop(1, `rgba(255,210,150,${0.45 * sunriseBoost * dawnFactor})`); // Was 0.3
-      } else {
-        // Peachy-amber dawn (enhanced)
-        flare.addColorStop(0, `rgba(255,110,75,${0.55 * sunriseBoost * dawnFactor})`); // Was 0.38
-        flare.addColorStop(0.6, `rgba(255,165,110,${0.5 * sunriseBoost * dawnFactor})`); // Was 0.35
-        flare.addColorStop(1, `rgba(255,210,150,${0.4 * sunriseBoost * dawnFactor})`); // Was 0.25
-      }
-
+    // Secondary warm band near horizon
+    const bandStrength = Math.max(0, twilightFactor - 0.1);
+    if (bandStrength > 0.01) {
+      const bandStart = canvas.height * 0.65;
+      const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
+      flare.addColorStop(0, `rgba(255,140,90,${0.35 * sunsetBoost * bandStrength})`);
+      flare.addColorStop(1, `rgba(255,210,150,${0.45 * sunsetBoost * bandStrength})`);
       ctx.fillStyle = flare;
       ctx.fillRect(0, bandStart, canvas.width, canvas.height - bandStart);
     }
+
     const tex = new THREE.CanvasTexture(canvas);
     tex.magFilter = THREE.LinearFilter;
     tex.minFilter = THREE.LinearFilter;
+    tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
   }, [skyKey, sunriseBoost, sunsetBoost, dawnVariant]);
 
-  if (!texture) return null;
+  const easedTexture = useMemo(() => {
+    if (!texture) return null;
+    const prev = prevTextureRef.current;
+    if (!prev) {
+      prevTextureRef.current = texture;
+      return texture;
+    }
+    prevTextureRef.current = texture;
+    return texture;
+  }, [texture]);
+
+  if (!easedTexture) return null;
   return (
     <mesh rotation={[0, 0, 0]}>
       <sphereGeometry args={[210, 32, 16]} />
-      <meshBasicMaterial map={texture} side={THREE.BackSide} depthWrite={false} />
+      <meshBasicMaterial map={easedTexture} side={THREE.BackSide} depthWrite={false} fog={false} toneMapped={false} />
     </mesh>
   );
 };
@@ -860,6 +999,9 @@ const createSunTexture = (size = 512) => {
   ctx.fillRect(0, 0, size, size);
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
 };
@@ -871,7 +1013,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
   const groupRef = useRef<THREE.Group>(null);
 
   // Create sun texture once
-  const sunTexture = useMemo(() => createSunTexture(512), []);
+  const sunTexture = useMemo(() => createSunTexture(256), []);
 
   useFrame(() => {
     if (!meshRef.current || !groupRef.current || !glowRef.current || !outerGlowRef.current) return;
@@ -977,6 +1119,18 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
         />
       </mesh>
 
+      {/* Soft corona ring - smooths edge into the sky */}
+      <mesh>
+        <planeGeometry args={[26, 26]} />
+        <meshBasicMaterial
+          map={sunTexture}
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          opacity={0.22}
+        />
+      </mesh>
+
       {/* Middle glow layer - bright halo */}
       <mesh ref={glowRef}>
         <planeGeometry args={[22, 22]} />
@@ -997,6 +1151,18 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
           transparent
           depthWrite={false}
           blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+
+      {/* Hot core - crisp center highlight */}
+      <mesh>
+        <planeGeometry args={[8, 8]} />
+        <meshBasicMaterial
+          color="#fff7e5"
+          transparent
+          depthWrite={false}
+          blending={THREE.AdditiveBlending}
+          opacity={0.55}
         />
       </mesh>
     </group>
@@ -1375,6 +1541,22 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
   }, [buildingsState, buildLaundryLines]);
 
+  // Generate hanging carpets for market districts (4-5 max)
+  const [hangingCarpets, setHangingCarpets] = useState<HangingCarpet[]>([]);
+
+  useEffect(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+
+    // Only generate carpets in MARKET districts
+    if (district !== 'MARKET' || buildingsRef.current.length < 2) {
+      setHangingCarpets([]);
+      return;
+    }
+
+    const carpets = generateMarketCarpets(buildingsRef.current, params.mapX, params.mapY, sessionSeed);
+    setHangingCarpets(carpets);
+  }, [buildingsState, params.mapX, params.mapY, sessionSeed]);
+
   // Generate spatial audio sources from buildings
   const spatialAudioSources = useMemo<SpatialSource[]>(() => {
     const sources: SpatialSource[] = [];
@@ -1714,6 +1896,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
     return [...baseObstacles, ...stallObstacles];
   }, [params.mapX, params.mapY, marketStalls, treeObstacles]);
+  const OBSTACLE_HASH_MIN = 32;
+  const obstacleHash = useMemo(() => (
+    obstacles.length >= OBSTACLE_HASH_MIN ? buildObstacleHash(obstacles) : null
+  ), [obstacles]);
 
   const weather = useRef<WeatherState>({
     cloudCover: 0.25,
@@ -1768,7 +1954,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       });
       const hash = buildingHashRef.current || undefined;
       // Use larger collision radius (1.2 instead of 0.6) to ensure safe spawn away from buildings
-      const found = tryPoints.find((p) => !isBlockedByBuildings(p, b, 1.2, hash) && !isBlockedByObstacles(p, obstacles, 1.2));
+      const found = tryPoints.find((p) => !isBlockedByBuildings(p, b, 1.2, hash) && !isBlockedByObstacles(p, obstacles, 1.2, obstacleHash || undefined));
       if (found) {
         setPlayerSpawn([found.x, 0, found.z]);
       } else {
@@ -1779,14 +1965,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           new THREE.Vector3(30, 0, -30),
           new THREE.Vector3(-30, 0, -30)
         ];
-        const edgeFound = edgePoints.find((p) => !isBlockedByBuildings(p, b, 1.2, hash) && !isBlockedByObstacles(p, obstacles, 1.2));
+        const edgeFound = edgePoints.find((p) => !isBlockedByBuildings(p, b, 1.2, hash) && !isBlockedByObstacles(p, obstacles, 1.2, obstacleHash || undefined));
         setPlayerSpawn(edgeFound ? [edgeFound.x, 0, edgeFound.z] : [32, 0, 32]);
       }
     } else if (district === 'CARAVANSERAI') {
       // Spawn near north gate/entrance (top center)
       setPlayerSpawn([0, 0, -38]);
     }
-  }, [params.mapX, params.mapY, obstacles]);
+  }, [params.mapX, params.mapY, obstacles, obstacleHash]);
 
   useEffect(() => {
     gl.shadowMap.enabled = true;
@@ -1797,6 +1983,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const sunElevation = Math.sin(sunAngle - Math.PI / 2);
   const dayFactor = smoothstep(-0.1, 0.35, sunElevation);
   const twilightFactor = smoothstep(-0.45, 0.05, sunElevation) * (1 - dayFactor);
+  const dawnFactor = smoothstep(-0.2, 0.05, sunElevation) * (1 - dayFactor);
+  const duskFactor = smoothstep(0.05, -0.2, -sunElevation) * (1 - dayFactor);
   const nightFactor = 1 - Math.max(dayFactor, twilightFactor);
   const enableHoverWireframe = params.cameraMode === CameraMode.OVERHEAD || devSettings.showHoverWireframe;
   const enableHoverLabel = params.cameraMode === CameraMode.OVERHEAD;
@@ -1805,8 +1993,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     const t = state.clock.elapsedTime;
 
     // Update rat positions for cat to hunt
-    if (ratsRef.current.length > 0) {
-      ratPositionsRef.current = ratsRef.current
+    const rats = ratsRef.current;
+    if (rats && rats.length > 0) {
+      ratPositionsRef.current = rats
         .filter(r => r.active)
         .map(r => r.position);
     }
@@ -1895,9 +2084,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // Tier 2: Harsher sun for intense midday heat
         const sunIntensity = Math.pow(Math.max(0, sunElevation), 0.45) * 6.8 * (1 - cloudCover * 0.4);
         // Tier 1: Reduced ambient for darker, more vivid shadows
-        let ambientIntensity = 0.02 + dayFactor * 0.28 + cloudCover * 0.08;
+        let ambientIntensity = 0.08 + dayFactor * 0.3 + cloudCover * 0.08;
         // Tier 1: Boosted hemisphere for warm ground bounce
-        let hemiIntensity = 0.22 + dayFactor * 0.6 + cloudCover * 0.16;
+        let hemiIntensity = 0.38 + dayFactor * 0.62 + cloudCover * 0.16;
 
         // GRAPHICS: Peak sun shadow enrichment - darker, more saturated shadows at noon
         // Reduce ambient during peak day for higher contrast shadows
@@ -1920,7 +2109,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         hemiSky.set("#bcd7ff");
         temp1.set("#d6b49c");
         temp2.set("#2b3250");
+        const warmShift = Math.max(dawnFactor, duskFactor);
         hemiSky.lerp(temp1, twilightFactor).lerp(temp2, nightFactor);
+        temp3.set("#f2caa2");
+        hemiSky.lerp(temp3, warmShift * 0.4);
 
         // Sun-baked: Warm ground bounce from hot sand/stone
         hemiGround.set("#e8c4a0");
@@ -1929,15 +2121,15 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         hemiGround.lerp(temp1, twilightFactor).lerp(temp2, nightFactor);
 
         // Sky colors matching the SkyGradientDome for atmospheric perspective
-        const { skyMid, skyHorizon, fogColor } = colorCache.current;
+        const { skyMid, skyHorizon, fogColor, skyColor } = colorCache.current;
 
-        skyMid.set('#162341');
+        skyMid.set('#0b1220');
         temp1.set('#49a6ef');
         temp2.set('#8b6f5a');
         temp3.set('#1b2438');
         skyMid.lerp(temp1, dayFactor).lerp(temp2, twilightFactor * 0.7).lerp(temp3, nightFactor);
 
-        skyHorizon.set('#1c2a4a');
+        skyHorizon.set('#0a0f1a');
         temp1.set('#2f95ee');
         temp2.set('#e8b878');
         temp3.set('#0f1829');
@@ -1948,7 +2140,6 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         fogColor.copy(skyHorizon);
 
         // GRAPHICS: Dawn rosy fingers - enhanced pink, lavender, soft orange gradients
-        const dawnFactor = smoothstep(-0.2, 0.05, sunElevation) * (1 - dayFactor);
         if (dawnFactor > 0.1) {
           // Variable dawn colors for beautiful variety
           temp1.set('#f5a6c8');
@@ -1976,7 +2167,6 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         // GRAPHICS: Twilight/Dusk enhanced atmospheric glow at horizon
-        const duskFactor = smoothstep(0.05, -0.2, -sunElevation) * (1 - dayFactor);
         if (duskFactor > 0.1) {
           temp1.set('#e8c488'); // Peachy-gold
           temp2.set('#b8a8c4'); // Lavender
@@ -1991,8 +2181,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         // GRAPHICS: Toned down twilight color - subtle warm glow instead of strong pink-red flash
-        const { skyColor } = colorCache.current;
-        skyColor.set("#87ceeb");
+        skyColor.set("#5f7fb4");
         temp1.set("#d8a475");
         temp2.set("#02040a");
         skyColor.lerp(temp1, twilightFactor * 0.6).lerp(temp2, nightFactor);
@@ -2022,21 +2211,33 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         // Night clamp to avoid bright whites + cool moonlight lift
-        const nightClamp = 1 - nightFactor * 0.6;
+        const nightClamp = 1 - nightFactor * 0.36;
         ambientIntensity *= nightClamp;
         hemiIntensity *= nightClamp;
         if (nightFactor > 0.2) {
-          const moonLift = (nightFactor - 0.2) * 0.35;
+          const moonLift = (nightFactor - 0.2) * 0.6;
           hemiIntensity += moonLift;
           temp1.set("#6b7fa8");
           hemiSky.lerp(temp1, nightFactor * 0.6);
         }
+        if (nightFactor > 0.6) {
+          ambientIntensity += (nightFactor - 0.6) * 0.08;
+        }
 
+        const centerX = playerRef.current?.position.x ?? 0;
+        const centerZ = playerRef.current?.position.z ?? 0;
+        const sunDirX = Math.cos(sunAngle - Math.PI / 2);
+        const sunDirY = Math.sin(sunAngle - Math.PI / 2);
+        const sunDirZ = 0.35;
+        const sunLen = Math.hypot(sunDirX, sunDirY, sunDirZ) || 1;
+        const shadowDistance = 60;
         lightRef.current.position.set(
-          Math.cos(sunAngle - Math.PI / 2) * 60,
-          Math.sin(sunAngle - Math.PI / 2) * 60,
-          20
+          centerX + (sunDirX / sunLen) * shadowDistance,
+          (sunDirY / sunLen) * shadowDistance,
+          centerZ + (sunDirZ / sunLen) * shadowDistance
         );
+        lightRef.current.target.position.set(centerX, 0, centerZ);
+        lightRef.current.target.updateMatrixWorld();
 
         lightRef.current.intensity = THREE.MathUtils.lerp(lightRef.current.intensity, sunIntensity, 0.08);
         lightRef.current.color.lerp(sunColor, 0.05);
@@ -2063,6 +2264,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           lightRef.current.shadow.bias = baseShadowSoftness;
         }
 
+        const shadowContrast = smoothstep(0.25, 0.7, sunElevation);
+        ambientIntensity *= 1 - shadowContrast * 0.12;
+        hemiIntensity *= 1 - shadowContrast * 0.08;
         ambientRef.current.intensity = THREE.MathUtils.lerp(ambientRef.current.intensity, ambientIntensity, 0.08);
         // GRAPHICS: Desaturated ambient color during day for richer shadow saturation
         // Less saturated ambient = more saturated shadows by contrast
@@ -2087,7 +2291,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // WEATHER-AWARE: Color and intensity adjust based on atmospheric conditions
         if (shadowFillLightRef.current) {
           // Base intensity from dayFactor
-          let shadowFillIntensity = dayFactor * 0.45;
+          let shadowFillIntensity = dayFactor * 0.4 * (1 - shadowContrast * 0.2);
 
           // Weather-based adjustments
           if (weatherType === WeatherType.OVERCAST) {
@@ -2111,7 +2315,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
               shadowFillColor.set('#6a5a9a');
             } else if (midDayFactor > 0.6) {
               // Midday: saturated cool blue (complementary to warm sun)
-              shadowFillColor.set('#4a7ac8');
+              shadowFillColor.set('#3f6fca');
             } else {
               // Morning/afternoon: medium blue-purple
               shadowFillColor.set('#5a78b8');
@@ -2133,8 +2337,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         if (gl) {
-          // Sun-baked: Increased exposure during day for bright, intense heat
-          const targetExposure = 1.15 + dayFactor * 0.15 - nightFactor * 0.18 + twilightFactor * 0.05;
+          // Sun-baked: Increased exposure during day, much lower exposure at night
+          const targetExposure = 1.02 + dayFactor * 0.14 + nightFactor * 0.12 + twilightFactor * 0.05;
           gl.toneMappingExposure = THREE.MathUtils.lerp(gl.toneMappingExposure, targetExposure, 0.05);
         }
 
@@ -2170,21 +2374,23 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             }
           }
 
-          // Night atmosphere - very subtle for star visibility
-          const nightAtmosphere = nightFactor * 0.002;
+          // Night atmosphere - minimal to keep sky dark
+          const nightAtmosphere = nightFactor * 0.00;
 
           // Realistic physics: add altitude-based density (more fog near ground)
           const altitudeFactor = 0.0008; // Ground-level fog accumulation
 
           const overheadFactor = params.cameraMode === CameraMode.OVERHEAD ? 0.25 : 1;
+          const fogTarget = (baseFog + horizonHaze + altitudeFactor + humidity * 0.003 + cloudCover * 0.003 + nightAtmosphere)
+            * devSettings.fogDensityScale
+            * overheadFactor;
           fogRef.current.density = THREE.MathUtils.lerp(
             fogRef.current.density,
-            (baseFog + horizonHaze + altitudeFactor + humidity * 0.004 + cloudCover * 0.003 + nightAtmosphere)
-              * devSettings.fogDensityScale
-              * overheadFactor,
-            0.02
+            fogTarget * (1 - nightFactor * 0.7),
+            0.01
           );
-          fogRef.current.color.lerp(fogColor, 0.05);
+          const nightFogColor = new THREE.Color('#0a0f1a');
+          fogRef.current.color.lerp(fogColor.clone().lerp(nightFogColor, nightFactor), 0.07);
         }
 
         // scene.background = skyColor; // DISABLED: Now using SkyGradient component for realistic gradient
@@ -2328,20 +2534,20 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <pointLight ref={marketBounceRef} position={[0, 6, 0]} intensity={0} color="#f3cfa0" distance={36} decay={2} />
       {/* Tier 1: Warmer ground color for sun-baked ambient bounce */}
       <hemisphereLight ref={hemiRef} intensity={0.28} color="#c7d2f0" groundColor="#a6917a" />
-      {/* PERFORMANCE: Shadow map configuration - 2048x2048 for quality, optimized bias for clean shadows */}
+      {/* PERFORMANCE: Tighter shadow frustum for higher local fidelity and lower cost */}
       <directionalLight
         ref={lightRef}
         position={[50, 50, 20]}
         castShadow={devSettings.showShadows}
-        shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-40}
-        shadow-camera-right={40}
-        shadow-camera-top={40}
-        shadow-camera-bottom={-40}
-        shadow-camera-near={5}
-        shadow-camera-far={140}
-        shadow-bias={-0.0001}
-        shadow-normalBias={0.02}
+        shadow-mapSize={[1024, 1024]}
+        shadow-camera-left={-24}
+        shadow-camera-right={24}
+        shadow-camera-top={24}
+        shadow-camera-bottom={-24}
+        shadow-camera-near={6}
+        shadow-camera-far={90}
+        shadow-bias={-0.00015}
+        shadow-normalBias={0.015}
         shadow-radius={1.2}
       />
       <directionalLight
@@ -2365,32 +2571,29 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         preset={envPreset}
         background={false}
         blur={0.6}
-        environmentIntensity={(0.35 + dayFactor * 0.75) * (1 - nightFactor * 0.7)}
+        environmentIntensity={(0.35 + dayFactor * 0.75) * Math.max(0, 1 - nightFactor * 0.6)}
       />
-      {/* GRAPHICS: Sky gradient dome with realistic zenith-to-horizon colors */}
-      <SkyGradient
-        timeOfDay={params.timeOfDay}
-        weatherType={weather.current.weatherType}
-        cloudCover={weather.current.cloudCover}
-      />
+      {/* SkyGradient disabled to avoid shader fallback to black; SkyGradientDome handles sky */}
+      <HorizonHaze timeOfDay={params.timeOfDay} />
 
       {/* GRAPHICS: Smooth star fade and increased saturation for dramatic night sky */}
       {/* PERFORMANCE: Reduced from 9000 to 3000 stars for better nighttime FPS */}
-      <Stars
-        radius={180}
-        depth={80}
-        count={3000}
-        factor={5}
-        saturation={0.35}
-        fade
-        speed={0.6}
-        opacity={Math.max(0, Math.min(1, (0.3 - dayFactor) / 0.3))}
-      />
+      {dayFactor < 0.3 && (
+        <Stars
+          radius={180}
+          depth={80}
+          count={2000}
+          factor={5}
+          saturation={0.95}
+          fade
+          speed={0.6}
+        />
+      )}
       <Moon timeOfDay={params.timeOfDay} simTime={simTime} />
-      <MilkyWay visible={dayFactor <= 0.2} simTime={simTime} />
+      <MilkyWay visible={dayFactor <= 0.4} simTime={simTime} />
 
       {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#c5ddf5', 0.004]} />}
-      {devSettings.showClouds && <CloudLayer weather={weather} />}
+      {devSettings.showClouds && <CloudLayer weather={weather} timeOfDay={params.timeOfDay} />}
 
       <WorldEnvironment
         mapX={params.mapX}
@@ -2412,6 +2615,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         fogColor={colorCache.current.fogColor}
         heightmap={heightmapRef.current}
         laundryLines={laundryLines}
+        hangingCarpets={hangingCarpets}
         catPositionRef={catPositionRef}
         ratPositions={ratPositionsRef.current}
         npcPositions={npcPositionsRef.current}
@@ -2492,7 +2696,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       {devSettings.showMiasma && <MiasmaFog infectionRate={params.infectionRate} />}
 
       {/* GRAPHICS: Dust particles for warm sun-baked atmosphere during sunny days */}
-      <DustParticles timeOfDay={params.timeOfDay} />
+      <DustParticles timeOfDay={params.timeOfDay} weather={weather} />
 
       <ImpactPuffs puffsRef={impactPuffsRef} />
       
@@ -2507,6 +2711,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           buildings={buildingsRef.current}
           buildingHash={buildingHashRef.current}
           obstacles={obstacles}
+          obstacleHash={obstacleHash}
           maxAgents={20}
           agentHashRef={agentHashRef}
           impactMapRef={impactMapRef}
@@ -2538,6 +2743,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         buildings={buildingsRef.current}
         buildingHash={buildingHashRef.current}
         obstacles={obstacles}
+        obstacleHash={obstacleHash}
         timeOfDay={params.timeOfDay}
         playerStats={playerStats}
         agentHashRef={agentHashRef}

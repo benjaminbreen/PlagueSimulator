@@ -243,8 +243,8 @@ export const MountainShrineDecor: React.FC<{
             <boxGeometry args={[1.2, 2.4, 0.2]} />
             <meshStandardMaterial color="#3a2a1a" roughness={0.95} />
           </mesh>
-          <mesh position={[0, 2.7, 3.55]} castShadow>
-            <cylinderGeometry args={[0.6, 0.6, 0.2, 8, 1, false, 0, Math.PI]} rotation={[0, 0, Math.PI / 2]} />
+          <mesh position={[0, 2.7, 3.55]} rotation={[0, 0, Math.PI / 2]} castShadow>
+            <cylinderGeometry args={[0.6, 0.6, 0.2, 8, 1, false, 0, Math.PI]} />
             <meshStandardMaterial color="#3a2a1a" roughness={0.95} />
           </mesh>
 

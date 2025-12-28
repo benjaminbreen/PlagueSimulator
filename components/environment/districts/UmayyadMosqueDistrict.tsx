@@ -47,7 +47,7 @@ const UmayyadMosqueDistrict: React.FC<UmayyadMosqueDistrictProps> = ({
       const distance = 25 + rand(i * 50) * 5;
       const x = Math.cos(angle) * distance;
       const z = Math.sin(angle) * distance;
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
 
       const width = 3 + rand(i * 100) * 2;
       const depth = 3 + rand(i * 100 + 25) * 2;
@@ -76,7 +76,7 @@ const UmayyadMosqueDistrict: React.FC<UmayyadMosqueDistrictProps> = ({
       const distance = 22 + rand(i * 75) * 3;
       const x = Math.cos(angle) * distance;
       const z = Math.sin(angle) * distance;
-      const y = sampleTerrainHeight(terrainHeightmap, mapX, mapY, x, z);
+      const y = sampleTerrainHeight(terrainHeightmap, x, z);
 
       items.push(
         <group key={`shop-${idCounter++}`} position={[x, y, z]}>

@@ -2,7 +2,7 @@ import React, { useRef, useMemo, useImperativeHandle, forwardRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { SimulationParams, CONSTANTS, AgentState } from '../types';
-import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
+import { AgentSnapshot, SpatialHash } from '../utils/spatial';
 
 // Speed constants by state
 const SPEED_IDLE = 0;
@@ -25,6 +25,11 @@ const tempHead = new THREE.Object3D();
 const tempTail = new THREE.Object3D();
 const tempEarL = new THREE.Object3D();
 const tempEarR = new THREE.Object3D();
+const tempHeadOffset = new THREE.Vector3();
+const tempTailOffset = new THREE.Vector3();
+const tempEarOffsetL = new THREE.Vector3();
+const tempEarOffsetR = new THREE.Vector3();
+const upAxis = new THREE.Vector3(0, 1, 0);
 
 export type RatState = 'idle' | 'wander' | 'flee';
 
@@ -68,7 +73,6 @@ export class Rat {
   ) {
     if (!this.active || dt <= 0) return;
 
-    this.animPhase += dt * 12;
     this.stateTimer -= dt;
 
     // Check for threats
@@ -227,9 +231,13 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
   const tailRef = useRef<THREE.InstancedMesh>(null);
   const earRef = useRef<THREE.InstancedMesh>(null);
 
-  // PERFORMANCE: Throttle NPC distance checks to 10Hz (every 6 frames at 60fps)
-  const npcCheckFrameCounter = useRef(0);
+  // PERFORMANCE: Throttle updates and cache NPC/corpse lists
+  const npcCheckTimerRef = useRef(0);
+  const corpseCheckTimerRef = useRef(0);
+  const nearUpdateTimerRef = useRef(0);
+  const farUpdateTimerRef = useRef(0);
   const cachedNpcPositions = useRef<THREE.Vector3[] | undefined>(undefined);
+  const cachedCorpsePositions = useRef<THREE.Vector3[]>([]);
 
   const rats = useMemo(() => {
     const arr: Rat[] = [];
@@ -249,13 +257,32 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
   const ratColorDark = useMemo(() => new THREE.Color('#1a1210'), []);
 
   useFrame((state, delta) => {
-    const dt = Math.min(delta, 0.1) * params.simulationSpeed;
+    const baseDelta = Math.min(delta, 0.1);
+    const scaledDelta = baseDelta * params.simulationSpeed;
+    const NEAR_UPDATE_INTERVAL = 0.08; // ~12.5Hz
+    const FAR_UPDATE_INTERVAL = 0.25;  // 4Hz
+    const NPC_CHECK_INTERVAL = 0.1;    // 10Hz
+    const CORPSE_CHECK_INTERVAL = 0.5; // 2Hz
+    const FAR_DISTANCE = 18;
+    const farDistanceSq = FAR_DISTANCE * FAR_DISTANCE;
 
-    // PERFORMANCE: Throttle NPC distance checks - only update every 6 frames (10Hz)
-    npcCheckFrameCounter.current++;
-    if (npcCheckFrameCounter.current >= 6) {
+    nearUpdateTimerRef.current += baseDelta;
+    farUpdateTimerRef.current += baseDelta;
+    npcCheckTimerRef.current += baseDelta;
+    corpseCheckTimerRef.current += baseDelta;
+
+    const shouldUpdateNear = nearUpdateTimerRef.current >= NEAR_UPDATE_INTERVAL;
+    const shouldUpdateFar = farUpdateTimerRef.current >= FAR_UPDATE_INTERVAL;
+    if (!shouldUpdateNear && !shouldUpdateFar) return;
+
+    const nearDt = shouldUpdateNear ? nearUpdateTimerRef.current * params.simulationSpeed : 0;
+    const farDt = shouldUpdateFar ? farUpdateTimerRef.current * params.simulationSpeed : 0;
+    if (shouldUpdateNear) nearUpdateTimerRef.current = 0;
+    if (shouldUpdateFar) farUpdateTimerRef.current = 0;
+
+    if (npcCheckTimerRef.current >= NPC_CHECK_INTERVAL) {
       cachedNpcPositions.current = npcPositions;
-      npcCheckFrameCounter.current = 0;
+      npcCheckTimerRef.current = 0;
     }
 
     // Calculate active rat count: minimum + hygiene bonus
@@ -264,23 +291,37 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
       : 0;
     const activeCount = MIN_RATS + hygieneBonus;
 
-    // Extract corpse positions for rat attraction (throttled to 10Hz like NPCs)
-    const corpsePositions: THREE.Vector3[] = [];
-    if (agentHashRef?.current && npcCheckFrameCounter.current === 0) {
-      // Query all nearby agents and filter for corpses
-      const allAgents = queryNearbyAgents(new THREE.Vector3(0, 0, 0), agentHashRef.current);
-      for (const agent of allAgents) {
-        if (agent.state === AgentState.DECEASED) {
-          corpsePositions.push(new THREE.Vector3(agent.x, 0, agent.z));
+    // Extract corpse positions for rat attraction (low frequency, no allocations)
+    if (agentHashRef?.current && corpseCheckTimerRef.current >= CORPSE_CHECK_INTERVAL) {
+      const corpses = cachedCorpsePositions.current;
+      corpses.length = 0;
+      agentHashRef.current.buckets.forEach(bucket => {
+        for (const agent of bucket) {
+          if (agent.state === AgentState.DECEASED) {
+            corpses.push(agent.pos);
+          }
         }
-      }
+      });
+      corpseCheckTimerRef.current = 0;
     }
 
     // Update rats with throttled NPC positions and corpse positions
     rats.forEach((rat, i) => {
       rat.active = i < activeCount;
       if (rat.active) {
-        rat.update(dt, params, playerPos, catPos, cachedNpcPositions.current, corpsePositions);
+        rat.animPhase += scaledDelta * 12;
+        const isFar = playerPos ? rat.position.distanceToSquared(playerPos) > farDistanceSq : false;
+        const updateDt = isFar ? farDt : nearDt;
+        if (updateDt > 0) {
+          rat.update(
+            updateDt,
+            params,
+            playerPos,
+            catPos,
+            isFar ? undefined : cachedNpcPositions.current,
+            isFar ? undefined : cachedCorpsePositions.current
+          );
+        }
       }
     });
 
@@ -309,8 +350,8 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
         bodyRef.current!.setMatrixAt(i, tempBody.matrix);
 
         // Head - smaller sphere at front
-        const headOffset = new THREE.Vector3(0, 0.02, 0.12 * s).applyAxisAngle(
-          new THREE.Vector3(0, 1, 0),
+        const headOffset = tempHeadOffset.set(0, 0.02, 0.12 * s).applyAxisAngle(
+          upAxis,
           angle
         );
         tempHead.position.set(
@@ -324,8 +365,8 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
         headRef.current!.setMatrixAt(i, tempHead.matrix);
 
         // Tail - thin cylinder at back, wagging
-        const tailOffset = new THREE.Vector3(0, 0, -0.14 * s).applyAxisAngle(
-          new THREE.Vector3(0, 1, 0),
+        const tailOffset = tempTailOffset.set(0, 0, -0.14 * s).applyAxisAngle(
+          upAxis,
           angle
         );
         tempTail.position.set(
@@ -339,12 +380,12 @@ export const Rats = forwardRef<Rat[], RatsProps>(({ params, playerPos, catPos, n
         tailRef.current!.setMatrixAt(i, tempTail.matrix);
 
         // Ears - two small spheres on head (combined into one instance, positioned twice)
-        const earOffsetL = new THREE.Vector3(-0.025 * s, 0.035, 0.1 * s).applyAxisAngle(
-          new THREE.Vector3(0, 1, 0),
+        const earOffsetL = tempEarOffsetL.set(-0.025 * s, 0.035, 0.1 * s).applyAxisAngle(
+          upAxis,
           angle
         );
-        const earOffsetR = new THREE.Vector3(0.025 * s, 0.035, 0.1 * s).applyAxisAngle(
-          new THREE.Vector3(0, 1, 0),
+        const earOffsetR = tempEarOffsetR.set(0.025 * s, 0.035, 0.1 * s).applyAxisAngle(
+          upAxis,
           angle
         );
         // Use two indices for ears (i*2 and i*2+1)

@@ -58,6 +58,7 @@ export const Scribe: React.FC<ScribeProps> = ({
       language: 'Arabic',
       height: 164 + seededRandom(seed + 2) * 16,
       weight: 68 + seededRandom(seed + 3) * 22,
+      disposition: 55,
       mood: 'Focused',
       awarenessLevel: 60,
       panicLevel: 25,

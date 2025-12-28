@@ -1098,7 +1098,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [reportTab, setReportTab] = useState<'epidemic' | 'player'>('epidemic');
   const [settingsTab, setSettingsTab] = useState<'about' | 'music' | 'dev'>('about');
   const [showPerspective, setShowPerspective] = useState(true);
-  const [fps, setFps] = useState(0);
+  const [perfStats, setPerfStats] = useState({
+    fps: 0,
+    avgFps: 0,
+    avgMs: 0,
+    p95Ms: 0,
+    longFrames: 0,
+    heapMB: null as number | null
+  });
   const [inventorySortBy, setInventorySortBy] = useState<'name' | 'rarity' | 'quantity'>('name');
   const [tabPulse, setTabPulse] = useState<'epidemic' | 'player' | null>(null);
   const [reportsPanelCollapsed, setReportsPanelCollapsed] = useState(false);
@@ -1163,15 +1170,53 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
   React.useEffect(() => {
     if (!devSettings.showPerfPanel) return;
-    let last = performance.now();
+    const bufferSize = 120;
+    const samples = new Array<number>(bufferSize).fill(0);
+    let sampleCount = 0;
+    let sampleIndex = 0;
+    let sampleSum = 0;
+    let lastFrame = performance.now();
+    let lastReport = lastFrame;
     let frames = 0;
     let rafId = 0;
     const loop = (now: number) => {
       frames += 1;
-      if (now - last >= 500) {
-        setFps(Math.round((frames * 1000) / (now - last)));
+      const frameMs = now - lastFrame;
+      lastFrame = now;
+      if (frameMs > 0 && frameMs < 1000) {
+        if (sampleCount < bufferSize) {
+          sampleCount += 1;
+        } else {
+          sampleSum -= samples[sampleIndex];
+        }
+        samples[sampleIndex] = frameMs;
+        sampleSum += frameMs;
+        sampleIndex = (sampleIndex + 1) % bufferSize;
+      }
+
+      if (now - lastReport >= 500) {
+        const fps = Math.round((frames * 1000) / (now - lastReport));
+        const avgMs = sampleCount ? sampleSum / sampleCount : 0;
+        const avgFps = avgMs > 0 ? Math.round(1000 / avgMs) : 0;
+        const sorted = samples.slice(0, sampleCount).sort((a, b) => a - b);
+        const p95Index = sorted.length ? Math.floor((sorted.length - 1) * 0.95) : 0;
+        const p95Ms = sorted.length ? sorted[p95Index] : 0;
+        let longFrames = 0;
+        for (let i = 0; i < sampleCount; i++) {
+          if (samples[i] > 33.3) longFrames += 1;
+        }
+        const memory = (performance as { memory?: { usedJSHeapSize: number } }).memory;
+        const heapMB = memory ? Math.round(memory.usedJSHeapSize / (1024 * 1024)) : null;
+        setPerfStats({
+          fps,
+          avgFps,
+          avgMs,
+          p95Ms,
+          longFrames,
+          heapMB
+        });
         frames = 0;
-        last = now;
+        lastReport = now;
       }
       rafId = requestAnimationFrame(loop);
     };
@@ -2477,7 +2522,29 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           <div className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-2">Performance</div>
           <div className="flex items-center justify-between text-sm mb-3">
             <span className="text-amber-200/70">FPS</span>
-            <span className="font-mono text-lg">{fps}</span>
+            <span className="font-mono text-lg">{perfStats.fps}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest mb-3">
+            <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">Avg FPS</span>
+              <span className="font-mono">{perfStats.avgFps}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">Avg ms</span>
+              <span className="font-mono">{perfStats.avgMs.toFixed(1)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">P95 ms</span>
+              <span className="font-mono">{perfStats.p95Ms.toFixed(1)}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">Long</span>
+              <span className="font-mono">{perfStats.longFrames}</span>
+            </div>
+            <div className="flex items-center justify-between col-span-2">
+              <span className="text-amber-200/60">Heap MB</span>
+              <span className="font-mono">{perfStats.heapMB ?? '—'}</span>
+            </div>
           </div>
           <div className="space-y-2 text-[10px] uppercase tracking-widest">
             <label className="flex items-center justify-between">

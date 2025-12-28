@@ -38,7 +38,7 @@ interface InteriorSceneProps {
 export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
-  const previousFog = useRef<THREE.Fog | null>(null);
+  const previousFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null);
   const previousExposure = useRef<number | null>(null);
   const impactPuffsRef = useRef<ImpactPuffSlot[]>(Array.from({ length: MAX_PUFFS }, () => null));
   const impactPuffIndexRef = useRef(0);
@@ -1369,7 +1369,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             ? `To ${roomLabel(targetRoom)}`
             : null;
         const windowSide = windowMap.get(room.id) ?? 'north';
-        const alcoveSides: Array<'north' | 'south' | 'east' | 'west'> = ['north', 'south', 'east', 'west']
+        const alcoveSides = (['north', 'south', 'east', 'west'] as const)
           .filter((side) => side !== interiorDoorSide && side !== windowSide);
         const alcoveSide = alcoveSides.length
           ? alcoveSides[Math.floor(seededRandom(styleSeed + index * 29) * alcoveSides.length)]
@@ -1572,6 +1572,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         onImpactPuff={handleImpactPuff}
         onPickupPrompt={onPickupPrompt}
         onPickup={handlePickup}
+        setTargetPosition={() => {}}
       />
     </group>
   );

@@ -31,6 +31,7 @@ export interface MaterialToken {
     dark?: MaterialPreset;
     light?: MaterialPreset;
     weathered?: MaterialPreset;
+    stained?: MaterialPreset;
   };
 }
 
@@ -297,7 +298,7 @@ export const createMaterialFromToken = (
  */
 export const getVariant = (
   token: MaterialToken,
-  variant?: 'dark' | 'light' | 'weathered'
+  variant?: 'dark' | 'light' | 'weathered' | 'stained'
 ): MaterialPreset => {
   if (variant && token.variants?.[variant]) {
     return token.variants[variant];

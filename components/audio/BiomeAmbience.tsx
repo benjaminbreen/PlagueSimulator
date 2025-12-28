@@ -1198,11 +1198,11 @@ export const useBiomeAmbiencePreview = () => {
 };
 
 export const AMBIENCE_INFO: Record<BiomeType, { name: string; description: string }> = {
-  marketplace: AMBIENCE_CONFIGS.marketplace,
-  wealthy: AMBIENCE_CONFIGS.wealthy,
-  hovels: AMBIENCE_CONFIGS.hovels,
-  desert: AMBIENCE_CONFIGS.desert,
-  civic: AMBIENCE_CONFIGS.civic,
+  marketplace: { name: 'Marketplace', description: 'Bustling bazaar with merchants and crowds' },
+  wealthy: { name: 'Wealthy Quarter', description: 'Quiet residential area with occasional activity' },
+  hovels: { name: 'Hovels', description: 'Poor district with dense population and animal sounds' },
+  desert: { name: 'Desert Outskirts', description: 'Open air with wind and sparse activity' },
+  civic: { name: 'Civic Center', description: 'Formal area near mosques and government buildings' },
 };
 
 // Export config for external use

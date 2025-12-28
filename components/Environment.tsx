@@ -9,6 +9,7 @@ import { getProfessionSign, ProfessionSign } from '../utils/professionSignData';
 import { getTerrainHeight, buildHeightmapFromGeometry, TerrainHeightmap, sampleTerrainHeight } from '../utils/terrain';
 import { PushableObject } from '../utils/pushables';
 import { LaundryLine, getCatenaryPoint } from '../utils/laundry';
+import { HangingCarpet } from '../utils/hangingCarpets';
 import { bakeBoxAO, bakeBoxAO_TallBuilding, bakeBoxAO_Civic } from '../utils/vertexAO';
 import {
   HOVER_WIREFRAME_COLORS,
@@ -26,6 +27,7 @@ import {
   createLinenTexture
 } from './environment/geometry';
 import { LaundryLines } from './environment/decorations/LaundryLines';
+import { HangingCarpets } from './environment/decorations/HangingCarpets';
 import {
   PushableGeraniumPot,
   PushableOlivePot,
@@ -197,6 +199,61 @@ const BUILDING_COLOR_VARIANTS = {
   ],
 };
 
+// District-specific color overrides - Jewish Quarter uses darker stone (dhimmi restrictions)
+const JEWISH_QUARTER_COLORS = {
+  [BuildingType.RESIDENTIAL]: [
+    '#8a7a68', // Dark stone
+    '#7a6a58', // Darker stone
+    '#6a5a48', // Very dark stone
+    '#7a6858', // Warm dark stone
+    '#8a7868', // Medium dark stone
+    '#9a8878', // Lighter dark stone
+  ],
+  [BuildingType.COMMERCIAL]: [
+    '#8a7a68', // Dark stone
+    '#7a6a58', // Darker stone
+    '#8a7868', // Medium dark stone
+    '#9a8878', // Lighter dark stone
+    '#7a6858', // Warm dark stone
+  ],
+  [BuildingType.RELIGIOUS]: [
+    '#6a5a48', // Very dark stone (modest synagogues)
+    '#7a6a58', // Dark stone
+    '#8a7a68', // Medium dark stone
+  ],
+  [BuildingType.CIVIC]: [
+    '#7a6a58', // Dark stone
+    '#8a7a68', // Medium dark stone
+    '#9a8878', // Lighter dark stone
+  ],
+};
+
+const CHRISTIAN_QUARTER_COLORS = {
+  [BuildingType.RESIDENTIAL]: [
+    '#d8cebb', // Pale stone
+    '#c8beab', // Light stone
+    '#b8ae9b', // Medium stone
+    '#c8b8a8', // Warm stone
+    '#d0c0b0', // Light warm stone
+  ],
+  [BuildingType.COMMERCIAL]: [
+    '#d0c4b0', // Pale limestone
+    '#c0b4a0', // Light limestone
+    '#c8bcaa', // Medium limestone
+    '#d8ccba', // Bright limestone
+  ],
+  [BuildingType.RELIGIOUS]: [
+    '#e8dcc8', // Bright church stone
+    '#f0e4d0', // Very pale stone
+    '#d8ccb8', // Warm stone
+  ],
+  [BuildingType.CIVIC]: [
+    '#d8ccb8', // Warm stone
+    '#c8bcaa', // Medium stone
+    '#d0c4b0', // Pale stone
+  ],
+};
+
 interface EnvironmentProps {
   mapX: number;
   mapY: number;
@@ -214,6 +271,7 @@ interface EnvironmentProps {
   fogColor?: THREE.Color;
   heightmap?: TerrainHeightmap | null;
   laundryLines?: LaundryLine[];
+  hangingCarpets?: HangingCarpet[];
   catPositionRef?: React.MutableRefObject<THREE.Vector3>;
   ratPositions?: THREE.Vector3[];
   npcPositions?: THREE.Vector3[];
@@ -2181,8 +2239,18 @@ const Building: React.FC<{
     // PERFORMANCE: Vertex colors disabled (was causing severe FPS drop to 10 FPS)
     // mat.vertexColors = true;
 
-    // Apply color variant - each building gets one of 5 color options
-    const colorVariants = BUILDING_COLOR_VARIANTS[data.type];
+    // Apply district-specific color variants or default
+    let colorVariants = BUILDING_COLOR_VARIANTS[data.type];
+
+    // Override with district-specific colors for Jewish and Christian quarters
+    if (data.district === 'JEWISH_QUARTER' && JEWISH_QUARTER_COLORS[data.type]) {
+      colorVariants = JEWISH_QUARTER_COLORS[data.type];
+      mat.roughness = 0.95; // Darker stone is rougher
+    } else if (data.district === 'CHRISTIAN_QUARTER' && CHRISTIAN_QUARTER_COLORS[data.type]) {
+      colorVariants = CHRISTIAN_QUARTER_COLORS[data.type];
+    }
+
+    // Apply color variant - each building gets one of the color options
     if (colorVariants && colorVariants.length > 0) {
       const colorIndex = Math.floor(seededRandom(localSeed + 77) * colorVariants.length);
       mat.color.set(colorVariants[colorIndex]);
@@ -2192,7 +2260,6 @@ const Building: React.FC<{
     let needsShaderUpdate = false;
     if ((data.type === BuildingType.COMMERCIAL || data.type === BuildingType.CIVIC) && noiseTextures && noiseTextures.length > 0) {
       // Tie texture intensity to color variant - pale colors get subtle texture, darker get more visible
-      const colorVariants = BUILDING_COLOR_VARIANTS[data.type];
       const colorIndex = Math.floor(seededRandom(localSeed + 77) * colorVariants.length);
 
       // Whitewashed buildings (first 4 variants) get very subtle texture
@@ -2813,6 +2880,28 @@ const Building: React.FC<{
           </mesh>
         )}
       </group>
+
+      {/* MEZUZAH - Jewish doorframe scripture cases (Jewish Quarter only) */}
+      {data.district === 'JEWISH_QUARTER' && (
+        <group position={doorPos} rotation={[0, doorRotation, 0]}>
+          <mesh
+            position={[1.2, 1.3, 0.05]}
+            rotation={[0, 0, Math.PI / 12]}
+            castShadow
+          >
+            <boxGeometry args={[0.08, 0.25, 0.06]} />
+            <meshStandardMaterial color="#3a2a1a" roughness={0.7} />
+          </mesh>
+          {/* Small decorative Hebrew letter shin (ש) on mezuzah */}
+          <mesh
+            position={[1.2, 1.3, 0.09]}
+            rotation={[0, 0, Math.PI / 12]}
+          >
+            <boxGeometry args={[0.03, 0.06, 0.01]} />
+            <meshStandardMaterial color="#d4c4b4" roughness={0.6} />
+          </mesh>
+        </group>
+      )}
 
       {/* PROFESSION SIGNAGE - Historically accurate merchant signs */}
       {data.type === BuildingType.COMMERCIAL && data.ownerProfession && (() => {
@@ -3672,7 +3761,7 @@ const InstancedWindows: React.FC<{
 }> = ({ buildings, district, nightFactor }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const glowMeshRef = useRef<THREE.InstancedMesh>(null);
-  const glowMaterialRef = useRef<THREE.MeshStandardMaterial>(null);
+  const glowMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
   const tempObj = useMemo(() => new THREE.Object3D(), []);
 
   const windowData = useMemo(() => {
@@ -3708,13 +3797,14 @@ const InstancedWindows: React.FC<{
 
         const windowGlowRoll = seededRandom(localSeed + side + 120);
         const hasGlow = windowGlowRoll > 0.5 && nightFactor > 0.2;
-        // GRAPHICS: Randomized brightness - some windows much brighter than others
-        // Range from 0.8 (dim) to 2.5 (very bright) for realistic variation
-        const glowIntensity = 0.8 + windowGlowRoll * 1.7;
+        // GRAPHICS: Randomized brightness - wide range from dim candles to bright lanterns
+        // Range from 0.3 (very dim) to 2.3 (very bright) for realistic variation
+        const glowIntensity = 0.3 + windowGlowRoll * 2.0;
 
-        // Three color variations: 0 = warm dull orange (candle), 1 = amber, 2 = brighter amber
+        // Three color variations weighted by historical accuracy:
+        // 60% dim candles (cheap), 30% medium lanterns, 10% bright lanterns (expensive)
         const colorRoll = seededRandom(localSeed + side + 200);
-        const colorIndex = colorRoll < 0.33 ? 0 : colorRoll < 0.66 ? 1 : 2;
+        const colorIndex = colorRoll < 0.60 ? 0 : colorRoll < 0.90 ? 1 : 2;
 
         data.push({
           matrix: tempObj.matrix.clone(),
@@ -3800,12 +3890,15 @@ const InstancedWindows: React.FC<{
   // Create custom shader material with per-instance intensity and color variation
   const glowMaterial = useMemo(() => {
     const material = new THREE.MeshStandardMaterial({
-      color: '#d4925f',
-      emissive: '#e67e36', // Base amber color
+      color: '#2a1810', // Very dark warm brown - only emissive shows through
+      emissive: '#a65a1f', // Deep warm amber base
       emissiveIntensity: 1.8,
       roughness: 0.9,
-      metalness: 0.05,
+      metalness: 0.0,
     });
+
+    // Store ref for dynamic updates
+    glowMaterialRef.current = material;
 
     // Modify shader to use per-instance glow intensity and color
     material.onBeforeCompile = (shader) => {
@@ -3835,10 +3928,10 @@ const InstancedWindows: React.FC<{
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>
-        // Three color palettes: warm dull orange (candle), amber, brighter amber
-        vec3 color0 = vec3(0.82, 0.45, 0.20); // #d17233 - Warm dull orange (candlelit)
-        vec3 color1 = vec3(0.90, 0.55, 0.22); // #e68c38 - Amber
-        vec3 color2 = vec3(0.95, 0.65, 0.30); // #f2a64d - Brighter amber
+        // Warm candlelit/lantern colors - deep amber tones, not bright yellow
+        vec3 color0 = vec3(0.65, 0.35, 0.12); // Deep warm orange (dim candles)
+        vec3 color1 = vec3(0.78, 0.42, 0.16); // Rich amber (medium lanterns)
+        vec3 color2 = vec3(0.85, 0.50, 0.20); // Warm bright amber (bright lanterns)
 
         // Select color based on index
         vec3 selectedColor = color0;
@@ -3866,9 +3959,8 @@ const InstancedWindows: React.FC<{
 
       {/* Window glow for lit windows at night */}
       {glowCount > 0 && (
-        <instancedMesh ref={glowMeshRef} args={[undefined, undefined, glowCount]}>
+        <instancedMesh ref={glowMeshRef} args={[undefined, undefined, glowCount]} material={glowMaterial}>
           <boxGeometry args={[1.0, 1.5, 0.02]} />
-          <primitive object={glowMaterial} ref={glowMaterialRef} />
         </instancedMesh>
       )}
     </>
@@ -3972,7 +4064,7 @@ export const Buildings: React.FC<{
     const terrainSeed = mapX * 1000 + mapY * 13 + 19;
     let seed = (mapX * 100) + mapY + sessionSeed; // Include session seed for procedural variation
 
-    if (district === 'ALLEYS' || district === 'JEWISH_QUARTER') {
+    if (district === 'ALLEYS') {
       const cellSize = 7;
       const halfCells = 4;
       const openCells = new Set<string>();
@@ -4080,32 +4172,28 @@ export const Buildings: React.FC<{
       return [];
     }
 
+    // Note: OUTSKIRTS_FARMLAND, OUTSKIRTS_DESERT, MOUNTAIN_SHRINE, SOUTHERN_ROAD, CARAVANSERAI
+    // are handled with early returns above, so only remaining districts reach here
     const size = CONSTANTS.MARKET_SIZE * (
       district === 'WEALTHY' ? 1.15
         : district === 'HOVELS' ? 0.9
           : district === 'CIVIC' ? 1.1
             : district === 'SALHIYYA' ? 0.5
-              : district === 'OUTSKIRTS_FARMLAND' ? 0.75
-                : district === 'OUTSKIRTS_DESERT' ? 0.8
-                  : 1.0
+              : 1.0
     );
     const baseBuilding = CONSTANTS.BUILDING_SIZE * (
       district === 'WEALTHY' ? 1.25
         : district === 'HOVELS' ? 0.75
           : district === 'CIVIC' ? 1.1
             : district === 'SALHIYYA' ? 1.0
-              : district === 'OUTSKIRTS_FARMLAND' ? 0.85
-                : district === 'OUTSKIRTS_DESERT' ? 0.9
-                  : 1.0
+              : 1.0
     );
     const street = CONSTANTS.STREET_WIDTH * (
       district === 'WEALTHY' ? 2.2
         : district === 'HOVELS' ? 1.3  // Increased from 0.85 to 1.3 for better movement (was 4.25 units, now 6.5 units)
           : district === 'CIVIC' ? 2.6
             : district === 'SALHIYYA' ? 1.8
-              : district === 'OUTSKIRTS_FARMLAND' ? 2.0
-                : district === 'OUTSKIRTS_DESERT' ? 2.2
-                  : 1.0
+              : 1.0
     );
     const gap = baseBuilding + street;
 
@@ -4117,14 +4205,12 @@ export const Buildings: React.FC<{
           : district === 'HOVELS' ? 0.35  // Increased from 0.2 to 0.35 for better movement (was 80% density, now 65%)
             : district === 'CIVIC' ? 0.7
               : district === 'SALHIYYA' ? 0.2
-                : district === 'OUTSKIRTS_FARMLAND' ? 0.7
-                  : district === 'OUTSKIRTS_DESERT' ? 0.78
-                    : 0.3;
+                : 0.3;
         if (chance < skipChance) continue;
         if (district === 'CIVIC' && (x * x + z * z) < (gap * 2.2) * (gap * 2.2)) continue;
         if (mapX === 0 && mapY === 0 && Math.abs(x) < gap * 1.5 && Math.abs(z) < gap * 1.5) continue;
         const data = generateBuildingMetadata(localSeed, x, z);
-        if (district === 'SALHIYYA' || district === 'MOUNTAIN_SHRINE') {
+        if (district === 'SALHIYYA') {
           const h = heightmap ? sampleTerrainHeight(heightmap, x, z) : getTerrainHeight(district, x, z, terrainSeed);
           data.position = [x, h, z];
         }
@@ -4199,13 +4285,14 @@ export const Buildings: React.FC<{
   }, [metadata, district]);
 
   // Frustum culling - only render buildings visible to camera
-  // EXPANDED frustum to include shadow casters (buildings can cast shadows from off-screen)
+  // Small expansion to include near shadow casters without rendering distant off-screen buildings
   const [visibleBuildings, setVisibleBuildings] = React.useState<BuildingMetadata[]>(metadata);
   const frustum = useMemo(() => new THREE.Frustum(), []);
   const frustumMatrix = useMemo(() => new THREE.Matrix4(), []);
   const expandedFrustum = useMemo(() => new THREE.Frustum(), []);
   const boundingSphere = useMemo(() => new THREE.Sphere(), []);
   const lastCullUpdateRef = React.useRef(0);
+  const SHADOW_CULL_EXPAND = 15;
 
   useFrame((state) => {
     const elapsed = state.clock.elapsedTime;
@@ -4229,9 +4316,9 @@ export const Buildings: React.FC<{
     expandedFrustum.planes[4] = planes[4].clone(); // near
     expandedFrustum.planes[5] = planes[5].clone(); // far
 
-    // Push each plane outward by adjusting constant (expands frustum by ~50 units for shadows)
+    // Push each plane outward by adjusting constant (small expansion for near shadows)
     for (let i = 0; i < 4; i++) {
-      expandedFrustum.planes[i].constant += 50;
+      expandedFrustum.planes[i].constant += SHADOW_CULL_EXPAND;
     }
 
     const visible: BuildingMetadata[] = [];
@@ -4355,7 +4442,8 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
     : district === 'CIVIC' ? pick(GROUND_PALETTE.CIVIC)
     : pick(GROUND_PALETTE.DEFAULT);
   const overlayColor = district === 'WEALTHY' ? '#c3b9a9'
-    : district === 'HOVELS' || district === 'ALLEYS' || district === 'JEWISH_QUARTER' ? '#9a734d'
+    : district === 'HOVELS' || district === 'ALLEYS' ? '#9a734d'
+    : district === 'JEWISH_QUARTER' ? '#b09a7d' // Lighter stone, distinct from alleys
     : district === 'SALHIYYA' ? '#4a6a3a' // Grass overlay
     : district === 'OUTSKIRTS_FARMLAND' ? '#4f6f3b'
     : district === 'OUTSKIRTS_DESERT' ? '#d17a4a' // Warm terracotta overlay (unused - overlay disabled for desert)
@@ -4373,12 +4461,13 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
     const material = new THREE.MeshStandardMaterial({
       color: baseColor,
       // Desert sand should be completely matte (no shine/wetness)
-      roughness: district === 'OUTSKIRTS_DESERT' ? 1.0 : 0.95,
+      roughness: 1.0,
       metalness: 0,
+      envMapIntensity: 0.2,
       // Desert sand: no roughness map for flatter, drier appearance
       roughnessMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT') ? null : roughnessTexture || null,
       bumpMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT') ? null : roughnessTexture || null,
-      bumpScale: 0.0035
+      bumpScale: 0.0025
     });
 
     // Inject custom shader code for distance-based horizon fade + heat shimmer
@@ -4578,7 +4667,7 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
 
 // LaundryLines now imported from ./environment/decorations/LaundryLines
 
-export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [], fogColor, heightmap, laundryLines = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true }) => {
+export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [], fogColor, heightmap, laundryLines = [], hangingCarpets = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
   const terrainSeed = mapX * 1000 + mapY * 13 + 19;
@@ -4670,6 +4759,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
           <CaravanseraiComplex mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
           {pushables.length > 0 && <PushableDecorations items={pushables} />}
           {laundryLines.length > 0 && <LaundryLines lines={laundryLines} time={time} />}
+          {hangingCarpets && hangingCarpets.length > 0 && <HangingCarpets carpets={hangingCarpets} />}
           {dogSpawn && (
             <StrayDog
               seed={dogSpawn.seed}

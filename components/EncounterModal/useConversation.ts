@@ -111,6 +111,10 @@ export function useConversation({
   const systemPromptRef = useRef<string>(buildSystemPrompt(context));
 
   useEffect(() => {
+    systemPromptRef.current = buildSystemPrompt(context);
+  }, [context]);
+
+  useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 

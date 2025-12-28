@@ -41,7 +41,7 @@ const SYRIAC_NAMES_MALE = ['Yuhanna', 'Shimun', 'Matta', 'Yaqub', 'Ephrem', 'Bar
 const SYRIAC_NAMES_FEMALE = ['Maryam', 'Shushanik', 'Sarah', 'Hanna', 'Marya', 'Shamiran'];
 const SYRIAC_NISBAS = ['Bar Shimun', 'Bar Yaqub', 'Al-Suryani', 'Bar Ephrem'];
 
-// Circassian names (later Mamluk period)
+// Circassian names (later Mamluk period - less common in 1348 Bahri period)
 const CIRCASSIAN_NAMES_MALE = ['Barquq', 'Jaqmaq', 'Inal', 'Qaytbay', 'Barsbay', 'Tatar', 'Khushqadam'];
 const CIRCASSIAN_NAMES_FEMALE = ['Khawand', 'Shirin'];
 const CIRCASSIAN_NISBAS = ['Al-Zahiri', 'Al-Ashrafiyya', 'Al-Jarkasi'];
@@ -51,11 +51,49 @@ const JEWISH_NAMES_MALE = ['Yosef', 'Shlomo', 'Moshe', 'Avraham', 'Yitzhak', 'Da
 const JEWISH_NAMES_FEMALE = ['Esther', 'Miriam', 'Rachel', 'Sarah', 'Leah', 'Rebecca', 'Rivka', 'Hannah', 'Dinah'];
 const JEWISH_SURNAMES = ['Ibn Ezra', 'Ben Gabirol', 'Ibn Shaprut', 'Al-Yahudi', 'Ben David', 'Ibn Tibbon', 'Al-Harizi'];
 
-// Frankish names (Italian, Venetian, Genoese, Provençal merchants - Latin Christians)
-// These are merchants, diplomats, and travelers from Italian city-states and Crusader remnants
-const FRANKISH_NAMES_MALE = ['Marco', 'Giovanni', 'Pietro', 'Antonio', 'Francesco', 'Lorenzo', 'Niccolò', 'Andrea', 'Giacomo', 'Matteo', 'Bernardo', 'Filippo'];
-const FRANKISH_NAMES_FEMALE = ['Maria', 'Caterina', 'Isabella', 'Lucia', 'Giovanna', 'Beatrice', 'Margherita', 'Elena'];
-const FRANKISH_SURNAMES = ['da Venezia', 'di Genova', 'Polo', 'Doria', 'Contarini', 'Mocenigo', 'da Pisa', 'de Provence', 'di Firenze', 'Dandolo'];
+// ============================================
+// ITALIAN CITY-STATE MERCHANT NAMES
+// ============================================
+// Each city-state had distinct naming patterns and prominent families
+
+// Venetian names (La Serenissima - dominant Mediterranean traders)
+const VENETIAN_NAMES_MALE = ['Marco', 'Giovanni', 'Pietro', 'Andrea', 'Niccolò', 'Lorenzo', 'Alvise', 'Jacopo', 'Bartolomeo', 'Sebastiano'];
+const VENETIAN_NAMES_FEMALE = ['Maria', 'Caterina', 'Francesca', 'Elena', 'Lucia', 'Chiara', 'Bianca', 'Isabella'];
+const VENETIAN_SURNAMES = ['Polo', 'Contarini', 'Mocenigo', 'Dandolo', 'Morosini', 'Grimani', 'Venier', 'Barbarigo', 'Corner'];
+
+// Genoese names (Rivals of Venice, banking and trade)
+const GENOESE_NAMES_MALE = ['Giovanni', 'Francesco', 'Antonio', 'Luca', 'Oberto', 'Simone', 'Giacomo', 'Lanfranco', 'Percivalle'];
+const GENOESE_NAMES_FEMALE = ['Maria', 'Caterina', 'Giovanna', 'Bianca', 'Leonora', 'Margherita'];
+const GENOESE_SURNAMES = ['Doria', 'Spinola', 'Grimaldi', 'Fieschi', 'Centurione', 'Giustiniani', 'Cattaneo', 'di Negro'];
+
+// Pisan names (Tuscan traders, declining by 1348)
+const PISAN_NAMES_MALE = ['Francesco', 'Ugolino', 'Ranieri', 'Bonaventura', 'Gherardo', 'Bartolomeo', 'Iacopo'];
+const PISAN_NAMES_FEMALE = ['Maria', 'Chiara', 'Lucia', 'Agnese', 'Berta'];
+const PISAN_SURNAMES = ['della Gherardesca', 'Visconti', 'Alliata', 'Gambacorti', 'Lanfranchi', 'Sismondi'];
+
+// Catalan names (Crown of Aragon - growing presence)
+const CATALAN_NAMES_MALE = ['Ramon', 'Berenguer', 'Guillem', 'Pere', 'Jaume', 'Arnau', 'Bernat', 'Joan', 'Francesc'];
+const CATALAN_NAMES_FEMALE = ['Maria', 'Elisenda', 'Blanca', 'Sibil·la', 'Constança', 'Violant'];
+const CATALAN_SURNAMES = ['de Barcelona', 'de Montcada', 'de Cervera', 'de Cardona', 'Marquet', 'de Rocafort', 'de Fluvià'];
+
+// ============================================
+// ADDITIONAL ETHNIC GROUP NAMES
+// ============================================
+
+// Maghrebi names (North African - Morocco, Tunisia, al-Andalus refugees)
+const MAGHREBI_NAMES_MALE = ['Muhammad', 'Ahmad', 'Abdullah', 'Idris', 'Yusuf', 'Musa', 'Ismail', 'Harun', 'Yahya', 'Tarik'];
+const MAGHREBI_NAMES_FEMALE = ['Fatima', 'Khadija', 'Zahra', 'Aisha', 'Maryam', 'Hafsa', 'Amina', 'Layla'];
+const MAGHREBI_NISBAS = ['Al-Maghribi', 'Al-Fasi', 'Al-Tunisi', 'Al-Andalusi', 'Al-Qurtubi', 'Al-Tilimsani', 'Ibn Rushd', 'Al-Marrakushi'];
+
+// Coptic names (Egyptian Christians)
+const COPTIC_NAMES_MALE = ['Boutros', 'Girgis', 'Morcos', 'Hanna', 'Tadros', 'Mikhail', 'Fanus', 'Shnouda', 'Kyrillos'];
+const COPTIC_NAMES_FEMALE = ['Maryam', 'Irini', 'Tamav', 'Demiana', 'Marina', 'Tasoni', 'Sofi'];
+const COPTIC_SURNAMES = ['Al-Qibti', 'Al-Misri', 'Ibn Butrus', 'Ibn Girgis', 'Abu Seif', 'Al-Sakakini'];
+
+// Indian names (Sindhi/Gujarati merchants on spice routes)
+const INDIAN_NAMES_MALE = ['Ramji', 'Vishnu', 'Gopal', 'Lakshmi', 'Kashi', 'Bhanji', 'Haridas', 'Mulchand', 'Thakur'];
+const INDIAN_NAMES_FEMALE = ['Devi', 'Rukmini', 'Lakshmi', 'Kamla', 'Pushpa', 'Radha'];
+const INDIAN_SURNAMES = ['Al-Hindi', 'Al-Sindi', 'Shetty', 'Thakkar', 'Vaniya', 'Mehta', 'Chheda'];
 
 // Lookup tables for name generation
 const NAMES_BY_ETHNICITY: Record<Ethnicity, { male: string[]; female: string[]; surnames: string[] }> = {
@@ -67,14 +105,19 @@ const NAMES_BY_ETHNICITY: Record<Ethnicity, { male: string[]; female: string[]; 
   'Greek/Rum': { male: GREEK_NAMES_MALE, female: GREEK_NAMES_FEMALE, surnames: GREEK_NISBAS },
   'Aramaean/Syriac': { male: SYRIAC_NAMES_MALE, female: SYRIAC_NAMES_FEMALE, surnames: SYRIAC_NISBAS },
   'Circassian': { male: CIRCASSIAN_NAMES_MALE, female: CIRCASSIAN_NAMES_FEMALE, surnames: CIRCASSIAN_NISBAS },
-  'Frankish': { male: FRANKISH_NAMES_MALE, female: FRANKISH_NAMES_FEMALE, surnames: FRANKISH_SURNAMES },
+  // Italian city-states
+  'Venetian': { male: VENETIAN_NAMES_MALE, female: VENETIAN_NAMES_FEMALE, surnames: VENETIAN_SURNAMES },
+  'Genoese': { male: GENOESE_NAMES_MALE, female: GENOESE_NAMES_FEMALE, surnames: GENOESE_SURNAMES },
+  'Pisan': { male: PISAN_NAMES_MALE, female: PISAN_NAMES_FEMALE, surnames: PISAN_SURNAMES },
+  'Catalan': { male: CATALAN_NAMES_MALE, female: CATALAN_NAMES_FEMALE, surnames: CATALAN_SURNAMES },
+  // Additional groups
+  'Maghrebi': { male: MAGHREBI_NAMES_MALE, female: MAGHREBI_NAMES_FEMALE, surnames: MAGHREBI_NISBAS },
+  'Coptic': { male: COPTIC_NAMES_MALE, female: COPTIC_NAMES_FEMALE, surnames: COPTIC_SURNAMES },
+  'Indian': { male: INDIAN_NAMES_MALE, female: INDIAN_NAMES_FEMALE, surnames: INDIAN_SURNAMES },
 };
 
 // Special case: Jewish names override ethnicity-based names
 const JEWISH_NAMES = { male: JEWISH_NAMES_MALE, female: JEWISH_NAMES_FEMALE, surnames: JEWISH_SURNAMES };
-
-// Special case: Frankish names for Latin Christians
-const FRANKISH_NAMES = { male: FRANKISH_NAMES_MALE, female: FRANKISH_NAMES_FEMALE, surnames: FRANKISH_SURNAMES };
 
 // Generate name based on ethnicity and religion
 // Exported for use by merchant generation
@@ -93,13 +136,32 @@ export const generateNameForMerchant = (
     return `${firstName} ${surname}`;
   }
 
-  // Latin Christian (Frankish) uses Italian/Venetian names
+  // Latin Christian uses ethnicity-specific Italian city-state names
+  // (Venetian, Genoese, Pisan, Catalan are all distinct)
   if (religion === 'Latin Christian') {
+    // If ethnicity is already an Italian city-state, use that
+    if (ethnicity === 'Venetian' || ethnicity === 'Genoese' || ethnicity === 'Pisan' || ethnicity === 'Catalan') {
+      const namePool = NAMES_BY_ETHNICITY[ethnicity];
+      const firstName = gender === 'Male'
+        ? namePool.male[Math.floor(rand() * namePool.male.length)]
+        : namePool.female[Math.floor(rand() * namePool.female.length)];
+      const surname = namePool.surnames[Math.floor(rand() * namePool.surnames.length)];
+      return `${firstName} ${surname}`;
+    }
+    // Default to Venetian for unspecified Latin Christians
     const firstName = gender === 'Male'
-      ? FRANKISH_NAMES.male[Math.floor(rand() * FRANKISH_NAMES.male.length)]
-      : FRANKISH_NAMES.female[Math.floor(rand() * FRANKISH_NAMES.female.length)];
-    const surname = FRANKISH_NAMES.surnames[Math.floor(rand() * FRANKISH_NAMES.surnames.length)];
+      ? VENETIAN_NAMES_MALE[Math.floor(rand() * VENETIAN_NAMES_MALE.length)]
+      : VENETIAN_NAMES_FEMALE[Math.floor(rand() * VENETIAN_NAMES_FEMALE.length)];
+    const surname = VENETIAN_SURNAMES[Math.floor(rand() * VENETIAN_SURNAMES.length)];
     return `${firstName} ${surname}`;
+  }
+
+  // Samaritan uses Jewish-style names with Samaritan flavor
+  if (religion === 'Samaritan') {
+    const firstName = gender === 'Male'
+      ? JEWISH_NAMES.male[Math.floor(rand() * JEWISH_NAMES.male.length)]
+      : JEWISH_NAMES.female[Math.floor(rand() * JEWISH_NAMES.female.length)];
+    return `${firstName} Al-Samiri`;
   }
 
   // Get ethnicity-specific names
@@ -141,11 +203,24 @@ const COMMERCIAL_PROFESSIONS = [
   'Glassblower',          // Damascus glasswork renowned
   'Soap Maker',           // Damascus soap (sabun) exported throughout region
   'Rug Merchant',         // Carpets, prayer rugs
-  'Jeweler',              // Precious metals, gems
+  'Jeweler',              // Precious metals, gems (often Jewish)
   'Leather Worker',       // Saddles, bags, shoes
   'Barber-Surgeon',       // Medical care and grooming
   'Locksmith',            // Intricate metalwork, keys
   'Oil Presser',          // Olive oil, sesame oil
+  // NEW: Previously missing critical professions
+  'Hakim',                // Physician - Islamic medical tradition
+  'Money Changer',        // Sarraf - essential for trade
+  'Goldsmith',            // Distinct from jeweler - metalwork (often Jewish)
+  'Brass Worker',         // Nahhas - Damascus metalwork famous
+  'Wine Merchant',        // Christian-only profession
+  'Funduq Keeper',        // Merchant hostel keeper
+  'Commercial Agent',     // Wakil - commission merchants
+  'Pharmacist',           // Saydalani - compound medicines
+  'Barber',               // Hallaq - social hub, distinct from surgeon
+  'Butcher',              // Qassab - meat trade
+  'Fishmonger',           // Sammak - Barada River trade
+  'Glazier',              // Zajjaj - window glass specialist
 ];
 const RESIDENTIAL_PROFESSIONS = [
   // Unskilled Labor
@@ -200,10 +275,15 @@ const RESIDENTIAL_PROFESSIONS = [
   // Scribal/Educated
   'Copyist',
   'Madrasa Student',
+  'Scribe',                 // Katib - administrative scribe
+  'Qur\'an Teacher',        // Muqri - elementary instruction
   // Military
   'City Guard',
   'Mamluk Soldier',
   'Retired Guard',
+  // Religious/Spiritual
+  'Sufi Dervish',           // Wandering mystic
+  'Zawiya Attendant',       // Sufi lodge caretaker
   // Urban Poor/Other
   'Tanner',
   'Unemployed',
@@ -211,7 +291,27 @@ const RESIDENTIAL_PROFESSIONS = [
   'Widow',
   'Pilgrim',
 ];
-const CLERGY_PROFESSIONS = ['Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher'];
+
+// Female-specific professions (historically documented)
+const FEMALE_PROFESSIONS = [
+  'Midwife',                // Daya - critical profession, well-documented
+  'Birth Attendant',        // Qabila - assists midwife
+  'Washer of the Dead',     // Ghasila - prepares women's bodies for burial
+  'Bathhouse Attendant',    // Hammamiyya - women's section of hammam
+  'Professional Mourner',   // Naddaba - paid mourners at funerals
+  'Matchmaker',             // Dallala - marriage broker, sales agent
+  'Wet Nurse',              // Murdi'a - nursing for wealthy families
+  'Henna Artist',           // Applies henna for weddings/celebrations
+  'Spinner',                // Common female textile work
+  'Embroiderer',            // Common female textile work
+  'Silk Winder',            // Factory-style silk work
+  'Servant',
+  'Cook',
+  'Launderer',
+  'Widow',                  // Often listed as status/profession
+];
+
+const CLERGY_PROFESSIONS = ['Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher', 'Sufi Shaykh'];
 
 // Religious building professions (architecture-specific)
 // Islamic professions (for Muslim-majority districts)
@@ -463,12 +563,14 @@ const generateDyeBasedColor = (rand: () => number, socialClass: SocialClass): st
 
 const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: string; accent: string; sash: boolean; sleeves: boolean }>> = {
   [SocialClass.PEASANT]: [
-    // Undyed natural fibers (most common)
+    // Undyed natural fibers (most common - weighted heavily)
     { desc: 'threadbare linen qamis in beige', base: '#c8b892', accent: '#e6d8b7', sash: false, sleeves: false },
     { desc: 'undyed flax thawb with a simple izar belt', base: '#d6c8a8', accent: '#cdbb9a', sash: false, sleeves: false },
     { desc: 'washed linen thawb in pale sand', base: '#d9cdb2', accent: '#c8b892', sash: false, sleeves: false },
     { desc: 'raw wool qamis in natural cream', base: '#d4c9b0', accent: '#bfb294', sash: false, sleeves: false },
     { desc: 'sun-bleached linen in off-white', base: '#e2d8c4', accent: '#d4c9a8', sash: false, sleeves: false },
+    { desc: 'simple flax qamis in pale oat', base: '#d0c4a4', accent: '#c4b898', sash: false, sleeves: false },
+    { desc: 'worn linen thawb in dusty cream', base: '#cfc5a8', accent: '#c0b090', sash: false, sleeves: false },
     // Earth tones from cheap local dyes
     { desc: 'patched wool qaba in earth tones', base: '#8a6b4f', accent: '#c8b892', sash: true, sleeves: true },
     { desc: 'rough wool qabāʾ in walnut brown', base: '#7a5a3f', accent: '#bfae8a', sash: true, sleeves: true },
@@ -478,6 +580,8 @@ const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: str
     { desc: 'faded indigo thawb', base: '#5a6e7a', accent: '#c8b892', sash: false, sleeves: false },
     { desc: 'madder-dyed qamis in brick red', base: '#8b5a4a', accent: '#d6c8a8', sash: true, sleeves: false },
     { desc: 'weld-dyed thawb in faded yellow-green', base: '#9a9858', accent: '#c8c0a0', sash: false, sleeves: false },
+    { desc: 'faded turquoise thawb from a wealthy household', base: '#5a8a8a', accent: '#c8c0a0', sash: false, sleeves: false },
+    { desc: 'sun-bleached green qamis of salvaged cloth', base: '#6a7a5a', accent: '#c8b892', sash: false, sleeves: false },
   ],
   [SocialClass.MERCHANT]: [
     // Quality local dyes
@@ -495,6 +599,12 @@ const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: str
     { desc: 'dyed wool qaba in slate blue', base: '#4a5a6b', accent: '#d9c9a8', sash: true, sleeves: true },
     { desc: 'indigo-dyed thawb in deep blue', base: '#3d4f5f', accent: '#c8b892', sash: true, sleeves: true },
     { desc: 'weld-and-indigo green qaba', base: '#4a5f4a', accent: '#d4c9a8', sash: true, sleeves: true },
+    // Vibrant trade goods colors (showing wealth from trade)
+    { desc: 'rich madder qaba in vivid red', base: '#a04040', accent: '#e3d2ad', sash: true, sleeves: true },
+    { desc: 'lapis-blue thawb from Persian trade', base: '#3a5a8a', accent: '#d4c9a8', sash: true, sleeves: true },
+    { desc: 'copper-henna qaba in warm orange', base: '#a06040', accent: '#e1d3b3', sash: true, sleeves: true },
+    { desc: 'olive qaba with saffron-gold trim', base: '#5d5b2f', accent: '#d4a030', sash: true, sleeves: true },
+    { desc: 'fine brown thawb with saffron sash', base: '#7a5a42', accent: '#d4a030', sash: true, sleeves: true },
   ],
   [SocialClass.CLERGY]: [
     // Austere, dark colors befitting religious scholars
@@ -512,6 +622,9 @@ const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: str
     { desc: 'rich brown qaba with indigo accents', base: '#4a3828', accent: '#4a5a6a', sash: false, sleeves: true },
     { desc: 'muted purple-brown thawb', base: '#4a3f4a', accent: '#9a8a7a', sash: false, sleeves: true },
     { desc: 'dignified black qaba', base: '#222220', accent: '#9a9080', sash: false, sleeves: true },
+    // Distinguished scholars (rare)
+    { desc: 'rich forest green qaba of a respected alim', base: '#2a5040', accent: '#9a8a7a', sash: false, sleeves: true },
+    { desc: 'deep scholarly blue thawb with modest trim', base: '#2a3a5a', accent: '#a08f78', sash: false, sleeves: true },
   ],
   [SocialClass.NOBILITY]: [
     // Expensive imported dyes showing wealth
@@ -531,21 +644,39 @@ const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: str
     { desc: 'deep forest green qabāʾ', base: '#2a3f2a', accent: '#b8a878', sash: true, sleeves: true },
     { desc: 'rich burgundy thawb', base: '#5a2830', accent: '#c8b088', sash: true, sleeves: true },
     { desc: 'teal silk qaba with silver trim', base: '#2a4a4a', accent: '#c8c8c0', sash: true, sleeves: true },
+    // Rare luxury dyes
+    { desc: 'Tyrian violet qabāʾ of Phoenician dye', base: '#6a3a5a', accent: '#c8b088', sash: true, sleeves: true },
+    { desc: 'Damascus rose thawb in soft pink-red', base: '#b05060', accent: '#d4c9a8', sash: true, sleeves: true },
+    { desc: 'vivid madder-crimson qaba with gold', base: '#a83030', accent: '#d4a965', sash: true, sleeves: true },
   ],
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const PROFESSION_TAGS: Record<string, Array<'military' | 'cleric' | 'artisan' | 'service' | 'noble' | 'youth' | 'retired'>> = {
+  // Unskilled Labor
   'Day-Laborer': ['service'],
   'Water-Carrier': ['service'],
   'Copyist': ['service'],
   'Tanner': ['artisan'],
   'Unemployed': ['service'],
+  'Porter': ['service'],
+  'Shepherd': ['service'],
+  'Street Sweeper': ['service'],
+  'Grave Digger': ['service'],
+  'Rag Picker': ['service'],
+  'Night Watchman': ['service'],
+  'Stable Hand': ['service'],
+  'Builder\'s Laborer': ['service'],
+  // Military
   'City Guard': ['military'],
   'Mamluk Soldier': ['military'],
+  'Mamluk Officer': ['noble', 'military'],
   'Retired Guard': ['military', 'retired'],
+  // Commercial/Merchants
   'Spice Merchant': ['service'],
+  'Silk Merchant': ['service'],
+  'Rug Merchant': ['service'],
   'Draper': ['artisan'],
   'Baker': ['artisan'],
   'Blacksmith': ['artisan'],
@@ -558,30 +689,91 @@ const PROFESSION_TAGS: Record<string, Array<'military' | 'cleric' | 'artisan' | 
   'Sherbet Seller': ['service'],
   'Sherbet House Keeper': ['service'],
   'Caravanserai Keeper': ['service'],
+  // NEW: Added professions
+  'Hakim': ['service'],            // Physician
+  'Money Changer': ['service'],    // Sarraf
+  'Goldsmith': ['artisan'],
+  'Jeweler': ['artisan'],
+  'Brass Worker': ['artisan'],
+  'Wine Merchant': ['service'],    // Christian-only
+  'Funduq Keeper': ['service'],
+  'Commercial Agent': ['service'],
+  'Pharmacist': ['service'],
+  'Barber': ['service'],
+  'Barber-Surgeon': ['service'],
+  'Butcher': ['artisan'],
+  'Fishmonger': ['service'],
+  'Glazier': ['artisan'],
+  'Glassblower': ['artisan'],
+  'Soap Maker': ['artisan'],
+  'Perfumer': ['artisan'],
+  'Apothecary': ['service'],
+  'Leather Worker': ['artisan'],
+  'Locksmith': ['artisan'],
+  'Oil Presser': ['artisan'],
+  'Scribe': ['service'],
+  // Islamic Clergy
   'Imam': ['cleric'],
   'Qadi': ['cleric'],
   'Mufti': ['cleric'],
   'Muezzin': ['cleric'],
   'Qur\'an Reciter': ['cleric'],
   'Madrasa Teacher': ['cleric'],
+  'Qur\'an Teacher': ['cleric'],
+  'Sufi Shaykh': ['cleric'],
+  'Sufi Dervish': ['cleric'],
+  'Zawiya Attendant': ['cleric', 'service'],
+  // Nobility/Administration
   'Estate Steward': ['noble', 'service'],
   'Court Clerk': ['noble', 'service'],
-  'Mamluk Officer': ['noble', 'military'],
+  'Household Manager': ['noble', 'service'],
+  'Tutor': ['noble', 'service'],
+  // Textile Workers
   'Spinner': ['artisan'],
+  'Dyer': ['artisan'],
+  'Embroiderer': ['artisan'],
+  'Tailor': ['artisan'],
+  'Silk Winder': ['artisan'],
+  'Felt Maker': ['artisan'],
+  // Service Workers
   'Bread Seller': ['service'],
   'Servant': ['service'],
   'Water-Bearer': ['service'],
   'Laundry Worker': ['service'],
+  'Launderer': ['service'],
+  'Bath Attendant': ['service'],
+  'Cook': ['service'],
+  'Messenger': ['service'],
   'Textile Trader': ['service'],
   'Herbalist': ['artisan'],
+  // Female-specific professions
   'Midwife': ['service'],
+  'Birth Attendant': ['service'],
+  'Washer of the Dead': ['service'],
+  'Bathhouse Attendant': ['service'],
+  'Professional Mourner': ['service'],
+  'Matchmaker': ['service'],
+  'Wet Nurse': ['service'],
+  'Henna Artist': ['artisan'],
   'Dyer\'s Assistant': ['artisan'],
   'Charity Worker': ['service'],
-  'Qur\'an Teacher': ['cleric'],
-  'Household Manager': ['noble', 'service'],
-  'Tutor': ['noble', 'service'],
-  'Porter': ['service'],
-  'Shepherd': ['service'],
+  // Transport
+  'Donkey Driver': ['service'],
+  'Camel Driver': ['service'],
+  'Muleteer': ['service'],
+  // Construction
+  'Mason': ['artisan'],
+  'Plasterer': ['artisan'],
+  'Whitewasher': ['artisan'],
+  'Brick Maker': ['artisan'],
+  'Tile Maker': ['artisan'],
+  // Other Artisans
+  'Cobbler': ['artisan'],
+  'Rope Maker': ['artisan'],
+  'Mat Weaver': ['artisan'],
+  'Basket Maker': ['artisan'],
+  'Woodcarver': ['artisan'],
+  // Youth/Apprentices
   'Apprentice Tanner': ['youth', 'artisan'],
   'Apprentice Potter': ['youth', 'artisan'],
   'Apprentice Carpenter': ['youth', 'artisan'],
@@ -595,6 +787,7 @@ const PROFESSION_TAGS: Record<string, Array<'military' | 'cleric' | 'artisan' | 
   'Household Helper': ['youth', 'service'],
   'Laundry Helper': ['youth', 'service'],
   'Novice Student': ['youth', 'cleric'],
+  'Madrasa Student': ['youth', 'cleric'],
   'Page': ['youth', 'noble'],
   'Household Apprentice': ['youth', 'noble'],
   'Tutor\'s Assistant': ['youth', 'noble'],
@@ -672,14 +865,51 @@ const chooseProfession = (
 
 // Helper to check if a religion can hold a profession
 const isMuslim = (religion: Religion): boolean =>
-  religion === 'Sunni Islam' || religion === 'Shia Islam';
+  religion === 'Sunni Islam' || religion === 'Shia Islam' || religion === 'Ismaili';
 
 // Professions that require being Muslim (historical dhimmi restrictions)
 const MUSLIM_ONLY_PROFESSIONS = [
   'Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher',
   'City Guard', 'Mamluk Soldier', 'Mamluk Officer', 'Mamluk Governor',
-  'Court Qadi', 'Market Inspector', 'Friday Mosque Imam', 'Madrasa Director', 'Shaykh', 'Shrine Keeper'
+  'Court Qadi', 'Market Inspector', 'Friday Mosque Imam', 'Madrasa Director', 'Shaykh', 'Shrine Keeper',
+  'Sufi Shaykh', 'Sufi Dervish', 'Zawiya Attendant', 'Qur\'an Teacher'
 ];
+
+// Professions with strong Jewish occupational clustering (historically documented)
+// Jews in medieval Damascus were concentrated in specific trades
+const JEWISH_WEIGHTED_PROFESSIONS = [
+  'Dyer',             // Indigo/purple dyeing was heavily Jewish
+  'Hakim',            // Jewish physicians served Muslim courts
+  'Goldsmith',        // Jewish specialty
+  'Money Changer',    // Sarraf - Jewish specialty
+  'Jeweler',          // Precious metals
+  'Silk Merchant',    // Significant Jewish presence
+  'Pharmacist',       // Medicine-adjacent
+  'Glassblower',      // Artisan trade
+];
+
+// Professions only Christians can do (forbidden to Muslims)
+const CHRISTIAN_ONLY_PROFESSIONS = [
+  'Wine Merchant',    // Wine trade forbidden to Muslims
+];
+
+// Apply Jewish occupational weighting
+const applyJewishOccupationalWeighting = (
+  pool: string[],
+  religion: Religion,
+  rand: () => number
+): string[] => {
+  if (religion !== 'Jewish' && religion !== 'Samaritan') return pool;
+
+  // 40% chance to select from Jewish-weighted professions if available
+  if (rand() < 0.4) {
+    const jewishProfessions = pool.filter(p => JEWISH_WEIGHTED_PROFESSIONS.includes(p));
+    if (jewishProfessions.length > 0) {
+      return jewishProfessions;
+    }
+  }
+  return pool;
+};
 
 export const generateNPCStats = (seed: number, context?: { districtType?: DistrictType }): NPCStats => {
   let s = seed;
@@ -738,20 +968,20 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   // Step 3: Build profession pools with religion-appropriate options
   const professionPoolsByClass: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
     [SocialClass.PEASANT]: {
-      Male: ['Day-Laborer', 'Water-Carrier', 'Tanner', 'Copyist', 'Porter', 'Shepherd'],
-      Female: ['Spinner', 'Bread Seller', 'Servant', 'Water-Bearer', 'Laundry Worker'],
+      Male: ['Day-Laborer', 'Water-Carrier', 'Tanner', 'Copyist', 'Porter', 'Shepherd', 'Scribe'],
+      Female: FEMALE_PROFESSIONS.filter(p => !['Matchmaker', 'Midwife'].includes(p)), // Basic female professions
     },
     [SocialClass.MERCHANT]: {
       Male: COMMERCIAL_PROFESSIONS,
-      Female: ['Textile Trader', 'Herbalist', 'Midwife', 'Dyer\'s Assistant', 'Bread Seller'],
+      Female: ['Midwife', 'Matchmaker', 'Henna Artist', 'Silk Winder', 'Embroiderer', 'Dyer', 'Spinner'],
     },
     [SocialClass.CLERGY]: {
       Male: CLERGY_PROFESSIONS,
-      Female: ['Charity Worker'],
+      Female: ['Washer of the Dead', 'Charity Worker'], // Limited religious roles for women
     },
     [SocialClass.NOBILITY]: {
       Male: ['Estate Steward', 'Court Clerk', 'Mamluk Officer'],
-      Female: ['Household Manager', 'Tutor'],
+      Female: ['Household Manager', 'Tutor', 'Wet Nurse'],
     },
   };
 
@@ -761,6 +991,15 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   if (!isMuslim(religion)) {
     professionPool = professionPool.filter(p => !MUSLIM_ONLY_PROFESSIONS.includes(p));
   }
+
+  // Filter out Christian-only professions for Muslims
+  if (isMuslim(religion)) {
+    professionPool = professionPool.filter(p => !CHRISTIAN_ONLY_PROFESSIONS.includes(p));
+  }
+
+  // Apply Jewish occupational clustering
+  professionPool = applyJewishOccupationalWeighting(professionPool, religion, rand);
+
   const profession = chooseProfession(professionPool, age, gender, socialClass, rand);
 
   // Step 5: Generate ethnicity-appropriate name AFTER demographics are finalized
@@ -1083,8 +1322,13 @@ export const generatePlayerStats = (
   // Step 2: Generate ethnicity-appropriate name
   const name = generateName(rand, gender, ethnicity, religion);
 
-  const skinTone = `hsl(${26 + Math.round(rand() * 8)}, ${28 + Math.round(rand() * 18)}%, ${30 + Math.round(rand() * 18)}%)`;
-  const skinDescriptions = ['olive-toned complexion', 'sun-browned skin', 'warm sand-brown skin', 'weathered bronze complexion'];
+  // Levantine/Mediterranean skin tones - olive to light brown
+  // Hue 24-34 (warm beige-orange), Saturation 25-42%, Lightness 48-66%
+  const skinLightness = 48 + Math.round(rand() * 18); // 48-66% - mostly olive to light brown
+  const skinSaturation = 25 + Math.round(rand() * 17); // 25-42%
+  const skinHue = 24 + Math.round(rand() * 10); // 24-34 warm undertone
+  const skinTone = `hsl(${skinHue}, ${skinSaturation}%, ${skinLightness}%)`;
+  const skinDescriptions = ['olive-toned complexion', 'fair olive skin', 'warm wheat-brown skin', 'light bronze complexion', 'sun-kissed olive skin'];
   const hairDescriptions = ['black hair', 'deep brown hair', 'dark chestnut hair'];
   const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
   const baseHairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
@@ -1404,7 +1648,7 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
   const rand = () => seededRandom(s++);
   const sizeScale = 0.88 + rand() * 0.24;
 
-  // Determine district first (needed for religious profession filtering)
+  // Determine district first (needed for religious profession filtering and styling)
   const district = getDistrictType(x, z);
 
   const typeRand = rand();
@@ -1515,6 +1759,7 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
     hasSymmetricalWindows: rand() > 0.5,
     isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || rand() > 0.985,
     isQuarantined: type === BuildingType.RESIDENTIAL && rand() > 0.965,
-    isOpen: type !== BuildingType.RESIDENTIAL ? true : rand() > 0.25
+    isOpen: type !== BuildingType.RESIDENTIAL ? true : rand() > 0.25,
+    district // Include district for styling
   };
 };

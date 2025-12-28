@@ -42,6 +42,7 @@ const LaundryLineRenderer: React.FC<{ line: LaundryLine; time: number }> = ({ li
   return (
     <group>
       {/* Rope */}
+      {/* @ts-expect-error R3F line element conflicts with SVG line type */}
       <line ref={ropeRef} geometry={ropeGeometry}>
         <lineBasicMaterial color="#8b7355" linewidth={2} />
       </line>

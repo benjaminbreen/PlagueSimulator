@@ -142,6 +142,24 @@ const DISTRICT_PROFILES: Record<DistrictType, DistrictProfile> = {
     droneAmount: 0.7,
     character: 'journey',
   },
+  CHRISTIAN_QUARTER: {
+    baseFreq: 80,
+    harmonics: [1, 0.4, 0.2],
+    noiseFreqLow: 65,
+    noiseFreqHigh: 140,
+    noiseAmount: 0.3,
+    droneAmount: 0.7,
+    character: 'reverent',
+  },
+  UMAYYAD_MOSQUE: {
+    baseFreq: 55,
+    harmonics: [1, 0.25, 0.1],
+    noiseFreqLow: 45,
+    noiseFreqHigh: 90,
+    noiseAmount: 0.15,
+    droneAmount: 0.85,
+    character: 'sacred',
+  },
 };
 
 export class BaseDroneLayer implements SoundLayer {

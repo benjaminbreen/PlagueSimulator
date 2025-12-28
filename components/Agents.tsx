@@ -22,6 +22,7 @@ interface AgentsProps {
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   obstacles?: Obstacle[];
+  obstacleHash?: SpatialHash<Obstacle> | null;
   maxAgents?: number;
   agentHashRef?: React.MutableRefObject<SpatialHash<AgentSnapshot> | null>;
   impactMapRef?: React.MutableRefObject<Map<string, { time: number; intensity: number }>>;
@@ -50,6 +51,7 @@ export const Agents: React.FC<AgentsProps> = ({
   buildings,
   buildingHash = null,
   obstacles = [],
+  obstacleHash = null,
   maxAgents = 30,
   agentHashRef: externalAgentHashRef,
   impactMapRef,
@@ -187,6 +189,7 @@ export const Agents: React.FC<AgentsProps> = ({
           buildings={buildings}
           buildingHash={buildingHash || undefined}
           obstacles={obstacles}
+          obstacleHash={obstacleHash || undefined}
           agentHash={localAgentHashRef.current || undefined}
           impactMapRef={impactMapRef}
           playerRef={playerRef}
