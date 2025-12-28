@@ -76,7 +76,9 @@ const getHorizonProfile = (district?: DistrictType): HorizonProfile => {
 
     case 'RESIDENTIAL':
     case 'ALLEYS':
+    case 'JEWISH_QUARTER':
     case 'HOVELS':
+    case 'CHRISTIAN_QUARTER':
       return 'RESIDENTIAL';
 
     case 'CARAVANSERAI':
@@ -124,41 +126,41 @@ export const HorizonBackdrop: React.FC<{
   const twilightFactor = time >= 17 && time < 19 ? (time - 17) / 2 : time >= 5 && time < 7 ? (7 - time) / 2 : 0;
   const dayFactor = time >= 7 && time < 17 ? 1 : time >= 5 && time < 7 ? (time - 5) / 2 : time >= 17 && time < 19 ? (19 - time) / 2 : 0;
 
-  // ATMOSPHERIC SCATTERING: More haze at twilight/midday heat, clearer at night
-  const atmosphericHaze = nightFactor > 0.8 ? 0.5 : twilightFactor > 0 ? 1.2 : dayFactor * 0.9;
+  // ATMOSPHERIC SCATTERING: Intense heat haze during day, dust at twilight, warm air at night
+  const atmosphericHaze = nightFactor > 0.8 ? 0.6 : twilightFactor > 0 ? 1.5 : dayFactor * 1.2;
 
-  // Distant silhouette colors - warm sun-bleached tones
+  // Distant silhouette colors - warm sun-bleached tones (NO BLUE TONES - this is hot Syria!)
   const silhouetteColor = isDesert
-    ? (nightFactor > 0.8 ? '#120c08' : twilightFactor > 0 ? '#4a3424' : '#8a7a6a')  // Day: warm sun-bleached tan
-    : (nightFactor > 0.8 ? '#0a0a0a' : twilightFactor > 0 ? '#2a2a3a' : '#6a5a4a'); // Day: warm dusty brown
+    ? (nightFactor > 0.8 ? '#1a1410' : twilightFactor > 0 ? '#5a3820' : '#9a8268')  // Night: warm charcoal, Twilight: dusty terracotta, Day: sun-bleached tan
+    : (nightFactor > 0.8 ? '#1a1410' : twilightFactor > 0 ? '#3a2a1a' : '#7a5a3a'); // Night: warm charcoal, Twilight: warm umber, Day: dusty brown
 
   // Reduced opacity for softer, more indistinct silhouettes
   const silhouetteOpacity = (isDesert
     ? (nightFactor > 0.8 ? 0.25 : twilightFactor > 0 ? 0.35 : 0.28)
     : (nightFactor > 0.8 ? 0.3 : twilightFactor > 0 ? 0.4 : 0.32)) * (1.0 - atmosphericHaze * 0.15);
 
-  // Wall color - weathered stone (kept close for boundary)
+  // Wall color - sun-baked weathered sandstone
   const wallColor = isDesert
-    ? (nightFactor > 0.8 ? '#2a241b' : twilightFactor > 0 ? '#7a5f3f' : '#b58a5a')
-    : (nightFactor > 0.8 ? '#2a2a2a' : twilightFactor > 0 ? '#5a5a5a' : '#6a6a5a');
+    ? (nightFactor > 0.8 ? '#2a241b' : twilightFactor > 0 ? '#8a6a3f' : '#c49a5a')
+    : (nightFactor > 0.8 ? '#2a241a' : twilightFactor > 0 ? '#6a5a3a' : '#8a7a5a'); // Warmer stone tones
   const wallOpacity = showCityWalls ? 1 : 0.45;
   const wallRadiusUsed = showCityWalls ? wallRadius : wallRadius + 60;
 
-  // Mountain ring - very faint, warm distant haze
+  // Mountain ring - distant warm haze, sun-bleached peaks
   const mountainColor = isDesert
-    ? (nightFactor > 0.8 ? '#070503' : twilightFactor > 0 ? '#2c1f18' : '#a89878')  // Day: warm dusty tan
-    : (nightFactor > 0.8 ? '#000000' : twilightFactor > 0 ? '#1a1a24' : '#9a8a7a'); // Day: warm sandy brown
+    ? (nightFactor > 0.8 ? '#1a1208' : twilightFactor > 0 ? '#4a3220' : '#b8a888')  // Night: warm dark, Twilight: dusty brown, Day: pale sandy
+    : (nightFactor > 0.8 ? '#1a1208' : twilightFactor > 0 ? '#3a2818' : '#a89878'); // Night: warm dark, Twilight: warm umber, Day: dusty tan
 
   // Much fainter mountains for distance realism
   const mountainOpacity = (nightFactor > 0.8 ? 0.2 : twilightFactor > 0 ? 0.3 : 0.35) * (1.0 - atmosphericHaze * 0.2);
 
-  // Atmospheric haze - warm dusty heat shimmer
+  // Atmospheric haze - intense heat shimmer and dust (MORE VISIBLE for summer)
   const hazeColor = isDesert
-    ? (nightFactor > 0.8 ? '#2a2016' : twilightFactor > 0 ? '#c89a6a' : '#e8d4b8')  // Day: warm sandy haze
-    : (nightFactor > 0.8 ? '#1a1a1a' : twilightFactor > 0 ? '#8a8a9a' : '#d8c4a8'); // Day: warm dusty haze
+    ? (nightFactor > 0.8 ? '#2a2016' : twilightFactor > 0 ? '#d8aa6a' : '#f4e4c8')  // Night: warm dust, Twilight: golden dust, Day: intense sandy shimmer
+    : (nightFactor > 0.8 ? '#2a2016' : twilightFactor > 0 ? '#a88a6a' : '#e8d4b8'); // Night: warm dust, Twilight: dusty amber, Day: creamy haze
   const hazeOpacity = (isDesert
-    ? (nightFactor > 0.8 ? 0.08 : twilightFactor > 0 ? 0.16 : 0.12)
-    : (nightFactor > 0.8 ? 0.1 : twilightFactor > 0 ? 0.18 : 0.14)) * (0.8 + atmosphericHaze * 0.4);
+    ? (nightFactor > 0.8 ? 0.12 : twilightFactor > 0 ? 0.24 : 0.20)  // Increased opacity for more heat haze
+    : (nightFactor > 0.8 ? 0.14 : twilightFactor > 0 ? 0.26 : 0.22)) * (0.9 + atmosphericHaze * 0.5);
 
   // Instanced city buildings - SINGLE DRAW CALL (count from profile config)
   const buildingInstancesRef = useRef<THREE.InstancedMesh>(null);
@@ -498,9 +500,10 @@ export const HorizonBackdrop: React.FC<{
       {/* HORIZON LINE GRADIENT - Ultra-smooth atmospheric blending */}
       {/* Enhanced multi-layer gradient for seamless ground-to-sky transition */}
       {(() => {
+        // WARM TONES ONLY - no blue! This is hot, dusty Syria in June
         const horizonSkyColor = isDesert
-          ? (nightFactor > 0.8 ? '#111825' : twilightFactor > 0 ? '#f2a24f' : '#f4d4a8')  // Day: warm sandy-golden
-          : (nightFactor > 0.8 ? '#0f1829' : twilightFactor > 0 ? '#f7b25a' : '#e8c8a0'); // Day: warm cream-golden
+          ? (nightFactor > 0.8 ? '#2a1e14' : twilightFactor > 0 ? '#f2a24f' : '#fae4b8')  // Night: warm charcoal-brown, Twilight: golden, Day: pale sandy-cream
+          : (nightFactor > 0.8 ? '#2a1e14' : twilightFactor > 0 ? '#f7b25a' : '#f0d8b0'); // Night: warm charcoal-brown, Twilight: amber-gold, Day: dusty cream
 
         // ENHANCED: 12 gradient layers for ultra-smooth blending
         const gradientLayers = [
@@ -521,15 +524,15 @@ export const HorizonBackdrop: React.FC<{
         return (
           <>
             {gradientLayers.map((layer, i) => {
-              // Blend from warm ground to warm atmospheric horizon
-              const groundColor = new THREE.Color(isDesert ? '#d4a870' : '#d8b898');  // Warmer ground
+              // Blend from sun-bleached ground to warm atmospheric horizon
+              const groundColor = new THREE.Color(isDesert ? '#e4b878' : '#e8c8a0');  // More sun-bleached, warm
               const skyColor = new THREE.Color(horizonSkyColor);
               const blendedColor = groundColor.clone().lerp(skyColor, layer.colorMix);
 
-              // Atmospheric haze increases during peak sun
+              // Intense atmospheric haze during hot summer days
               const adjustedOpacity = layer.opacity
-                * (nightFactor > 0.8 ? 0.4 : twilightFactor > 0 ? 0.85 : 0.65)
-                * (1.0 + atmosphericHaze * 0.25);
+                * (nightFactor > 0.8 ? 0.45 : twilightFactor > 0 ? 0.95 : 0.80)  // Higher daytime opacity for heat shimmer
+                * (1.0 + atmosphericHaze * 0.35);
 
               return (
                 <mesh key={`horizon-gradient-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, layer.height, 0]}>

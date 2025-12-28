@@ -3,9 +3,19 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, us
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls, PointerLockControls } from '@react-three/drei';
-import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent, AgentState } from '../types';
+import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent, AgentState, ClimbableAccessory, ClimbingState, PlagueType } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
+import {
+  createClimbingState,
+  initiateClimbing,
+  stopClimbing,
+  updateClimbing,
+  calculateRoofEntryPosition,
+  calculateGroundExitPosition,
+  CLIMBING_CONSTANTS
+} from '../utils/climbing';
+import { findNearbyClimbable, findNearbyClimbableFast, getRoofHeightAt, ClimbableSpatialHash } from '../utils/climbables';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 import { PushableObject, PickupInfo, PushableMaterial } from '../utils/pushables';
 import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
@@ -63,10 +73,16 @@ interface PlayerProps {
   ratsRef?: React.MutableRefObject<Rat[] | null>;
   onPlagueExposure?: (type: 'flea' | 'airborne' | 'contact', intensity: number) => void;
   simTime?: number;
+  climbables?: ClimbableAccessory[];
+  onClimbingStateChange?: (state: ClimbingState | boolean) => void;
+  onClimbablePrompt?: (prompt: string | null) => void;
+  climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
   initialPosition = [0, 0, 0],
+  targetPosition,
+  setTargetPosition,
   cameraMode,
   buildings = [],
   buildingHash = null,
@@ -88,13 +104,25 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   sprintStateRef,
   ratsRef,
   onPlagueExposure,
-  simTime
+  simTime,
+  climbables = [],
+  onClimbingStateChange,
+  onClimbablePrompt,
+  climbInputRef
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
   const pointerRef = useRef<any>(null);
   const markerRef = useRef<THREE.Mesh>(null);
   const markerGlowRef = useRef<THREE.Mesh>(null);
+
+  // Spatial hash for fast climbable lookup (O(1) instead of O(n))
+  const climbableSpatialHash = useMemo(() => {
+    const hash = new ClimbableSpatialHash(5.0);
+    hash.build(climbables);
+    return hash;
+  }, [climbables]);
+
   const markerGlowMap = useMemo(() => {
     const size = 128;
     const canvas = document.createElement('canvas');
@@ -140,6 +168,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   
   // Physics states
   const velV = useRef(0);
+  const velH = useRef(new THREE.Vector3(0, 0, 0)); // Horizontal velocity (for jump dismount)
   const isGrounded = useRef(true);
   const coyoteTimer = useRef(0);
   const jumpBuffer = useRef(0);
@@ -147,6 +176,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const sprintCharge = useRef(0);
   const landingDamp = useRef(0);
   const lastSpace = useRef(false);
+  const lastCRef = useRef(false); // For C key edge detection (climbing)
   const lastMovePosRef = useRef(new THREE.Vector3());
   const stuckTimerRef = useRef(0);
   const interactSwingRef = useRef(0);
@@ -155,6 +185,13 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const interactTriggerRef = useRef<number | null>(null);
   const pickupPromptRef = useRef<string | null>(null);
   const nearestPickupRef = useRef<{ id: string; pickup: PickupInfo } | null>(null);
+
+  // Climbing state
+  const climbingStateRef = useRef<ClimbingState>(createClimbingState());
+  const activeClimbableRef = useRef<ClimbableAccessory | null>(null);
+  const nearbyClimbableRef = useRef<ClimbableAccessory | null>(null);
+  const [isClimbing, setIsClimbing] = useState(false);
+  const climbAnimationPhaseRef = useRef(0);
 
   // Action animation state (warn, encourage, observe)
   const actionAnimationRef = useRef<{ action: string; progress: number } | null>(null);
@@ -225,10 +262,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
   }, [initialPosition, heightmap, buildings, buildingHash, obstacles]);
 
-  const [keys, setKeys] = useState({ 
-    up: false, down: false, left: false, right: false, 
+  const [keys, setKeys] = useState({
+    up: false, down: false, left: false, right: false,
     w: false, a: false, s: false, d: false,
-    shift: false, space: false
+    shift: false, space: false, c: false
   });
   const [northLocked, setNorthLocked] = useState(false);
   const recenterRef = useRef(false);
@@ -267,6 +304,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         }
       }
       if (k === ' ') setKeys(prev => ({ ...prev, space: true }));
+      if (k === 'c') setKeys(prev => ({ ...prev, c: true }));
       if (k === 'r') {
         recenterRef.current = true;
         recenterAmount.current = 1;
@@ -299,6 +337,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         }
       }
       if (k === ' ') setKeys(prev => ({ ...prev, space: false }));
+      if (k === 'c') setKeys(prev => ({ ...prev, c: false }));
       if (k === 'r') {
         recenterRef.current = false;
       }
@@ -315,6 +354,18 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       actionStartTimeRef.current = performance.now();
     }
   }, [actionEvent]);
+
+  // Reset climbing state when climbables change (map transition)
+  useEffect(() => {
+    if (climbingStateRef.current.isClimbing) {
+      climbingStateRef.current = stopClimbing(climbingStateRef.current);
+      activeClimbableRef.current = null;
+      setIsClimbing(false);
+      onClimbingStateChange?.(false);
+    }
+    // Clear prompt on climbables change
+    onClimbablePrompt?.(null);
+  }, [climbables, onClimbingStateChange, onClimbablePrompt]);
 
   const playFootstep = (variant: 'walk' | 'run') => {
     const ctx = audioCtxRef.current;
@@ -514,6 +565,167 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     // Skip all movement and interaction logic when in dossier mode
     if (dossierMode) return;
 
+    // === CLIMBING SYSTEM ===
+    // Skip climbing in first-person mode (W/S control camera pitch there)
+    if (cameraMode !== CameraMode.FIRST_PERSON) {
+      const playerPos = {
+        x: group.current.position.x,
+        y: group.current.position.y,
+        z: group.current.position.z
+      };
+      const playerFacing = group.current.rotation.y;
+
+      // Helper to sample terrain height
+      const getTerrainHeight = (x: number, z: number) =>
+        sampleTerrainHeight(heightmap, x, z);
+
+      // Check if player is on a rooftop (for descent detection)
+      const roofHeight = district ? getRoofHeightAt(
+        { x: playerPos.x, z: playerPos.z },
+        buildings,
+        district
+      ) : null;
+      const isOnRoof = roofHeight !== null && Math.abs(playerPos.y - roofHeight) < 0.5;
+
+      // Detect nearby climbable when not climbing
+      if (!climbingStateRef.current.isClimbing) {
+        // Check from ground OR from rooftop (for descent) - use spatial hash for O(1) lookup
+        const nearbyFromGround = findNearbyClimbableFast(playerPos, playerFacing, climbableSpatialHash, CLIMBING_CONSTANTS.CLIMB_DETECTION_RADIUS, false);
+        const nearbyFromRoof = isOnRoof ? findNearbyClimbableFast(playerPos, playerFacing, climbableSpatialHash, CLIMBING_CONSTANTS.CLIMB_DETECTION_RADIUS, true) : null;
+        const nearby = nearbyFromGround || nearbyFromRoof;
+        nearbyClimbableRef.current = nearby;
+
+        // Update climbable prompt
+        if (nearby && onClimbablePrompt) {
+          if (nearbyFromRoof) {
+            onClimbablePrompt('Press C to descend');
+          } else {
+            onClimbablePrompt('Press C to climb');
+          }
+        } else if (!nearby && onClimbablePrompt) {
+          onClimbablePrompt(null);
+        }
+
+        // Check for climb initiation (press C near a climbable)
+        const cJustPressed = keys.c && !lastCRef.current;
+        const wantsClimbUp = cJustPressed && nearbyFromGround && isGrounded.current;
+        const wantsClimbDown = cJustPressed && nearbyFromRoof && isOnRoof;
+
+        if (wantsClimbUp && nearbyFromGround) {
+          // Start climbing from bottom
+          climbingStateRef.current = initiateClimbing(climbingStateRef.current, nearbyFromGround);
+          activeClimbableRef.current = nearbyFromGround;
+          setIsClimbing(true);
+          climbAnimationPhaseRef.current = 0; // Reset animation phase
+          onClimbingStateChange?.(true); // Notify UI of climbing state
+          velV.current = 0;
+        } else if (wantsClimbDown && nearbyFromRoof) {
+          // Start climbing from top (descending)
+          climbingStateRef.current = initiateClimbing(climbingStateRef.current, nearbyFromRoof, true);
+          activeClimbableRef.current = nearbyFromRoof;
+          setIsClimbing(true);
+          climbAnimationPhaseRef.current = 0;
+          onClimbingStateChange?.(true); // Notify UI of climbing state
+          velV.current = 0;
+        }
+      }
+
+      // Handle climbing movement
+      if (climbingStateRef.current.isClimbing && activeClimbableRef.current) {
+        const climbable = activeClimbableRef.current;
+
+        // Edge-detect space press for jump (don't use held state)
+        const spaceJustPressed = keys.space && !lastSpace.current;
+
+        // Edge-detect C press for cancel (step off gracefully)
+        const cJustPressed = keys.c && !lastCRef.current;
+
+        // Check for mobile UI input (held state - UI manages setting/clearing via pointer events)
+        const mobileUp = climbInputRef?.current === 'up';
+        const mobileDown = climbInputRef?.current === 'down';
+        const mobileCancel = climbInputRef?.current === 'cancel';
+
+        // Build climbing input (keyboard OR mobile)
+        const climbInput = {
+          up: keys.up || keys.w || mobileUp,
+          down: keys.down || keys.s || mobileDown,
+          jump: spaceJustPressed
+        };
+
+        // Update climbing state
+        const result = updateClimbing(climbingStateRef.current, climbable, climbInput, delta);
+        climbingStateRef.current = result.newState;
+
+        // Apply position and rotation from result
+        group.current.position.copy(result.playerPosition);
+        group.current.rotation.y = result.playerRotation;
+
+        // Update animation phase for hand-over-hand motion
+        if (climbInput.up || climbInput.down) {
+          climbAnimationPhaseRef.current = (climbAnimationPhaseRef.current + delta * climbable.climbSpeed * 2) % 1;
+        }
+
+        // Check for dismount conditions
+        if (result.shouldDismountTop) {
+          const roofPos = calculateRoofEntryPosition(climbable);
+          group.current.position.set(roofPos.x, roofPos.y, roofPos.z);
+          climbingStateRef.current = stopClimbing(climbingStateRef.current);
+          activeClimbableRef.current = null;
+          setIsClimbing(false);
+          isGrounded.current = true;
+          onClimbingStateChange?.(false);
+        }
+
+        if (result.shouldDismountBottom) {
+          const groundPos = calculateGroundExitPosition(climbable, getTerrainHeight);
+          group.current.position.set(groundPos.x, groundPos.y, groundPos.z);
+          climbingStateRef.current = stopClimbing(climbingStateRef.current);
+          activeClimbableRef.current = null;
+          setIsClimbing(false);
+          isGrounded.current = true;
+          onClimbingStateChange?.(false);
+        }
+
+        if (result.shouldDismountJump && result.jumpVelocity) {
+          climbingStateRef.current = stopClimbing(climbingStateRef.current);
+          activeClimbableRef.current = null;
+          setIsClimbing(false);
+          velV.current = result.jumpVelocity.y;
+          velH.current.set(result.jumpVelocity.x, 0, result.jumpVelocity.z); // Apply horizontal velocity
+          isGrounded.current = false;
+          onClimbingStateChange?.(false);
+        }
+
+        // Handle C key or mobile cancel - step off gracefully at current position
+        if ((cJustPressed || mobileCancel) && !result.shouldDismountTop && !result.shouldDismountBottom && !result.shouldDismountJump) {
+          // Step off in direction away from building (same as ground exit)
+          const stepDistance = CLIMBING_CONSTANTS.CANCEL_STEP;
+          const currentPos = group.current.position.clone();
+          switch (climbable.wallSide) {
+            case 0: currentPos.z += stepDistance; break; // Step north (away from building)
+            case 1: currentPos.x += stepDistance; break; // Step east (away from building)
+            case 2: currentPos.z -= stepDistance; break; // Step south (away from building)
+            case 3: currentPos.x -= stepDistance; break; // Step west (away from building)
+          }
+          group.current.position.copy(currentPos);
+          climbingStateRef.current = stopClimbing(climbingStateRef.current);
+          activeClimbableRef.current = null;
+          setIsClimbing(false);
+          velV.current = 0;
+          isGrounded.current = false; // Will fall if mid-climb
+          onClimbingStateChange?.(false);
+        }
+
+        // Update key states for edge detection (must happen before return)
+        lastCRef.current = keys.c;
+        lastSpace.current = keys.space;
+
+        // Skip normal movement when climbing
+        return;
+      }
+    }
+    // === END CLIMBING SYSTEM ===
+
     // 1. Camera Adjustment Logic (WASD)
     if (cameraMode === CameraMode.FIRST_PERSON) {
       fpYaw.current += (keys.a ? CAMERA_SENSITIVITY * delta : 0);
@@ -570,6 +782,35 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         }
       }
     }
+
+    // ROOFTOP COLLISION: Check if player is on a building roof
+    if (district) {
+      const roofHeight = getRoofHeightAt(
+        { x: group.current.position.x, z: group.current.position.z },
+        buildings,
+        district
+      );
+      if (roofHeight !== null) {
+        // Player is within building bounds - check if they're at roof level
+        const currentY = group.current.position.y;
+        // Only use roof as ground if player is coming from above or already on roof
+        if (currentY >= roofHeight - 0.5) {
+          groundHeight = Math.max(groundHeight, roofHeight);
+        }
+      }
+    }
+
+    // ROOFTOP EDGE FALLING: If grounded but significantly above calculated ground, player walked off edge
+    const EDGE_FALL_THRESHOLD = 0.8; // Must be this much above ground to trigger fall
+    if (isGrounded.current && group.current.position.y > groundHeight + EDGE_FALL_THRESHOLD) {
+      // Player has walked off an edge (roof, crate, etc) - start falling
+      isGrounded.current = false;
+      velV.current = 0; // Start with zero vertical velocity (natural fall)
+      coyoteTimer.current = 0; // Allow brief coyote time for recovery jump
+    }
+
+    // Update C key state for climbing edge detection
+    lastCRef.current = keys.c;
 
     // 2. Jumping Physics + buffers
     const spacePressed = keys.space && !lastSpace.current;
@@ -638,9 +879,27 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     if (!isGrounded.current) {
       velV.current += GRAVITY * delta;
       group.current.position.y += velV.current * delta;
+
+      // Apply horizontal velocity (from jump dismount) with air friction
+      if (velH.current.lengthSq() > 0.001) {
+        const nextX = group.current.position.x + velH.current.x * delta;
+        const nextZ = group.current.position.z + velH.current.z * delta;
+        // Check collision before applying
+        const nextPos = new THREE.Vector3(nextX, group.current.position.y, nextZ);
+        if (!isBlockedByBuildings(nextPos, buildings, 0.4, buildingHash || undefined)) {
+          group.current.position.x = nextX;
+          group.current.position.z = nextZ;
+        } else {
+          velH.current.set(0, 0, 0); // Stop on collision
+        }
+        // Air friction decay
+        velH.current.multiplyScalar(0.95);
+      }
+
       if (group.current.position.y <= groundHeight) {
         group.current.position.y = groundHeight;
         velV.current = 0;
+        velH.current.set(0, 0, 0); // Clear horizontal velocity on land
         isGrounded.current = true;
         landingDamp.current = 0.2;
         chargingRef.current = false;
@@ -1009,6 +1268,72 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
+    // 3b. Click-to-Move Auto-Movement (when no keyboard input)
+    if (!moving && targetPosition && setTargetPosition) {
+      const direction = targetPosition.clone().sub(group.current.position);
+      direction.y = 0;
+      const distanceToTarget = direction.length();
+
+      // Arrival threshold - stop when close enough
+      const ARRIVAL_THRESHOLD = 0.5;
+
+      if (distanceToTarget > ARRIVAL_THRESHOLD) {
+        // Move toward target
+        direction.normalize();
+        moveVec = direction;
+
+        // Reuse same movement code as keyboard
+        const airControl = isGrounded.current ? 1 : 0.6;
+        const damp = landingDamp.current > 0 ? 0.7 : 1.0;
+        currentSpeed = PLAYER_SPEED * airControl * damp; // Walk speed for auto-movement
+        const moveDelta = moveVec.multiplyScalar(currentSpeed * delta);
+
+        // Apply movement with collision detection
+        const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
+        const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6);
+        if (!blockedX) {
+          group.current.position.x = nextX.x;
+        } else {
+          // Hit obstacle - cancel target
+          setTargetPosition(null);
+        }
+
+        const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
+        const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6);
+        if (!blockedZ) {
+          group.current.position.z = nextZ.z;
+        } else {
+          // Hit obstacle - cancel target
+          setTargetPosition(null);
+        }
+
+        // Update walking state
+        if (walkingRef.current !== true) {
+          walkingRef.current = true;
+          setIsWalking(true);
+        }
+
+        // Rotate character to face movement direction
+        if (cameraMode !== CameraMode.FIRST_PERSON) {
+          const targetRot = Math.atan2(moveVec.x, moveVec.z);
+          const rotSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
+          group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, targetRot, rotSpeed);
+        }
+      } else {
+        // Arrived at target
+        setTargetPosition(null);
+        if (walkingRef.current !== false) {
+          walkingRef.current = false;
+          setIsWalking(false);
+        }
+      }
+    }
+
+    // Keyboard input cancels click-to-move target
+    if (moving && targetPosition && setTargetPosition) {
+      setTargetPosition(null);
+    }
+
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
     let groundHeightNow = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
 
@@ -1028,6 +1353,18 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           const crateTop = item.position.y + CRATE_HEIGHT / 2;
           groundHeightNow = Math.max(groundHeightNow, crateTop);
         }
+      }
+    }
+
+    // ROOFTOP COLLISION: Check for rooftop standing
+    if (district) {
+      const roofHeight = getRoofHeightAt(
+        { x: group.current.position.x, z: group.current.position.z },
+        buildings,
+        district
+      );
+      if (roofHeight !== null && group.current.position.y >= roofHeight - 0.5) {
+        groundHeightNow = Math.max(groundHeightNow, roofHeight);
       }
     }
 
@@ -1460,15 +1797,17 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           const nearbyAgents = queryNearbyAgents(pos, agentHashRef.current);
           const nearbyInfected = nearbyAgents.filter(agent => {
             if (agent.state !== AgentState.INFECTED) return false;
-            const dist = Math.hypot(agent.x - pos.x, agent.z - pos.z);
+            const dist = Math.hypot(agent.pos.x - pos.x, agent.pos.z - pos.z);
             return dist < EXPOSURE_CONFIG.INFECTED_RADIUS;
           });
 
           if (nearbyInfected.length > 0) {
             const infectedDensity = Math.min(1, nearbyInfected.length / EXPOSURE_CONFIG.MAX_INFECTED_DENSITY);
-            const exposureChance = EXPOSURE_CONFIG.INFECTED_BASE_CHANCE * infectedDensity * protectionMultiplier;
+            const pneumonicCount = nearbyInfected.filter(agent => agent.plagueType === PlagueType.PNEUMONIC).length;
+            const pneumonicBoost = pneumonicCount > 0 ? 1.4 : 0.35;
+            const exposureChance = EXPOSURE_CONFIG.INFECTED_BASE_CHANCE * infectedDensity * pneumonicBoost * protectionMultiplier;
 
-            if (Math.random() < exposureChance) {
+            if (Math.random() < Math.min(0.2, exposureChance)) {
               onPlagueExposure('airborne', 0.8);
               return;
             }
@@ -1481,7 +1820,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           const nearbyAgents = queryNearbyAgents(pos, agentHashRef.current);
           const nearbyCorpses = nearbyAgents.filter(agent => {
             if (agent.state !== AgentState.DECEASED) return false;
-            const dist = Math.hypot(agent.x - pos.x, agent.z - pos.z);
+            const dist = Math.hypot(agent.pos.x - pos.x, agent.pos.z - pos.z);
             return dist < EXPOSURE_CONFIG.CORPSE_RADIUS;
           });
 
@@ -1497,12 +1836,23 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    // 6. Marker positioning
+    // 6. Marker positioning (shows at click-to-move target)
     if (markerRef.current) {
-      // Keep marker on ground while jumping
-      markerRef.current.position.y = groundHeightNow - group.current.position.y + 0.05;
-      if (markerGlowRef.current) {
-        markerGlowRef.current.position.y = groundHeightNow - group.current.position.y + 0.02;
+      if (targetPosition) {
+        // Show marker at click target position
+        const targetGroundHeight = sampleTerrainHeight(heightmap, targetPosition.x, targetPosition.z);
+        markerRef.current.position.set(targetPosition.x, targetGroundHeight + 0.05, targetPosition.z);
+        markerRef.current.visible = true;
+        if (markerGlowRef.current) {
+          markerGlowRef.current.position.set(targetPosition.x, targetGroundHeight + 0.02, targetPosition.z);
+          markerGlowRef.current.visible = true;
+        }
+      } else {
+        // Hide marker when no target
+        markerRef.current.visible = false;
+        if (markerGlowRef.current) {
+          markerGlowRef.current.visible = false;
+        }
       }
     }
   });
@@ -1551,6 +1901,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             turbanColor={playerStats?.headwearColor || playerStats?.hairColor || '#ffffff'}
             headscarfColor={playerStats?.headscarfColor}
             gender={playerStats?.gender}
+            age={playerStats?.age}
             hairColor={playerStats?.hairColor}
             scale={playerStats ? [playerStats.weight, playerStats.height, playerStats.weight] : undefined}
             enableArmSwing
@@ -1579,6 +1930,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             jumpAnticipationRef={jumpAnticipationRef}
             landingImpulseRef={landingImpulseRef}
             jumpChargeRef={lastJumpChargeRef}
+            isClimbing={isClimbing}
+            climbAnimationPhaseRef={climbAnimationPhaseRef}
             animationBoost={1.35}
             distanceFromCamera={0}
             showGroundShadow={false}
@@ -1600,26 +1953,23 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           </group>
         )}
 
-        {/* Glowing Marker */}
-        <mesh ref={markerRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.05, 0]}>
-          <ringGeometry args={[0.8, 1.0, 32]} />
-          <meshBasicMaterial color={MARKER_COLOR} transparent opacity={0.65} side={THREE.DoubleSide} />
-        </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.04, 0]}>
-          <circleGeometry args={[1.0, 32]} />
-          <meshBasicMaterial color={MARKER_COLOR} transparent opacity={0.12} />
-        </mesh>
-        <mesh ref={markerGlowRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-          <planeGeometry args={[2.6, 2.6]} />
-          <meshBasicMaterial
-            map={markerGlowMap ?? undefined}
-            transparent
-            opacity={0.7}
-            blending={THREE.AdditiveBlending}
-            depthWrite={false}
-          />
-        </mesh>
       </group>
+
+      {/* Click-to-Move Destination Marker (world space) */}
+      <mesh ref={markerRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} visible={false}>
+        <ringGeometry args={[0.8, 1.0, 32]} />
+        <meshBasicMaterial color={MARKER_COLOR} transparent opacity={0.65} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh ref={markerGlowRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 0]} visible={false}>
+        <planeGeometry args={[2.6, 2.6]} />
+        <meshBasicMaterial
+          map={markerGlowMap ?? undefined}
+          transparent
+          opacity={0.7}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
     </>
   );
 });

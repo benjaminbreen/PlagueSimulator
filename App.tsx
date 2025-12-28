@@ -8,10 +8,15 @@ import { MoraleStats } from './components/Agents';
 import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
 import { MerchantModal } from './components/MerchantModal';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
+import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
+import { shouldNpcBeHome } from './utils/npcSchedule';
+import { advanceNpcHealth, applyHouseholdExposure, ensureNpcPlagueMeta, resetNpcPlagueMeta } from './utils/npcHealth';
+import { updateBuildingInfections } from './utils/buildingInfection';
 import { initializePlague, progressPlague } from './utils/plague';
+import { ConversationImpact, applyConversationImpact } from './utils/friendliness';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -48,10 +53,20 @@ function App() {
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showEncounterModal, setShowEncounterModal] = useState(false);
   const [showEncounterModal3, setShowEncounterModal3] = useState(false);
+  const [isNPCInitiatedEncounter, setIsNPCInitiatedEncounter] = useState(false);
   const [showDemographicsOverlay, setShowDemographicsOverlay] = useState(false);
   const [npcStateOverride, setNpcStateOverride] = useState<NpcStateOverride | null>(null);
+  const [tileBuildings, setTileBuildings] = useState<BuildingMetadata[]>([]);
+  const [outdoorNpcPool, setOutdoorNpcPool] = useState<NPCRecord[]>([]);
+  const [buildingInfectionState, setBuildingInfectionState] = useState<Record<string, BuildingInfectionState>>({});
+  const tileRegistriesRef = useRef<Map<string, { npcMap: Map<string, NPCRecord>; lastScheduleSimTime: number }>>(new Map());
+  const buildingInfectionRef = useRef<Map<string, Map<string, BuildingInfectionState>>>(new Map());
+  const scheduleTickRef = useRef(0);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
+  const [climbablePrompt, setClimbablePrompt] = useState<string | null>(null);
+  const [isClimbing, setIsClimbing] = useState(false);
+  const climbInputRef = useRef<'up' | 'down' | 'cancel' | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
   const [pushCharge, setPushCharge] = useState(0);
   const [currentWeather, setCurrentWeather] = useState<string>('CLEAR');
@@ -64,9 +79,38 @@ function App() {
   // Conversation history state (session-only, keyed by NPC id)
   const [conversationHistories, setConversationHistories] = useState<ConversationSummary[]>([]);
 
-  const handleConversationSummary = useCallback((summary: ConversationSummary) => {
+  // Handle conversation end - save summary and apply impact to NPC disposition
+  const handleConversationResult = useCallback((npcId: string, summary: ConversationSummary, impact: ConversationImpact) => {
+    // Save conversation summary to history
     setConversationHistories(prev => [...prev, summary]);
+
+    // Apply impact to NPC disposition and panic in the pool
+    setOutdoorNpcPool(prev => prev.map(record => {
+      if (record.stats.id !== npcId) return record;
+
+      // Apply the conversation impact to update disposition and panic
+      const { newDisposition, newPanicLevel } = applyConversationImpact(record.stats, impact);
+
+      return {
+        ...record,
+        stats: {
+          ...record.stats,
+          disposition: newDisposition,
+          panicLevel: newPanicLevel
+        }
+      };
+    }));
   }, []);
+
+  // Handle NPC-initiated encounters (friendly NPCs approaching the player)
+  const handleNPCInitiatedEncounter = useCallback((npc: { stats: NPCStats; state: AgentState }) => {
+    // Don't trigger if any modal is already open
+    if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || showEncounterModal3) return;
+
+    setSelectedNpc(npc);
+    setIsNPCInitiatedEncounter(true);
+    setShowEncounterModal(true);
+  }, [showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, showEncounterModal3]);
 
   const handleForceNpcState = useCallback((id: string, state: AgentState) => {
     setNpcStateOverride({ id, state, nonce: Date.now() });
@@ -74,11 +118,30 @@ function App() {
       if (!prev || prev.stats.id !== id) return prev;
       return { ...prev, state };
     });
-  }, []);
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const registry = tileRegistriesRef.current.get(tileKey);
+    if (registry) {
+      const record = registry.npcMap.get(id);
+      if (record) {
+        record.state = state;
+        record.stateStartTime = stats.simTime;
+        record.lastUpdateSimTime = stats.simTime;
+      }
+    }
+  }, [params.mapX, params.mapY, stats.simTime]);
 
   const handleForceAllNpcState = useCallback((state: AgentState) => {
     setNpcStateOverride({ id: '*', state, nonce: Date.now() });
     setSelectedNpc((prev) => (prev ? { ...prev, state } : prev));
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const registry = tileRegistriesRef.current.get(tileKey);
+    if (registry) {
+      registry.npcMap.forEach((record) => {
+        record.state = state;
+        record.stateStartTime = stats.simTime;
+        record.lastUpdateSimTime = stats.simTime;
+      });
+    }
   }, []);
 
   // Action system state
@@ -257,10 +320,12 @@ function App() {
       }
       if (e.key === '4' && selectedNpc && !showEncounterModal && !showEncounterModal3 && !showMerchantModal && !showEnterModal && !showPlayerModal) {
         e.preventDefault();
+        setIsNPCInitiatedEncounter(false); // Player-initiated, not NPC
         setShowEncounterModal(true);
       }
       if (e.key === 'Escape' && showEncounterModal) {
         setShowEncounterModal(false);
+        setIsNPCInitiatedEncounter(false);
       }
       if (e.key === '3' && selectedNpc && !showEncounterModal3 && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
         e.preventDefault();
@@ -358,6 +423,12 @@ function App() {
     }, 600);
   }, []);
 
+  useEffect(() => {
+    setTileBuildings([]);
+    setOutdoorNpcPool([]);
+    setBuildingInfectionState({});
+  }, [params.mapX, params.mapY]);
+
   const canvasCamera = useMemo(() => ({ position: [20, 20, 20] as [number, number, number], fov: 45 }), []);
   const canvasDpr = useMemo(() => [1, 2] as [number, number], []);
   const canvasGl = useMemo(() => ({ toneMappingExposure: 1.05 }), []);
@@ -378,6 +449,134 @@ function App() {
     setStats(prev => ({ ...prev, ...counts }));
   }, []);
 
+  const setBuildingInfectionSnapshot = useCallback((nextMap: Map<string, BuildingInfectionState>) => {
+    const nextRecord: Record<string, BuildingInfectionState> = {};
+    nextMap.forEach((value, key) => {
+      nextRecord[key] = value;
+    });
+    setBuildingInfectionState((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(nextRecord);
+      if (prevKeys.length === nextKeys.length && nextKeys.every((key) => prev[key]?.status === nextRecord[key]?.status)) {
+        return prev;
+      }
+      return nextRecord;
+    });
+  }, []);
+
+  const ensureTileRegistry = useCallback((buildings: BuildingMetadata[]) => {
+    if (buildings.length === 0) return null;
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    let registry = tileRegistriesRef.current.get(tileKey);
+    if (!registry) {
+      const district = getDistrictType(params.mapX, params.mapY);
+      const tileSeed = hashToSeedTile(tileKey);
+      registry = createTileNPCRegistry(buildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT);
+      tileRegistriesRef.current.set(tileKey, registry);
+    }
+    return registry;
+  }, [params.mapX, params.mapY, stats.simTime]);
+
+  const updateRegistryForSchedule = useCallback((registry: { npcMap: Map<string, NPCRecord>; lastScheduleSimTime: number }) => {
+    const timeOfDay = params.timeOfDay;
+    const lockedBuildingId = sceneMode === 'interior' ? interiorBuilding?.id ?? null : null;
+    registry.npcMap.forEach((record) => {
+      if (lockedBuildingId && record.homeBuildingId === lockedBuildingId) {
+        record.location = 'interior';
+        return;
+      }
+      if (record.homeBuildingId) {
+        const shouldHome = shouldNpcBeHome(record, timeOfDay);
+        record.location = shouldHome ? 'interior' : 'outdoor';
+      } else {
+        record.location = 'outdoor';
+      }
+    });
+    registry.lastScheduleSimTime = stats.simTime;
+  }, [params.timeOfDay, stats.simTime, sceneMode, interiorBuilding]);
+
+  const updateOffscreenHealth = useCallback((registry: { npcMap: Map<string, NPCRecord> }) => {
+    const householdRisk = new Map<string, boolean>();
+    registry.npcMap.forEach((record) => {
+      if (!record.homeBuildingId) return;
+      if (record.location !== 'interior') return;
+      if (record.state === AgentState.INFECTED || record.state === AgentState.INCUBATING) {
+        householdRisk.set(record.homeBuildingId, true);
+      }
+    });
+
+    registry.npcMap.forEach((record) => {
+      const timeSinceUpdate = stats.simTime - record.lastUpdateSimTime;
+      if (record.location === 'outdoor' && timeSinceUpdate < 0.5) return;
+      if (timeSinceUpdate >= 0.25) {
+        if (record.location === 'interior' && record.homeBuildingId && householdRisk.get(record.homeBuildingId)) {
+          applyHouseholdExposure(record, stats.simTime, timeSinceUpdate);
+        }
+        advanceNpcHealth(record, stats.simTime);
+        record.lastUpdateSimTime = stats.simTime;
+      }
+    });
+  }, [stats.simTime]);
+
+  const handleNpcUpdate = useCallback((id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: import('./types').NPCPlagueMeta) => {
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const registry = tileRegistriesRef.current.get(tileKey);
+    if (!registry) return;
+    const record = registry.npcMap.get(id);
+    if (!record) return;
+    if (record.state !== state) {
+      record.state = state;
+      record.stateStartTime = stats.simTime;
+      if (state === AgentState.INCUBATING) {
+        ensureNpcPlagueMeta(record, stats.simTime);
+      } else if (state === AgentState.INFECTED) {
+        ensureNpcPlagueMeta(record, stats.simTime);
+        if (record.plagueMeta) {
+          record.plagueMeta.onsetTime = stats.simTime;
+        }
+      } else if (state === AgentState.HEALTHY) {
+        resetNpcPlagueMeta(record);
+      }
+    }
+    if (plagueMeta) {
+      record.plagueMeta = plagueMeta;
+    }
+    record.lastUpdateSimTime = stats.simTime;
+    record.stats.awarenessLevel = awareness;
+    record.stats.panicLevel = panic;
+    record.location = location;
+    if (location === 'outdoor') {
+      record.lastOutdoorPos = [pos.x, pos.y, pos.z];
+    }
+  }, [params.mapX, params.mapY, stats.simTime]);
+
+  const handleBuildingsUpdate = useCallback((buildings: BuildingMetadata[]) => {
+    scheduleTickRef.current = 0;
+    setTileBuildings(buildings);
+  }, []);
+
+  useEffect(() => {
+    if (tileBuildings.length === 0) return;
+    const registry = ensureTileRegistry(tileBuildings);
+    if (!registry) return;
+    const scheduleInterval = 1.5;
+    const shouldRun = scheduleTickRef.current === 0 || stats.simTime - scheduleTickRef.current >= scheduleInterval;
+    if (!shouldRun) return;
+    scheduleTickRef.current = stats.simTime;
+    updateRegistryForSchedule(registry);
+    updateOffscreenHealth(registry);
+    const outdoor = Array.from(registry.npcMap.values()).filter((record) => record.location === 'outdoor');
+    setOutdoorNpcPool(outdoor);
+    if (sceneMode === 'outdoor' && selectedNpc && !outdoor.some((record) => record.id === selectedNpc.stats.id)) {
+      setSelectedNpc(null);
+    }
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const prevInfection = buildingInfectionRef.current.get(tileKey) ?? new Map();
+    const nextInfection = updateBuildingInfections(tileBuildings, registry.npcMap, prevInfection, stats.simTime);
+    buildingInfectionRef.current.set(tileKey, nextInfection);
+    setBuildingInfectionSnapshot(nextInfection);
+  }, [stats.simTime, tileBuildings, ensureTileRegistry, updateRegistryForSchedule, updateOffscreenHealth, setBuildingInfectionSnapshot, params.mapX, params.mapY, sceneMode, selectedNpc]);
+
   const hashToSeed = useCallback((input: string) => {
     let hash = 0;
     for (let i = 0; i < input.length; i += 1) {
@@ -389,13 +588,27 @@ function App() {
   const enterInterior = useCallback((building: BuildingMetadata) => {
     const seed = hashToSeed(building.id);
     const spec = generateInteriorSpec(building, seed);
+    const registry = ensureTileRegistry(tileBuildings);
+    if (registry) {
+      spec.npcs = spec.npcs.map((npc) => {
+        const record = registry.npcMap.get(npc.id);
+        if (!record) return npc;
+        record.location = 'interior';
+        return {
+          ...npc,
+          stats: record.stats,
+          state: record.state,
+          plagueMeta: record.plagueMeta
+        };
+      });
+    }
     setInteriorSpec(spec);
     setInteriorNarrator(spec.narratorState);
     setInteriorBuilding(building);
     lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
     setNearBuilding(null);
     setSceneMode('interior');
-  }, [hashToSeed, params.mapX, params.mapY]);
+  }, [ensureTileRegistry, hashToSeed, params.mapX, params.mapY, tileBuildings]);
 
   const handlePurchase = useCallback((item: import('./types').MerchantItem, quantity: number) => {
     if (!nearMerchant) return;
@@ -605,6 +818,9 @@ function App() {
         minimapData={minimapData}
         sceneMode={sceneMode}
         pickupPrompt={pickupPrompt}
+        climbablePrompt={climbablePrompt}
+        isClimbing={isClimbing}
+        onClimbInput={(dir) => { climbInputRef.current = dir; }}
         pickupToast={pickupToast?.message ?? null}
         currentWeather={currentWeather}
         pushCharge={pushCharge}
@@ -619,11 +835,12 @@ function App() {
         showEncounterModal3={showEncounterModal3}
         setShowEncounterModal3={setShowEncounterModal3}
         conversationHistories={conversationHistories}
-        onConversationSummary={handleConversationSummary}
+        onConversationResult={handleConversationResult}
         showDemographicsOverlay={showDemographicsOverlay}
         setShowDemographicsOverlay={setShowDemographicsOverlay}
         onForceNpcState={handleForceNpcState}
         onForceAllNpcState={handleForceAllNpcState}
+        isNPCInitiatedEncounter={isNPCInitiatedEncounter}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting */}
@@ -754,11 +971,16 @@ function App() {
               onStatsUpdate={handleStatsUpdate}
               onMapChange={handleMapChange}
               onNearBuilding={setNearBuilding}
+              onBuildingsUpdate={handleBuildingsUpdate}
               onNearMerchant={setNearMerchant}
               onNpcSelect={setSelectedNpc}
+              onNpcUpdate={handleNpcUpdate}
               selectedNpcId={selectedNpc?.stats.id ?? null}
               onMinimapUpdate={setMinimapData}
               onPickupPrompt={setPickupPrompt}
+              onClimbablePrompt={setClimbablePrompt}
+              onClimbingStateChange={setIsClimbing}
+              climbInputRef={climbInputRef}
               onPickupItem={handlePickupItem}
               onWeatherUpdate={setCurrentWeather}
               onPushCharge={setPushCharge}
@@ -766,9 +988,12 @@ function App() {
               actionEvent={actionEvent}
               showDemographicsOverlay={showDemographicsOverlay}
               npcStateOverride={npcStateOverride}
+              npcPool={outdoorNpcPool}
+              buildingInfection={buildingInfectionState}
               onPlayerPositionUpdate={(pos) => playerPositionRef.current.copy(pos)}
               dossierMode={showPlayerModal}
               onPlagueExposure={handlePlagueExposure}
+              onNPCInitiatedEncounter={handleNPCInitiatedEncounter}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -780,9 +1005,11 @@ function App() {
               onPickupPrompt={setPickupPrompt}
               onPickupItem={handlePickupItem}
               onNpcSelect={setSelectedNpc}
+              onNpcUpdate={handleNpcUpdate}
               selectedNpcId={selectedNpc?.stats.id ?? null}
               showDemographicsOverlay={showDemographicsOverlay}
               npcStateOverride={npcStateOverride}
+              onPlagueExposure={handlePlagueExposure}
             />
           )}
         </Suspense>

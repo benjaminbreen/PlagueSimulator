@@ -312,6 +312,126 @@ const FrankishWarehouse: React.FC<{ seed: number }> = ({ seed }) => {
   );
 };
 
+// Bell Tower (campanile style, though bells were rarely rung under Mamluk rule)
+const BellTower: React.FC<{ seed: number }> = ({ seed }) => {
+  const rand = (offset: number) => seededRandom(seed + offset);
+  const stoneColor = '#b8a898';
+
+  return (
+    <group>
+      {/* Base foundation */}
+      <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3.5, 1, 3.5]} />
+        <meshStandardMaterial color="#a89888" roughness={0.9} />
+      </mesh>
+      {/* Main tower shaft */}
+      <mesh position={[0, 6, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 10, 3]} />
+        <meshStandardMaterial color={stoneColor} roughness={0.9} />
+      </mesh>
+      {/* Bell chamber (open arches) */}
+      <mesh position={[0, 12, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3.2, 3, 3.2]} />
+        <meshStandardMaterial color={stoneColor} roughness={0.9} />
+      </mesh>
+      {/* Arched openings in bell chamber */}
+      {[0, Math.PI / 2, Math.PI, -Math.PI / 2].map((angle, i) => (
+        <mesh
+          key={`arch-${i}`}
+          position={[Math.sin(angle) * 1.65, 12, Math.cos(angle) * 1.65]}
+          rotation={[0, angle, 0]}
+          castShadow
+        >
+          <boxGeometry args={[0.1, 2, 1.5]} />
+          <meshStandardMaterial color="#2a2a2a" roughness={0.6} transparent opacity={0.9} />
+        </mesh>
+      ))}
+      {/* Pyramidal roof */}
+      <mesh position={[0, 14.5, 0]} rotation={[0, Math.PI / 4, 0]} castShadow receiveShadow>
+        <coneGeometry args={[2.5, 3, 4]} />
+        <meshStandardMaterial color="#6a5a4a" roughness={0.85} />
+      </mesh>
+      {/* Cross on top */}
+      <group position={[0, 16.5, 0]}>
+        <ByzantineCross height={1.5} color="#4a4a4a" />
+      </group>
+    </group>
+  );
+};
+
+// Syriac Orthodox Monastery with scriptorium
+const SyriacMonastery: React.FC<{ seed: number }> = ({ seed }) => {
+  const rand = (offset: number) => seededRandom(seed + offset);
+  const wallColor = '#c8b8a8';
+  const woodColor = '#5a4a3a';
+
+  return (
+    <group>
+      {/* Main monastery building */}
+      <mesh position={[0, 3, 0]} castShadow receiveShadow>
+        <boxGeometry args={[8, 6, 12]} />
+        <meshStandardMaterial color={wallColor} roughness={0.9} />
+      </mesh>
+      {/* Scriptorium wing (where manuscripts are copied) */}
+      <mesh position={[6, 2, 3]} castShadow receiveShadow>
+        <boxGeometry args={[4, 4, 6]} />
+        <meshStandardMaterial color={wallColor} roughness={0.9} />
+      </mesh>
+      {/* Small chapel attached */}
+      <mesh position={[-5, 2.5, -3]} castShadow receiveShadow>
+        <boxGeometry args={[4, 5, 6]} />
+        <meshStandardMaterial color={wallColor} roughness={0.9} />
+      </mesh>
+      {/* Chapel dome */}
+      <group position={[-5, 5.5, -3]}>
+        <mesh castShadow receiveShadow>
+          <sphereGeometry args={[1.5, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshStandardMaterial color="#5a6a7a" roughness={0.6} />
+        </mesh>
+        <group position={[0, 1.8, 0]}>
+          <ByzantineCross height={1} color="#4a4a4a" />
+        </group>
+      </group>
+      {/* Courtyard colonnade */}
+      {[-3, -1, 1, 3].map((z, i) => (
+        <group key={`column-${i}`} position={[4, 2, z]}>
+          <mesh castShadow receiveShadow>
+            <cylinderGeometry args={[0.25, 0.25, 4, 8]} />
+            <meshStandardMaterial color="#a89888" roughness={0.85} />
+          </mesh>
+          {/* Column capital */}
+          <mesh position={[0, 2.2, 0]} castShadow>
+            <cylinderGeometry args={[0.35, 0.25, 0.4, 8]} />
+            <meshStandardMaterial color="#a89888" roughness={0.85} />
+          </mesh>
+        </group>
+      ))}
+      {/* Wooden door */}
+      <mesh position={[0, 1.5, 6.05]} castShadow>
+        <boxGeometry args={[1.8, 3, 0.2]} />
+        <meshStandardMaterial color={woodColor} roughness={0.95} />
+      </mesh>
+      {/* Small windows (scriptorium needs light) */}
+      {[0, 2, 4].map((z, i) => (
+        <mesh key={`window-${i}`} position={[8.05, 2.5, z]} castShadow>
+          <boxGeometry args={[0.2, 1.2, 0.8]} />
+          <meshStandardMaterial color="#3a4a5a" roughness={0.5} />
+        </mesh>
+      ))}
+      {/* Stone cross marker outside */}
+      <group position={[-3, 0, 6.5]}>
+        <mesh position={[0, 0.4, 0]} castShadow>
+          <boxGeometry args={[0.6, 0.8, 0.6]} />
+          <meshStandardMaterial color="#9a9a8a" roughness={0.8} />
+        </mesh>
+        <group position={[0, 1.2, 0]}>
+          <ByzantineCross height={1} color="#6a6a5a" />
+        </group>
+      </group>
+    </group>
+  );
+};
+
 export const ChristianQuarterDecor: React.FC<{
   mapX: number;
   mapY: number;
@@ -320,7 +440,7 @@ export const ChristianQuarterDecor: React.FC<{
   heightmap?: TerrainHeightmap | null;
 }> = ({ mapX, mapY, timeOfDay, terrainSeed, heightmap }) => {
   const district = getDistrictType(mapX, mapY);
-  if (district !== 'ALLEYS') return null;
+  if (district !== 'CHRISTIAN_QUARTER') return null;
 
   const time = timeOfDay ?? 12;
   const baseSeed = mapX * 1000 + mapY * 13 + 777;
@@ -332,8 +452,12 @@ export const ChristianQuarterDecor: React.FC<{
     return {
       // Main Orthodox church (Melkite) - prominent position
       orthodoxChurch: [-15, -12] as [number, number],
+      // Bell tower - near main church
+      bellTower: [-10, -12] as [number, number],
       // Armenian chapel - smaller, near market area
       armenianChapel: [18, 8] as [number, number],
+      // Syriac Orthodox monastery with scriptorium
+      syriacMonastery: [-22, 10] as [number, number],
       // Churchyard fountain
       fountain: [-8, -8] as [number, number],
       // Wine shops scattered in the quarter
@@ -386,6 +510,15 @@ export const ChristianQuarterDecor: React.FC<{
         <OrthodoxChurch seed={baseSeed + 1} scale={1} />
       </group>
 
+      {/* Bell Tower - Near main church */}
+      <group position={[
+        landmarks.bellTower[0],
+        getHeight(landmarks.bellTower[0], landmarks.bellTower[1]),
+        landmarks.bellTower[1]
+      ]}>
+        <BellTower seed={baseSeed + 5} />
+      </group>
+
       {/* Armenian Chapel */}
       <group position={[
         landmarks.armenianChapel[0],
@@ -393,6 +526,15 @@ export const ChristianQuarterDecor: React.FC<{
         landmarks.armenianChapel[1]
       ]} rotation={[0, Math.PI / 4, 0]}>
         <ArmenianChapel seed={baseSeed + 2} />
+      </group>
+
+      {/* Syriac Orthodox Monastery */}
+      <group position={[
+        landmarks.syriacMonastery[0],
+        getHeight(landmarks.syriacMonastery[0], landmarks.syriacMonastery[1]),
+        landmarks.syriacMonastery[1]
+      ]} rotation={[0, -Math.PI / 6, 0]}>
+        <SyriacMonastery seed={baseSeed + 6} />
       </group>
 
       {/* Churchyard Fountain */}

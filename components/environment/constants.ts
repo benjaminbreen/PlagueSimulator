@@ -51,6 +51,7 @@ export const GROUND_PALETTE = {
   WEALTHY: ['#5a8a48', '#4f7d3d', '#649850', '#558a42'],  // Lush garden green like Salhiyya
   HOVELS: ['#b68a5f', '#a47b54', '#9a734d'],
   ALLEYS: ['#b68a5f', '#a47b54', '#9a734d'],
+  JEWISH_QUARTER: ['#a47854', '#9a6d48', '#8f6040'],  // Darker stone for Jewish Quarter
   RESIDENTIAL: ['#c8b8a8', '#b8a898', '#d8c8b8'],
   CIVIC: ['#d8c2a0', '#d1b896'],
   SALHIYYA: ['#6a8a4a', '#5f7d45', '#548040'],

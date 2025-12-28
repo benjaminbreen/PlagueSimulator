@@ -27,6 +27,7 @@ const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
   SALHIYYA: 'wealthy',
   HOVELS: 'hovels',
   ALLEYS: 'hovels',
+  JEWISH_QUARTER: 'hovels',  // TODO: Add specific Jewish Quarter soundscape in Phase 6
   RESIDENTIAL: 'hovels',
   OUTSKIRTS_DESERT: 'desert',
   OUTSKIRTS_FARMLAND: 'desert',

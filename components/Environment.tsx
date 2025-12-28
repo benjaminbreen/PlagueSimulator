@@ -64,12 +64,16 @@ import { OutskirtsFarmlandDecor } from './environment/districts/OutskirtsFarmlan
 import { OutskirtsDesertDecor } from './environment/districts/OutskirtsDesertDecor';
 import { SouthernRoadDecor } from './environment/districts/SouthernRoadDecor';
 import { ChristianQuarterDecor } from './environment/districts/ChristianQuarterDecor';
+import JewishQuarterDecor from './environment/districts/JewishQuarterDecor';
+import UmayyadMosqueDistrict from './environment/districts/UmayyadMosqueDistrict';
 import { MosqueBackground } from './environment/landmarks/MosqueBackground';
 import { HorizonBackdrop } from './environment/landmarks/HorizonBackdrop';
 import { CentralWell } from './environment/landmarks/CentralWell';
 import { BirdFlock } from './environment/landmarks/BirdFlock';
 import { WealthyGarden } from './environment/landmarks/WealthyGarden';
 import { CitadelComplex } from './environment/landmarks/CitadelComplex';
+import { ClimbableAccessory } from './environment/climbables';
+import { generateClimbablesForBuilding } from '../utils/climbables';
 
 // Texture generators, constants, and hover system now imported from environment/
 
@@ -199,6 +203,7 @@ interface EnvironmentProps {
   sessionSeed?: number; // Random seed per game session for procedural variation
   onGroundClick?: (point: THREE.Vector3) => void;
   onBuildingsGenerated?: (buildings: BuildingMetadata[]) => void;
+  onClimbablesGenerated?: (climbables: import('../types').ClimbableAccessory[]) => void;
   onHeightmapBuilt?: (heightmap: TerrainHeightmap | null) => void;
   onTreePositionsGenerated?: (trees: Array<[number, number, number]>) => void;
   nearBuildingId?: string | null;
@@ -2167,6 +2172,8 @@ const Building: React.FC<{
   const finalBuildingSize = baseBuildingSize * professionArchitecture.footprintScale;
   const finalHeight = baseHeightScaled * professionArchitecture.heightMultiplier;
 
+  // Note: Climbables now generated at Environment level for correct world positioning
+
   const buildingMaterial = useMemo(() => {
     if (!(mainMaterial instanceof THREE.MeshStandardMaterial)) return mainMaterial;
     const mat = mainMaterial.clone();
@@ -3511,6 +3518,8 @@ const Building: React.FC<{
           intensity={torchIntensity}
         />
       ))}
+
+      {/* Climbable Accessories rendered at Environment level for correct world positioning */}
     </group>
   );
 };
@@ -3963,7 +3972,7 @@ export const Buildings: React.FC<{
     const terrainSeed = mapX * 1000 + mapY * 13 + 19;
     let seed = (mapX * 100) + mapY + sessionSeed; // Include session seed for procedural variation
 
-    if (district === 'ALLEYS') {
+    if (district === 'ALLEYS' || district === 'JEWISH_QUARTER') {
       const cellSize = 7;
       const halfCells = 4;
       const openCells = new Set<string>();
@@ -4279,6 +4288,10 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
   const blotchTexture = useMemo(() => createBlotchTexture(512), []);
   const { camera, scene } = useThree();
 
+  // Drag detection for click-to-move (prevent camera drag from triggering movement)
+  const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const DRAG_THRESHOLD = 5; // pixels - movement beyond this is considered a drag
+
   // Calculate heat intensity for shimmer effect (peak at midday)
   const time = timeOfDay ?? 12;
   const sunAngle = (time / 24) * Math.PI * 2;
@@ -4332,6 +4345,7 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
     : district === 'WEALTHY' ? pick(GROUND_PALETTE.WEALTHY)
     : district === 'HOVELS' ? pick(GROUND_PALETTE.HOVELS)
     : district === 'ALLEYS' ? pick(GROUND_PALETTE.ALLEYS)
+    : district === 'JEWISH_QUARTER' ? pick(GROUND_PALETTE.JEWISH_QUARTER)
     : district === 'SALHIYYA' ? pick(GROUND_PALETTE.SALHIYYA)
     : district === 'OUTSKIRTS_FARMLAND' ? pick(GROUND_PALETTE.OUTSKIRTS_FARMLAND)
     : district === 'OUTSKIRTS_DESERT' ? pick(GROUND_PALETTE.OUTSKIRTS_DESERT)
@@ -4341,7 +4355,7 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
     : district === 'CIVIC' ? pick(GROUND_PALETTE.CIVIC)
     : pick(GROUND_PALETTE.DEFAULT);
   const overlayColor = district === 'WEALTHY' ? '#c3b9a9'
-    : district === 'HOVELS' || district === 'ALLEYS' ? '#9a734d'
+    : district === 'HOVELS' || district === 'ALLEYS' || district === 'JEWISH_QUARTER' ? '#9a734d'
     : district === 'SALHIYYA' ? '#4a6a3a' // Grass overlay
     : district === 'OUTSKIRTS_FARMLAND' ? '#4f6f3b'
     : district === 'OUTSKIRTS_DESERT' ? '#d17a4a' // Warm terracotta overlay (unused - overlay disabled for desert)
@@ -4495,13 +4509,30 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
 
   return (
     <group>
-      <mesh 
-        rotation={[-Math.PI / 2, 0, 0]} 
-        receiveShadow 
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        receiveShadow
         position={[0, -0.1, 0]}
         onPointerDown={(e) => {
           e.stopPropagation();
-          onClick?.(e.point);
+          // Track pointer down position to detect drag
+          pointerDownPosRef.current = { x: e.clientX, y: e.clientY };
+        }}
+        onPointerUp={(e) => {
+          e.stopPropagation();
+          // Only trigger click-to-move if pointer hasn't moved much (not a drag)
+          if (pointerDownPosRef.current) {
+            const dx = e.clientX - pointerDownPosRef.current.x;
+            const dy = e.clientY - pointerDownPosRef.current.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+
+            if (distance < DRAG_THRESHOLD) {
+              // This was a click, not a drag - trigger movement
+              onClick?.(e.point);
+            }
+
+            pointerDownPosRef.current = null;
+          }
         }}
       >
         <primitive object={terrainGeometry ?? baseGeometry} attach="geometry" />
@@ -4547,7 +4578,7 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
 
 // LaundryLines now imported from ./environment/decorations/LaundryLines
 
-export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [], fogColor, heightmap, laundryLines = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true }) => {
+export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [], fogColor, heightmap, laundryLines = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
   const terrainSeed = mapX * 1000 + mapY * 13 + 19;
@@ -4561,12 +4592,27 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
   // Track building positions for path generation
   const [buildingPositions, setBuildingPositions] = React.useState<Array<[number, number, number]>>([]);
 
+  // Store climbables at Environment level for proper world-space rendering
+  const [climbablesForRendering, setClimbablesForRendering] = React.useState<import('../types').ClimbableAccessory[]>([]);
+
   const handleBuildingsGenerated = React.useCallback((buildings: BuildingMetadata[]) => {
     // Extract building positions
     setBuildingPositions(buildings.map(b => b.position));
     // Forward to original callback
     onBuildingsGenerated?.(buildings);
-  }, [onBuildingsGenerated]);
+
+    // Generate all climbables for all buildings
+    const allClimbables: import('../types').ClimbableAccessory[] = [];
+    for (const building of buildings) {
+      const buildingSeed = building.position[0] * 1000 + building.position[2] + 5000;
+      const buildingClimbables = generateClimbablesForBuilding(building, district, buildingSeed);
+      allClimbables.push(...buildingClimbables);
+    }
+
+    // Store for rendering and pass to callback
+    setClimbablesForRendering(allClimbables);
+    onClimbablesGenerated?.(allClimbables);
+  }, [onBuildingsGenerated, onClimbablesGenerated, district]);
 
   // Determine if stray dog should spawn (50% chance in non-marketplace biomes)
   const dogSpawn = useMemo(() => {
@@ -4602,6 +4648,10 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
         <group>
           <Ground onClick={onGroundClick} district={district} seed={groundSeed} terrainSeed={terrainSeed} timeOfDay={timeOfDay} fogColor={fogColor} onHeightmapBuilt={onHeightmapBuilt} />
           <Buildings mapX={mapX} mapY={mapY} sessionSeed={sessionSeed} onBuildingsGenerated={handleBuildingsGenerated} nearBuildingId={nearBuildingId} torchIntensity={torchIntensity} nightFactor={nightFactor} heightmap={heightmap} />
+          {/* Render climbables at world level (not inside Building groups) */}
+          {climbablesForRendering.map((accessory) => (
+            <ClimbableAccessory key={accessory.id} accessory={accessory} nightFactor={nightFactor} />
+          ))}
           <MosqueBackground mapX={mapX} mapY={mapY} />
           <HorizonBackdrop timeOfDay={timeOfDay} showCityWalls={displayCityWalls} wallRadius={CONSTANTS.BOUNDARY + 8} district={district} mapX={mapX} mapY={mapY} />
           <CentralWell mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} catPositionRef={catPositionRef} ratPositions={ratPositions} npcPositions={npcPositions} playerPosition={playerPosition} isSprinting={isSprinting} />
@@ -4614,6 +4664,8 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
           <SouthernRoadDecor mapX={mapX} mapY={mapY} />
           <SalhiyyaDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} onTreePositionsGenerated={onTreePositionsGenerated} buildingPositions={buildingPositions} heightmap={heightmap} />
           <ChristianQuarterDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} heightmap={heightmap} />
+          <JewishQuarterDecor mapX={mapX} mapY={mapY} terrainHeightmap={heightmap} sessionSeed={terrainSeed} />
+          <UmayyadMosqueDistrict mapX={mapX} mapY={mapY} terrainHeightmap={heightmap} sessionSeed={terrainSeed} playerPosition={playerPosition} />
           <MountainShrineDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} onTreePositionsGenerated={onTreePositionsGenerated} />
           <CaravanseraiComplex mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
           {pushables.length > 0 && <PushableDecorations items={pushables} />}

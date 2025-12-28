@@ -77,6 +77,15 @@ const DISTRICT_PROFILES: Record<DistrictType, DistrictProfile> = {
     noiseFreqHigh: 220,
     noiseAmount: 0.45,
     droneAmount: 0.55,
+    character: 'domestic',
+  },
+  JEWISH_QUARTER: {
+    baseFreq: 110,
+    harmonics: [1, 0.5, 0.35, 0.2],
+    noiseFreqLow: 90,
+    noiseFreqHigh: 220,
+    noiseAmount: 0.45,
+    droneAmount: 0.55,
     character: 'enclosed',
   },
   SALHIYYA: {

@@ -214,6 +214,7 @@ const RESIDENTIAL_PROFESSIONS = [
 const CLERGY_PROFESSIONS = ['Imam', 'Qadi', 'Mufti', 'Muezzin', 'Qur\'an Reciter', 'Madrasa Teacher'];
 
 // Religious building professions (architecture-specific)
+// Islamic professions (for Muslim-majority districts)
 const RELIGIOUS_PROFESSIONS = [
   'Imam',                    // Neighborhood mosque (masjid)
   'Friday Mosque Imam',      // Large Friday mosque (jami)
@@ -222,16 +223,37 @@ const RELIGIOUS_PROFESSIONS = [
   'Shrine Keeper',           // Mausoleum/tomb (maqam)
 ];
 
-// Civic building professions (public services and government)
-const CIVIC_PROFESSIONS = [
-  'Mamluk Governor',         // Military/political headquarters
-  'Court Qadi',              // Court/tribunal
-  'Notary',                  // Legal documents, contracts
-  'Court Physician',         // Medical clinic
-  'Market Inspector',        // Muhtasib - enforces fair trade
-  'Hammam Keeper',           // Public bath
-  'Fountain Keeper',         // Public fountain (sabil)
+// Christian professions (for Christian Quarter)
+const CHRISTIAN_RELIGIOUS_PROFESSIONS = [
+  'Orthodox Priest',         // Melkite/Eastern Orthodox church
+  'Armenian Priest',         // Armenian Apostolic church
+  'Syriac Priest',          // Syriac Orthodox church
+  'Monk',                    // Monastery/hermitage
+  'Deacon',                  // Assistant to priest
 ];
+
+// Jewish professions (for Jewish Quarter)
+const JEWISH_RELIGIOUS_PROFESSIONS = [
+  'Rabbi',                   // Synagogue leader
+  'Cantor',                  // Synagogue cantor (hazzan)
+  'Torah Scribe',            // Sofer - writes Torah scrolls
+  'Ritual Slaughterer',      // Shochet - kosher butcher
+  'Scholar',                 // Talmudic scholar
+];
+
+// Civic building professions (public services and government)
+// Weighted to make high-ranking positions (Governor, Qadi) much rarer
+const CIVIC_PROFESSIONS_WEIGHTED = [
+  { profession: 'Mamluk Governor', weight: 1 },      // VERY RARE - only 1-2 per city (1/50 = 2%)
+  { profession: 'Court Qadi', weight: 2 },           // RARE - major judge (2/50 = 4%)
+  { profession: 'Court Physician', weight: 5 },      // Uncommon - medical clinic (5/50 = 10%)
+  { profession: 'Market Inspector', weight: 8 },     // Common - muhtasib (8/50 = 16%)
+  { profession: 'Notary', weight: 10 },              // Common - document office (10/50 = 20%)
+  { profession: 'Hammam Keeper', weight: 12 },       // Very common - public baths (12/50 = 24%)
+  { profession: 'Fountain Keeper', weight: 12 },     // Very common - public fountains (12/50 = 24%)
+];
+
+const CIVIC_PROFESSIONS = CIVIC_PROFESSIONS_WEIGHTED.map(p => p.profession);
 // Moods organized by disposition range (0-100)
 // High disposition (80-100): Friendly moods
 // Medium-high (60-80): Pleasant moods
@@ -283,6 +305,233 @@ const HEALTH_STATUSES = ['Sound', 'Wary', 'Recovering', 'Stressed', 'Healthy'];
 export const seededRandom = (seed: number) => {
   const x = Math.sin(seed++) * 10000;
   return x - Math.floor(x);
+};
+
+const adjustHex = (hex: string, factor: number) => {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return hex;
+  const num = parseInt(clean, 16);
+  const r = Math.min(255, Math.max(0, Math.round(((num >> 16) & 0xff) * factor)));
+  const g = Math.min(255, Math.max(0, Math.round(((num >> 8) & 0xff) * factor)));
+  const b = Math.min(255, Math.max(0, Math.round((num & 0xff) * factor)));
+  return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+};
+
+// Convert hex to HSL
+const hexToHSL = (hex: string): { h: number; s: number; l: number } => {
+  const clean = hex.replace('#', '');
+  const num = parseInt(clean, 16);
+  const r = ((num >> 16) & 0xff) / 255;
+  const g = ((num >> 8) & 0xff) / 255;
+  const b = (num & 0xff) / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+      case g: h = ((b - r) / d + 2) / 6; break;
+      case b: h = ((r - g) / d + 4) / 6; break;
+    }
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+};
+
+// Convert HSL to hex
+const hslToHex = (h: number, s: number, l: number): string => {
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+
+  const toHex = (v: number) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+};
+
+/**
+ * Apply age-based graying to hair color
+ * Hair begins graying around 35, with full gray by ~70
+ */
+export const getAgedHairColor = (baseHairColor: string, age: number, rand: () => number): string => {
+  if (age < 30) return baseHairColor;
+
+  const hsl = hexToHSL(baseHairColor);
+
+  // Early graying starts at 30, accelerates after 45
+  let grayProgress = 0;
+  if (age >= 30 && age < 45) {
+    // Slow graying: 0-20% gray by 45
+    grayProgress = ((age - 30) / 15) * 0.2;
+  } else if (age >= 45 && age < 60) {
+    // Medium graying: 20-60% by 60
+    grayProgress = 0.2 + ((age - 45) / 15) * 0.4;
+  } else if (age >= 60) {
+    // Full graying: 60-100% by 75+
+    grayProgress = 0.6 + Math.min(0.4, ((age - 60) / 15) * 0.4);
+  }
+
+  // Add some individual variation (some people gray faster/slower)
+  const variation = (rand() - 0.5) * 0.15;
+  grayProgress = Math.max(0, Math.min(1, grayProgress + variation));
+
+  // Desaturate and lighten
+  const newS = hsl.s * (1 - grayProgress * 0.9); // Almost fully desaturate
+  const newL = hsl.l + grayProgress * (65 - hsl.l); // Lighten toward ~65%
+
+  return hslToHex(hsl.h, newS, newL);
+};
+
+/**
+ * Historical dye color ranges for 14th century Damascus
+ * Based on available dye sources and trade routes
+ */
+const HISTORICAL_DYES: Record<string, { h: [number, number]; s: [number, number]; l: [number, number] }> = {
+  // Expensive imported dyes
+  indigo: { h: [215, 235], s: [30, 50], l: [25, 42] },      // From India/Persia - deep blue
+  kermes: { h: [350, 10], s: [45, 65], l: [28, 42] },       // Insect red, luxury crimson
+  saffron: { h: [42, 52], s: [55, 75], l: [48, 62] },       // Yellow-gold, expensive
+
+  // Local plant dyes
+  madder: { h: [5, 22], s: [38, 58], l: [32, 48] },         // Root-based red/rust
+  pomegranate: { h: [18, 35], s: [28, 48], l: [28, 42] },   // Brown-tan rinds
+  walnut: { h: [25, 40], s: [18, 32], l: [18, 32] },        // Dark brown/near-black
+  henna: { h: [22, 38], s: [42, 62], l: [38, 52] },         // Orange-brown
+  weld: { h: [48, 62], s: [35, 55], l: [52, 68] },          // Yellow-green plant
+
+  // Undyed natural fibers
+  rawLinen: { h: [42, 52], s: [12, 28], l: [62, 78] },      // Cream/ecru
+  rawWool: { h: [35, 48], s: [8, 22], l: [55, 72] },        // Off-white to tan
+};
+
+// Social class determines dye availability (weights sum to ~1.0)
+const DYE_ACCESS_BY_CLASS: Record<SocialClass, Record<string, number>> = {
+  [SocialClass.NOBILITY]: {
+    indigo: 0.20, kermes: 0.12, saffron: 0.10, madder: 0.18,
+    pomegranate: 0.12, walnut: 0.10, henna: 0.08, rawLinen: 0.10
+  },
+  [SocialClass.MERCHANT]: {
+    indigo: 0.08, madder: 0.22, pomegranate: 0.20,
+    walnut: 0.12, henna: 0.12, weld: 0.08, rawLinen: 0.18
+  },
+  [SocialClass.CLERGY]: {
+    walnut: 0.35, rawWool: 0.25, pomegranate: 0.18, indigo: 0.12, rawLinen: 0.10
+  },
+  [SocialClass.PEASANT]: {
+    rawLinen: 0.30, rawWool: 0.28, pomegranate: 0.18, madder: 0.12, walnut: 0.08, weld: 0.04
+  },
+};
+
+/**
+ * Generate a historically-accurate robe color based on social class
+ */
+const generateDyeBasedColor = (rand: () => number, socialClass: SocialClass): string => {
+  const weights = DYE_ACCESS_BY_CLASS[socialClass];
+  const entries = Object.entries(weights);
+
+  // Weighted random selection
+  let roll = rand();
+  let selectedDye = entries[0][0];
+  for (const [dye, weight] of entries) {
+    roll -= weight;
+    if (roll <= 0) {
+      selectedDye = dye;
+      break;
+    }
+  }
+
+  const range = HISTORICAL_DYES[selectedDye];
+  const h = range.h[0] + rand() * (range.h[1] - range.h[0]);
+  const s = range.s[0] + rand() * (range.s[1] - range.s[0]);
+  const l = range.l[0] + rand() * (range.l[1] - range.l[0]);
+
+  return hslToHex(h, s, l);
+};
+
+const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: string; accent: string; sash: boolean; sleeves: boolean }>> = {
+  [SocialClass.PEASANT]: [
+    // Undyed natural fibers (most common)
+    { desc: 'threadbare linen qamis in beige', base: '#c8b892', accent: '#e6d8b7', sash: false, sleeves: false },
+    { desc: 'undyed flax thawb with a simple izar belt', base: '#d6c8a8', accent: '#cdbb9a', sash: false, sleeves: false },
+    { desc: 'washed linen thawb in pale sand', base: '#d9cdb2', accent: '#c8b892', sash: false, sleeves: false },
+    { desc: 'raw wool qamis in natural cream', base: '#d4c9b0', accent: '#bfb294', sash: false, sleeves: false },
+    { desc: 'sun-bleached linen in off-white', base: '#e2d8c4', accent: '#d4c9a8', sash: false, sleeves: false },
+    // Earth tones from cheap local dyes
+    { desc: 'patched wool qaba in earth tones', base: '#8a6b4f', accent: '#c8b892', sash: true, sleeves: true },
+    { desc: 'rough wool qabāʾ in walnut brown', base: '#7a5a3f', accent: '#bfae8a', sash: true, sleeves: true },
+    { desc: 'pomegranate-dyed thawb in dull tan', base: '#8f7656', accent: '#c8b892', sash: false, sleeves: false },
+    { desc: 'mud-brown wool qaba', base: '#6b5343', accent: '#b8a880', sash: true, sleeves: true },
+    // Rare colored pieces (hand-me-downs or lucky finds)
+    { desc: 'faded indigo thawb', base: '#5a6e7a', accent: '#c8b892', sash: false, sleeves: false },
+    { desc: 'madder-dyed qamis in brick red', base: '#8b5a4a', accent: '#d6c8a8', sash: true, sleeves: false },
+    { desc: 'weld-dyed thawb in faded yellow-green', base: '#9a9858', accent: '#c8c0a0', sash: false, sleeves: false },
+  ],
+  [SocialClass.MERCHANT]: [
+    // Quality local dyes
+    { desc: 'dyed wool qaba in muted olive with a beige izar', base: '#6f6a3f', accent: '#e1d3b3', sash: true, sleeves: true },
+    { desc: 'soft wool thawb in deep olive', base: '#5d5b2f', accent: '#cbb58c', sash: true, sleeves: true },
+    { desc: 'pomegranate-brown qaba with woven trim', base: '#7a5a42', accent: '#d6c8a8', sash: true, sleeves: true },
+    { desc: 'henna-dyed thawb in warm orange-brown', base: '#8b6844', accent: '#e3d2ad', sash: true, sleeves: true },
+    { desc: 'madder-dyed thawb in russet red', base: '#8b4a3a', accent: '#e1d3b3', sash: true, sleeves: true },
+    { desc: 'madder-dyed qaba in terracotta', base: '#a65a42', accent: '#d9c9a8', sash: true, sleeves: true },
+    // Good quality basics
+    { desc: 'well-kept linen thawb in warm tan', base: '#b89b6a', accent: '#d9c9a8', sash: true, sleeves: true },
+    { desc: 'trimmed qaba with a woven izar', base: '#7b5a4a', accent: '#e3d2ad', sash: true, sleeves: true },
+    { desc: 'fine linen thawb with patterned izar', base: '#a68c6a', accent: '#e3d2ad', sash: true, sleeves: true },
+    // Imported dyes (sign of trade success)
+    { desc: 'dyed wool qaba in slate blue', base: '#4a5a6b', accent: '#d9c9a8', sash: true, sleeves: true },
+    { desc: 'indigo-dyed thawb in deep blue', base: '#3d4f5f', accent: '#c8b892', sash: true, sleeves: true },
+    { desc: 'weld-and-indigo green qaba', base: '#4a5f4a', accent: '#d4c9a8', sash: true, sleeves: true },
+  ],
+  [SocialClass.CLERGY]: [
+    // Austere, dark colors befitting religious scholars
+    { desc: 'modest wool qaba in slate tones', base: '#4a4f59', accent: '#7a6f63', sash: false, sleeves: true },
+    { desc: 'faded wool thawb in ash brown', base: '#5b5247', accent: '#9b8e7a', sash: false, sleeves: true },
+    { desc: 'deep indigo qaba', base: '#2d3d4f', accent: '#9b8e7a', sash: false, sleeves: true },
+    { desc: 'walnut-dyed qaba in near-black', base: '#2f2a25', accent: '#8a7f6f', sash: false, sleeves: true },
+    { desc: 'dark charcoal wool thawb', base: '#3a3835', accent: '#9b8e7a', sash: false, sleeves: true },
+    { desc: 'dark brown qaba with simple trim', base: '#4a3f35', accent: '#a08f78', sash: false, sleeves: true },
+    // Clean, simple undyed for some orders
+    { desc: 'undyed cream wool thawb', base: '#d4c9b8', accent: '#bfb39a', sash: false, sleeves: true },
+    { desc: 'natural linen qaba in pale tan', base: '#c8bca0', accent: '#b8a888', sash: false, sleeves: true },
+    // Occasional color for high-ranking ulama
+    { desc: 'deep green qaba of a learned scholar', base: '#3a4f3a', accent: '#8a8068', sash: false, sleeves: true },
+    { desc: 'rich brown qaba with indigo accents', base: '#4a3828', accent: '#4a5a6a', sash: false, sleeves: true },
+    { desc: 'muted purple-brown thawb', base: '#4a3f4a', accent: '#9a8a7a', sash: false, sleeves: true },
+    { desc: 'dignified black qaba', base: '#222220', accent: '#9a9080', sash: false, sleeves: true },
+  ],
+  [SocialClass.NOBILITY]: [
+    // Expensive imported dyes showing wealth
+    { desc: 'kermes-crimson qabāʾ with gold trim', base: '#9a3428', accent: '#d4a965', sash: true, sleeves: true },
+    { desc: 'deep kermes red thawb with tiraz', base: '#8a2820', accent: '#c8a858', sash: true, sleeves: true },
+    { desc: 'rich indigo thawb with woven trim', base: '#2d415a', accent: '#cdbb9a', sash: true, sleeves: true },
+    { desc: 'imperial purple qaba', base: '#4a2848', accent: '#c8b088', sash: true, sleeves: true },
+    { desc: 'saffron-dyed qaba with tiraz bands', base: '#e0a83a', accent: '#3d3a34', sash: true, sleeves: true },
+    { desc: 'bright saffron-gold thawb', base: '#d4a030', accent: '#4a4035', sash: true, sleeves: true },
+    // Fine quality earth tones
+    { desc: 'fine woven qaba with subtle embroidery', base: '#6a5b4a', accent: '#bfa57e', sash: true, sleeves: true },
+    { desc: 'well-tailored thawb in rich cloth', base: '#70523f', accent: '#cbb58c', sash: true, sleeves: true },
+    { desc: 'layered qaba with ornate trim', base: '#5c4a3f', accent: '#d0b992', sash: true, sleeves: true },
+    // Status colors
+    { desc: 'true black wool qabāʾ', base: '#1f1f1f', accent: '#a89878', sash: true, sleeves: true },
+    { desc: 'midnight blue qaba with gold', base: '#1f2f3f', accent: '#c8a848', sash: true, sleeves: true },
+    { desc: 'deep forest green qabāʾ', base: '#2a3f2a', accent: '#b8a878', sash: true, sleeves: true },
+    { desc: 'rich burgundy thawb', base: '#5a2830', accent: '#c8b088', sash: true, sleeves: true },
+    { desc: 'teal silk qaba with silver trim', base: '#2a4a4a', accent: '#c8c8c0', sash: true, sleeves: true },
+  ],
 };
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
@@ -459,7 +708,7 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     if (classRand > 0.96) socialClass = SocialClass.NOBILITY;
     else if (classRand > 0.45) socialClass = SocialClass.MERCHANT;
     else if (classRand > 0.3) socialClass = SocialClass.CLERGY;
-  } else if (districtType === 'ALLEYS') {
+  } else if (districtType === 'ALLEYS' || districtType === 'JEWISH_QUARTER') {
     if (classRand > 0.985) socialClass = SocialClass.NOBILITY;
     else if (classRand > 0.8) socialClass = SocialClass.MERCHANT;
     else if (classRand > 0.65) socialClass = SocialClass.CLERGY;
@@ -555,11 +804,17 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.4);
   const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.4 : 0.6);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.75 : 0.4);
-  let robePattern: 'none' | 'damask' | 'stripe' | 'chevron' = (() => {
+  let robePattern: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric' = (() => {
     if (rand() > 0.75) {
-      const patternPool: Array<'stripe' | 'chevron' | 'damask'> = gender === 'Female'
-        ? ['stripe', 'chevron', 'damask']
-        : ['stripe', 'chevron'];
+      // Pattern pools vary by social class - expensive patterns for wealthy
+      const patternPool: Array<'stripe' | 'chevron' | 'damask' | 'ikat' | 'tiraz' | 'geometric'> =
+        socialClass === SocialClass.NOBILITY
+          ? ['damask', 'tiraz', 'geometric', 'ikat', 'stripe'] // Wealthy: fine patterns
+          : socialClass === SocialClass.MERCHANT
+            ? ['stripe', 'ikat', 'damask', 'chevron'] // Merchants: some fine patterns
+            : socialClass === SocialClass.CLERGY
+              ? ['geometric', 'tiraz', 'stripe'] // Clergy: restrained geometric
+              : ['stripe', 'chevron']; // Peasants: simple patterns only
       const pick = patternPool[Math.floor(rand() * patternPool.length)];
       return pick;
     }
@@ -570,6 +825,16 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     : socialClass === SocialClass.MERCHANT ? (rand() > 0.45 ? 'full' : 'lower')
     : socialClass === SocialClass.CLERGY ? (rand() > 0.5 ? 'full' : 'lower')
     : rand() > 0.7 ? 'none' : 'lower';
+
+  const robePickBase = ROBE_OPTIONS_BY_CLASS[socialClass][Math.floor(rand() * ROBE_OPTIONS_BY_CLASS[socialClass].length)];
+  const robePick = {
+    ...robePickBase,
+    base: adjustHex(robePickBase.base, 0.94 + rand() * 0.12),
+    accent: adjustHex(robePickBase.accent, 0.9 + rand() * 0.18)
+  };
+  const robeHasSash = robePick.sash || (isMerchant && rand() > 0.45) || (socialClass === SocialClass.NOBILITY && rand() > 0.3);
+  const robePatternScale = 2.4 + rand() * 2.8;
+  const sashPattern: 'none' | 'stripe' = robeHasSash && rand() > (socialClass === SocialClass.NOBILITY ? 0.4 : 0.55) ? 'stripe' : 'none';
 
   const hairStyle: 'short' | 'medium' | 'long' | 'covered' = gender === 'Female'
     ? 'covered'
@@ -619,13 +884,16 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     sleeveCoverage = 'full';
     applyFootwear('shoes');
   } else if (isMerchant) {
-    headwearStyle = 'fez';
+    // Only change headwear for men - women keep their scarf/head covering
+    if (gender === 'Male') headwearStyle = 'fez';
     if (rand() > 0.6 && robePattern === 'none') robePattern = 'stripe';
   } else if (isLaborer) {
-    headwearStyle = rand() > 0.6 ? 'cap' : 'none';
+    // Only change headwear for men - women keep their scarf/head covering
+    if (gender === 'Male') headwearStyle = rand() > 0.6 ? 'cap' : 'none';
     sleeveCoverage = rand() > 0.4 ? 'lower' : 'none';
   } else if (isArtisan) {
-    headwearStyle = rand() > 0.7 ? 'cap' : 'none';
+    // Only change headwear for men - women keep their scarf/head covering
+    if (gender === 'Male') headwearStyle = rand() > 0.7 ? 'cap' : 'none';
   }
 
   if (!isReligiousLeader && !isSoldier && gender === 'Male') {
@@ -640,6 +908,47 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     }
   }
 
+  const headwearPalette = headwearStyle === 'turban'
+    ? ['#e8dfcf', '#cbb48a', '#8b2e2e', '#3f5d7a', '#1f1f1f']
+    : headwearStyle === 'fez'
+      ? ['#8b2e2e', '#7b5a4a', '#1f1f1f']
+      : headwearStyle === 'taqiyah'
+        ? ['#3a3a3a', '#1f1f1f', '#5a4a3a']
+        : headwearStyle === 'straw'
+          ? ['#cbb48a', '#d6c2a4']
+          : ['#cbb48a', '#7b5a4a', '#1f1f1f'];
+  const headwearColor = headwearPalette[Math.floor(rand() * headwearPalette.length)];
+
+  // Hair color with age-based graying
+  const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626', '#3a2c22'];
+  const baseHairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
+  const hairColor = getAgedHairColor(baseHairColor, age, rand);
+
+  // Facial hair for men (historically, beards were common in medieval Damascus)
+  const facialHair: NPCStats['facialHair'] = gender === 'Male' ? (() => {
+    // Young men (under 20) typically clean-shaven or stubble
+    if (age < 20) return rand() > 0.7 ? 'stubble' : 'none';
+    // Religious leaders almost always have beards
+    if (isReligiousLeader) return rand() > 0.2 ? 'full_beard' : 'short_beard';
+    // Soldiers often have mustaches or short beards
+    if (isSoldier) return rand() > 0.5 ? 'mustache' : (rand() > 0.5 ? 'short_beard' : 'stubble');
+    // Older men more likely to have beards
+    if (age > 40) {
+      const roll = rand();
+      if (roll < 0.35) return 'full_beard';
+      if (roll < 0.6) return 'short_beard';
+      if (roll < 0.8) return 'goatee';
+      return 'stubble';
+    }
+    // General adult men
+    const roll = rand();
+    if (roll < 0.15) return 'full_beard';
+    if (roll < 0.35) return 'short_beard';
+    if (roll < 0.5) return 'goatee';
+    if (roll < 0.7) return 'mustache';
+    if (roll < 0.85) return 'stubble';
+    return 'none';
+  })() : 'none';
 
   const accessoryPool = gender === 'Female'
     ? (socialClass === SocialClass.NOBILITY
@@ -722,8 +1031,16 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     robeHemBand,
     robeOverwrap,
     robePattern,
+    robeBaseColor: robePick.base,
+    robeAccentColor: robePick.accent,
+    robeHasSash,
+    robePatternScale,
+    sashPattern,
     hairStyle,
+    hairColor,
+    facialHair,
     headwearStyle,
+    headwearColor,
     sleeveCoverage,
     footwearStyle,
     footwearColor,
@@ -770,7 +1087,9 @@ export const generatePlayerStats = (
   const skinDescriptions = ['olive-toned complexion', 'sun-browned skin', 'warm sand-brown skin', 'weathered bronze complexion'];
   const hairDescriptions = ['black hair', 'deep brown hair', 'dark chestnut hair'];
   const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
-  const hairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
+  const baseHairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
+  // Apply age-based graying (gray/white hair increases with age)
+  const hairColor = getAgedHairColor(baseHairColor, age, rand);
 
   // Step 3: Build profession pools (religion-validated)
   const professionPoolsByClass: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
@@ -804,52 +1123,7 @@ export const generatePlayerStats = (
   const isMerchant = /(Merchant|Draper|Trader|Coppersmith|Weaver|Carpenter|Herbalist|Midwife|Dyer)/i.test(profession);
   const isLaborer = /(Day-Laborer|Water-Carrier|Tanner|Porter|Bread Seller|Laundry|Servant|Water-Bearer)/i.test(profession);
 
-  const robeOptionsByClass: Record<SocialClass, Array<{ desc: string; base: string; accent: string; sash: boolean; sleeves: boolean }>> = {
-    [SocialClass.PEASANT]: [
-      { desc: 'threadbare linen qamis in beige', base: '#c8b892', accent: '#e6d8b7', sash: false, sleeves: false },
-      { desc: 'patched wool qaba in earth tones', base: '#8a6b4f', accent: '#c8b892', sash: true, sleeves: true },
-      { desc: 'undyed flax thawb with a simple izar belt', base: '#d6c8a8', accent: '#cdbb9a', sash: false, sleeves: false },
-      { desc: 'washed linen thawb in pale sand', base: '#d9cdb2', accent: '#c8b892', sash: false, sleeves: false },
-      { desc: 'rough wool qabāʾ in walnut brown', base: '#7a5a3f', accent: '#bfae8a', sash: true, sleeves: true },
-      { desc: 'faded indigo thawb', base: '#5a6e7a', accent: '#c8b892', sash: false, sleeves: false },
-      { desc: 'madder-dyed qamis in brick red', base: '#8b5a4a', accent: '#d6c8a8', sash: true, sleeves: false },
-    ],
-    [SocialClass.MERCHANT]: [
-      { desc: 'dyed wool qaba in muted olive with a beige izar', base: '#6f6a3f', accent: '#e1d3b3', sash: true, sleeves: true },
-      { desc: 'well-kept linen thawb in warm tan', base: '#b89b6a', accent: '#d9c9a8', sash: true, sleeves: true },
-      { desc: 'trimmed qaba with a woven izar', base: '#7b5a4a', accent: '#e3d2ad', sash: true, sleeves: true },
-      { desc: 'dyed linen thawb in soft ochre', base: '#c2a46a', accent: '#ead8b8', sash: true, sleeves: true },
-      { desc: 'indigo-dyed qabāʾ with cream trim', base: '#3d5266', accent: '#e8ddc4', sash: true, sleeves: true },
-      { desc: 'saffron-yellow thawb with dark trim', base: '#d9a645', accent: '#5a4a3a', sash: true, sleeves: true },
-      { desc: 'henna-orange qaba with beige izar', base: '#c87a4a', accent: '#e6d8b7', sash: true, sleeves: true },
-      { desc: 'deep madder-red thawb', base: '#a54e3a', accent: '#e1d3b3', sash: true, sleeves: true },
-    ],
-    [SocialClass.CLERGY]: [
-      { desc: 'dark wool qaba with plain trim', base: '#3d3a34', accent: '#8b7f70', sash: false, sleeves: true },
-      { desc: 'plain thawb with a faded izar', base: '#51473c', accent: '#9a8a75', sash: true, sleeves: true },
-      { desc: 'modest wool qaba in slate tones', base: '#4a4f59', accent: '#7a6f63', sash: false, sleeves: true },
-      { desc: 'faded wool thawb in ash brown', base: '#5b5247', accent: '#9b8e7a', sash: false, sleeves: true },
-      { desc: 'deep indigo qaba', base: '#2d3d4f', accent: '#9b8e7a', sash: false, sleeves: true },
-    ],
-    [SocialClass.NOBILITY]: [
-      { desc: 'fine woven qaba with subtle embroidery', base: '#6a5b4a', accent: '#bfa57e', sash: true, sleeves: true },
-      { desc: 'well-tailored thawb in rich cloth', base: '#70523f', accent: '#cbb58c', sash: true, sleeves: true },
-      { desc: 'layered qaba with ornate trim', base: '#5c4a3f', accent: '#d0b992', sash: true, sleeves: true },
-      { desc: 'kermes-crimson qabāʾ with gold trim', base: '#9a3428', accent: '#d4a965', sash: true, sleeves: true },
-      { desc: 'rich indigo thawb with woven trim', base: '#2d415a', accent: '#cdbb9a', sash: true, sleeves: true },
-      { desc: 'saffron-dyed qaba with tiraz bands', base: '#e0a83a', accent: '#3d3a34', sash: true, sleeves: true },
-      { desc: 'true black wool qabāʾ', base: '#1f1f1f', accent: '#a89878', sash: true, sleeves: true },
-    ],
-  };
-  const robePickBase = robeOptionsByClass[socialClass][Math.floor(rand() * robeOptionsByClass[socialClass].length)];
-  const adjustHex = (hex: string, factor: number) => {
-    const clean = hex.replace('#', '');
-    const num = parseInt(clean, 16);
-    const r = Math.min(255, Math.max(0, Math.round(((num >> 16) & 0xff) * factor)));
-    const g = Math.min(255, Math.max(0, Math.round(((num >> 8) & 0xff) * factor)));
-    const b = Math.min(255, Math.max(0, Math.round((num & 0xff) * factor)));
-    return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
-  };
+  const robePickBase = ROBE_OPTIONS_BY_CLASS[socialClass][Math.floor(rand() * ROBE_OPTIONS_BY_CLASS[socialClass].length)];
   let robePick = {
     ...robePickBase,
     base: adjustHex(robePickBase.base, 0.94 + rand() * 0.12),
@@ -867,9 +1141,10 @@ export const generatePlayerStats = (
         if (socialClass === SocialClass.CLERGY) return rand() > 0.5 ? 'turban' : 'taqiyah';
         return rand() > 0.5 ? 'cap' : rand() > 0.7 ? 'turban' : 'none';
       })();
-  if (isReligiousLeader) {
+  // Only override headwear for men - women keep their scarf/head covering
+  if (isReligiousLeader && gender === 'Male') {
     headwearStyle = 'turban';
-  } else if (isSoldier) {
+  } else if (isSoldier && gender === 'Male') {
     headwearStyle = isOfficer ? 'turban' : 'cap';
   }
 
@@ -976,11 +1251,17 @@ export const generatePlayerStats = (
   const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.65 : 0.4);
   const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.35 : 0.6);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.35);
-  let robePattern: 'none' | 'damask' | 'stripe' | 'chevron' = (() => {
+  let robePattern: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric' = (() => {
     if (rand() > 0.75) {
-      const patternPool: Array<'stripe' | 'chevron' | 'damask'> = gender === 'Female'
-        ? ['stripe', 'chevron', 'damask']
-        : ['stripe', 'chevron'];
+      // Pattern pools vary by social class - expensive patterns for wealthy
+      const patternPool: Array<'stripe' | 'chevron' | 'damask' | 'ikat' | 'tiraz' | 'geometric'> =
+        socialClass === SocialClass.NOBILITY
+          ? ['damask', 'tiraz', 'geometric', 'ikat', 'stripe'] // Wealthy: fine patterns
+          : socialClass === SocialClass.MERCHANT
+            ? ['stripe', 'ikat', 'damask', 'chevron'] // Merchants: some fine patterns
+            : socialClass === SocialClass.CLERGY
+              ? ['geometric', 'tiraz', 'stripe'] // Clergy: restrained geometric
+              : ['stripe', 'chevron']; // Peasants: simple patterns only
       const pick = patternPool[Math.floor(rand() * patternPool.length)];
       return pick;
     }
@@ -1100,10 +1381,31 @@ export const generatePlayerStats = (
   };
 };
 
+/**
+ * Get appropriate religious professions based on district demographics
+ */
+const getDistrictReligiousProfessions = (district: DistrictType): string[] => {
+  switch (district) {
+    case 'CHRISTIAN_QUARTER':
+      return CHRISTIAN_RELIGIOUS_PROFESSIONS;
+    case 'JEWISH_QUARTER':
+      return JEWISH_RELIGIOUS_PROFESSIONS;
+    case 'UMAYYAD_MOSQUE':
+      // Umayyad Mosque district should have Islamic professions
+      return RELIGIOUS_PROFESSIONS;
+    default:
+      // All other districts use standard Islamic professions (14th century Damascus was Muslim-majority)
+      return RELIGIOUS_PROFESSIONS;
+  }
+};
+
 export const generateBuildingMetadata = (seed: number, x: number, z: number): BuildingMetadata => {
   let s = seed + Math.abs(x) * 13 + Math.abs(z) * 7;
   const rand = () => seededRandom(s++);
   const sizeScale = 0.88 + rand() * 0.24;
+
+  // Determine district first (needed for religious profession filtering)
+  const district = getDistrictType(x, z);
 
   const typeRand = rand();
   let type = BuildingType.RESIDENTIAL;
@@ -1117,7 +1419,9 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
   let ownerGender: 'Male' | 'Female' = rand() > 0.5 ? 'Male' : 'Female';
 
   if (type === BuildingType.RELIGIOUS) {
-    ownerProfession = RELIGIOUS_PROFESSIONS[Math.floor(rand() * RELIGIOUS_PROFESSIONS.length)];
+    // Get district-appropriate religious professions
+    const districtProfessions = getDistrictReligiousProfessions(district);
+    ownerProfession = districtProfessions[Math.floor(rand() * districtProfessions.length)];
 
     // Sultan appoints major institutions (Friday Mosque, Madrasa)
     if (ownerProfession === 'Friday Mosque Imam' || ownerProfession === 'Madrasa Director') {
@@ -1130,7 +1434,18 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
     }
     ownerGender = 'Male';
   } else if (type === BuildingType.CIVIC) {
-    ownerProfession = CIVIC_PROFESSIONS[Math.floor(rand() * CIVIC_PROFESSIONS.length)];
+    // Use weighted selection for civic professions (makes governors/qadis much rarer)
+    const totalWeight = CIVIC_PROFESSIONS_WEIGHTED.reduce((sum, p) => sum + p.weight, 0);
+    const randomWeight = rand() * totalWeight;
+    let accumulatedWeight = 0;
+    ownerProfession = 'Notary'; // Fallback
+    for (const prof of CIVIC_PROFESSIONS_WEIGHTED) {
+      accumulatedWeight += prof.weight;
+      if (randomWeight <= accumulatedWeight) {
+        ownerProfession = prof.profession;
+        break;
+      }
+    }
 
     // Sultan appoints high government positions
     if (ownerProfession === 'Mamluk Governor' || ownerProfession === 'Court Qadi') {
@@ -1153,7 +1468,6 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
   }
 
   // Calculate building height using the same formula as Environment.tsx
-  const district = getDistrictType(x, z);
   const localSeed = x * 1000 + z;
   const baseHeight = district === 'HOVELS' && type !== BuildingType.RELIGIOUS && type !== BuildingType.CIVIC
     ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2

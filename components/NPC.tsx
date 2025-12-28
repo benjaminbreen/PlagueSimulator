@@ -2,12 +2,21 @@ import React, { useRef, useState, useMemo, memo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
-import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle, PANIC_SUSCEPTIBILITY, PlayerActionEvent, NpcStateOverride } from '../types';
+import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle, PANIC_SUSCEPTIBILITY, PlayerActionEvent, NpcStateOverride, NPCPlagueMeta, PlagueType } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
 import { seededRandom } from '../utils/procedural';
 import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
+import { createNpcPlagueMeta } from '../utils/npcHealth';
+
+const hashStringToSeed = (value: string) => {
+  let hash = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash || 1;
+};
 
 // Helper function to calculate door position from building metadata
 const getDoorPosition = (building: BuildingMetadata): THREE.Vector3 => {
@@ -109,12 +118,19 @@ const CorpseMiasma: React.FC = memo(() => {
   );
 });
 
+// NPC approach behavior for friendly NPCs
+interface NPCApproachState {
+  isApproaching: boolean;
+  approachCooldown: number; // Timestamp when cooldown expires
+}
+
 interface NPCProps {
   stats: NPCStats;
   initialState?: AgentState;
+  plagueMeta?: NPCPlagueMeta;
   position: THREE.Vector3;
   target: THREE.Vector3;
-  onUpdate: (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number) => void;
+  onUpdate: (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, plagueMeta?: NPCPlagueMeta) => void;
   getSimTime: () => number;
   infectionRate: number;
   quarantine: boolean;
@@ -125,8 +141,10 @@ interface NPCProps {
   obstacles?: Obstacle[];
   impactMapRef?: React.MutableRefObject<Map<string, { time: number; intensity: number }>>;
   playerRef?: React.RefObject<THREE.Group>;
+  playerStats?: { disposition?: number; charisma?: number; religion?: string; ethnicity?: string; socialClass?: string } | null;
   timeOfDay: number;
   onSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
+  onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
   isSelected?: boolean;
   district?: DistrictType;
   terrainSeed?: number;
@@ -134,11 +152,14 @@ interface NPCProps {
   actionEvent?: PlayerActionEvent | null;
   showDemographicsOverlay?: boolean;
   npcStateOverride?: NpcStateOverride | null;
+  /** Global cooldown ref shared across all NPCs to prevent approach spam */
+  globalApproachCooldownRef?: React.MutableRefObject<number>;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
   stats,
   initialState = AgentState.HEALTHY,
+  plagueMeta,
   position,
   target,
   onUpdate,
@@ -152,15 +173,18 @@ export const NPC: React.FC<NPCProps> = memo(({
   obstacles = [],
   impactMapRef,
   playerRef,
+  playerStats = null,
   timeOfDay,
   onSelect,
+  onNPCInitiatedEncounter,
   isSelected = false,
   district,
   terrainSeed,
   heightmap,
   actionEvent,
   showDemographicsOverlay = false,
-  npcStateOverride
+  npcStateOverride,
+  globalApproachCooldownRef
 }) => {
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -170,6 +194,11 @@ export const NPC: React.FC<NPCProps> = memo(({
 
   const stateRef = useRef<AgentState>(initialState);
   const stateStartTimeRef = useRef(getSimTime());
+  const plagueTypeRef = useRef<PlagueType>(plagueMeta?.plagueType ?? PlagueType.NONE);
+  const exposureTimeRef = useRef<number | null>(plagueMeta?.exposureTime ?? null);
+  const incubationHoursRef = useRef<number | null>(plagueMeta?.incubationHours ?? null);
+  const deathHoursRef = useRef<number | null>(plagueMeta?.deathHours ?? null);
+  const onsetTimeRef = useRef<number | null>(plagueMeta?.onsetTime ?? null);
   const currentPosRef = useRef(position.clone());
   const currentTargetRef = useRef(target.clone());
   const retargetTimerRef = useRef(0);
@@ -177,12 +206,23 @@ export const NPC: React.FC<NPCProps> = memo(({
   const impactStartRef = useRef(0);
   const impactIntensityRef = useRef(0);
   const impactPulseRef = useRef(0);
+  const lastSentPlagueMetaRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!plagueMeta) return;
+    plagueTypeRef.current = plagueMeta.plagueType;
+    exposureTimeRef.current = plagueMeta.exposureTime;
+    incubationHoursRef.current = plagueMeta.incubationHours;
+    deathHoursRef.current = plagueMeta.deathHours;
+    onsetTimeRef.current = plagueMeta.onsetTime;
+  }, [plagueMeta?.plagueType, plagueMeta?.exposureTime, plagueMeta?.incubationHours, plagueMeta?.deathHours, plagueMeta?.onsetTime]);
   const playerImpactCooldownRef = useRef(0);
   const impactGroupRef = useRef<THREE.Group>(null);
   const statusMarkerRef = useRef<THREE.Mesh>(null);
   const statusMarkerMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const propGroupRef = useRef<THREE.Group>(null);
-  const propPhase = useMemo(() => seededRandom(Number(stats.id.split('-')[1] || '1') + 77) * Math.PI * 2, [stats.id]);
+  const idSeed = useMemo(() => hashStringToSeed(stats.id), [stats.id]);
+  const propPhase = useMemo(() => seededRandom(idSeed + 77) * Math.PI * 2, [idSeed]);
   const impactStemMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const impactDotMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const impactExclaimRef = useRef<THREE.Group>(null);
@@ -208,6 +248,12 @@ export const NPC: React.FC<NPCProps> = memo(({
 
   // PLAYER ACTION RESPONSE: Track last processed action
   const lastActionTimestampRef = useRef(0);
+
+  // NPC APPROACH SYSTEM: Track when friendly NPCs approach the player
+  const isApproachingPlayerRef = useRef(false);
+  const approachCooldownRef = useRef(0); // Sim time when NPC can approach again
+  const lastApproachCheckRef = useRef(0); // Throttle approach checks
+  const approachCheckCountRef = useRef(0); // Counter for seeded random variation
 
   // PERFORMANCE: Cache speed modifiers (only recalculate when hour or state changes)
   const cachedSpeedRef = useRef(2.0);
@@ -243,38 +289,39 @@ export const NPC: React.FC<NPCProps> = memo(({
   }, [stats.headwearStyle, stats.id]);
 
   const appearance = useMemo(() => {
-    const seed = Number(stats.id.split('-')[1] || '1');
+    const seed = idSeed;
     const tone = seededRandom(seed + 11);
     const skin = `hsl(${26 + Math.round(tone * 8)}, ${28 + Math.round(tone * 18)}%, ${30 + Math.round(tone * 18)}%)`;
-    const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626'];
-    const hair = hairPalette[Math.floor(seededRandom(seed + 17) * hairPalette.length)];
-    const scarfPalette = ['#d6c2a4', '#c7b08c', '#c2a878', '#bfa57e'];
+    // Use stats.hairColor (includes age-based graying) or fallback to generated
+    const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626', '#3a2c22'];
+    const hair = stats.hairColor ?? hairPalette[Math.floor(seededRandom(seed + 17) * hairPalette.length)];
+    const scarfPalette = ['#d6c2a4', '#c7b08c', '#c2a878', '#bfa57e', '#e1d3b3'];
     const scarf = scarfPalette[Math.floor(seededRandom(seed + 29) * scarfPalette.length)];
-    const robePalette = ['#6f6a3f', '#7b5a4a', '#6b5a45', '#5c4b3a', '#4a4f59'];
-    let robe = robePalette[Math.floor(seededRandom(seed + 41) * robePalette.length)];
-    const accentPalette = ['#e1d3b3', '#d9c9a8', '#cbb58c', '#bfa57e'];
-    let accent = accentPalette[Math.floor(seededRandom(seed + 43) * accentPalette.length)];
-    const headwearPalette = ['#8b2e2e', '#1f1f1f', '#cbb48a', '#7b5a4a', '#3f5d7a'];
+    const robePalette = ['#6f6a3f', '#7b5a4a', '#6b5a45', '#5c4b3a', '#4a4f59', '#8b5a4a', '#5a6e7a'];
+    const accentPalette = ['#e1d3b3', '#d9c9a8', '#cbb58c', '#bfa57e', '#d6c8a8'];
+    let robe = stats.robeBaseColor ?? robePalette[Math.floor(seededRandom(seed + 41) * robePalette.length)];
+    let accent = stats.robeAccentColor ?? accentPalette[Math.floor(seededRandom(seed + 43) * accentPalette.length)];
+    const headwearPalette = ['#8b2e2e', '#1f1f1f', '#cbb48a', '#7b5a4a', '#3f5d7a', '#e8dfcf'];
     const headwearIndex = Math.floor(seededRandom(seed + 55) * headwearPalette.length);
-    let headwear = stats.headwearStyle === 'straw'
+    let headwear = stats.headwearColor ?? (stats.headwearStyle === 'straw'
       ? '#cbb48a'
       : stats.headwearStyle === 'fez'
         ? (seededRandom(seed + 57) > 0.5 ? '#8b2e2e' : '#cbb48a')
-        : headwearPalette[headwearIndex];
+        : headwearPalette[headwearIndex]);
     const isReligiousLeader = /Imam|Qadi|Mufti|Muezzin|Qur'an|Madrasa/i.test(stats.profession);
     const isSoldier = /Guard|Soldier|Mamluk/i.test(stats.profession);
     const isOfficer = /Officer/i.test(stats.profession);
     if (isReligiousLeader) {
-      robe = '#2f2b26';
-      accent = '#c8b892';
-      headwear = '#e8dfcf';
+      robe = stats.robeBaseColor ?? '#2f2b26';
+      accent = stats.robeAccentColor ?? '#c8b892';
+      headwear = stats.headwearColor ?? '#e8dfcf';
     } else if (isSoldier) {
-      robe = isOfficer ? '#3b2f2b' : '#2f3438';
-      accent = isOfficer ? '#b59b6a' : '#8b5e3c';
-      headwear = isOfficer ? '#8b2e2e' : '#3a3a3a';
+      robe = stats.robeBaseColor ?? (isOfficer ? '#3b2f2b' : '#2f3438');
+      accent = stats.robeAccentColor ?? (isOfficer ? '#b59b6a' : '#8b5e3c');
+      headwear = stats.headwearColor ?? (isOfficer ? '#8b2e2e' : '#3a3a3a');
     }
     return { skin, scarf, robe, accent, hair, headwear };
-  }, [stats.headwearStyle, stats.id, stats.profession]);
+  }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, idSeed]);
   const moodDisplay = moodOverride ?? stats.mood;
   const lastOverrideNonceRef = useRef<number | null>(null);
 
@@ -284,6 +331,27 @@ export const NPC: React.FC<NPCProps> = memo(({
     lastOverrideNonceRef.current = npcStateOverride.nonce;
     stateRef.current = npcStateOverride.state;
     stateStartTimeRef.current = getSimTime();
+    if (npcStateOverride.state === AgentState.INCUBATING) {
+      const meta = createNpcPlagueMeta(idSeed + Math.floor(getSimTime() * 10), getSimTime());
+      plagueTypeRef.current = meta.plagueType;
+      exposureTimeRef.current = meta.exposureTime;
+      incubationHoursRef.current = meta.incubationHours;
+      deathHoursRef.current = meta.deathHours;
+      onsetTimeRef.current = meta.onsetTime;
+    } else if (npcStateOverride.state === AgentState.HEALTHY) {
+      plagueTypeRef.current = PlagueType.NONE;
+      exposureTimeRef.current = null;
+      incubationHoursRef.current = null;
+      deathHoursRef.current = null;
+      onsetTimeRef.current = null;
+    } else if (npcStateOverride.state === AgentState.INFECTED && plagueTypeRef.current === PlagueType.NONE) {
+      const meta = createNpcPlagueMeta(idSeed + Math.floor(getSimTime() * 10), getSimTime());
+      plagueTypeRef.current = meta.plagueType;
+      exposureTimeRef.current = meta.exposureTime;
+      incubationHoursRef.current = meta.incubationHours;
+      deathHoursRef.current = meta.deathHours;
+      onsetTimeRef.current = getSimTime();
+    }
   }, [npcStateOverride, stats.id, getSimTime]);
   const getReligionColor = (value: string) => {
     switch (value) {
@@ -358,6 +426,17 @@ export const NPC: React.FC<NPCProps> = memo(({
           targetBuildingRef.current = nearestBuilding.id;
           return;
         }
+      }
+    }
+
+    // SICKNESS: Incubating/infected NPCs are more likely to seek shelter
+    if ((stateRef.current === AgentState.INCUBATING || stateRef.current === AgentState.INFECTED) && Math.random() < 0.45) {
+      const nearestBuilding = findNearestBuilding(currentPosRef.current, buildings, 28);
+      if (nearestBuilding) {
+        const doorPos = getDoorPosition(nearestBuilding);
+        currentTargetRef.current.copy(doorPos);
+        targetBuildingRef.current = nearestBuilding.id;
+        return;
       }
     }
 
@@ -669,6 +748,102 @@ export const NPC: React.FC<NPCProps> = memo(({
           playerImpactCooldownRef.current = now;
         }
       }
+
+      // NPC APPROACH BEHAVIOR: Friendly NPCs may approach the player
+      // Only check every ~1 second of sim time to reduce overhead
+      // Check both individual and global cooldowns
+      const globalCooldownActive = globalApproachCooldownRef?.current && simTime < globalApproachCooldownRef.current;
+      if (
+        onNPCInitiatedEncounter &&
+        !isSelected &&
+        stateRef.current === AgentState.HEALTHY &&
+        simTime - lastApproachCheckRef.current > 1 &&
+        simTime > approachCooldownRef.current &&
+        !globalCooldownActive
+      ) {
+        lastApproachCheckRef.current = simTime;
+        approachCheckCountRef.current += 1;
+
+        const distToPlayer = Math.sqrt(distSq);
+        const APPROACH_NOTICE_DISTANCE = 12; // NPCs notice player within this range
+        const APPROACH_INITIATE_DISTANCE = 2.5; // Close enough to trigger encounter
+
+        // Only consider approaching if player is in notice range
+        if (distToPlayer < APPROACH_NOTICE_DISTANCE && distToPlayer > APPROACH_INITIATE_DISTANCE) {
+          // Calculate approach probability based on disposition and factors
+          const baseDisposition = stats.disposition ?? 50;
+
+          // Disposition must be high enough (friendly NPCs)
+          if (baseDisposition >= 60 && panicRef.current < 40) {
+            // Calculate effective friendliness with player factors
+            let approachScore = baseDisposition;
+
+            // Same religion bonus
+            if (playerStats?.religion && stats.religion === playerStats.religion) {
+              approachScore += 15;
+            }
+            // Same ethnicity bonus
+            if (playerStats?.ethnicity && stats.ethnicity === playerStats.ethnicity) {
+              approachScore += 10;
+            }
+            // Player charisma bonus
+            if (playerStats?.charisma) {
+              approachScore += (playerStats.charisma - 5) * 3;
+            }
+            // Time of day factor (people less likely to approach at night)
+            if (timeOfDay < 6 || timeOfDay > 20) {
+              approachScore -= 30;
+            }
+            // Panic reduces approach likelihood
+            approachScore -= panicRef.current;
+
+            // Use seeded random for consistent behavior (varies by NPC and check count)
+            const approachChance = Math.max(0, (approachScore - 70) / 100);
+            const checkSeed = idSeed + approachCheckCountRef.current * 7919; // Prime for better distribution
+            if (seededRandom(checkSeed) < approachChance * 0.15) { // Cap at ~4.5% per check for high scores
+              // Start approaching the player!
+              isApproachingPlayerRef.current = true;
+              const offsetSeed = checkSeed + 1;
+              currentTargetRef.current.set(
+                playerPos.x + (seededRandom(offsetSeed) - 0.5) * 2,
+                0,
+                playerPos.z + (seededRandom(offsetSeed + 1) - 0.5) * 2
+              );
+              targetBuildingRef.current = null; // Cancel any building destination
+            }
+          }
+        }
+
+        // Check if approaching NPC should abort or has reached the player
+        if (isApproachingPlayerRef.current) {
+          // Abort if player moved out of range
+          if (distToPlayer > APPROACH_NOTICE_DISTANCE + 5) {
+            isApproachingPlayerRef.current = false;
+            approachCooldownRef.current = simTime + 5; // Short cooldown for range abort
+          }
+          // Abort if panic increased past threshold
+          else if (panicRef.current >= 40) {
+            isApproachingPlayerRef.current = false;
+            approachCooldownRef.current = simTime + 8; // Medium cooldown for panic abort
+          }
+          // Abort if player selected this NPC (player initiated encounter instead)
+          else if (isSelected) {
+            isApproachingPlayerRef.current = false;
+            // No cooldown - player took over the encounter
+          }
+          // NPC reached player - trigger encounter!
+          else if (distToPlayer < APPROACH_INITIATE_DISTANCE) {
+            isApproachingPlayerRef.current = false;
+            approachCooldownRef.current = simTime + 10; // Don't approach again for 10 sim minutes
+
+            // Call the encounter handler
+            onNPCInitiatedEncounter({
+              stats: { ...stats, panicLevel: panicRef.current, awarenessLevel: awarenessRef.current },
+              state: stateRef.current
+            });
+          }
+        }
+      }
     }
 
     // 1c. STUCK DETECTION: Jiggle counter to detect NPCs vibrating against walls
@@ -690,14 +865,32 @@ export const NPC: React.FC<NPCProps> = memo(({
     }
 
     // 2. State Progression
-    const hoursInState = simTime - stateStartTimeRef.current;
-    if (stateRef.current === AgentState.INCUBATING && hoursInState >= CONSTANTS.HOURS_TO_INFECTED) {
-      stateRef.current = AgentState.INFECTED;
-      stateStartTimeRef.current = simTime;
-    } else if (stateRef.current === AgentState.INFECTED && hoursInState >= (CONSTANTS.HOURS_TO_DEATH - CONSTANTS.HOURS_TO_INFECTED)) {
-      stateRef.current = AgentState.DECEASED;
-      stateStartTimeRef.current = simTime;
+    if (stateRef.current === AgentState.INCUBATING) {
+      const exposureTime = exposureTimeRef.current ?? stateStartTimeRef.current;
+      const incubationHours = incubationHoursRef.current ?? CONSTANTS.HOURS_TO_INFECTED;
+      if (simTime - exposureTime >= incubationHours) {
+        stateRef.current = AgentState.INFECTED;
+        stateStartTimeRef.current = simTime;
+        onsetTimeRef.current = simTime;
+        isApproachingPlayerRef.current = false; // Sick NPCs don't approach
+      }
+    } else if (stateRef.current === AgentState.INFECTED) {
+      const onsetTime = onsetTimeRef.current ?? stateStartTimeRef.current;
+      const deathHours = deathHoursRef.current ?? (CONSTANTS.HOURS_TO_DEATH - CONSTANTS.HOURS_TO_INFECTED);
+      if (simTime - onsetTime >= deathHours) {
+        stateRef.current = AgentState.DECEASED;
+        stateStartTimeRef.current = simTime;
+        isApproachingPlayerRef.current = false; // Dead NPCs don't approach
+      }
     }
+
+    let cachedNeighbors: AgentSnapshot[] | null = null;
+    const getNeighbors = () => {
+      if (!cachedNeighbors && agentHash) {
+        cachedNeighbors = queryNearbyAgents(currentPosRef.current, agentHash);
+      }
+      return cachedNeighbors ?? [];
+    };
 
     // 3. Infection Spread (Throttled to once per second for performance)
     if (stateRef.current === AgentState.HEALTHY && agentHash) {
@@ -707,16 +900,27 @@ export const NPC: React.FC<NPCProps> = memo(({
       if (infectionCheckTimerRef.current >= 1.0) {
         infectionCheckTimerRef.current = 0;
 
-        const neighbors = queryNearbyAgents(currentPosRef.current, agentHash);
+        const neighbors = getNeighbors();
         for (const other of neighbors) {
           if (other.id === stats.id) continue;
           if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
             if (currentPosRef.current.distanceToSquared(other.pos) < 4.0) {
               // Compensate for 1-second intervals to maintain same infection rate
               // At 60fps, we went from 60 checks/sec to 1 check/sec, so multiply by 60
-              if (Math.random() < infectionRate * simulationSpeed * 0.5 * 60) {
+              const contagionMod = other.state === AgentState.INFECTED
+                ? (other.plagueType === PlagueType.PNEUMONIC ? 1 : other.plagueType === PlagueType.BUBONIC ? 0.35 : 0.2)
+                : (other.plagueType === PlagueType.PNEUMONIC ? 0.35 : 0.12);
+              const exposureChance = Math.min(0.25, infectionRate * simulationSpeed * 0.5 * 60 * contagionMod);
+              if (Math.random() < exposureChance) {
+                const meta = createNpcPlagueMeta(idSeed + Math.floor(simTime * 10), simTime);
+                plagueTypeRef.current = meta.plagueType;
+                exposureTimeRef.current = meta.exposureTime;
+                incubationHoursRef.current = meta.incubationHours;
+                deathHoursRef.current = meta.deathHours;
+                onsetTimeRef.current = meta.onsetTime;
                 stateRef.current = AgentState.INCUBATING;
                 stateStartTimeRef.current = simTime;
+                isApproachingPlayerRef.current = false; // Sick NPCs don't approach
                 break;
               }
             }
@@ -732,7 +936,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       if (rumorCheckTimerRef.current >= 0.5) {
         rumorCheckTimerRef.current = 0;
 
-        const neighbors = queryNearbyAgents(currentPosRef.current, agentHash);
+        const neighbors = getNeighbors();
         const panicMod = PANIC_SUSCEPTIBILITY[stats.socialClass] ?? 1.0;
 
         for (const other of neighbors) {
@@ -832,6 +1036,11 @@ export const NPC: React.FC<NPCProps> = memo(({
             if (Math.random() < 0.6) {
               stateRef.current = AgentState.HEALTHY;
               stateStartTimeRef.current = simTime;
+              plagueTypeRef.current = PlagueType.NONE;
+              exposureTimeRef.current = null;
+              incubationHoursRef.current = null;
+              deathHoursRef.current = null;
+              onsetTimeRef.current = null;
               setMoodOverride('Grateful');
               moodExpireRef.current = performance.now() + 15000;
               panicRef.current = Math.max(0, panicRef.current - 30);
@@ -844,6 +1053,11 @@ export const NPC: React.FC<NPCProps> = memo(({
             if (Math.random() < 0.2) {
               stateRef.current = AgentState.HEALTHY;
               stateStartTimeRef.current = simTime;
+              plagueTypeRef.current = PlagueType.NONE;
+              exposureTimeRef.current = null;
+              incubationHoursRef.current = null;
+              deathHoursRef.current = null;
+              onsetTimeRef.current = null;
               setMoodOverride('Grateful');
               moodExpireRef.current = performance.now() + 20000;
               panicRef.current = Math.max(0, panicRef.current - 40);
@@ -869,7 +1083,27 @@ export const NPC: React.FC<NPCProps> = memo(({
     }
 
     // 4. Report back to Registry
-    onUpdate(stats.id, stateRef.current, currentPosRef.current, awarenessRef.current, panicRef.current);
+    let plagueMetaSnapshot: NPCPlagueMeta | undefined;
+    if (plagueTypeRef.current !== PlagueType.NONE) {
+      const metaKey = [
+        plagueTypeRef.current,
+        exposureTimeRef.current ?? 'n',
+        incubationHoursRef.current ?? 'n',
+        deathHoursRef.current ?? 'n',
+        onsetTimeRef.current ?? 'n'
+      ].join('|');
+      if (metaKey !== lastSentPlagueMetaRef.current) {
+        lastSentPlagueMetaRef.current = metaKey;
+        plagueMetaSnapshot = {
+          plagueType: plagueTypeRef.current,
+          exposureTime: exposureTimeRef.current,
+          incubationHours: incubationHoursRef.current,
+          deathHours: deathHoursRef.current,
+          onsetTime: onsetTimeRef.current
+        };
+      }
+    }
+    onUpdate(stats.id, stateRef.current, currentPosRef.current, awarenessRef.current, panicRef.current, plagueMetaSnapshot);
 
     // 5. Impact pulse update (cheap)
     if (impactMapRef?.current) {
@@ -1001,21 +1235,26 @@ export const NPC: React.FC<NPCProps> = memo(({
           </mesh>
         </group>
         <Humanoid
-          color={stats.gender === 'Female' ? appearance.robe : (stateRef.current === AgentState.DECEASED ? '#111' : colors.body)}
+          color={stateRef.current === AgentState.DECEASED ? '#111' : appearance.robe}
         headColor={appearance.skin}
         turbanColor={appearance.headwear}
         headscarfColor={appearance.scarf}
         robeAccentColor={appearance.accent}
         hairColor={appearance.hair}
-        gender={stats.gender}
+          gender={stats.gender}
+          age={stats.age}
         scale={[stats.weight, stats.height, stats.weight] as [number, number, number]}
         robeHasTrim={stats.robeHasTrim}
+        robeHasSash={stats.robeHasSash}
         robeHemBand={stats.robeHemBand}
         robeSpread={stats.robeSpread}
         robeOverwrap={stats.robeOverwrap}
         robePattern={stats.robePattern}
+        robePatternScale={stats.robePatternScale}
+        sashPattern={stats.sashPattern}
         hairStyle={stats.hairStyle}
         headwearStyle={stats.headwearStyle}
+        facialHair={stats.facialHair}
         sleeveCoverage={stats.sleeveCoverage}
         footwearStyle={stats.footwearStyle}
         footwearColor={stats.footwearColor}

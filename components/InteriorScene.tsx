@@ -2,7 +2,10 @@ import React, { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
-import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState, CONSTANTS, PANIC_SUSCEPTIBILITY, NpcStateOverride } from '../types';
+import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState, CONSTANTS, PANIC_SUSCEPTIBILITY, NpcStateOverride, NPCPlagueMeta, PlagueType } from '../types';
+import { EXPOSURE_CONFIG, calculatePlagueProtection } from '../utils/plagueExposure';
+import { exposePlayerToPlague } from '../utils/plague';
+import { createNpcPlagueMeta } from '../utils/npcHealth';
 import { seededRandom } from '../utils/procedural';
 import { Player } from './Player';
 import { Humanoid } from './Humanoid';
@@ -22,6 +25,8 @@ interface InteriorSceneProps {
   onPickupPrompt?: (label: string | null) => void;
   onPickupItem?: (pickup: import('../utils/pushables').PickupInfo) => void;
   onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
+  onNpcUpdate?: (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: NPCPlagueMeta) => void;
+  onPlagueExposure?: (plague: import('../types').PlagueStatus) => void;
   selectedNpcId?: string | null;
   showDemographicsOverlay?: boolean;
   npcStateOverride?: NpcStateOverride | null;
@@ -30,7 +35,7 @@ interface InteriorSceneProps {
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, selectedNpcId, showDemographicsOverlay = false, npcStateOverride }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | null>(null);
@@ -48,6 +53,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     action: 'sit' | 'stand' | 'read' | 'cook';
     state: AgentState;
     stateStartTime: number;
+    plagueMeta?: NPCPlagueMeta;
     awareness: number;
     panic: number;
     infectionTimer: number;
@@ -57,6 +63,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const [npcWalkState, setNpcWalkState] = useState<Record<string, boolean>>({});
   const [, setHealthTick] = useState(0);
   const lastOverrideNonceRef = useRef<number | null>(null);
+  const registrySyncTimerRef = useRef(0);
+  const exposureCheckTimerRef = useRef(0);
   const getReligionColor = (value: string) => {
     switch (value) {
       case 'Sunni Islam': return 'text-amber-200';
@@ -82,6 +90,14 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       case 'Persian': return 'text-purple-200';
       default: return 'text-amber-100';
     }
+  };
+
+  const hashStringToSeed = (value: string) => {
+    let hash = 0;
+    for (let i = 0; i < value.length; i += 1) {
+      hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+    }
+    return hash || 1;
   };
   const playerRef = useRef<THREE.Group>(null);
   const [pickedUpIds, setPickedUpIds] = useState<Set<string>>(new Set());
@@ -631,6 +647,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         action: hotspot ? hotspot.action : 'stand',
         state: npc.state ?? AgentState.HEALTHY,
         stateStartTime: simTime,
+        plagueMeta: npc.plagueMeta ?? (npc.state === AgentState.INCUBATING ? createNpcPlagueMeta(hashStringToSeed(npc.id) + Math.floor(simTime * 10), simTime) : undefined),
         awareness: npc.stats.awarenessLevel,
         panic: npc.stats.panicLevel,
         infectionTimer: 0,
@@ -647,6 +664,20 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       npcStatesRef.current.forEach((npc) => {
         npc.state = npcStateOverride.state;
         npc.stateStartTime = simTime;
+        if (npcStateOverride.state === AgentState.INCUBATING) {
+          npc.plagueMeta = createNpcPlagueMeta(hashStringToSeed(npc.id) + Math.floor(simTime * 10), simTime);
+        } else if (npcStateOverride.state === AgentState.HEALTHY) {
+          npc.plagueMeta = {
+            plagueType: PlagueType.NONE,
+            exposureTime: null,
+            incubationHours: null,
+            deathHours: null,
+            onsetTime: null
+          };
+        } else if (npcStateOverride.state === AgentState.INFECTED) {
+          npc.plagueMeta = createNpcPlagueMeta(hashStringToSeed(npc.id) + Math.floor(simTime * 10), simTime);
+          npc.plagueMeta.onsetTime = simTime;
+        }
       });
       setHealthTick((prev) => prev + 1);
       return;
@@ -655,6 +686,20 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     if (target) {
       target.state = npcStateOverride.state;
       target.stateStartTime = simTime;
+      if (npcStateOverride.state === AgentState.INCUBATING) {
+        target.plagueMeta = createNpcPlagueMeta(hashStringToSeed(target.id) + Math.floor(simTime * 10), simTime);
+      } else if (npcStateOverride.state === AgentState.HEALTHY) {
+        target.plagueMeta = {
+          plagueType: PlagueType.NONE,
+          exposureTime: null,
+          incubationHours: null,
+          deathHours: null,
+          onsetTime: null
+        };
+      } else if (npcStateOverride.state === AgentState.INFECTED) {
+        target.plagueMeta = createNpcPlagueMeta(hashStringToSeed(target.id) + Math.floor(simTime * 10), simTime);
+        target.plagueMeta.onsetTime = simTime;
+      }
       setHealthTick((prev) => prev + 1);
     }
   }, [npcStateOverride, simTime]);
@@ -667,6 +712,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       id: npc.id,
       pos: npc.position,
       state: npc.state,
+      plagueType: npc.plagueMeta?.plagueType,
       awareness: npc.awareness,
       panic: npc.panic
     }));
@@ -830,14 +876,25 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       const panicMod = npcStats ? (PANIC_SUSCEPTIBILITY[npcStats.socialClass] ?? 1.0) : 1.0;
 
       const hoursInState = simTime - npc.stateStartTime;
-      if (npc.state === AgentState.INCUBATING && hoursInState >= CONSTANTS.HOURS_TO_INFECTED) {
-        npc.state = AgentState.INFECTED;
-        npc.stateStartTime = simTime;
-        healthChanged = true;
-      } else if (npc.state === AgentState.INFECTED && hoursInState >= (CONSTANTS.HOURS_TO_DEATH - CONSTANTS.HOURS_TO_INFECTED)) {
-        npc.state = AgentState.DECEASED;
-        npc.stateStartTime = simTime;
-        healthChanged = true;
+      if (npc.state === AgentState.INCUBATING) {
+        const exposureTime = npc.plagueMeta?.exposureTime ?? npc.stateStartTime;
+        const incubationHours = npc.plagueMeta?.incubationHours ?? CONSTANTS.HOURS_TO_INFECTED;
+        if (simTime - exposureTime >= incubationHours) {
+          npc.state = AgentState.INFECTED;
+          npc.stateStartTime = simTime;
+          if (npc.plagueMeta) {
+            npc.plagueMeta.onsetTime = simTime;
+          }
+          healthChanged = true;
+        }
+      } else if (npc.state === AgentState.INFECTED) {
+        const onsetTime = npc.plagueMeta?.onsetTime ?? npc.stateStartTime;
+        const deathHours = npc.plagueMeta?.deathHours ?? (CONSTANTS.HOURS_TO_DEATH - CONSTANTS.HOURS_TO_INFECTED);
+        if (simTime - onsetTime >= deathHours) {
+          npc.state = AgentState.DECEASED;
+          npc.stateStartTime = simTime;
+          healthChanged = true;
+        }
       }
 
       if (npc.state === AgentState.HEALTHY) {
@@ -848,9 +905,14 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             if (other.id === npc.id) continue;
             if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
               if (npc.position.distanceToSquared(other.pos) < 4.0) {
-                if (Math.random() < params.infectionRate * params.simulationSpeed * 0.5 * 60) {
+                const contagionMod = other.state === AgentState.INFECTED
+                  ? (other.plagueType === PlagueType.PNEUMONIC ? 1 : other.plagueType === PlagueType.BUBONIC ? 0.35 : 0.2)
+                  : (other.plagueType === PlagueType.PNEUMONIC ? 0.35 : 0.12);
+                const exposureChance = Math.min(0.25, params.infectionRate * params.simulationSpeed * 0.5 * 60 * contagionMod);
+                if (Math.random() < exposureChance) {
                   npc.state = AgentState.INCUBATING;
                   npc.stateStartTime = simTime;
+                  npc.plagueMeta = createNpcPlagueMeta(hashStringToSeed(npc.id) + Math.floor(simTime * 10), simTime);
                   healthChanged = true;
                   break;
                 }
@@ -887,6 +949,63 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     }
     if (healthChanged) {
       setHealthTick((prev) => prev + 1);
+    }
+    if (onNpcUpdate) {
+      registrySyncTimerRef.current += delta * params.simulationSpeed;
+      if (registrySyncTimerRef.current >= 1.2) {
+        registrySyncTimerRef.current = 0;
+        npcStatesRef.current.forEach((npc) => {
+          onNpcUpdate(npc.id, npc.state, npc.position, npc.awareness, npc.panic, 'interior', npc.plagueMeta);
+        });
+      }
+    }
+    if (playerRef.current && onPlagueExposure && playerStats.plague.state === AgentState.HEALTHY) {
+      exposureCheckTimerRef.current += delta;
+      if (exposureCheckTimerRef.current >= EXPOSURE_CONFIG.CHECK_INTERVAL_SECONDS) {
+        exposureCheckTimerRef.current = 0;
+        const pos = playerRef.current.position;
+        const protectionMultiplier = calculatePlagueProtection(playerStats.inventory);
+
+        const nearbyInfected = npcStatesRef.current.filter((npc) => {
+          if (npc.state !== AgentState.INFECTED) return false;
+          const dist = Math.hypot(npc.position.x - pos.x, npc.position.z - pos.z);
+          return dist < EXPOSURE_CONFIG.INFECTED_RADIUS;
+        });
+
+        if (nearbyInfected.length > 0) {
+          const pneumonicCount = nearbyInfected.filter((npc) => npc.plagueMeta?.plagueType === PlagueType.PNEUMONIC).length;
+          const infectedDensity = Math.min(1, nearbyInfected.length / EXPOSURE_CONFIG.MAX_INFECTED_DENSITY);
+          const pneumonicBoost = pneumonicCount > 0 ? 1.4 : 0.4;
+          const exposureChance = EXPOSURE_CONFIG.INFECTED_BASE_CHANCE * infectedDensity * pneumonicBoost * protectionMultiplier;
+          if (Math.random() < Math.min(0.2, exposureChance)) {
+            const updatedPlague = exposePlayerToPlague(playerStats.plague, 'airborne', 0.8, simTime);
+            if (updatedPlague.state !== AgentState.HEALTHY) {
+              onPlagueExposure(updatedPlague);
+              onPickupPrompt?.('You feel a sudden chill...');
+              setTimeout(() => onPickupPrompt?.(null), 2000);
+              return;
+            }
+          }
+        }
+
+        const nearbyCorpses = npcStatesRef.current.filter((npc) => {
+          if (npc.state !== AgentState.DECEASED) return false;
+          const dist = Math.hypot(npc.position.x - pos.x, npc.position.z - pos.z);
+          return dist < EXPOSURE_CONFIG.CORPSE_RADIUS;
+        });
+
+        if (nearbyCorpses.length > 0) {
+          const exposureChance = EXPOSURE_CONFIG.CORPSE_BASE_CHANCE * protectionMultiplier;
+          if (Math.random() < Math.min(0.15, exposureChance)) {
+            const updatedPlague = exposePlayerToPlague(playerStats.plague, 'contact', 0.6, simTime);
+            if (updatedPlague.state !== AgentState.HEALTHY) {
+              onPlagueExposure(updatedPlague);
+              onPickupPrompt?.('You feel a sudden chill...');
+              setTimeout(() => onPickupPrompt?.(null), 2000);
+            }
+          }
+        }
+      }
     }
     if (playerRef.current) {
       const playerPos = playerRef.current.position;

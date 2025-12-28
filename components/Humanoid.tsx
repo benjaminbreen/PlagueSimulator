@@ -6,6 +6,101 @@ import * as THREE from 'three';
 const damaskCache = new Map<string, THREE.CanvasTexture>();
 const strawCache = new Map<string, THREE.CanvasTexture>();
 const motifCache = new Map<string, THREE.CanvasTexture>();
+const hairCache = new Map<string, THREE.CanvasTexture>();
+
+// Hair strand texture - creates realistic hair strand pattern
+const getHairTexture = (baseHex: string, isGraying: boolean = false) => {
+  const key = `${baseHex}_${isGraying}`;
+  const cached = hairCache.get(key);
+  if (cached) return cached;
+
+  const size = 128; // Higher resolution for better detail
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  // Parse base color
+  const hex = baseHex.replace('#', '');
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+
+  // Fill with darker base for depth
+  ctx.fillStyle = `rgb(${Math.floor(r * 0.75)}, ${Math.floor(g * 0.75)}, ${Math.floor(b * 0.75)})`;
+  ctx.fillRect(0, 0, size, size);
+
+  // Draw dense vertical hair strands with variation
+  for (let x = 0; x < size; x += 1) {
+    // Vary strand brightness - wider range for more natural look
+    const variation = 0.65 + Math.random() * 0.55;
+    const strandR = Math.min(255, Math.floor(r * variation));
+    const strandG = Math.min(255, Math.floor(g * variation));
+    const strandB = Math.min(255, Math.floor(b * variation));
+
+    ctx.strokeStyle = `rgb(${strandR}, ${strandG}, ${strandB})`;
+    ctx.globalAlpha = 0.5 + Math.random() * 0.5;
+    ctx.lineWidth = 0.8 + Math.random() * 0.8;
+
+    // Wavy strands with bezier curves for natural flow
+    ctx.beginPath();
+    const startOffset = (Math.random() - 0.5) * 3;
+    const midOffset = (Math.random() - 0.5) * 6;
+    const endOffset = (Math.random() - 0.5) * 4;
+    ctx.moveTo(x + startOffset, 0);
+    ctx.quadraticCurveTo(x + midOffset, size / 2, x + endOffset, size);
+    ctx.stroke();
+  }
+
+  // Add darker shadow strands for depth
+  ctx.globalAlpha = 0.4;
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * size;
+    ctx.strokeStyle = `rgb(${Math.floor(r * 0.5)}, ${Math.floor(g * 0.5)}, ${Math.floor(b * 0.5)})`;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.quadraticCurveTo(x + (Math.random() - 0.5) * 4, size / 2, x + (Math.random() - 0.5) * 3, size);
+    ctx.stroke();
+  }
+
+  // Add highlight strands for shine
+  ctx.globalAlpha = 0.35;
+  for (let i = 0; i < 24; i++) {
+    const x = Math.random() * size;
+    ctx.strokeStyle = `rgb(${Math.min(255, r + 70)}, ${Math.min(255, g + 60)}, ${Math.min(255, b + 50)})`;
+    ctx.lineWidth = 0.8 + Math.random() * 0.6;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.quadraticCurveTo(x + (Math.random() - 0.5) * 3, size / 2, x + (Math.random() - 0.5) * 2, size);
+    ctx.stroke();
+  }
+
+  // If graying, add white/gray strands
+  if (isGraying) {
+    ctx.globalAlpha = 0.55;
+    for (let i = 0; i < 20; i++) {
+      const x = Math.random() * size;
+      const grayValue = 170 + Math.floor(Math.random() * 85);
+      ctx.strokeStyle = `rgb(${grayValue}, ${grayValue}, ${grayValue})`;
+      ctx.lineWidth = 0.8 + Math.random() * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.quadraticCurveTo(x + (Math.random() - 0.5) * 2, size / 2, x + (Math.random() - 0.5) * 2, size);
+      ctx.stroke();
+    }
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(2, 2); // Reduced repeat for less visible tiling
+  texture.minFilter = THREE.LinearMipMapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  hairCache.set(key, texture);
+  return texture;
+};
 
 const getDamaskTexture = (baseHex: string, accentHex: string, alpha: number) => {
   const key = `${baseHex}_${accentHex}_${alpha}`;
@@ -88,8 +183,8 @@ const getStrawTexture = (baseHex: string, accentHex: string) => {
   return texture;
 };
 
-const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron', baseHex: string, accentHex: string) => {
-  const key = `${pattern}_${baseHex}_${accentHex}`;
+const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric', baseHex: string, accentHex: string, repeat = 3) => {
+  const key = `${pattern}_${baseHex}_${accentHex}_${repeat}`;
   const cached = motifCache.get(key);
   if (cached) return cached;
   const size = 64;
@@ -104,8 +199,8 @@ const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron', baseHex: stri
   ctx.fillStyle = accentHex;
   ctx.globalAlpha = 0.55;
   if (pattern === 'stripe') {
-    for (let y = 0; y < size; y += 8) {
-      ctx.fillRect(0, y, size, 3);
+    for (let y = 0; y < size; y += 6) {
+      ctx.fillRect(0, y, size, 2);
     }
   } else if (pattern === 'chevron') {
     for (let y = 0; y < size; y += 12) {
@@ -119,7 +214,99 @@ const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron', baseHex: stri
         ctx.fill();
       }
     }
+  } else if (pattern === 'ikat') {
+    // Ikat: Tie-dye with blurred, feathered diamond shapes
+    // Uses softer edges to simulate the dye bleeding effect
+    const step = 16;
+    for (let y = 0; y < size; y += step) {
+      for (let x = 0; x < size; x += step) {
+        const offsetX = (Math.floor(y / step) % 2) * (step / 2);
+        // Create fuzzy diamond with gradient-like effect
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.moveTo(x + offsetX + step / 2, y + 1);
+        ctx.lineTo(x + offsetX + step - 2, y + step / 2);
+        ctx.lineTo(x + offsetX + step / 2, y + step - 1);
+        ctx.lineTo(x + offsetX + 2, y + step / 2);
+        ctx.closePath();
+        ctx.fill();
+        // Inner diamond (sharper)
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        ctx.moveTo(x + offsetX + step / 2, y + 4);
+        ctx.lineTo(x + offsetX + step - 5, y + step / 2);
+        ctx.lineTo(x + offsetX + step / 2, y + step - 4);
+        ctx.lineTo(x + offsetX + 5, y + step / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  } else if (pattern === 'tiraz') {
+    // Tiraz: Islamic inscription bands - horizontal bands with geometric motifs
+    // Simulates the embroidered bands found on medieval Islamic textiles
+    ctx.globalAlpha = 0.5;
+    // Upper band
+    ctx.fillRect(0, 8, size, 4);
+    // Lower band
+    ctx.fillRect(0, size - 12, size, 4);
+    // Small geometric accents in bands
+    ctx.globalAlpha = 0.7;
+    for (let x = 0; x < size; x += 10) {
+      // Diamond accents in upper band
+      ctx.beginPath();
+      ctx.moveTo(x + 5, 6);
+      ctx.lineTo(x + 8, 10);
+      ctx.lineTo(x + 5, 14);
+      ctx.lineTo(x + 2, 10);
+      ctx.closePath();
+      ctx.fill();
+      // Diamond accents in lower band
+      ctx.beginPath();
+      ctx.moveTo(x + 5, size - 14);
+      ctx.lineTo(x + 8, size - 10);
+      ctx.lineTo(x + 5, size - 6);
+      ctx.lineTo(x + 2, size - 10);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Central subtle motifs
+    ctx.globalAlpha = 0.25;
+    for (let x = 0; x < size; x += 16) {
+      ctx.beginPath();
+      ctx.arc(x + 8, size / 2, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (pattern === 'geometric') {
+    // Islamic geometric: interlocking 8-pointed stars
+    const step = 22;
+    ctx.globalAlpha = 0.5;
+    for (let y = -step / 2; y < size + step; y += step) {
+      for (let x = -step / 2; x < size + step; x += step) {
+        const cx = x + step / 2;
+        const cy = y + step / 2;
+        const r = step * 0.4;
+        // 8-pointed star
+        ctx.beginPath();
+        for (let i = 0; i < 8; i++) {
+          const angle = (i * Math.PI) / 4;
+          const outerR = i % 2 === 0 ? r : r * 0.5;
+          const px = cx + Math.cos(angle) * outerR;
+          const py = cy + Math.sin(angle) * outerR;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        // Central dot
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.5;
+      }
+    }
   } else {
+    // damask (default)
     const step = 20;
     for (let x = 0; x < size; x += step) {
       for (let y = 0; y < size; y += step) {
@@ -136,7 +323,7 @@ const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron', baseHex: stri
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 3);
+  texture.repeat.set(repeat, repeat);
   texture.minFilter = THREE.LinearMipMapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   motifCache.set(key, texture);
@@ -161,6 +348,8 @@ interface HumanoidProps {
   jumpAnticipationRef?: React.MutableRefObject<number>;
   landingImpulseRef?: React.MutableRefObject<number>;
   jumpChargeRef?: React.MutableRefObject<number>;
+  isClimbing?: boolean;
+  climbAnimationPhaseRef?: React.MutableRefObject<number>;
   animationBoost?: number;
   walkSpeed?: number;
   enableArmSwing?: boolean;
@@ -174,8 +363,12 @@ interface HumanoidProps {
   robeHemBand?: boolean;
   robeSpread?: number;
   robeOverwrap?: boolean;
-  robePattern?: 'none' | 'damask' | 'stripe' | 'chevron';
+  robePattern?: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric';
+  robePatternScale?: number;
+  sashPattern?: 'none' | 'stripe';
+  sashPatternScale?: number;
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
+  facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
@@ -194,6 +387,12 @@ interface HumanoidProps {
   // Plague infection state
   isInfected?: boolean;
   isIncubating?: boolean;
+  age?: number;
+  // Portrait mode - enables enhanced facial animations (only for encounter modal)
+  portraitMode?: boolean;
+  isSpeaking?: boolean;
+  mood?: string;
+  panicLevel?: number;
 }
 
 export const Humanoid: React.FC<HumanoidProps> = memo(({
@@ -214,6 +413,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   jumpAnticipationRef,
   landingImpulseRef,
   jumpChargeRef,
+  isClimbing = false,
+  climbAnimationPhaseRef,
   animationBoost = 1,
   walkSpeed = 10,
   enableArmSwing = false,
@@ -228,7 +429,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   robeSpread,
   robeOverwrap,
   robePattern = 'none',
+  robePatternScale,
+  sashPattern = 'none',
+  sashPatternScale,
   hairStyle: hairStyleProp,
+  facialHair = 'none',
   headwearStyle: headwearStyleProp,
   sleeveCoverage = robeSleeves ? 'full' : 'none',
   footwearStyle = 'sandals',
@@ -241,10 +446,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   actionAnimationRef,
   sicknessLevel = 0,
   isInfected = false,
-  isIncubating = false
+  isIncubating = false,
+  age,
+  // Portrait mode props (only used in encounter modal)
+  portraitMode = false,
+  isSpeaking = false,
+  mood = 'neutral',
+  panicLevel = 0,
 }) => {
   // PERFORMANCE: LOD - skip facial details beyond 25 units
   const showFacialDetails = distanceFromCamera < 25;
+  // PERFORMANCE: Hair LOD tiers - high detail when close, simplified when far
+  const hairLOD: 'high' | 'medium' | 'low' =
+    distanceFromCamera < 15 ? 'high' :
+    distanceFromCamera < 35 ? 'medium' : 'low';
 
   // PLAGUE VISUAL: Apply sickly pallor to skin based on sickness level
   const sickHeadColor = useMemo(() => {
@@ -374,8 +589,31 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const hash = (color + robeAccentColor).split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
     const contrast = hash % 3 === 0;
     const motif = contrast ? adjustColor(robeAccentColor, 1.35) : adjustColor(color, 1.2);
-    return getMotifTexture(robePattern, '#000000', motif) ?? null;
-  }, [color, robeAccentColor, robePattern, distanceFromCamera]);
+    const repeat = Math.max(1.8, robePatternScale ?? 3);
+    return getMotifTexture(robePattern, '#000000', motif, repeat) ?? null;
+  }, [color, robeAccentColor, robePattern, distanceFromCamera, robePatternScale]);
+
+  const sashMap = useMemo(() => {
+    if (!robeHasSash || sashPattern !== 'stripe' || distanceFromCamera > 25) return null;
+    const base = adjustColor(robeAccentColor, 0.85);
+    const accent = adjustColor(robeAccentColor, 1.2);
+    const repeat = Math.max(4, sashPatternScale ?? 7);
+    return getMotifTexture('stripe', base, accent, repeat) ?? null;
+  }, [robeHasSash, sashPattern, distanceFromCamera, robeAccentColor, sashPatternScale]);
+
+  // Hair texture - only for HIGH LOD (close up) for performance
+  const hairTexture = useMemo(() => {
+    if (hairLOD !== 'high' || headwearStyle !== 'none' || hairStyle === 'covered') return null;
+    // Detect if hair is graying by checking for lighter color values
+    const hex = hairColor.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const avg = (r + g + b) / 3;
+    const isGraying = avg > 80; // Graying hair tends to be lighter
+    return getHairTexture(hairColor, isGraying) ?? null;
+  }, [hairColor, hairLOD, headwearStyle, hairStyle]);
+
   const eyeColor = useMemo(() => {
     const roll = Math.random();
     if (roll > 0.98) return '#6aa0c8'; // rare blue
@@ -383,6 +621,17 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     if (roll > 0.6) return '#3b2a1a'; // deep brown
     return '#2a1a12'; // very dark brown
   }, []);
+  const strideVariance = useMemo(() => 0.85 + Math.random() * 0.3, []);
+  const armVariance = useMemo(() => 0.85 + Math.random() * 0.3, []);
+  const gaitPhaseOffset = useMemo(() => Math.random() * Math.PI * 2, []);
+  const ageScale = useMemo(() => {
+    if (age === undefined) return 1;
+    if (age < 18) return 1.08;
+    if (age < 35) return 1.0;
+    if (age < 55) return 0.92;
+    return 0.82;
+  }, [age]);
+  const healthScale = useMemo(() => Math.max(0.6, 1 - sicknessLevel * 0.35), [sicknessLevel]);
   const upperLidLeft = useRef<THREE.Mesh>(null);
   const upperLidRight = useRef<THREE.Mesh>(null);
   const lowerLidLeft = useRef<THREE.Mesh>(null);
@@ -391,6 +640,21 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const blinkCooldown = useRef(2 + Math.random() * 3); // 2-5 seconds initial
   const blinkProgress = useRef(0);
   const isBlinking = useRef(false);
+
+  // Portrait mode refs (only used when portraitMode=true)
+  const leftBrowRef = useRef<THREE.Mesh>(null);
+  const rightBrowRef = useRef<THREE.Mesh>(null);
+  const mouthInteriorRef = useRef<THREE.Mesh>(null);
+  const upperLipRef = useRef<THREE.Mesh>(null);
+  const lowerLipRef = useRef<THREE.Mesh>(null);
+
+  // Portrait mode animation state
+  const speakPhase = useRef(0);
+  const mouthOpenAmount = useRef(0);
+  const animBrowAngle = useRef(0);
+  const animBrowHeight = useRef(0);
+  const targetBrowAngle = useRef(0);
+  const targetBrowHeight = useRef(0);
 
   // Idle weight shifting state
   const idleShiftTimer = useRef(0);
@@ -474,9 +738,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const anticipate = jumpAnticipationRef ? jumpAnticipationRef.current : 0;
     const landing = landingImpulseRef ? landingImpulseRef.current : 0;
     const jumpBoost = jumpChargeRef ? jumpChargeRef.current : 0;
-    const effectiveWalkSpeed = isSprinting ? walkSpeed * 2.2 : walkSpeed;
-    const t = state.clock.elapsedTime * effectiveWalkSpeed;
-    const amp = isWalking ? (isSprinting ? 0.85 : 0.4) : 0; // Bigger stride when sprinting
+    const baseSpeed = isSprinting ? walkSpeed * 2.2 : walkSpeed;
+    const effectiveWalkSpeed = baseSpeed * ageScale * healthScale * (0.9 + strideVariance * 0.15);
+    const t = state.clock.elapsedTime * effectiveWalkSpeed + gaitPhaseOffset;
+    const strideScale = (isFemale ? 0.88 : 1) * (age < 18 ? 1.05 : age !== undefined && age > 55 ? 0.9 : 1);
+    const amp = isWalking ? (isSprinting ? 0.85 : 0.55) * strideScale * strideVariance : 0; // Stronger walk stride
 
     // Easing function for more organic, weighted movement
     const easeInOutQuad = (x: number) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
@@ -564,10 +830,10 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
         // Shoulders drop slightly on weight-bearing side
         if (leftShoulder.current) {
-          leftShoulder.current.position.y = THREE.MathUtils.lerp(leftShoulder.current.position.y || 0, shiftAmount * 0.02, 0.08);
+          leftShoulder.current.position.y = THREE.MathUtils.lerp(leftShoulder.current.position.y || 0, 1.4 + shiftAmount * 0.02, 0.08);
         }
         if (rightShoulder.current) {
-          rightShoulder.current.position.y = THREE.MathUtils.lerp(rightShoulder.current.position.y || 0, -shiftAmount * 0.02, 0.08);
+          rightShoulder.current.position.y = THREE.MathUtils.lerp(rightShoulder.current.position.y || 0, 1.4 - shiftAmount * 0.02, 0.08);
         }
 
         if (shiftT >= 1) {
@@ -758,7 +1024,54 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     }
 
     if (enableArmSwing) {
-      if (!jumping) {
+      // CLIMBING ANIMATION: Hand-over-hand ladder climb
+      if (isClimbing && climbAnimationPhaseRef) {
+        const climbPhase = climbAnimationPhaseRef.current;
+        const climbCycle = climbPhase * Math.PI * 2;
+
+        // Alternate arms reaching up
+        const leftReach = Math.sin(climbCycle);
+        const rightReach = Math.sin(climbCycle + Math.PI);
+
+        // Arms reach up alternately
+        if (leftArm.current) {
+          leftArm.current.rotation.x = -2.5 + leftReach * 0.5; // Reaching up
+          leftArm.current.rotation.z = 0.3 - Math.abs(leftReach) * 0.2;
+          leftArm.current.rotation.y = 0;
+        }
+        if (rightArm.current) {
+          rightArm.current.rotation.x = -2.5 + rightReach * 0.5;
+          rightArm.current.rotation.z = -0.3 + Math.abs(rightReach) * 0.2;
+          rightArm.current.rotation.y = 0;
+        }
+
+        // Bend elbows as if gripping rungs
+        if (leftForearm.current) {
+          leftForearm.current.rotation.x = -0.8 - Math.max(0, leftReach) * 0.4;
+        }
+        if (rightForearm.current) {
+          rightForearm.current.rotation.x = -0.8 - Math.max(0, rightReach) * 0.4;
+        }
+
+        // Legs step up alternately
+        if (leftLeg.current) {
+          leftLeg.current.rotation.x = -0.6 + leftReach * 0.3;
+        }
+        if (rightLeg.current) {
+          rightLeg.current.rotation.x = -0.6 + rightReach * 0.3;
+        }
+        if (leftKnee.current) {
+          leftKnee.current.rotation.x = Math.max(0, -leftReach) * 0.5;
+        }
+        if (rightKnee.current) {
+          rightKnee.current.rotation.x = Math.max(0, -rightReach) * 0.5;
+        }
+
+        // Torso leans slightly forward
+        if (torsoGroup.current) {
+          torsoGroup.current.rotation.x = THREE.MathUtils.lerp(torsoGroup.current.rotation.x, 0.15, 0.15);
+        }
+      } else if (!jumping) {
         // Check if interaction or action animation should take priority
         const interactionCharge = interactionChargeRef?.current ?? 0;
         const interactionSwing = interactionSwingRef?.current ?? 0;
@@ -768,72 +1081,42 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
         // Normal walk arm swing - only when not in interaction
         if (!hasInteraction) {
-          if (isSprinting) {
-            // SPRINT: Vigorous bent-elbow pumping motion with vertical drive
-            const pumpPhase = Math.sin(t + Math.PI);
-            const pumpAmp = 1.3; // Increased from 0.9 for more dramatic pump
-
-            // Add vertical component - arms pump UP toward chest, not just forward
-            const verticalPump = Math.max(0, pumpPhase) * 0.5; // Upward drive
-            const backswing = Math.min(0, pumpPhase) * 0.7; // Backswing behind body
+          if (isWalking) {
+            const gait = leftPhase;
+            const ageArmScale = age !== undefined && age > 55 ? 0.85 : age !== undefined && age < 18 ? 1.05 : 1;
+            const armScale = (isFemale ? 0.82 : 1) * ageArmScale * armVariance;
+            const armAmp = (isSprinting ? 0.9 : 0.35) * armScale;
+            const lift = (isSprinting ? 0.12 : 0.04) * armScale;
+            const elbowBase = isSprinting ? -0.9 : -0.35;
+            const elbowSwing = (isSprinting ? 0.28 : 0.14) * armScale;
 
             if ((armSwingMode === 'both' || armSwingMode === 'left') && leftArm.current) {
-              // Arms pump forward AND upward (rotate shoulder forward + lift up)
-              leftArm.current.rotation.x = pumpPhase * pumpAmp - verticalPump * 0.4; // Forward swing + upward arc
-              leftArm.current.rotation.z = 0.25 + Math.abs(pumpPhase) * 0.15; // Arms held out from body
-              leftArm.current.rotation.y = pumpPhase * 0.2; // Slight inward rotation on upswing
-
+              const forward = -gait;
+              leftArm.current.rotation.x = forward * armAmp - Math.max(0, forward) * lift;
+              leftArm.current.rotation.z = 0.06 + Math.abs(forward) * 0.06;
+              leftArm.current.rotation.y = forward * 0.03;
               if (leftForearm.current) {
-                // Elbow bends more on upswing (bring fist toward chest height)
-                const elbowBend = -1.1 - verticalPump * 0.6; // Deeper bend on upswing
-                leftForearm.current.rotation.x = elbowBend;
-                leftForearm.current.rotation.z = -0.1; // Hand angled slightly inward
+                leftForearm.current.rotation.x = elbowBase - Math.max(0, forward) * elbowSwing;
+                leftForearm.current.rotation.z = -0.05;
               }
-
-              // Drive left shoulder with arm pump
               if (leftShoulder.current) {
-                leftShoulder.current.rotation.x = pumpPhase * 0.3; // Shoulder pumps with arm
-                leftShoulder.current.rotation.z = verticalPump * 0.15; // Shoulder lifts on upswing
+                leftShoulder.current.rotation.x = forward * 0.06;
+                leftShoulder.current.rotation.z = Math.max(0, forward) * 0.06;
               }
             }
 
             if ((armSwingMode === 'both' || armSwingMode === 'right') && rightArm.current) {
-              const rightPump = Math.sin(t); // Opposite phase
-              const rightVertical = Math.max(0, rightPump) * 0.5;
-              const rightBack = Math.min(0, rightPump) * 0.7;
-
-              rightArm.current.rotation.x = rightPump * pumpAmp - rightVertical * 0.4;
-              rightArm.current.rotation.z = -0.25 - Math.abs(rightPump) * 0.15;
-              rightArm.current.rotation.y = -rightPump * 0.2;
-
+              const forward = gait;
+              rightArm.current.rotation.x = forward * armAmp - Math.max(0, forward) * lift;
+              rightArm.current.rotation.z = -0.06 - Math.abs(forward) * 0.06;
+              rightArm.current.rotation.y = -forward * 0.03;
               if (rightForearm.current) {
-                const elbowBend = -1.1 - rightVertical * 0.6;
-                rightForearm.current.rotation.x = elbowBend;
-                rightForearm.current.rotation.z = 0.1;
+                rightForearm.current.rotation.x = elbowBase - Math.max(0, forward) * elbowSwing;
+                rightForearm.current.rotation.z = 0.05;
               }
-
-              // Drive right shoulder with arm pump
               if (rightShoulder.current) {
-                rightShoulder.current.rotation.x = rightPump * 0.3;
-                rightShoulder.current.rotation.z = -rightVertical * 0.15;
-              }
-            }
-          } else if (isWalking) {
-            // WALK: Relaxed natural arm swing
-            if ((armSwingMode === 'both' || armSwingMode === 'left') && leftArm.current) {
-              const swing = Math.sin(t + Math.PI * 0.95) * amp;
-              leftArm.current.rotation.x = swing;
-              leftArm.current.rotation.z = swing * 0.2;
-              if (leftForearm.current) {
-                leftForearm.current.rotation.x = -Math.max(0, Math.sin(t + Math.PI)) * 0.35;
-              }
-            }
-            if ((armSwingMode === 'both' || armSwingMode === 'right') && rightArm.current) {
-              const swing = Math.sin(t * 1.03) * amp;
-              rightArm.current.rotation.x = swing;
-              rightArm.current.rotation.z = -swing * 0.2;
-              if (rightForearm.current) {
-                rightForearm.current.rotation.x = -Math.max(0, Math.sin(t)) * 0.35;
+                rightShoulder.current.rotation.x = forward * 0.06;
+                rightShoulder.current.rotation.z = -Math.max(0, forward) * 0.06;
               }
             }
           } else {
@@ -1215,6 +1498,100 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         if (lowerLidRight.current) lowerLidRight.current.scale.y = 1;
       }
     }
+
+    // === PORTRAIT MODE ANIMATIONS ===
+    // Only runs when portraitMode is true (encounter modal only)
+    if (portraitMode) {
+      const dt = state.clock.getDelta() || 0.016;
+
+      // Calculate mood-based expression targets
+      const moodLower = mood?.toLowerCase() || 'neutral';
+      switch (moodLower) {
+        case 'anxious':
+        case 'worried':
+          targetBrowAngle.current = 0.15;
+          targetBrowHeight.current = 0.005;
+          break;
+        case 'fearful':
+        case 'terrified':
+          targetBrowAngle.current = 0.25;
+          targetBrowHeight.current = 0.01;
+          break;
+        case 'angry':
+        case 'hostile':
+          targetBrowAngle.current = -0.2;
+          targetBrowHeight.current = -0.005;
+          break;
+        case 'content':
+        case 'happy':
+          targetBrowAngle.current = 0.05;
+          targetBrowHeight.current = 0.003;
+          break;
+        case 'sad':
+        case 'melancholy':
+          targetBrowAngle.current = 0.18;
+          targetBrowHeight.current = -0.003;
+          break;
+        case 'suspicious':
+          targetBrowAngle.current = -0.1;
+          targetBrowHeight.current = 0;
+          break;
+        default:
+          targetBrowAngle.current = 0;
+          targetBrowHeight.current = 0;
+      }
+
+      // Add panic influence to expression
+      const panicFactor = (panicLevel || 0) / 100;
+      targetBrowAngle.current += panicFactor * 0.1;
+      targetBrowHeight.current += panicFactor * 0.005;
+
+      // Smooth interpolation to target expression
+      animBrowAngle.current += (targetBrowAngle.current - animBrowAngle.current) * dt * 3;
+      animBrowHeight.current += (targetBrowHeight.current - animBrowHeight.current) * dt * 3;
+
+      // Apply eyebrow animation - use browY as base position
+      const baseRotation = isFemale ? 0.1 : 0.08;
+      if (leftBrowRef.current) {
+        leftBrowRef.current.rotation.z = -baseRotation - animBrowAngle.current;
+        leftBrowRef.current.position.y = browY + animBrowHeight.current;
+      }
+      if (rightBrowRef.current) {
+        rightBrowRef.current.rotation.z = baseRotation + animBrowAngle.current;
+        rightBrowRef.current.position.y = browY + animBrowHeight.current;
+      }
+
+      // Speaking animation - mouth movement
+      if (isSpeaking) {
+        speakPhase.current += dt * 12;
+        // Multiple frequencies for natural speech pattern
+        const primary = Math.sin(speakPhase.current) * 0.5 + 0.5;
+        const secondary = Math.sin(speakPhase.current * 1.7) * 0.3;
+        const tertiary = Math.sin(speakPhase.current * 0.5) * 0.2;
+        const targetOpen = Math.max(0, (primary + secondary + tertiary) * 0.5);
+        mouthOpenAmount.current += (targetOpen - mouthOpenAmount.current) * dt * 15;
+      } else {
+        mouthOpenAmount.current += (0 - mouthOpenAmount.current) * dt * 8;
+      }
+
+      // Apply mouth animation - use mouthY as base position
+      const openAmt = mouthOpenAmount.current;
+      if (mouthInteriorRef.current) {
+        mouthInteriorRef.current.scale.y = 1 + openAmt * 3;
+        mouthInteriorRef.current.position.y = mouthY - lipGap - openAmt * 0.006;
+      }
+      if (upperLipRef.current) {
+        upperLipRef.current.position.y = mouthY + openAmt * 0.003;
+      }
+      if (lowerLipRef.current) {
+        lowerLipRef.current.position.y = mouthY - 0.012 - openAmt * 0.006;
+      }
+
+      // More frequent blinking when panicked
+      if (panicFactor > 0.5) {
+        blinkCooldown.current = Math.min(blinkCooldown.current, 1.5 + Math.random() * 2);
+      }
+    }
   });
 
   return (
@@ -1297,7 +1674,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             {robeHasSash && (
               <mesh position={[0, 0.95, 0]} castShadow>
                 <torusGeometry args={[0.38 * femaleRobeSpread, 0.035, 8, 16]} />
-                <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
+                <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} map={sashMap ?? undefined} />
               </mesh>
             )}
             {femaleRobeBand && (
@@ -1312,15 +1689,15 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
               </mesh>
             )}
-            <mesh position={[-0.24, 1.34, 0]} castShadow>
+            <mesh position={[-0.22, 1.34, 0]} castShadow>
               <boxGeometry args={[0.14, 0.14, 0.14]} />
               <meshStandardMaterial color={color} roughness={0.9} />
             </mesh>
-            <mesh position={[0.24, 1.34, 0]} castShadow>
+            <mesh position={[0.22, 1.34, 0]} castShadow>
               <boxGeometry args={[0.14, 0.14, 0.14]} />
               <meshStandardMaterial color={color} roughness={0.9} />
             </mesh>
-            <group ref={leftArm} position={[-0.28, 1.14, 0.02]}>
+            <group ref={leftArm} position={[-0.26, 1.14, 0.02]}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.055, 0.055, 0.36, 8]} />
               <meshStandardMaterial color={upperArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
@@ -1349,7 +1726,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               </group>
             </group>
             </group>
-            <group ref={rightArm} position={[0.28, 1.14, 0.02]}>
+            <group ref={rightArm} position={[0.26, 1.14, 0.02]}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.055, 0.055, 0.36, 8]} />
               <meshStandardMaterial color={upperArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
@@ -1439,12 +1816,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             {/* Main sash belt - thicker and more visible */}
             <mesh position={[0, 0.95, 0]} castShadow>
               <torusGeometry args={[isFemale ? 0.42 : 0.28, 0.06, 10, 18]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.85} map={sashMap ?? undefined} />
             </mesh>
             {/* Sash hanging ends */}
             <mesh ref={sashFrontRef} position={[0, 0.95, 0.22]} castShadow>
               <boxGeometry args={[isFemale ? 0.28 : 0.22, 0.18, 0.03]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.88} map={sashMap ?? undefined} />
             </mesh>
             {/* Sash knot detail */}
             <mesh position={[0.02, 0.95, 0.24]} castShadow>
@@ -1526,47 +1903,160 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               </group>
             </>
           )}
-          {/* Hair */}
+          {/* Hair - LOD-based rendering for performance */}
           {headwearStyle === 'none' && hairStyle !== 'covered' && (
             <group>
-              <mesh position={[0, 0.16, -0.08]} castShadow>
-                <sphereGeometry args={[0.2, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.45]} />
-                <meshStandardMaterial color={hairColor} roughness={0.9} />
-              </mesh>
-              <mesh position={[0, 0.18, 0.02]} castShadow>
-                <boxGeometry args={[0.1, 0.012, 0.03]} />
-                <meshStandardMaterial color={hairColor} roughness={0.95} />
-              </mesh>
-              <mesh position={[0, 0.07, -0.16]} castShadow>
-                <sphereGeometry args={[0.18, 10, 10]} />
-                <meshStandardMaterial color={hairColor} roughness={0.92} />
-              </mesh>
-              {(hairStyle === 'medium' || hairStyle === 'long') && (
+              {/* === LOW LOD (>35 units) - Silhouette only === */}
+              {hairLOD === 'low' && (
                 <>
-                  <mesh position={[-0.16, -0.01, -0.04]} castShadow>
-                    <boxGeometry args={[0.05, 0.18, 0.1]} />
+                  <mesh position={[0, 0.08, -0.05]} castShadow>
+                    <sphereGeometry args={[0.21, 8, 6, 0, Math.PI * 2, 0, Math.PI * 0.52]} />
                     <meshStandardMaterial color={hairColor} roughness={0.9} />
                   </mesh>
-                  <mesh position={[0.16, -0.01, -0.04]} castShadow>
-                    <boxGeometry args={[0.05, 0.18, 0.1]} />
-                    <meshStandardMaterial color={hairColor} roughness={0.9} />
-                  </mesh>
+                  {hairStyle === 'long' && (
+                    <mesh position={[0, -0.12, -0.14]} rotation={[0.15, 0, 0]} castShadow>
+                      <capsuleGeometry args={[0.06, 0.22, 3, 6]} />
+                      <meshStandardMaterial color={hairColor} roughness={0.9} />
+                    </mesh>
+                  )}
                 </>
               )}
-              {hairStyle === 'long' && (
+
+              {/* === MEDIUM LOD (15-35 units) - Basic shape with some detail === */}
+              {hairLOD === 'medium' && (
                 <>
-                  <mesh position={[-0.14, -0.18, -0.14]} rotation={[0.05, 0, 0]} castShadow>
-                    <boxGeometry args={[0.06, 0.28, 0.1]} />
-                    <meshStandardMaterial color={hairColor} roughness={0.92} />
+                  {/* Base cap */}
+                  <mesh position={[0, 0.07, -0.05]} castShadow>
+                    <sphereGeometry args={[0.20, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.52]} />
+                    <meshStandardMaterial color={hairColor} roughness={0.88} />
                   </mesh>
-                  <mesh position={[0.14, -0.18, -0.14]} rotation={[0.05, 0, 0]} castShadow>
-                    <boxGeometry args={[0.06, 0.28, 0.1]} />
-                    <meshStandardMaterial color={hairColor} roughness={0.92} />
+                  {/* Top volume layer */}
+                  <mesh position={[0, 0.12, -0.04]} castShadow>
+                    <sphereGeometry args={[0.17, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.45]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 1.05)} roughness={0.85} />
                   </mesh>
-                  <mesh position={[0, -0.16, -0.22]} castShadow>
-                    <boxGeometry args={[0.16, 0.26, 0.1]} />
-                    <meshStandardMaterial color={hairColor} roughness={0.92} />
+                  {/* Medium/Long: side coverage */}
+                  {(hairStyle === 'medium' || hairStyle === 'long') && (
+                    <>
+                      <mesh position={[-0.15, -0.04, -0.04]} rotation={[0, 0.08, 0.12]} castShadow>
+                        <capsuleGeometry args={[0.035, 0.14, 3, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.88} />
+                      </mesh>
+                      <mesh position={[0.15, -0.04, -0.04]} rotation={[0, -0.08, -0.12]} castShadow>
+                        <capsuleGeometry args={[0.035, 0.14, 3, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.88} />
+                      </mesh>
+                    </>
+                  )}
+                  {/* Long: back drape */}
+                  {hairStyle === 'long' && (
+                    <mesh position={[0, -0.14, -0.15]} rotation={[0.12, 0, 0]} castShadow>
+                      <capsuleGeometry args={[0.055, 0.24, 3, 6]} />
+                      <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.9} />
+                    </mesh>
+                  )}
+                </>
+              )}
+
+              {/* === HIGH LOD (<15 units) - Full detail with layered volume === */}
+              {hairLOD === 'high' && (
+                <>
+                  {/* Layer 1: Skull-hugging dark base */}
+                  <mesh position={[0, 0.06, -0.045]} castShadow>
+                    <sphereGeometry args={[0.198, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.54]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.82)} roughness={0.92} />
                   </mesh>
+                  {/* Layer 2: Main volume - uses texture for strand detail */}
+                  <mesh position={[0, 0.09, -0.05]} castShadow>
+                    <sphereGeometry args={[0.205, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.50]} />
+                    <meshStandardMaterial color={hairColor} map={hairTexture} roughness={0.88} />
+                  </mesh>
+                  {/* Layer 3: Top highlight */}
+                  <mesh position={[0, 0.13, -0.035]} castShadow>
+                    <sphereGeometry args={[0.165, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.42]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 1.08)} roughness={0.85} />
+                  </mesh>
+                  {/* Hairline definition - softens forehead edge */}
+                  <mesh position={[0, 0.10, 0.10]} rotation={[0.6, 0, 0]} castShadow>
+                    <torusGeometry args={[0.10, 0.018, 6, 12, Math.PI]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.9} />
+                  </mesh>
+
+                  {/* Short hair: temple and side coverage */}
+                  {hairStyle === 'short' && (
+                    <>
+                      {/* Left temple coverage */}
+                      <mesh position={[-0.15, 0.02, 0.02]} rotation={[0.1, 0.2, 0.1]} castShadow>
+                        <boxGeometry args={[0.06, 0.08, 0.04]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} map={hairTexture} roughness={0.9} />
+                      </mesh>
+                      {/* Right temple coverage */}
+                      <mesh position={[0.15, 0.02, 0.02]} rotation={[0.1, -0.2, -0.1]} castShadow>
+                        <boxGeometry args={[0.06, 0.08, 0.04]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} map={hairTexture} roughness={0.9} />
+                      </mesh>
+                      {/* Left side above ear */}
+                      <mesh position={[-0.17, -0.02, -0.02]} rotation={[0, 0.15, 0.08]} castShadow>
+                        <capsuleGeometry args={[0.022, 0.06, 4, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                      </mesh>
+                      {/* Right side above ear */}
+                      <mesh position={[0.17, -0.02, -0.02]} rotation={[0, -0.15, -0.08]} castShadow>
+                        <capsuleGeometry args={[0.022, 0.06, 4, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                      </mesh>
+                      {/* Back of head coverage */}
+                      <mesh position={[0, 0.02, -0.12]} rotation={[-0.2, 0, 0]} castShadow>
+                        <capsuleGeometry args={[0.08, 0.06, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.85)} map={hairTexture} roughness={0.9} />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* Medium/Long: side strand clusters */}
+                  {(hairStyle === 'medium' || hairStyle === 'long') && (
+                    <>
+                      {/* Left side cluster */}
+                      <mesh position={[-0.16, -0.02, -0.03]} rotation={[0, 0.1, 0.14]} castShadow>
+                        <capsuleGeometry args={[0.028, 0.13, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.94)} map={hairTexture} roughness={0.88} />
+                      </mesh>
+                      <mesh position={[-0.14, -0.05, -0.05]} rotation={[0.04, 0.06, 0.10]} castShadow>
+                        <capsuleGeometry args={[0.024, 0.11, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.98)} map={hairTexture} roughness={0.86} />
+                      </mesh>
+                      {/* Right side cluster */}
+                      <mesh position={[0.16, -0.02, -0.03]} rotation={[0, -0.1, -0.14]} castShadow>
+                        <capsuleGeometry args={[0.028, 0.13, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.94)} map={hairTexture} roughness={0.88} />
+                      </mesh>
+                      <mesh position={[0.14, -0.05, -0.05]} rotation={[0.04, -0.06, -0.10]} castShadow>
+                        <capsuleGeometry args={[0.024, 0.11, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.98)} map={hairTexture} roughness={0.86} />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* Long: flowing back hair */}
+                  {hairStyle === 'long' && (
+                    <group position={[0, -0.08, -0.12]} rotation={[-0.12, 0, 0]}>
+                      {/* Central back flow */}
+                      <mesh position={[0, -0.10, 0]} castShadow>
+                        <capsuleGeometry args={[0.052, 0.30, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.86)} map={hairTexture} roughness={0.9} />
+                      </mesh>
+                      {/* Left back strand */}
+                      <mesh position={[-0.07, -0.08, 0.03]} rotation={[-0.05, 0.08, 0.06]} castShadow>
+                        <capsuleGeometry args={[0.035, 0.26, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.90)} map={hairTexture} roughness={0.88} />
+                      </mesh>
+                      {/* Right back strand */}
+                      <mesh position={[0.07, -0.08, 0.03]} rotation={[-0.05, -0.08, -0.06]} castShadow>
+                        <capsuleGeometry args={[0.035, 0.26, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.90)} map={hairTexture} roughness={0.88} />
+                      </mesh>
+                    </group>
+                  )}
                 </>
               )}
             </group>
@@ -1575,11 +2065,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           {showFacialDetails && (
             <>
               {/* Eyebrows */}
-              <mesh position={[-browX, browY, 0.165]} rotation={[0, 0, isFemale ? -0.1 : -0.08]} castShadow>
+              <mesh ref={leftBrowRef} position={[-browX, browY, 0.165]} rotation={[0, 0, isFemale ? -0.1 : -0.08]} castShadow>
                 <boxGeometry args={[0.05, browHeight, 0.02]} />
                 <meshStandardMaterial color={browColor} roughness={1} />
               </mesh>
-              <mesh position={[browX, browY, 0.165]} rotation={[0, 0, isFemale ? 0.1 : 0.08]} castShadow>
+              <mesh ref={rightBrowRef} position={[browX, browY, 0.165]} rotation={[0, 0, isFemale ? 0.1 : 0.08]} castShadow>
                 <boxGeometry args={[0.05, browHeight, 0.02]} />
                 <meshStandardMaterial color={browColor} roughness={1} />
               </mesh>
@@ -1658,25 +2148,193 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <meshStandardMaterial color="#cfa88c" roughness={1} />
               </mesh>
               {/* Lips */}
-              <mesh position={[0, mouthY, 0.175]} castShadow>
+              <mesh ref={upperLipRef} position={[0, mouthY, 0.175]} castShadow>
                 <boxGeometry args={[mouthWidth * lipWidthScale * faceVariant.mouthWidthScale, 0.012, 0.015]} />
                 <meshStandardMaterial color={lipUpperColor} roughness={1} />
               </mesh>
-              <mesh position={[0, mouthY - 0.012, 0.175]} castShadow>
+              <mesh ref={lowerLipRef} position={[0, mouthY - 0.012, 0.175]} castShadow>
                 <boxGeometry args={[mouthWidth * lipWidthScale * lipLowerScale * faceVariant.mouthWidthScale, 0.014, 0.015]} />
                 <meshStandardMaterial color={lipColor} roughness={1} />
               </mesh>
-              <mesh position={[0, mouthY - lipGap, 0.176]} castShadow>
+              <mesh ref={mouthInteriorRef} position={[0, mouthY - lipGap, 0.176]} castShadow>
                 <boxGeometry args={[mouthWidth * lipWidthScale * 0.9 * faceVariant.mouthWidthScale, 0.004, 0.01]} />
-                <meshStandardMaterial color={lipColor} roughness={1} />
+                <meshStandardMaterial color="#2a1a1a" roughness={1} />
               </mesh>
               {/* Nose */}
               <mesh position={[0, -0.01, 0.195]} castShadow>
                 <coneGeometry args={[noseRadius, noseLength, 8]} />
                 <meshStandardMaterial color={headColor} roughness={1} />
               </mesh>
+
+              {/* Facial Hair - men only */}
+              {!isFemale && facialHair !== 'none' && (
+                <group>
+                  {/* Stubble - subtle shadow on jaw and chin */}
+                  {facialHair === 'stubble' && (
+                    <>
+                      <mesh position={[0, -0.14, 0.12]} castShadow>
+                        <sphereGeometry args={[0.08, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.7)} roughness={1} transparent opacity={0.4} />
+                      </mesh>
+                      <mesh position={[-0.08, -0.11, 0.1]} castShadow>
+                        <boxGeometry args={[0.04, 0.06, 0.02]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.35} />
+                      </mesh>
+                      <mesh position={[0.08, -0.11, 0.1]} castShadow>
+                        <boxGeometry args={[0.04, 0.06, 0.02]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.35} />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* Mustache */}
+                  {(facialHair === 'mustache' || facialHair === 'full_beard' || facialHair === 'goatee') && (
+                    <>
+                      <mesh position={[-0.025, mouthY + 0.018, 0.18]} rotation={[0, 0, 0.15]} castShadow>
+                        <capsuleGeometry args={[0.012, 0.03, 4, 6]} />
+                        <meshStandardMaterial color={hairColor} roughness={0.95} />
+                      </mesh>
+                      <mesh position={[0.025, mouthY + 0.018, 0.18]} rotation={[0, 0, -0.15]} castShadow>
+                        <capsuleGeometry args={[0.012, 0.03, 4, 6]} />
+                        <meshStandardMaterial color={hairColor} roughness={0.95} />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* Short beard - covers chin and lower jaw */}
+                  {facialHair === 'short_beard' && (
+                    <>
+                      <mesh position={[0, -0.14, 0.13]} castShadow>
+                        <sphereGeometry args={[0.07, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                        <meshStandardMaterial color={hairColor} roughness={0.92} />
+                      </mesh>
+                      <mesh position={[-0.06, -0.11, 0.11]} castShadow>
+                        <boxGeometry args={[0.04, 0.05, 0.03]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                      </mesh>
+                      <mesh position={[0.06, -0.11, 0.11]} castShadow>
+                        <boxGeometry args={[0.04, 0.05, 0.03]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                      </mesh>
+                      {/* Mustache for short beard */}
+                      <mesh position={[-0.022, mouthY + 0.016, 0.178]} rotation={[0, 0, 0.12]} castShadow>
+                        <capsuleGeometry args={[0.01, 0.025, 4, 6]} />
+                        <meshStandardMaterial color={hairColor} roughness={0.94} />
+                      </mesh>
+                      <mesh position={[0.022, mouthY + 0.016, 0.178]} rotation={[0, 0, -0.12]} castShadow>
+                        <capsuleGeometry args={[0.01, 0.025, 4, 6]} />
+                        <meshStandardMaterial color={hairColor} roughness={0.94} />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* Full beard - thick coverage */}
+                  {facialHair === 'full_beard' && (
+                    <>
+                      {/* Main chin beard */}
+                      <mesh position={[0, -0.16, 0.10]} castShadow>
+                        <sphereGeometry args={[0.09, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.6]} />
+                        <meshStandardMaterial color={hairColor} roughness={0.9} />
+                      </mesh>
+                      {/* Beard extension downward */}
+                      <mesh position={[0, -0.22, 0.06]} rotation={[0.3, 0, 0]} castShadow>
+                        <capsuleGeometry args={[0.045, 0.08, 4, 8]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.92} />
+                      </mesh>
+                      {/* Side jaw coverage */}
+                      <mesh position={[-0.08, -0.12, 0.08]} castShadow>
+                        <boxGeometry args={[0.05, 0.08, 0.04]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                      </mesh>
+                      <mesh position={[0.08, -0.12, 0.08]} castShadow>
+                        <boxGeometry args={[0.05, 0.08, 0.04]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                      </mesh>
+                      {/* Sideburns connecting to beard */}
+                      <mesh position={[-0.12, -0.04, 0.04]} castShadow>
+                        <boxGeometry args={[0.03, 0.1, 0.03]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.85)} roughness={0.9} />
+                      </mesh>
+                      <mesh position={[0.12, -0.04, 0.04]} castShadow>
+                        <boxGeometry args={[0.03, 0.1, 0.03]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.85)} roughness={0.9} />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* Goatee - chin only with mustache */}
+                  {facialHair === 'goatee' && (
+                    <>
+                      <mesh position={[0, -0.15, 0.14]} castShadow>
+                        <sphereGeometry args={[0.055, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                        <meshStandardMaterial color={hairColor} roughness={0.92} />
+                      </mesh>
+                      <mesh position={[0, -0.20, 0.10]} rotation={[0.25, 0, 0]} castShadow>
+                        <capsuleGeometry args={[0.028, 0.05, 4, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                      </mesh>
+                    </>
+                  )}
+                </group>
+              )}
             </>
           )}
+
+          {/* Hair showing under headwear - for long/medium styles */}
+          {headwearStyle !== 'none' && headwearStyle !== 'turban' && hairStyle !== 'covered' && hairStyle !== 'short' && (
+            <group>
+              {/* Side hair wisps peeking out near temples */}
+              {(headwearStyle === 'scarf' || headwearStyle === 'cap' || headwearStyle === 'taqiyah') && (
+                <>
+                  {/* Left side wisp */}
+                  <mesh position={[-0.16, -0.04, 0.04]} rotation={[0.1, 0.2, 0.15]} castShadow>
+                    <capsuleGeometry args={[0.018, 0.07, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} />
+                  </mesh>
+                  <mesh position={[-0.14, -0.08, 0.02]} rotation={[0.05, 0.15, 0.12]} castShadow>
+                    <capsuleGeometry args={[0.014, 0.05, 4, 6]} />
+                    <meshStandardMaterial color={hairColor} roughness={0.88} />
+                  </mesh>
+                  {/* Right side wisp */}
+                  <mesh position={[0.16, -0.04, 0.04]} rotation={[0.1, -0.2, -0.15]} castShadow>
+                    <capsuleGeometry args={[0.018, 0.07, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} />
+                  </mesh>
+                  <mesh position={[0.14, -0.08, 0.02]} rotation={[0.05, -0.15, -0.12]} castShadow>
+                    <capsuleGeometry args={[0.014, 0.05, 4, 6]} />
+                    <meshStandardMaterial color={hairColor} roughness={0.88} />
+                  </mesh>
+                </>
+              )}
+              {/* Long hair flowing down back under scarf */}
+              {hairStyle === 'long' && headwearStyle === 'scarf' && (
+                <group position={[0, -0.22, -0.16]} rotation={[-0.15, 0, 0]}>
+                  <mesh position={[0, -0.08, 0]} castShadow>
+                    <capsuleGeometry args={[0.045, 0.24, 4, 8]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.85)} roughness={0.9} />
+                  </mesh>
+                  <mesh position={[-0.05, -0.06, 0.02]} rotation={[0, 0.05, 0.08]} castShadow>
+                    <capsuleGeometry args={[0.028, 0.18, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.88} />
+                  </mesh>
+                  <mesh position={[0.05, -0.06, 0.02]} rotation={[0, -0.05, -0.08]} castShadow>
+                    <capsuleGeometry args={[0.028, 0.18, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.88} />
+                  </mesh>
+                </group>
+              )}
+              {/* Medium hair - shorter back showing */}
+              {hairStyle === 'medium' && headwearStyle === 'scarf' && (
+                <group position={[0, -0.18, -0.14]} rotation={[-0.1, 0, 0]}>
+                  <mesh position={[0, -0.04, 0]} castShadow>
+                    <capsuleGeometry args={[0.035, 0.10, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.9} />
+                  </mesh>
+                </group>
+              )}
+            </group>
+          )}
+
           {headwearStyle === 'scarf' && (
             <group>
               <mesh position={[0, 0.12, -0.06]} castShadow>
@@ -1891,13 +2549,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         {!isFemale && (
           <>
             {/* Shoulders */}
-            <group ref={leftShoulder} position={[-0.3, 1.34, 0]}>
+            <group ref={leftShoulder} position={[-0.3, 1.4, 0]}>
               <mesh castShadow>
                 <boxGeometry args={[0.18, 0.18, 0.18]} />
                 <meshStandardMaterial color={color} roughness={0.85} />
               </mesh>
             </group>
-            <group ref={rightShoulder} position={[0.3, 1.34, 0]}>
+            <group ref={rightShoulder} position={[0.3, 1.4, 0]}>
               <mesh castShadow>
                 <boxGeometry args={[0.18, 0.18, 0.18]} />
                 <meshStandardMaterial color={color} roughness={0.85} />

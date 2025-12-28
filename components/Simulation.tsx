@@ -3,7 +3,7 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent, PlagueStatus, NpcStateOverride } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent, PlagueStatus, NpcStateOverride, NPCRecord, BuildingInfectionState } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents, MoraleStats } from './Agents';
 import { Rats, Rat } from './Rats';
@@ -35,11 +35,16 @@ interface SimulationProps {
   onStatsUpdate: (stats: SimulationCounts) => void;
   onMapChange: (dx: number, dy: number) => void;
   onNearBuilding: (building: BuildingMetadata | null) => void;
+  onBuildingsUpdate?: (buildings: BuildingMetadata[]) => void;
   onNearMerchant?: (merchant: MerchantNPCType | null) => void;
   onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
+  onNpcUpdate?: (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: import('../types').NPCPlagueMeta) => void;
   selectedNpcId?: string | null;
   onMinimapUpdate?: (data: MiniMapData) => void;
   onPickupPrompt?: (label: string | null) => void;
+  onClimbablePrompt?: (label: string | null) => void;
+  onClimbingStateChange?: (climbing: boolean) => void;
+  climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
   onPickupItem?: (pickup: PickupInfo) => void;
   onWeatherUpdate?: (weatherType: string) => void;
   onPushCharge?: (charge: number) => void;
@@ -47,9 +52,13 @@ interface SimulationProps {
   actionEvent?: PlayerActionEvent | null;
   showDemographicsOverlay?: boolean;
   npcStateOverride?: NpcStateOverride | null;
+  npcPool?: NPCRecord[];
+  buildingInfection?: Record<string, BuildingInfectionState>;
   onPlayerPositionUpdate?: (pos: THREE.Vector3) => void;
   dossierMode?: boolean;
   onPlagueExposure?: (plague: PlagueStatus) => void;
+  /** Callback when a friendly NPC approaches and initiates an encounter */
+  onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -552,6 +561,92 @@ const getWindowGlowPositions = (buildings: BuildingMetadata[]) => {
   return positions;
 };
 
+const getInfectionMarkers = (buildings: BuildingMetadata[], infection: Record<string, BuildingInfectionState> | undefined) => {
+  if (!infection) return [];
+  const buildingSize = CONSTANTS.BUILDING_SIZE;
+  return buildings.flatMap((building) => {
+    const state = infection[building.id];
+    if (!state || state.status === 'clear') return [];
+    const scale = building.sizeScale ?? 1;
+    const half = (buildingSize * scale) / 2;
+    const doorOffset = 0.3;
+    const y = 1.6 + (building.storyCount ?? 1) * 0.15;
+    let pos: THREE.Vector3;
+    let rotY = 0;
+    switch (building.doorSide) {
+      case 0:
+        pos = new THREE.Vector3(building.position[0], y, building.position[2] - half - doorOffset);
+        rotY = 0;
+        break;
+      case 1:
+        pos = new THREE.Vector3(building.position[0], y, building.position[2] + half + doorOffset);
+        rotY = Math.PI;
+        break;
+      case 2:
+        pos = new THREE.Vector3(building.position[0] + half + doorOffset, y, building.position[2]);
+        rotY = -Math.PI / 2;
+        break;
+      default:
+        pos = new THREE.Vector3(building.position[0] - half - doorOffset, y, building.position[2]);
+        rotY = Math.PI / 2;
+        break;
+    }
+    return [{
+      id: building.id,
+      position: pos,
+      rotation: rotY,
+      status: state.status
+    }];
+  });
+};
+
+const InfectionMarkerPool: React.FC<{
+  buildings: BuildingMetadata[];
+  infection: Record<string, BuildingInfectionState> | undefined;
+}> = ({ buildings, infection }) => {
+  const markers = useMemo(() => getInfectionMarkers(buildings, infection), [buildings, infection]);
+  const meshRefs = useRef<Array<THREE.Mesh | null>>([]);
+
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    meshRefs.current.forEach((mesh, index) => {
+      if (!mesh) return;
+      const pulse = 0.75 + Math.sin(t * 1.5 + index) * 0.15;
+      mesh.scale.setScalar(pulse);
+    });
+  });
+
+  if (markers.length === 0) return null;
+
+  const statusColor = (status: BuildingInfectionState['status']) => {
+    if (status === 'deceased') return '#dc2626';
+    if (status === 'infected') return '#f97316';
+    return '#facc15';
+  };
+
+  return (
+    <group>
+      {markers.map((marker, index) => (
+        <mesh
+          key={`infection-${marker.id}`}
+          ref={(el) => { meshRefs.current[index] = el; }}
+          position={marker.position}
+          rotation={[0, marker.rotation, 0]}
+        >
+          <planeGeometry args={[1.1, 0.5]} />
+          <meshBasicMaterial
+            color={statusColor(marker.status)}
+            transparent
+            opacity={0.55}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
 const WindowLightPool: React.FC<{ buildings: BuildingMetadata[]; timeOfDay: number }> = ({ buildings, timeOfDay }) => {
   const lightPool = useRef<THREE.PointLight[]>([]);
   const windowPositions = useMemo(() => getWindowGlowPositions(buildings), [buildings]);
@@ -909,7 +1004,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onNearMerchant, onNpcSelect, selectedNpcId, onMinimapUpdate, onPickupPrompt, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, onPlayerPositionUpdate, dossierMode, onPlagueExposure }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -957,6 +1052,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   });
   const [buildingsState, setBuildingsState] = useState<BuildingMetadata[]>([]);
   const buildingsRef = useRef<BuildingMetadata[]>([]);
+  const [climbablesState, setClimbablesState] = useState<import('../types').ClimbableAccessory[]>([]);
   const [currentNearBuilding, setCurrentNearBuilding] = useState<BuildingMetadata | null>(null);
   const [currentNearMerchant, setCurrentNearMerchant] = useState<MerchantNPCType | null>(null);
 
@@ -1098,7 +1194,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       addCoin('coin-hovel-1', [0.6, 0.05, -1.2]);
       return items;
     }
-    if (district === 'ALLEYS') {
+    if (district === 'ALLEYS' || district === 'JEWISH_QUARTER') {
       items.push(
         createPushable('jar-alley', 'clayJar', [-1.8, 0.3, 1.6], 0.6, 0.8, 0, 'ceramic'),
         createPushable('basket-alley', 'basket', [2.2, 0.2, -1.2], 0.6, 0.6, 0.1, 'wood')
@@ -1521,7 +1617,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   // Astrologer - 50% chance in marketplace and standard street biomes
   const astrologerPosition = useMemo<[number, number, number] | null>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
-    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'RESIDENTIAL', 'WEALTHY'];
+    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'JEWISH_QUARTER', 'RESIDENTIAL', 'WEALTHY'];
 
     if (!validDistricts.includes(district)) return null;
 
@@ -1545,7 +1641,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   // Scribe - 50% chance in marketplace and standard street biomes
   const scribePosition = useMemo<[number, number, number] | null>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
-    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'RESIDENTIAL', 'WEALTHY'];
+    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'JEWISH_QUARTER', 'RESIDENTIAL', 'WEALTHY'];
 
     if (!validDistricts.includes(district)) return null;
 
@@ -1656,8 +1752,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     buildingsRef.current = b;
     buildingHashRef.current = buildBuildingHash(b);
     setBuildingsState(b);
+    onBuildingsUpdate?.(b);
     const district = getDistrictType(params.mapX, params.mapY);
-    if (district === 'HOVELS' || district === 'ALLEYS') {
+    if (district === 'HOVELS' || district === 'ALLEYS' || district === 'JEWISH_QUARTER') {
       const spawnSeed = params.mapX * 1000 + params.mapY * 13 + 77;
       const tryPoints: THREE.Vector3[] = [];
       const base = new THREE.Vector3(0, 0, 0);
@@ -2152,7 +2249,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         if (now - minimapTickRef.current > 0.25) {
           minimapTickRef.current = now;
           const district = getDistrictType(params.mapX, params.mapY);
-          const radius = district === 'ALLEYS' ? 20 : district === 'HOVELS' ? 26 : 34;
+          const radius = district === 'ALLEYS' || district === 'JEWISH_QUARTER' ? 20 : district === 'HOVELS' ? 26 : 34;
           const maxDistSq = (radius * 1.25) * (radius * 1.25);
           const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
           const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale;
@@ -2301,6 +2398,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         sessionSeed={sessionSeed}
         onGroundClick={setPlayerTarget}
         onBuildingsGenerated={handleBuildingsGenerated}
+        onClimbablesGenerated={setClimbablesState}
         onHeightmapBuilt={(heightmap) => {
           heightmapRef.current = heightmap;
         }}
@@ -2414,16 +2512,21 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           impactMapRef={impactMapRef}
           playerRef={playerRef}
           onNpcSelect={onNpcSelect}
+          onNpcUpdate={onNpcUpdate}
           selectedNpcId={selectedNpcId}
           district={district}
           terrainSeed={terrainSeed}
           heightmap={heightmapRef.current}
           npcStateOverride={npcStateOverride}
           showDemographicsOverlay={showDemographicsOverlay}
+          npcPool={npcPool}
+          playerStats={playerStats}
+          onNPCInitiatedEncounter={onNPCInitiatedEncounter}
         />
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
       {devSettings.showTorches && <WindowLightPool buildings={buildingsState} timeOfDay={params.timeOfDay} />}
+      <InfectionMarkerPool buildings={buildingsState} infection={buildingInfection} />
       {devSettings.showRats && <Rats ref={ratsRef} ratsRef={ratsRef} params={params} playerPos={playerRef.current?.position} catPos={catPositionRef.current} npcPositions={npcPositionsRef.current} agentHashRef={agentHashRef} />}
 
       <Player
@@ -2452,6 +2555,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         ratsRef={ratsRef}
         onPlagueExposure={handlePlagueExposure}
         simTime={simTime}
+        climbables={climbablesState}
+        onClimbablePrompt={onClimbablePrompt}
+        onClimbingStateChange={onClimbingStateChange}
+        climbInputRef={climbInputRef}
       />
 
       {/* Footprints in sand (OUTSKIRTS_DESERT only) */}

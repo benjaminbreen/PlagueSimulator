@@ -1,8 +1,10 @@
 import { DistrictType, Ethnicity, Language, Religion, SocialClass } from '../types';
 
 // Biome types determine demographic distribution
-// christian_quarter = Bab Touma / Bab Sharqi area - historically the Christian neighborhood of Damascus
-type BiomeType = 'marketplace' | 'wealthy' | 'hovels' | 'desert' | 'civic' | 'christian_quarter';
+// christian_quarter = Bab Touma - historically the Christian neighborhood of Damascus
+// jewish_quarter = Al-Yahud - historically the Jewish neighborhood of Damascus
+// umayyad_mosque = The Great Mosque - central religious landmark
+type BiomeType = 'marketplace' | 'wealthy' | 'hovels' | 'desert' | 'civic' | 'christian_quarter' | 'jewish_quarter' | 'umayyad_mosque';
 
 const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
   MARKET: 'marketplace',
@@ -10,7 +12,10 @@ const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
   WEALTHY: 'wealthy',
   SALHIYYA: 'wealthy',
   HOVELS: 'hovels',
-  ALLEYS: 'christian_quarter',  // Bab Touma/Bab Sharqi - historical Christian Quarter
+  ALLEYS: 'hovels',
+  JEWISH_QUARTER: 'jewish_quarter',  // Al-Yahud - historical Jewish Quarter
+  CHRISTIAN_QUARTER: 'christian_quarter',  // Bab Touma - historical Christian Quarter
+  UMAYYAD_MOSQUE: 'umayyad_mosque',  // The Great Mosque of Damascus
   RESIDENTIAL: 'hovels',
   OUTSKIRTS_DESERT: 'desert',
   OUTSKIRTS_FARMLAND: 'desert',
@@ -69,7 +74,7 @@ const RELIGION_WEIGHTS_BY_BIOME: Record<BiomeType, Array<{ value: Religion; weig
     { value: 'Jewish', weight: 0.03 },
     { value: 'Druze', weight: 0.005 },  // Rare in civic areas
   ],
-  // Bab Touma / Bab Sharqi - Historical Christian Quarter of Damascus
+  // Bab Touma - Historical Christian Quarter of Damascus
   // Home to Melkite (Eastern Orthodox), Syriac Orthodox, and Armenian churches
   // Also contains a small Jewish community and some Frankish/Latin merchants
   christian_quarter: [
@@ -81,6 +86,28 @@ const RELIGION_WEIGHTS_BY_BIOME: Record<BiomeType, Array<{ value: Religion; weig
     { value: 'Jewish', weight: 0.05 },           // Small Jewish community
     { value: 'Druze', weight: 0.003 },           // Very rare
     { value: 'Latin Christian', weight: 0.057 }, // Frankish/Italian merchants, visitors
+  ],
+  // Al-Yahud - Historical Jewish Quarter of Damascus
+  // Predominantly Jewish population with some Muslim and Christian residents
+  // Mix of Arabophone Jews, Sephardic Jews, and Aramaic-speaking Jews
+  jewish_quarter: [
+    { value: 'Jewish', weight: 0.85 },           // Dominant Jewish population
+    { value: 'Sunni Islam', weight: 0.10 },      // Some Muslim residents and merchants
+    { value: 'Eastern Orthodox', weight: 0.03 }, // Small Christian minority
+    { value: 'Syriac Orthodox', weight: 0.01 },  // Very small
+    { value: 'Shia Islam', weight: 0.01 },
+    { value: 'Druze', weight: 0.001 },           // Extremely rare
+  ],
+  // Umayyad Mosque - The Great Mosque of Damascus
+  // Predominantly Muslim worshippers, pilgrims, and scholars
+  // Mix of locals and visitors from across the Islamic world
+  umayyad_mosque: [
+    { value: 'Sunni Islam', weight: 0.88 },      // Dominant Sunni majority
+    { value: 'Shia Islam', weight: 0.08 },       // Shia pilgrims and scholars
+    { value: 'Eastern Orthodox', weight: 0.02 }, // Christian visitors (mosque built on former church site)
+    { value: 'Jewish', weight: 0.01 },           // Jewish scholars and visitors
+    { value: 'Syriac Orthodox', weight: 0.005 }, // Very rare
+    { value: 'Druze', weight: 0.005 },           // Rare
   ],
 };
 
@@ -147,65 +174,87 @@ const ETHNICITY_WEIGHTS_BY_BIOME: Record<BiomeType, Array<{ value: Ethnicity; we
     { value: 'Persian', weight: 0.02 },
     { value: 'Frankish', weight: 0.06 },        // Italian/Venetian/Genoese merchants
   ],
+  // Jewish Quarter - predominantly Arabophone and Aramaic-speaking Jews
+  jewish_quarter: [
+    { value: 'Arab', weight: 0.60 },            // Arabized Mizrahi Jews
+    { value: 'Aramaean/Syriac', weight: 0.22 }, // Aramaic-speaking Jews
+    { value: 'Greek/Rum', weight: 0.08 },       // Romaniote Jews
+    { value: 'Persian', weight: 0.08 },         // Persian/Bukharan Jews
+    { value: 'Kurdish', weight: 0.01 },         // Very few Kurdish Muslims
+    { value: 'Armenian', weight: 0.01 },        // Very rare
+  ],
+  // Umayyad Mosque - diverse Muslim population (locals + pilgrims)
+  umayyad_mosque: [
+    { value: 'Arab', weight: 0.58 },            // Local Syrian Arabs
+    { value: 'Turkic', weight: 0.12 },          // Mamluk officials, Turkish pilgrims
+    { value: 'Kurdish', weight: 0.08 },         // Kurdish Muslims
+    { value: 'Persian', weight: 0.10 },         // Persian pilgrims and scholars
+    { value: 'Aramaean/Syriac', weight: 0.05 }, // Local Syriac converts
+    { value: 'Greek/Rum', weight: 0.03 },       // Some Greek Muslims
+    { value: 'Circassian', weight: 0.03 },      // Mamluk soldiers
+    { value: 'Armenian', weight: 0.01 },        // Very rare visitors
+  ],
 };
 
+// Religion-specific ethnicity weights
+// Cleaned up to avoid historically impossible combinations
+// Note: Sunni Islam uses biome-based weights (falls through), but the consistency
+// check will fix any impossible Armenian/Frankish combinations
 const RELIGION_ETHNICITY_WEIGHTS: Partial<Record<Religion, Array<{ value: Ethnicity; weight: number }>>> = {
-  'Shia Islam': [
+  'Sunni Islam': [
+    // No Armenians (Christian) or Frankish (Latin Christian)
     { value: 'Arab', weight: 0.55 },
-    { value: 'Persian', weight: 0.2 },
-    { value: 'Kurdish', weight: 0.1 },
-    { value: 'Turkic', weight: 0.05 },
-    { value: 'Aramaean/Syriac', weight: 0.05 },
-    { value: 'Armenian', weight: 0.02 },
-    { value: 'Greek/Rum', weight: 0.02 },
+    { value: 'Turkic', weight: 0.15 },
+    { value: 'Kurdish', weight: 0.10 },
+    { value: 'Persian', weight: 0.08 },
+    { value: 'Circassian', weight: 0.05 },
+    { value: 'Aramaean/Syriac', weight: 0.04 },  // Some Syriac converts
+    { value: 'Greek/Rum', weight: 0.03 },        // Some Greek converts
+  ],
+  'Shia Islam': [
+    // No Armenians - they were universally Christian
+    { value: 'Arab', weight: 0.55 },
+    { value: 'Persian', weight: 0.22 },
+    { value: 'Kurdish', weight: 0.12 },
+    { value: 'Turkic', weight: 0.06 },
+    { value: 'Aramaean/Syriac', weight: 0.04 },  // Some Syriac converts
     { value: 'Circassian', weight: 0.01 },
   ],
   'Eastern Orthodox': [
-    { value: 'Greek/Rum', weight: 0.45 },
-    { value: 'Aramaean/Syriac', weight: 0.2 },
-    { value: 'Arab', weight: 0.2 },
-    { value: 'Armenian', weight: 0.1 },
-    { value: 'Kurdish', weight: 0.03 },
-    { value: 'Persian', weight: 0.02 },
+    // Melkite/Greek Orthodox - Greek-speaking Christians under Constantinople
+    { value: 'Greek/Rum', weight: 0.50 },
+    { value: 'Aramaean/Syriac', weight: 0.25 },  // Arabic-speaking Melkites
+    { value: 'Arab', weight: 0.20 },             // Arabized Melkites
+    { value: 'Armenian', weight: 0.05 },         // Rare Armenian Melkites
   ],
   'Armenian Apostolic': [
-    { value: 'Armenian', weight: 0.75 },
-    { value: 'Arab', weight: 0.1 },
-    { value: 'Aramaean/Syriac', weight: 0.05 },
-    { value: 'Greek/Rum', weight: 0.05 },
-    { value: 'Persian', weight: 0.03 },
-    { value: 'Kurdish', weight: 0.02 },
+    // Armenian Apostolic Church is ethnically Armenian by definition
+    { value: 'Armenian', weight: 0.98 },
+    { value: 'Arab', weight: 0.02 },             // Very rare Arabized Armenians
   ],
   'Syriac Orthodox': [
-    { value: 'Aramaean/Syriac', weight: 0.7 },
-    { value: 'Arab', weight: 0.15 },
+    // Jacobite/Syrian Orthodox - primarily Syriac-speaking
+    { value: 'Aramaean/Syriac', weight: 0.75 },
+    { value: 'Arab', weight: 0.20 },             // Arabized Syriacs
     { value: 'Greek/Rum', weight: 0.05 },
-    { value: 'Armenian', weight: 0.05 },
-    { value: 'Kurdish', weight: 0.03 },
-    { value: 'Persian', weight: 0.02 },
   ],
   Jewish: [
-    { value: 'Arab', weight: 0.55 },
-    { value: 'Aramaean/Syriac', weight: 0.2 },
-    { value: 'Greek/Rum', weight: 0.1 },
-    { value: 'Persian', weight: 0.08 },
-    { value: 'Armenian', weight: 0.04 },
-    { value: 'Kurdish', weight: 0.03 },
+    // Jews in Damascus - Arabized and Sephardic
+    { value: 'Arab', weight: 0.60 },             // Arabized Mizrahi Jews
+    { value: 'Aramaean/Syriac', weight: 0.20 }, // Syriac-speaking Jews
+    { value: 'Greek/Rum', weight: 0.10 },        // Romaniote Jews
+    { value: 'Persian', weight: 0.10 },          // Persian Jews
   ],
   Druze: [
-    { value: 'Arab', weight: 0.7 },
-    { value: 'Kurdish', weight: 0.12 },
-    { value: 'Persian', weight: 0.08 },
-    { value: 'Aramaean/Syriac', weight: 0.05 },
-    { value: 'Turkic', weight: 0.03 },
-    { value: 'Greek/Rum', weight: 0.02 },
+    // Druze were primarily Arab (originated in Egypt, spread to Syria/Lebanon)
+    { value: 'Arab', weight: 0.85 },
+    { value: 'Kurdish', weight: 0.15 },          // Some Kurdish Druze in northern areas
   ],
   // Latin Christians - primarily Frankish (Italian city-state merchants and Crusader remnants)
   'Latin Christian': [
-    { value: 'Frankish', weight: 0.85 },        // Venetians, Genoese, Pisans, Provençals
-    { value: 'Greek/Rum', weight: 0.05 },       // Some converted Greeks
-    { value: 'Armenian', weight: 0.05 },        // Some Armenian Catholics
-    { value: 'Arab', weight: 0.05 },            // Rare Arab Catholics
+    { value: 'Frankish', weight: 0.95 },         // Venetians, Genoese, Pisans, Provençals
+    { value: 'Greek/Rum', weight: 0.03 },        // Very rare converted Greeks
+    { value: 'Arab', weight: 0.02 },             // Very rare Arab Catholics
   ],
 };
 
@@ -283,13 +332,110 @@ export interface Demographics {
   language: Language;
 }
 
+/**
+ * Enforce historically accurate ethnicity-religion pairings.
+ * In 14th century Damascus, certain ethnicities had near-100% correlation with specific religions:
+ * - Armenians: Almost universally Armenian Apostolic Christian
+ * - Frankish: Almost universally Latin Christian (Catholic)
+ * - Conversely, Armenian Apostolic → Armenian, Latin Christian → Frankish
+ */
+const enforceEthnicityReligionConsistency = (
+  rand: () => number,
+  ethnicity: Ethnicity,
+  religion: Religion
+): { ethnicity: Ethnicity; religion: Religion } => {
+  // If ethnicity is Armenian, religion MUST be Armenian Apostolic (or rarely Eastern Orthodox)
+  // Muslim Armenians were virtually non-existent in this period
+  if (ethnicity === 'Armenian') {
+    if (religion !== 'Armenian Apostolic' && religion !== 'Eastern Orthodox') {
+      // 95% Armenian Apostolic, 5% Eastern Orthodox (Melkite converts)
+      return {
+        ethnicity,
+        religion: rand() < 0.95 ? 'Armenian Apostolic' : 'Eastern Orthodox'
+      };
+    }
+  }
+
+  // If ethnicity is Frankish, religion MUST be Latin Christian
+  // Frankish/Italian merchants in Damascus were Catholic
+  if (ethnicity === 'Frankish') {
+    if (religion !== 'Latin Christian') {
+      return { ethnicity, religion: 'Latin Christian' };
+    }
+  }
+
+  // If religion is Armenian Apostolic, ethnicity should be Armenian
+  // (the church is ethnically Armenian by definition)
+  if (religion === 'Armenian Apostolic') {
+    if (ethnicity !== 'Armenian') {
+      return { ethnicity: 'Armenian', religion };
+    }
+  }
+
+  // If religion is Latin Christian, ethnicity should usually be Frankish
+  // (occasional Greek/Armenian Catholic converts, but rare)
+  if (religion === 'Latin Christian') {
+    if (ethnicity !== 'Frankish') {
+      // 90% Frankish, 10% allow other ethnicities (rare converts)
+      if (rand() < 0.9) {
+        return { ethnicity: 'Frankish', religion };
+      }
+    }
+  }
+
+  // Greek/Rum ethnicity strongly correlates with Eastern Orthodox
+  // Kurdish/Turkic/Circassian strongly correlate with Islam
+  if (ethnicity === 'Greek/Rum') {
+    if (religion !== 'Eastern Orthodox' && religion !== 'Sunni Islam') {
+      // Greeks were mostly Orthodox, some converted to Islam under Mamluk rule
+      return {
+        ethnicity,
+        religion: rand() < 0.75 ? 'Eastern Orthodox' : 'Sunni Islam'
+      };
+    }
+  }
+
+  // Aramaean/Syriac strongly correlates with Syriac Orthodox or Eastern Orthodox
+  if (ethnicity === 'Aramaean/Syriac') {
+    if (religion !== 'Syriac Orthodox' && religion !== 'Eastern Orthodox' && religion !== 'Sunni Islam') {
+      // Most were Syriac Orthodox, some Eastern Orthodox (Melkite), some had converted to Islam
+      const roll = rand();
+      if (roll < 0.5) {
+        return { ethnicity, religion: 'Syriac Orthodox' };
+      } else if (roll < 0.7) {
+        return { ethnicity, religion: 'Eastern Orthodox' };
+      } else {
+        return { ethnicity, religion: 'Sunni Islam' };
+      }
+    }
+  }
+
+  // Druze were primarily Arab (with some Kurdish converts)
+  if (religion === 'Druze') {
+    if (ethnicity !== 'Arab' && ethnicity !== 'Kurdish') {
+      return { ethnicity: 'Arab', religion };
+    }
+  }
+
+  // No changes needed
+  return { ethnicity, religion };
+};
+
 export const assignDemographics = (rand: () => number, options: DemographicOptions): Demographics => {
   const biome = getBiomeForDistrict(options.districtType);
   const baseReligion = pickWeighted(rand, RELIGION_WEIGHTS_BY_BIOME[biome]);
   const religion = applyReligionOverrides(baseReligion, options.profession);
   const ethnicityWeights = applyEthnicityOverrides(ETHNICITY_WEIGHTS_BY_BIOME[biome], religion, options.profession);
   const ethnicity = pickWeighted(rand, ethnicityWeights);
-  const language = pickLanguage(rand, ethnicity, religion);
-  return { ethnicity, religion, language };
+
+  // Enforce historically accurate ethnicity-religion pairings
+  const { ethnicity: finalEthnicity, religion: finalReligion } = enforceEthnicityReligionConsistency(
+    rand,
+    ethnicity,
+    religion
+  );
+
+  const language = pickLanguage(rand, finalEthnicity, finalReligion);
+  return { ethnicity: finalEthnicity, religion: finalReligion, language };
 };
 

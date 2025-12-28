@@ -28,28 +28,36 @@ const CLOTH_COLORS: Record<DistrictType, string[]> = {
   WEALTHY: ['#c85a4a', '#5a7a8a', '#8a6a9a', '#e8d8c8', '#d8c8b8'],
   HOVELS: ['#6a5a4a', '#8a7a6a', '#5a4a3a', '#7a6a5a'],
   ALLEYS: ['#7a6a5a', '#9a8a7a', '#6a5a4a', '#8a7a6a'],
+  JEWISH_QUARTER: ['#7a6a5a', '#9a8a7a', '#6a5a4a', '#8a7a6a'],
   RESIDENTIAL: ['#d8c8b8', '#e8d8c8', '#c8b8a8', '#b8a898'],
   CIVIC: ['#c8b8a8', '#d8c8b8', '#b8a898'],
+  UMAYYAD_MOSQUE: ['#e8d8c8', '#d8c8b8', '#c8b8a8'],
   SALHIYYA: ['#c8b8a8', '#b8a898', '#d8c8b8'],
   OUTSKIRTS_FARMLAND: ['#8a7a6a', '#9a8a7a', '#7a6a5a'],
   OUTSKIRTS_DESERT: ['#9a8872', '#a4937c', '#8f7f6b'],
   MOUNTAIN_SHRINE: ['#b8a898', '#c8b8a8'],
   CARAVANSERAI: ['#a89888', '#b8a898', '#c8b8a8'],
+  CHRISTIAN_QUARTER: ['#7a6a5a', '#9a8a7a', '#6a5a4a', '#8a7a6a'],
+  SOUTHERN_ROAD: ['#9a8872', '#a4937c', '#8f7f6b'],
 };
 
 // District-specific density (percentage of valid building pairs)
 const LINE_DENSITY: Record<DistrictType, number> = {
   HOVELS: 0.7,
   ALLEYS: 0.6,
+  JEWISH_QUARTER: 0.6,
   RESIDENTIAL: 0.4,
   MARKET: 0.2,
   WEALTHY: 0.1,
   CIVIC: 0.15,
+  UMAYYAD_MOSQUE: 0.2,
   SALHIYYA: 0.3,
   OUTSKIRTS_FARMLAND: 0.4,
   OUTSKIRTS_DESERT: 0.2,
   MOUNTAIN_SHRINE: 0.2,
   CARAVANSERAI: 0.3,
+  CHRISTIAN_QUARTER: 0.6,
+  SOUTHERN_ROAD: 0.3,
 };
 
 export const shouldGenerateLaundryLine = (district: DistrictType, seed: number): boolean => {

@@ -9,7 +9,8 @@ import {
   buildSystemPrompt,
   formatMessagesForGemini,
   trimConversationHistory,
-  generateInitialGreeting
+  generateInitialGreeting,
+  generateNPCInitiatedGreeting
 } from '../../utils/conversationContext';
 import {
   analyzeConversationImpact,
@@ -59,6 +60,8 @@ interface UseConversationOptions {
   npc: NPCStats;
   context: EncounterContext;
   onConversationEnd?: (result: ConversationResult) => void;
+  /** If true, the NPC initiated this encounter by approaching the player */
+  isNPCInitiated?: boolean;
 }
 
 interface UseConversationReturn {
@@ -73,16 +76,25 @@ interface UseConversationReturn {
 export function useConversation({
   npc,
   context,
-  onConversationEnd
+  onConversationEnd,
+  isNPCInitiated = false
 }: UseConversationOptions): UseConversationReturn {
   const [messages, setMessages] = useState<ConversationMessage[]>(() => {
-    // Start with NPC greeting - uses friendliness system with player context
-    const greeting = generateInitialGreeting(
-      npc,
-      context.environment.timeOfDay,
-      context.player,
-      context.conversationHistory
-    );
+    // Generate appropriate greeting based on who initiated the encounter
+    // NPC-initiated uses proactive approach greetings, player-initiated uses reactive greetings
+    const greeting = isNPCInitiated
+      ? generateNPCInitiatedGreeting(
+          npc,
+          context.environment.timeOfDay,
+          context.player,
+          context.conversationHistory
+        )
+      : generateInitialGreeting(
+          npc,
+          context.environment.timeOfDay,
+          context.player,
+          context.conversationHistory
+        );
     return [{
       id: `msg-${Date.now()}`,
       role: 'npc' as const,

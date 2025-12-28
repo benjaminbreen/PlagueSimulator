@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BuildingMetadata } from '../types';
+import { BuildingMetadata, PlagueType } from '../types';
 
 export interface SpatialHash<T> {
   cellSize: number;
@@ -42,6 +42,7 @@ export interface AgentSnapshot {
   id: string;
   state: number;
   pos: THREE.Vector3;
+  plagueType?: PlagueType;
   awareness: number;  // 0-100: plague awareness for rumor spread
   panic: number;      // 0-100: fear level for behavior modification
 }

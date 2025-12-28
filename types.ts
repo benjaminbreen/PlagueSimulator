@@ -124,13 +124,47 @@ export interface NPCStats {
   robeHasTrim?: boolean;
   robeHemBand?: boolean;
   robeOverwrap?: boolean;
-  robePattern?: 'none' | 'damask' | 'stripe' | 'chevron';
+  robePattern?: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric';
+  robeBaseColor?: string;
+  robeAccentColor?: string;
+  robeHasSash?: boolean;
+  robePatternScale?: number;
+  sashPattern?: 'none' | 'stripe';
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
+  hairColor?: string;
+  facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
+  headwearColor?: string;
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
   footwearColor?: string;
   accessories?: string[];
+}
+
+export interface NPCPlagueMeta {
+  plagueType: PlagueType;
+  exposureTime: number | null;
+  incubationHours: number | null;
+  deathHours: number | null;
+  onsetTime: number | null;
+}
+
+export type NpcLocation = 'outdoor' | 'interior';
+
+export interface NPCRecord {
+  id: string;
+  stats: NPCStats;
+  state: AgentState;
+  stateStartTime: number;
+  plagueMeta?: NPCPlagueMeta;
+  location: NpcLocation;
+  homeBuildingId: string | null;
+  lastOutdoorPos: [number, number, number];
+  scheduleSeed: number;
+  lastUpdateSimTime: number;
+  isEphemeral: boolean;
+  role?: string;
+  districtType?: DistrictType;
 }
 
 export interface PlayerStats {
@@ -162,7 +196,7 @@ export interface PlayerStats {
   robeHemBand: boolean;
   robeSpread: number;
   robeOverwrap: boolean;
-  robePattern: 'none' | 'damask' | 'stripe' | 'chevron';
+  robePattern: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric';
   hairStyle: 'short' | 'medium' | 'long' | 'covered';
   headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
   sleeveCoverage: 'full' | 'lower' | 'none';
@@ -355,6 +389,7 @@ export interface InteriorNPC {
   rotation: [number, number, number];
   stats: NPCStats;
   state: AgentState;
+  plagueMeta?: NPCPlagueMeta;
 }
 
 export interface InteriorNarratorState {
@@ -393,6 +428,90 @@ export interface Obstacle {
   position: [number, number, number];
   radius: number;
 }
+
+// ==================== CLIMBABLE TYPES ====================
+
+export type ClimbableType =
+  | 'STONE_STAIRCASE'    // External stairs to rooftops (common, multi-story buildings)
+  | 'WOODEN_LADDER'      // Removable ladders (poor homes, storage access)
+  | 'GRAPE_TRELLIS'      // Wooden frame on walls (ubiquitous in Damascus)
+  | 'MASHRABIYA'         // Lattice balcony projections (wealthy/commercial)
+  | 'LEAN_TO';           // Reed/wood shade structures (markets, poor districts)
+
+export interface ClimbableAccessory {
+  id: string;
+  type: ClimbableType;
+  buildingId: string;
+
+  // Position on building wall
+  wallSide: 0 | 1 | 2 | 3;        // 0=North, 1=East, 2=South, 3=West
+  wallOffset: number;             // Position along wall (-1 to 1, 0 = center)
+
+  // World positions (computed from building)
+  basePosition: [number, number, number];
+  topPosition: [number, number, number];
+
+  // Dimensions
+  width: number;
+  height: number;
+  depth: number;
+
+  // Climbing behavior
+  climbSpeed: number;             // Units per second when climbing
+  requiresHold: boolean;          // True = hold W to climb, False = auto-walk
+}
+
+export interface ClimbingState {
+  isClimbing: boolean;
+  climbableId: string | null;
+  climbProgress: number;          // 0 = base, 1 = top
+  climbDirection: 'up' | 'down' | 'none';
+}
+
+// Climbable configuration per type
+export const CLIMBABLE_CONFIG: Record<ClimbableType, {
+  climbSpeed: number;
+  requiresHold: boolean;
+  baseWidth: number;
+  baseHeight: number;
+  baseDepth: number;
+}> = {
+  STONE_STAIRCASE: {
+    climbSpeed: 4.0,
+    requiresHold: false,
+    baseWidth: 2.0,
+    baseHeight: 6.0,
+    baseDepth: 1.5,
+  },
+  WOODEN_LADDER: {
+    climbSpeed: 5.0,
+    requiresHold: true,
+    baseWidth: 0.6,
+    baseHeight: 4.0,
+    baseDepth: 0.3,
+  },
+  GRAPE_TRELLIS: {
+    climbSpeed: 2.5,
+    requiresHold: true,
+    baseWidth: 3.0,
+    baseHeight: 4.5,
+    baseDepth: 0.4,
+  },
+  MASHRABIYA: {
+    climbSpeed: 3.0,
+    requiresHold: false,
+    baseWidth: 2.5,
+    baseHeight: 1.8,
+    baseDepth: 1.2,
+  },
+  LEAN_TO: {
+    climbSpeed: 3.5,
+    requiresHold: false,
+    baseWidth: 2.5,
+    baseHeight: 2.5,
+    baseDepth: 2.0,
+  },
+};
 
 export enum MarketStallType {
   SPICES = 'SPICES',           // Saffron, cumin, pepper
@@ -531,6 +650,13 @@ export interface NpcStateOverride {
   nonce: number;
 }
 
+export type BuildingInfectionStatus = 'clear' | 'incubating' | 'infected' | 'deceased';
+
+export interface BuildingInfectionState {
+  status: BuildingInfectionStatus;
+  lastSeenSimTime: number;
+}
+
 export const CONSTANTS = {
   AGENT_COUNT: 45,
   MARKET_SIZE: 60,
@@ -643,18 +769,25 @@ export interface PlayerActionEvent {
 }
 
 export const getLocationLabel = (x: number, y: number) => {
-  if (x === 0 && y === 0) return "Al-Buzuriyah (Main Road)";
-  if (x === 1 && y === 1) return "Bab Sharqi (Narrow Alleys)";
-  if (x === -1 && y === 2) return "Al-Qaymariyya (Wealthy Quarter)";
-  if (x === 0 && y === -2) return "Al-Shaghour (Poor Hovels)";
-  if (x === 2 && y === -1) return "The Mamluk Citadel (Civic Quarter)";
-  if (x === 1 && y === -1) return "Player's Home (Residential)";
-  if (x === -2 && y === 1) return "Al-Salihiyya (Hillside Quarter)";
-  if (x === 2 && y === 2) return "Ghouta Farmlands (Rural Fringe)";
-  if (x === -3 && y === -1) return "Desert Outskirts (North Track)";
-  if (x === -2 && y === -2) return "Caravanserai (Pilgrims' Road)";
-  if (x === -3 && y === 3) return "Mount Qassioun (Sacred Mountain)";
-  if (x === 1 && y === -3) return "Hauran Highway (Southern Road)";
+  // Helper function for radius-based matching (defined below)
+  const isNear = (targetX: number, targetY: number, radius: number): boolean => {
+    const dx = x - targetX;
+    const dy = y - targetY;
+    return Math.sqrt(dx * dx + dy * dy) <= radius;
+  };
+
+  // Use radius-based matching for main districts (same as getDistrictType)
+  if (isNear(0, 0, 0.8)) return "Al-Buzuriyah (Central Bazaar)";
+  if (isNear(0, 2, 0.8)) return "Umayyad Mosque (Great Mosque)";
+  if (isNear(-2, 1, 0.8)) return "The Mamluk Citadel (Civic Quarter)";
+  if (isNear(-4, 4, 0.8)) return "Al-Salihiyya (Hillside Quarter)";
+  if (isNear(0, -2, 0.8)) return "Al-Yahud (Jewish Quarter)";
+  if (isNear(3, 0, 0.8)) return "Al-Nasara (Christian Quarter)";
+  if (isNear(0, -4, 0.8)) return "Al-Shaghour (Poor Hovels)";
+  if (isNear(-2, 3, 0.8)) return "Al-Qaymariyya (Wealthy Quarter)";
+  if (isNear(4, 1, 0.8)) return "Bab Sharqi (Eastern District)";
+  if (isNear(5, 2, 1.5)) return "Ghouta Farmlands (Rural Fringe)";
+  if (isNear(6, 0, 1.5)) return "Desert Outskirts (Syrian Desert)";
 
   // Procedural names for other blocks
   const prefixes = ["Lower", "Upper", "North", "South", "East", "West"];
@@ -665,20 +798,71 @@ export const getLocationLabel = (x: number, y: number) => {
   return `${p} ${d} Block — ${x}, ${y}`;
 };
 
-export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'SALHIYYA' | 'OUTSKIRTS_FARMLAND' | 'OUTSKIRTS_DESERT' | 'CARAVANSERAI' | 'MOUNTAIN_SHRINE' | 'SOUTHERN_ROAD';
+export type DistrictType = 'MARKET' | 'WEALTHY' | 'HOVELS' | 'CIVIC' | 'RESIDENTIAL' | 'ALLEYS' | 'JEWISH_QUARTER' | 'CHRISTIAN_QUARTER' | 'UMAYYAD_MOSQUE' | 'SALHIYYA' | 'OUTSKIRTS_FARMLAND' | 'OUTSKIRTS_DESERT' | 'CARAVANSERAI' | 'MOUNTAIN_SHRINE' | 'SOUTHERN_ROAD';
 
-export const getDistrictType = (x: number, y: number): DistrictType => {
-  if (x === 0 && y === 0) return 'MARKET';
-  if (x === -1 && y === 2) return 'WEALTHY';
-  if (x === 0 && y === -2) return 'HOVELS';
-  if (x === 2 && y === -1) return 'CIVIC';
-  if (x === 1 && y === 1) return 'ALLEYS';
-  if (x === -2 && y === 1) return 'SALHIYYA';
-  if (x === 2 && y === 2) return 'OUTSKIRTS_FARMLAND';
-  if (x === -3 && y === -1) return 'OUTSKIRTS_DESERT';
-  if (x === -2 && y === -2) return 'CARAVANSERAI';
-  if (x === -3 && y === 3) return 'MOUNTAIN_SHRINE';
-  if (x === 1 && y === -3) return 'SOUTHERN_ROAD';
+/**
+ * Helper: Check if coordinate is within radius of a point (handles fractional coordinates)
+ */
+const isNearPoint = (x: number, targetX: number, y: number, targetY: number, radius: number): boolean => {
+  const dx = x - targetX;
+  const dy = y - targetY;
+  return Math.sqrt(dx * dx + dy * dy) <= radius;
+};
+
+/**
+ * Get district type based on map coordinates
+ * 2x scaled grid with radius-based matching to handle fractional coordinates
+ * Geography: West = mountains, East = desert, North = Qassioun slopes, South = plains
+ */
+export const getDistrictType = (mapX: number, mapY: number): DistrictType => {
+  // Major landmarks (radius 0.8 to handle walking through their edges)
+  if (isNearPoint(mapX, 0, mapY, 0, 0.8)) return 'MARKET';
+  if (isNearPoint(mapX, 0, mapY, 2, 0.8)) return 'UMAYYAD_MOSQUE';  // Great Mosque - north of market
+  if (isNearPoint(mapX, -2, mapY, 1, 0.8)) return 'CIVIC';  // Citadel - northwest corner
+  if (isNearPoint(mapX, -4, mapY, 4, 0.8)) return 'SALHIYYA';  // Hillside - UP the mountain (higher Y)
+  if (isNearPoint(mapX, 0, mapY, -2, 0.8)) return 'JEWISH_QUARTER';  // Al-Yahud - south-central
+  if (isNearPoint(mapX, 3, mapY, 0, 0.8)) return 'CHRISTIAN_QUARTER';  // Bab Touma - EAST on Straight Street axis
+  if (isNearPoint(mapX, 0, mapY, -4, 0.8)) return 'HOVELS';  // Al-Shaghour - far south
+  if (isNearPoint(mapX, -2, mapY, 3, 0.8)) return 'WEALTHY';  // Al-Qaymariyya - northwest
+
+  // Eastern areas (Bab Sharqi and outskirts)
+  if (isNearPoint(mapX, 4, mapY, 1, 0.8)) return 'ALLEYS';  // Bab Sharqi - Eastern District alleys
+
+  // Outskirts - historically accurate geography
+  if (isNearPoint(mapX, 5, mapY, 2, 1.5)) return 'OUTSKIRTS_FARMLAND';  // Ghouta - SOUTHEAST (irrigated oasis)
+  if (isNearPoint(mapX, 6, mapY, 0, 1.5)) return 'OUTSKIRTS_DESERT';  // Syrian Desert - EAST (correct!)
+  if (isNearPoint(mapX, -6, mapY, 3, 1.5)) return 'OUTSKIRTS_FARMLAND';  // Mountain foothills - WEST (was desert, now farmland)
+  if (isNearPoint(mapX, -4, mapY, -4, 0.8)) return 'CARAVANSERAI';  // Silk Market - southwest
+  if (isNearPoint(mapX, -6, mapY, 6, 1.2)) return 'MOUNTAIN_SHRINE';  // Mt. Qassioun peak - far northwest UP
+  if (isNearPoint(mapX, 2, mapY, -6, 1.2)) return 'SOUTHERN_ROAD';  // Hauran Highway - far south
+
+  // Interstitial districts - connective tissue with region-based logic
+  // Between Citadel and Mosque
+  if (mapX >= -2 && mapX <= 0 && mapY >= 1 && mapY <= 2) return 'ALLEYS';
+
+  // Between Market and Mosque (north-south corridor)
+  if (Math.abs(mapX) < 0.8 && mapY > 0 && mapY < 2) return 'ALLEYS';
+
+  // Between Jewish Quarter and Christian Quarter (SINGLE alleys district - they're close!)
+  if (mapX > 0 && mapX < 3 && mapY >= -2 && mapY <= 0) return 'ALLEYS';
+
+  // Around Salhiyya hillside (residential on slopes)
+  if (mapX >= -4 && mapX <= -2 && mapY >= 2 && mapY <= 4) return 'RESIDENTIAL';
+
+  // Around Wealthy Quarter
+  if (mapX >= -3 && mapX <= -1 && mapY >= 2 && mapY <= 3.5) return 'WEALTHY';
+
+  // Around Hovels (southern poor districts)
+  if (Math.abs(mapX) < 2 && mapY >= -4 && mapY <= -2.5) return 'HOVELS';
+
+  // East of Market toward Christian Quarter (Straight Street area)
+  if (mapX > 0.8 && mapX < 2.5 && Math.abs(mapY) < 0.8) return 'RESIDENTIAL';
+
+  // Near center but not in specific landmarks = dense alleys
+  const distFromCenter = Math.sqrt(mapX * mapX + mapY * mapY);
+  if (distFromCenter < 3) return 'ALLEYS';
+
+  // Default fallback
   return 'RESIDENTIAL';
 };
 

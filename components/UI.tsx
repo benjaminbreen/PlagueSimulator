@@ -39,6 +39,7 @@ import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from
 import { SoundDebugPanel } from './audio/SoundDebugPanel';
 import { EncounterModal } from './EncounterModal/EncounterModal';
 import { ConversationSummary } from '../types';
+import { ConversationImpact } from '../utils/friendliness';
 import { SicknessMeter } from './SicknessMeter';
 import { getPlagueTypeLabel } from '../utils/plague';
 
@@ -55,6 +56,9 @@ interface UIProps {
   minimapData: MiniMapData | null;
   sceneMode: 'outdoor' | 'interior';
   pickupPrompt: string | null;
+  climbablePrompt: string | null;
+  isClimbing: boolean;
+  onClimbInput?: (direction: 'up' | 'down' | 'cancel' | null) => void;
   pickupToast: string | null;
   currentWeather: string;
   pushCharge: number;
@@ -69,11 +73,14 @@ interface UIProps {
   showEncounterModal3: boolean;
   setShowEncounterModal3: React.Dispatch<React.SetStateAction<boolean>>;
   conversationHistories: ConversationSummary[];
-  onConversationSummary: (summary: ConversationSummary) => void;
+  /** Handler for when conversation ends - receives npcId, summary, and impact for disposition updates */
+  onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact) => void;
   showDemographicsOverlay: boolean;
   setShowDemographicsOverlay: React.Dispatch<React.SetStateAction<boolean>>;
   onForceNpcState: (id: string, state: AgentState) => void;
   onForceAllNpcState: (state: AgentState) => void;
+  /** Whether the current encounter was initiated by an NPC approaching the player */
+  isNPCInitiatedEncounter?: boolean;
 }
 
 const WeatherModal: React.FC<{
@@ -223,20 +230,23 @@ const MapModal: React.FC<{
 }> = ({ currentX, currentY, onClose, onSelectLocation }) => {
   // Historical Damascus locations with accurate positioning
   // Each location has a descriptive title and historical name
-  const locations = [
-    { title: "CENTRAL BAZAAR", name: "Al-Buzuriyah Souq", hoverName: "Spice Market District", x: 0, y: 0, type: "market", desc: "Central bazaar near the Umayyad Mosque", color: "amber" },
-    { title: "EASTERN DISTRICT", name: "Bab Sharqi Quarter", hoverName: "Eastern Gate Quarter", x: 1, y: 1, type: "alley", desc: "Eastern gate district with narrow alleys", color: "slate" },
-    { title: "HILLSIDE QUARTER", name: "Al-Salihiyya", hoverName: "Mount Qassioun Slopes", x: -2, y: 1, type: "hillside", desc: "Hillside quarter on Mount Qassioun's slopes", color: "green" },
-    { title: "WEALTHY QUARTER", name: "Al-Qaymariyya", hoverName: "Merchant District", x: -1, y: 2, type: "wealthy", desc: "Wealthy merchant quarter northwest of center", color: "purple" },
-    { title: "SOUTHERN QUARTER", name: "Al-Shaghour", hoverName: "Dense Urban District", x: 0, y: -2, type: "poor", desc: "Dense southern quarter outside old walls", color: "red" },
-    { title: "CHRISTIAN QUARTER", name: "Bab Touma", hoverName: "Eastern Christian District", x: 1, y: -1, type: "residential", desc: "Ancient Christian district, eastern old city", color: "blue" },
-    { title: "RURAL FARMLANDS", name: "The Ghouta", hoverName: "Irrigated Oasis Lands", x: 2, y: 2, type: "outskirts", desc: "Fertile orchards and farmland irrigated by Barada", color: "lime" },
-    { title: "DESERT OUTSKIRTS", name: "Northern Track", hoverName: "Arid Scrublands", x: -3, y: -1, type: "outskirts", desc: "Sparse desert fringe north of the silk market", color: "sand" },
-    { title: "SILK MARKET", name: "Khan al-Harir", hoverName: "Silk Caravanserai", x: -2, y: -2, type: "caravanserai", desc: "Silk merchants' caravanserai and lodging", color: "orange" },
-    { title: "MAMLUK FORTRESS", name: "The Citadel", hoverName: "Damascus Citadel", x: 2, y: -1, type: "civic", desc: "Military fortress in northwestern old city", color: "red" },
-    { title: "MOUNTAIN SHRINE", name: "Mount Qassioun", hoverName: "Sacred Mountain Peak", x: -3, y: 3, type: "landmark", desc: "Sacred mountain overlooking Damascus from northwest", color: "emerald" },
-    { title: "SOUTHERN ROAD", name: "Hauran Highway", hoverName: "Southern Trade Route", x: 1, y: -3, type: "landmark", desc: "Trade route to the fertile Hauran plateau", color: "yellow" },
-  ];
+  // Pre-split titles for performance (memoized)
+  const locations = useMemo(() => [
+    { title: "CENTRAL\nBAZAAR", titleLines: ["CENTRAL", "BAZAAR"], name: "Al-Buzuriyah Souq", hoverName: "City Center", x: 0, y: 0, type: "market", desc: "Central bazaar south of the Great Mosque", color: "amber" },
+    { title: "GREAT\nMOSQUE", titleLines: ["GREAT", "MOSQUE"], name: "Umayyad Mosque", hoverName: "Religious Center", x: 0, y: 2, type: "mosque", desc: "The Great Mosque of Damascus, heart of the city", color: "emerald" },
+    { title: "JEWISH\nQUARTER", titleLines: ["JEWISH", "QUARTER"], name: "Al-Yahud", hoverName: "South-Central District", x: 0, y: -2, type: "jewish", desc: "Jewish quarter with synagogues and kosher markets", color: "indigo" },
+    { title: "CHRISTIAN\nQUARTER", titleLines: ["CHRISTIAN", "QUARTER"], name: "Bab Touma", hoverName: "East on Straight Street", x: 3, y: 0, type: "residential", desc: "Christian district at eastern end of Via Recta", color: "blue" },
+    { title: "EASTERN\nDISTRICT", titleLines: ["EASTERN", "DISTRICT"], name: "Bab Sharqi", hoverName: "Eastern Gate Area", x: 4, y: 1, type: "alley", desc: "Eastern gate district with narrow alleys", color: "slate" },
+    { title: "HILLSIDE\nQUARTER", titleLines: ["HILLSIDE", "QUARTER"], name: "Al-Salihiyya", hoverName: "Mountain Slopes", x: -4, y: 4, type: "hillside", desc: "Hillside quarter on Mount Qassioun's slopes", color: "green" },
+    { title: "WEALTHY\nQUARTER", titleLines: ["WEALTHY", "QUARTER"], name: "Al-Qaymariyya", hoverName: "Northwest Quarter", x: -2, y: 3, type: "wealthy", desc: "Wealthy merchant quarter northwest of center", color: "purple" },
+    { title: "SOUTHERN\nQUARTER", titleLines: ["SOUTHERN", "QUARTER"], name: "Al-Shaghour", hoverName: "Far South", x: 0, y: -4, type: "poor", desc: "Dense southern quarter outside old walls", color: "red" },
+    { title: "RURAL\nFARMLANDS", titleLines: ["RURAL", "FARMLANDS"], name: "The Ghouta", hoverName: "Irrigated Oasis", x: 5, y: 2, type: "outskirts", desc: "Fertile orchards and farmland irrigated by Barada", color: "lime" },
+    { title: "DESERT\nOUTSKIRTS", titleLines: ["DESERT", "OUTSKIRTS"], name: "Eastern Badlands", hoverName: "Syrian Desert Edge", x: 6, y: 0, type: "outskirts", desc: "Arid desert fringe to the east", color: "sand" },
+    { title: "SILK\nMARKET", titleLines: ["SILK", "MARKET"], name: "Khan al-Harir", hoverName: "Silk Caravanserai", x: -4, y: -4, type: "caravanserai", desc: "Silk merchants' caravanserai and lodging", color: "orange" },
+    { title: "MAMLUK\nFORTRESS", titleLines: ["MAMLUK", "FORTRESS"], name: "The Citadel", hoverName: "Northwest Fortress", x: -2, y: 1, type: "civic", desc: "Military fortress in northwestern corner of old city", color: "red" },
+    { title: "MOUNTAIN\nSHRINE", titleLines: ["MOUNTAIN", "SHRINE"], name: "Mount Qassioun", hoverName: "Sacred Peak", x: -6, y: 6, type: "landmark", desc: "Sacred mountain overlooking Damascus from northwest", color: "emerald" },
+    { title: "SOUTHERN\nROAD", titleLines: ["SOUTHERN", "ROAD"], name: "Hauran Highway", hoverName: "Southern Trade Route", x: 2, y: -6, type: "landmark", desc: "Trade route to the fertile Hauran plateau", color: "yellow" },
+  ], []);
 
   // ESC key to close
   useEffect(() => {
@@ -306,8 +316,9 @@ const MapModal: React.FC<{
               {/* Location Markers */}
               {locations.map((loc) => {
                 const isCurrent = loc.x === currentX && loc.y === currentY;
-                const svgX = 250 + loc.x * 70;
-                const svgY = 270 - loc.y * 65;
+                // Halved scaling for 2x coordinate system (was 70/65, now 35/32.5)
+                const svgX = 250 + loc.x * 35;
+                const svgY = 270 - loc.y * 32.5;
 
                 const colorMap = {
                   amber: { bg: 'fill-amber-500', ring: 'stroke-amber-400', text: 'fill-amber-300', glow: 'rgba(251, 191, 36, 0.4)' },
@@ -316,6 +327,7 @@ const MapModal: React.FC<{
                   purple: { bg: 'fill-purple-500', ring: 'stroke-purple-400', text: 'fill-purple-300', glow: 'rgba(168, 85, 247, 0.4)' },
                   red: { bg: 'fill-red-500', ring: 'stroke-red-400', text: 'fill-red-300', glow: 'rgba(239, 68, 68, 0.4)' },
                   blue: { bg: 'fill-blue-500', ring: 'stroke-blue-400', text: 'fill-blue-300', glow: 'rgba(59, 130, 246, 0.4)' },
+                  indigo: { bg: 'fill-indigo-500', ring: 'stroke-indigo-400', text: 'fill-indigo-300', glow: 'rgba(99, 102, 241, 0.4)' },
                   lime: { bg: 'fill-lime-500', ring: 'stroke-lime-400', text: 'fill-lime-300', glow: 'rgba(132, 204, 22, 0.4)' },
                   sand: { bg: 'fill-amber-400', ring: 'stroke-amber-300', text: 'fill-amber-200', glow: 'rgba(245, 158, 11, 0.35)' },
                   orange: { bg: 'fill-orange-500', ring: 'stroke-orange-400', text: 'fill-orange-300', glow: 'rgba(249, 115, 22, 0.4)' },
@@ -376,26 +388,34 @@ const MapModal: React.FC<{
 
                     {/* Labels - always show title, detailed info on hover */}
                     <g className="pointer-events-none">
-                      {/* Default label - always visible */}
+                      {/* Default label - always visible (stacked multi-line) */}
                       <text
                         x={svgX}
-                        y={svgY - 16}
+                        y={svgY - 20}
                         textAnchor="middle"
                         className={`text-[8px] ${colors.text} font-bold transition-opacity group-hover/node:opacity-0`}
                         opacity="0.7"
                       >
-                        {loc.title}
+                        {loc.titleLines.map((line, i) => (
+                          <tspan key={i} x={svgX} dy={i === 0 ? 0 : 10}>
+                            {line}
+                          </tspan>
+                        ))}
                       </text>
 
                       {/* Hover label - detailed two-line */}
                       <g className="opacity-0 group-hover/node:opacity-100 transition-opacity">
                         <text
                           x={svgX}
-                          y={svgY - 24}
+                          y={svgY - 28}
                           textAnchor="middle"
                           className={`text-[9px] ${colors.text} font-bold`}
                         >
-                          {loc.title}
+                          {loc.titleLines.map((line, i) => (
+                            <tspan key={i} x={svgX} dy={i === 0 ? 0 : 11}>
+                              {line}
+                            </tspan>
+                          ))}
                         </text>
                         <text
                           x={svgX}
@@ -709,6 +729,9 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     data.district === 'HOVELS' ? 'Poor Hovels' :
     data.district === 'CIVIC' ? 'Civic District' :
     data.district === 'ALLEYS' ? 'Narrow Alleys' :
+    data.district === 'JEWISH_QUARTER' ? 'Jewish Quarter (Al-Yahud)' :
+    data.district === 'CHRISTIAN_QUARTER' ? 'Christian Quarter' :
+    data.district === 'UMAYYAD_MOSQUE' ? 'Great Mosque' :
     data.district === 'SALHIYYA' ? 'Al-Salihiyya' :
     data.district === 'OUTSKIRTS_FARMLAND' ? 'Ghouta Farmlands' :
     data.district === 'OUTSKIRTS_DESERT' ? 'Desert Outskirts' :
@@ -1068,7 +1091,7 @@ const EncounterModalLegacy: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationSummary, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationResult, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
@@ -1890,6 +1913,54 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             {pickupPrompt}
           </div>
         )}
+        {climbablePrompt && !pickupPrompt && !isClimbing && (
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-sky-700/50 text-sky-200 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_20px_rgba(56,189,248,0.25)]">
+            {climbablePrompt}
+          </div>
+        )}
+
+        {/* Climbing Controls - shows when actively climbing */}
+        {isClimbing && (
+          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
+            {/* Climbing status with keyboard hint */}
+            <div className="bg-black/80 backdrop-blur-md px-4 py-1.5 rounded-full border border-sky-500/50 text-sky-300 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(56,189,248,0.3)]">
+              Climbing <span className="text-sky-400/60 ml-1">(↑/↓ keys)</span>
+            </div>
+            {/* Arrow controls for mobile - hold to climb continuously */}
+            <div className="flex flex-col items-center gap-1">
+              <button
+                className="w-12 h-12 bg-black/70 backdrop-blur-md rounded-lg border border-sky-500/50 text-sky-300 flex items-center justify-center active:bg-sky-900/50 active:scale-95 transition-all touch-manipulation shadow-lg select-none"
+                onPointerDown={(e) => { e.preventDefault(); onClimbInput?.('up'); }}
+                onPointerUp={() => onClimbInput?.(null as any)}
+                onPointerLeave={() => onClimbInput?.(null as any)}
+                onPointerCancel={() => onClimbInput?.(null as any)}
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+              <div className="flex gap-1">
+                <button
+                  className="w-12 h-12 bg-black/70 backdrop-blur-md rounded-lg border border-sky-500/50 text-sky-300 flex items-center justify-center active:bg-sky-900/50 active:scale-95 transition-all touch-manipulation shadow-lg select-none"
+                  onPointerDown={(e) => { e.preventDefault(); onClimbInput?.('down'); }}
+                  onPointerUp={() => onClimbInput?.(null as any)}
+                  onPointerLeave={() => onClimbInput?.(null as any)}
+                  onPointerCancel={() => onClimbInput?.(null as any)}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                className="mt-1 px-4 py-1.5 bg-black/70 backdrop-blur-md rounded-full border border-red-500/50 text-red-300 text-[9px] uppercase tracking-wider active:bg-red-900/50 active:scale-95 transition-all touch-manipulation shadow-lg"
+                onClick={() => onClimbInput?.('cancel')}
+              >
+                Cancel (C)
+              </button>
+            </div>
+          </div>
+        )}
         {pickupToast && (
           <div className="absolute bottom-36 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-950/90 via-black/80 to-amber-950/90 backdrop-blur-md px-5 py-2 rounded-full border border-amber-500/50 text-amber-100 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_30px_rgba(245,158,11,0.35)]">
             {pickupToast}
@@ -2692,7 +2763,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           simulationStats={stats}
           conversationHistory={conversationHistories}
           onClose={() => setShowEncounterModal(false)}
-          onSummaryGenerated={onConversationSummary}
+          onConversationResult={onConversationResult}
+          isNPCInitiated={isNPCInitiatedEncounter}
         />
       )}
 
