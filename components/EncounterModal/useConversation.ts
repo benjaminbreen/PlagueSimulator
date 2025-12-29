@@ -8,21 +8,26 @@ import {
 import {
   buildSystemPrompt,
   formatMessagesForGemini,
-  trimConversationHistory,
-  generateInitialGreeting,
-  generateNPCInitiatedGreeting
+  trimConversationHistory
 } from '../../utils/conversationContext';
 import {
   analyzeConversationImpact,
   ConversationImpact
 } from '../../utils/friendliness';
 
+export type ConversationAction = 'end_conversation' | null;
+
+interface ChatAPIResponse {
+  message: string;
+  action: ConversationAction;
+}
+
 // Call serverless chat route to keep API key off the client.
 async function callChatAPI(
   systemPrompt: string,
   messages: { role: 'user' | 'model'; parts: { text: string }[] }[],
   playerMessage: string
-): Promise<string> {
+): Promise<ChatAPIResponse> {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: {
@@ -43,12 +48,13 @@ async function callChatAPI(
 
   const data = await response.json();
   const responseText = data.response;
+  const action = data.action as ConversationAction || null;
 
   if (!responseText) {
     throw new Error('No response from Gemini');
   }
 
-  return responseText;
+  return { message: responseText, action };
 }
 
 function sanitizeNpcResponse(text: string): string {
@@ -66,6 +72,8 @@ interface UseConversationOptions {
   npc: NPCStats;
   context: EncounterContext;
   onConversationEnd?: (result: ConversationResult) => void;
+  /** Called when NPC triggers an action (e.g., end_conversation) */
+  onNPCAction?: (action: ConversationAction, npc: NPCStats) => void;
   /** If true, the NPC initiated this encounter by approaching the player */
   isNPCInitiated?: boolean;
 }
@@ -83,35 +91,14 @@ export function useConversation({
   npc,
   context,
   onConversationEnd,
+  onNPCAction,
   isNPCInitiated = false
 }: UseConversationOptions): UseConversationReturn {
-  const [messages, setMessages] = useState<ConversationMessage[]>(() => {
-    // Generate appropriate greeting based on who initiated the encounter
-    // NPC-initiated uses proactive approach greetings, player-initiated uses reactive greetings
-    const greeting = isNPCInitiated
-      ? generateNPCInitiatedGreeting(
-          npc,
-          context.environment.timeOfDay,
-          context.player,
-          context.conversationHistory
-        )
-      : generateInitialGreeting(
-          npc,
-          context.environment.timeOfDay,
-          context.player,
-          context.conversationHistory
-        );
-    return [{
-      id: `msg-${Date.now()}`,
-      role: 'npc' as const,
-      content: greeting,
-      timestamp: Date.now()
-    }];
-  });
-
-  const [isLoading, setIsLoading] = useState(false);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [isLoading, setIsLoading] = useState(true); // Start loading for initial greeting
   const [error, setError] = useState<string | null>(null);
   const messagesRef = useRef<ConversationMessage[]>(messages);
+  const greetingGeneratedRef = useRef(false);
 
   // Cache the system prompt to avoid rebuilding on every message
   const systemPromptRef = useRef<string>(buildSystemPrompt(context));
@@ -123,6 +110,58 @@ export function useConversation({
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
+
+  // Generate initial greeting via LLM on mount
+  useEffect(() => {
+    if (greetingGeneratedRef.current) return;
+    greetingGeneratedRef.current = true;
+
+    let cancelled = false;
+
+    async function generateGreeting() {
+      const greetingPrompt = isNPCInitiated
+        ? '[SYSTEM: You notice this stranger and decide to approach them. Generate a brief, natural greeting to initiate conversation. 1-2 sentences max.]'
+        : '[SYSTEM: This person has just approached you. Generate a brief, natural greeting based on what you are currently doing and your mood. 1-2 sentences max.]';
+
+      try {
+        const { message } = await callChatAPI(
+          systemPromptRef.current,
+          [],
+          greetingPrompt
+        );
+
+        if (cancelled) return;
+
+        const greeting: ConversationMessage = {
+          id: `msg-${Date.now()}`,
+          role: 'npc',
+          content: sanitizeNpcResponse(message) || getFallbackGreeting(npc),
+          timestamp: Date.now()
+        };
+        setMessages([greeting]);
+      } catch (err) {
+        console.error('Failed to generate greeting:', err);
+        if (cancelled) return;
+
+        // Use fallback greeting
+        const fallback: ConversationMessage = {
+          id: `msg-${Date.now()}`,
+          role: 'npc',
+          content: getFallbackGreeting(npc),
+          timestamp: Date.now()
+        };
+        setMessages([fallback]);
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    generateGreeting();
+
+    return () => { cancelled = true; };
+  }, [npc, isNPCInitiated]);
 
   const sendMessage = useCallback(async (content: string) => {
     if (!content.trim() || isLoading) return;
@@ -145,14 +184,14 @@ export function useConversation({
       const formattedMessages = formatMessagesForGemini(trimmedMessages);
 
       // Call Gemini API directly
-      const responseText = await callChatAPI(
+      const { message, action } = await callChatAPI(
         systemPromptRef.current,
         formattedMessages,
         content.trim()
       );
 
       // Add NPC response
-      const sanitizedResponse = sanitizeNpcResponse(responseText);
+      const sanitizedResponse = sanitizeNpcResponse(message);
       const npcMessage: ConversationMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'npc',
@@ -161,6 +200,11 @@ export function useConversation({
       };
 
       setMessages(prev => [...prev, npcMessage]);
+
+      // If NPC triggered an action, notify the parent
+      if (action && onNPCAction) {
+        onNPCAction(action, npc);
+      }
 
     } catch (err) {
       console.error('Conversation error:', err);
@@ -178,7 +222,7 @@ export function useConversation({
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, npc]);
+  }, [isLoading, npc, onNPCAction]);
 
   const endConversation = useCallback(async (): Promise<ConversationResult | null> => {
     if (messages.length < 2) return null;
@@ -221,7 +265,7 @@ export function useConversation({
   };
 }
 
-// Fallback responses for when API fails
+// Fallback responses for when API fails mid-conversation
 function getFallbackResponse(npc: NPCStats): string {
   const fallbacks = [
     `${npc.name} seems distracted and doesn't respond clearly.`,
@@ -236,4 +280,25 @@ function getFallbackResponse(npc: NPCStats): string {
   }
 
   return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+}
+
+// Simple fallback greetings for when API fails on initial greeting
+function getFallbackGreeting(npc: NPCStats): string {
+  if (npc.panicLevel > 60) {
+    const panicGreetings = [
+      'What? What do you want?',
+      'Not now... not now...',
+      'Leave me be!'
+    ];
+    return panicGreetings[Math.floor(Math.random() * panicGreetings.length)];
+  }
+
+  const greetings = [
+    'Yes?',
+    'What do you need?',
+    'Can I help you?',
+    'What is it?',
+    'Speak.'
+  ];
+  return greetings[Math.floor(Math.random() * greetings.length)];
 }

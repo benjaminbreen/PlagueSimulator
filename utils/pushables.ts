@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora';
+export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem';
 export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth';
 
 export interface PickupInfo {
@@ -21,6 +21,7 @@ export interface PushableObject {
   rotation?: number;
   sourceId?: string;
   pickup?: PickupInfo;
+  appearance?: import('../types').ItemAppearance;
   angularVelocity?: THREE.Vector3;  // For rolling rotation (boulders)
   isSleeping?: boolean;              // Performance optimization (boulders)
   lastSlopeCheck?: number;           // Throttle gradient calculations (boulders)
@@ -37,7 +38,8 @@ export const createPushable = (
   radius: number,
   mass: number,
   rotation = 0,
-  material?: PushableMaterial
+  material?: PushableMaterial,
+  appearance?: import('../types').ItemAppearance
 ): PushableObject => ({
   id,
   kind,
@@ -50,5 +52,6 @@ export const createPushable = (
   velocity: new THREE.Vector3(),
   radius,
   mass,
-  rotation
+  rotation,
+  appearance
 });

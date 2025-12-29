@@ -9,8 +9,9 @@ import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
 import { MerchantModal } from './components/MerchantModal';
 import { GuideModal } from './components/HistoricalGuide';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, EventInstance, EventEffect, EventContextSnapshot, EventDefinition, EventOption, PlagueType } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, EventInstance, EventEffect, EventContextSnapshot, EventDefinition, EventOption, PlagueType, SocialClass } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
+import { getItemDetailsByItemId } from './utils/merchantItems';
 import { generateInteriorSpec } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
 import { shouldNpcBeHome } from './utils/npcSchedule';
@@ -24,6 +25,8 @@ import { checkBiomeRandomEvent, checkConversationTrigger, getBiomeForDistrict } 
 import { getEventsForBiome, getEventById } from './utils/events/catalog';
 import { evaluateTriggers, TriggerState } from './utils/events/triggerSystem';
 import { TriggerTargetType, TriggerWhen } from './utils/events/triggerCatalog';
+import { Toast, ToastMessage } from './components/Toast';
+import { calculateDirection, formatDistrictName } from './utils/directions';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -59,11 +62,13 @@ function App() {
   const lastStatsUpdateRef = useRef(0);
   const lastMoraleUpdateRef = useRef(0);
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
+  const [nearSpeakableNpc, setNearSpeakableNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
   const [showMerchantModal, setShowMerchantModal] = useState(false);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showEncounterModal, setShowEncounterModal] = useState(false);
   const [showEncounterModal3, setShowEncounterModal3] = useState(false);
   const [isNPCInitiatedEncounter, setIsNPCInitiatedEncounter] = useState(false);
+  const [isFollowingAfterDismissal, setIsFollowingAfterDismissal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
   const [selectedNpcActivity, setSelectedNpcActivity] = useState('');
@@ -73,10 +78,28 @@ function App() {
   const [activeEvent, setActiveEvent] = useState<EventInstance | null>(null);
   const [eventQueue, setEventQueue] = useState<EventInstance[]>([]);
   const [llmEventsEnabled, setLlmEventsEnabled] = useState(false);
-  const [worldFlags, setWorldFlags] = useState<Record<string, boolean | number | string>>({});
+  const [worldFlags, setWorldFlags] = useState<Record<string, boolean | number | string>>(() => {
+    try {
+      const raw = localStorage.getItem('worldFlags');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [lastEventNote, setLastEventNote] = useState<string | null>(null);
   const eventCooldownsRef = useRef<Record<string, number>>({});
   const npcThreatMemoryRef = useRef<Record<string, { count: number; lastSimTime: number }>>({});
-  const triggerStateRef = useRef<TriggerState>({ counts: {}, lastTriggeredDay: {} });
+  // Track NPC that dismissed player for handling "insist on following" option
+  const dismissedNpcRef = useRef<{ npcId: string; npcName: string } | null>(null);
+  const initialTriggerState = useMemo<TriggerState>(() => {
+    try {
+      const raw = localStorage.getItem('eventTriggerState');
+      return raw ? JSON.parse(raw) : { counts: {}, lastTriggeredDay: {} };
+    } catch {
+      return { counts: {}, lastTriggeredDay: {} };
+    }
+  }, []);
+  const triggerStateRef = useRef<TriggerState>(initialTriggerState);
   const [showDemographicsOverlay, setShowDemographicsOverlay] = useState(false);
   const [npcStateOverride, setNpcStateOverride] = useState<NpcStateOverride | null>(null);
   const [tileBuildings, setTileBuildings] = useState<BuildingMetadata[]>([]);
@@ -94,6 +117,7 @@ function App() {
   const [isClimbing, setIsClimbing] = useState(false);
   const climbInputRef = useRef<'up' | 'down' | 'cancel' | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
+  const [dropRequests, setDropRequests] = useState<import('./types').DroppedItemRequest[]>([]);
   const [pushCharge, setPushCharge] = useState(0);
   const [currentWeather, setCurrentWeather] = useState<string>('CLEAR');
   const [moraleStats, setMoraleStats] = useState<MoraleStats>({
@@ -101,6 +125,93 @@ function App() {
     avgPanic: 0,
     agentCount: 0
   });
+  const [toastMessages, setToastMessages] = useState<ToastMessage[]>([]);
+  const toastIdCounter = useRef(0);
+  const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
+  const [cameraViewTarget, setCameraViewTarget] = useState<[number, number, number] | null>(null);
+
+  // Handle navigation to infected household
+  const handleNavigateToHousehold = useCallback((buildingPosition: [number, number, number]) => {
+    // Switch to overhead camera mode
+    setParams(prev => ({ ...prev, cameraMode: CameraMode.OVERHEAD }));
+    // Set camera view target (only moves camera, not player)
+    // Will stay locked until player moves
+    setCameraViewTarget(buildingPosition);
+  }, []);
+
+  // Clear camera view target when player starts moving
+  const handlePlayerStartMove = useCallback(() => {
+    if (cameraViewTarget) {
+      setCameraViewTarget(null);
+    }
+  }, [cameraViewTarget]);
+
+  // Calculate infected households for epidemic report
+  const infectedHouseholds = useMemo(() => {
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const registry = tileRegistriesRef.current.get(tileKey);
+    if (!registry || !buildingInfectionState) return [];
+
+    const households: import('./types').InfectedHouseholdInfo[] = [];
+    const buildingMap = new Map(tileBuildings.map(b => [b.id, b]));
+
+    // Group NPCs by building
+    const npcsByBuilding = new Map<string, NPCRecord[]>();
+    registry.npcMap.forEach((record) => {
+      if (!record.homeBuildingId) return;
+      const building = buildingMap.get(record.homeBuildingId);
+      if (!building) return;
+      const infectionState = buildingInfectionState[record.homeBuildingId];
+      if (!infectionState || infectionState.status === 'clear') return;
+
+      if (!npcsByBuilding.has(record.homeBuildingId)) {
+        npcsByBuilding.set(record.homeBuildingId, []);
+      }
+      npcsByBuilding.get(record.homeBuildingId)!.push(record);
+    });
+
+    // Create household entries
+    npcsByBuilding.forEach((npcs, buildingId) => {
+      const building = buildingMap.get(buildingId);
+      if (!building) return;
+
+      const infectionState = buildingInfectionState[buildingId];
+      if (!infectionState || infectionState.status === 'clear') return;
+
+      const infectedCount = npcs.filter(n => n.state === AgentState.INFECTED).length;
+      const deceasedCount = npcs.filter(n => n.state === AgentState.DECEASED).length;
+
+      // Find a representative NPC (owner or first infected/deceased)
+      const owner = npcs.find(n => n.role === 'owner');
+      const representativeNpc = owner || npcs[0];
+
+      if (representativeNpc) {
+        const direction = calculateDirection(
+          playerPositionRef.current.x,
+          playerPositionRef.current.z,
+          building.position[0],
+          building.position[2]
+        );
+
+        households.push({
+          buildingId,
+          npcName: representativeNpc.stats.name,
+          direction,
+          status: infectionState.status as 'infected' | 'deceased',
+          infectedCount,
+          deceasedCount,
+          buildingPosition: building.position
+        });
+      }
+    });
+
+    // Sort by severity (deceased first, then infected)
+    return households.sort((a, b) => {
+      if (a.status === 'deceased' && b.status !== 'deceased') return -1;
+      if (a.status !== 'deceased' && b.status === 'deceased') return 1;
+      return 0;
+    });
+  }, [buildingInfectionState, tileBuildings, params.mapX, params.mapY]);
 
   // Conversation history state (session-only, keyed by NPC id)
   const [conversationHistories, setConversationHistories] = useState<ConversationSummary[]>([]);
@@ -115,6 +226,20 @@ function App() {
     setShowMerchantModal(false);
     setShowEnterModal(false);
   }, [activeEvent]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('worldFlags', JSON.stringify(worldFlags));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [worldFlags]);
+
+  useEffect(() => {
+    if (!lastEventNote) return;
+    const timeout = window.setTimeout(() => setLastEventNote(null), 4000);
+    return () => window.clearTimeout(timeout);
+  }, [lastEventNote]);
 
   const handleForceNpcState = useCallback((id: string, state: AgentState) => {
     setNpcStateOverride({ id, state, nonce: Date.now() });
@@ -157,7 +282,6 @@ function App() {
     lastTriggered: null
   });
   const [actionEvent, setActionEvent] = useState<PlayerActionEvent | null>(null);
-  const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
 
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
@@ -166,52 +290,106 @@ function App() {
   const [playerStats, setPlayerStats] = useState<PlayerStats>(() => {
     const stats = generatePlayerStats(playerSeed, { districtType: getDistrictType(params.mapX, params.mapY) });
 
-    // Generate starting inventory
-    const rand = () => seededRandom(playerSeed + 999);
+    // Generate starting inventory (profession/class/gender-aware)
+    let s = playerSeed + 999;
+    const rand = () => seededRandom(s++);
     const startingInventory: import('./types').PlayerItem[] = [];
-
-    // Basic starting items (2-3 random items)
-    const basicItems = [
-      { id: 'item-merchant-bread-seller-0', name: 'Dried Figs', quantity: 2 },
-      { id: 'item-merchant-bread-seller-1', name: 'Olives', quantity: 3 },
-      { id: 'item-merchant-bread-seller-2', name: 'Dried Apricots', quantity: 2 },
-      { id: 'item-merchant-coppersmith-0', name: 'Leather Waterskin', quantity: 1 },
-      { id: 'item-merchant-bread-seller-6', name: 'Candles (Set of 6)', quantity: 1 }
-    ];
-
-    const itemCount = 2 + Math.floor(rand() * 2); // 2-3 items
-    for (let i = 0; i < itemCount; i++) {
-      const item = basicItems[Math.floor(rand() * basicItems.length)];
+    const addItem = (itemId: string, quantity = 1) => {
       startingInventory.push({
-        id: `player-start-${i}`,
-        itemId: item.id,
-        quantity: item.quantity,
+        id: `player-start-${startingInventory.length}`,
+        itemId,
+        quantity,
         acquiredAt: 0
       });
+    };
+
+    const pickUnique = (items: Array<{ id: string; quantity: number }>, count: number) => {
+      const pool = [...items];
+      for (let i = 0; i < count && pool.length > 0; i++) {
+        const index = Math.floor(rand() * pool.length);
+        const choice = pool.splice(index, 1)[0];
+        addItem(choice.id, choice.quantity);
+      }
+    };
+
+    const classBasics: Array<{ id: string; quantity: number }> = [];
+    if (stats.socialClass === SocialClass.PEASANT) {
+      classBasics.push(
+        { id: 'start-twine', quantity: 1 },
+        { id: 'start-linen-scrap', quantity: 2 },
+        { id: 'start-olives', quantity: 2 },
+        { id: 'start-dried-figs', quantity: 2 },
+        { id: 'start-candle-stub', quantity: 1 }
+      );
+    } else if (stats.socialClass === SocialClass.MERCHANT) {
+      classBasics.push(
+        { id: 'start-waterskin', quantity: 1 },
+        { id: 'start-candles', quantity: 1 },
+        { id: 'start-satchel', quantity: 1 },
+        { id: 'start-dates', quantity: 2 },
+        { id: 'start-olives', quantity: 2 }
+      );
+    } else if (stats.socialClass === SocialClass.CLERGY) {
+      classBasics.push(
+        { id: 'start-prayer-rug', quantity: 1 },
+        { id: 'start-incense', quantity: 1 },
+        { id: 'start-manuscript', quantity: 1 },
+        { id: 'start-candles', quantity: 1 }
+      );
+    } else if (stats.socialClass === SocialClass.NOBILITY) {
+      classBasics.push(
+        { id: 'start-satchel', quantity: 1 },
+        { id: 'start-perfume', quantity: 1 },
+        { id: 'start-rose-water', quantity: 1 },
+        { id: 'start-olives', quantity: 2 }
+      );
     }
 
-    // Profession-specific starting item
-    if (stats.profession.includes('Merchant') || stats.profession.includes('Trader')) {
-      startingInventory.push({
-        id: 'player-start-merchant',
-        itemId: 'item-merchant-merchant-3', // Leather Satchel
-        quantity: 1,
-        acquiredAt: 0
-      });
-    } else if (stats.profession.includes('Apothecary') || stats.profession.includes('Herbalist')) {
-      startingInventory.push({
-        id: 'player-start-herbalist',
-        itemId: 'item-merchant-apothecary-0', // Dates
-        quantity: 3,
-        acquiredAt: 0
-      });
-    } else if (stats.profession.includes('Guard') || stats.profession.includes('Soldier')) {
-      startingInventory.push({
-        id: 'player-start-guard',
-        itemId: 'item-merchant-metalsmith-0', // Damascus Steel Dagger
-        quantity: 1,
-        acquiredAt: 0
-      });
+    const genderBasics: Array<{ id: string; quantity: number }> = [];
+    if (stats.gender === 'Female') {
+      genderBasics.push({ id: 'start-headscarf', quantity: 1 });
+    } else {
+      genderBasics.push({ id: 'start-belt-sash', quantity: 1 });
+    }
+
+    const professionBasics: Array<{ id: string; quantity: number }> = [];
+    if (stats.profession.match(/Merchant|Trader|Draper|Textile|Weaver|Dyer|Carpenter/i)) {
+      professionBasics.push({ id: 'start-linen-cloth', quantity: 1 });
+    }
+    if (stats.profession.match(/Apothecary|Herbalist|Midwife/i)) {
+      professionBasics.push(
+        { id: 'start-mint', quantity: 2 },
+        { id: 'start-cumin', quantity: 1 },
+        { id: 'start-honey', quantity: 1 }
+      );
+    }
+    if (stats.profession.match(/Coppersmith|Metalsmith/i)) {
+      professionBasics.push(
+        { id: 'start-bronze-bell', quantity: 1 },
+        { id: 'start-iron-nails', quantity: 2 }
+      );
+    }
+    if (stats.profession.match(/Guard|Soldier|Officer/i)) {
+      professionBasics.push({ id: 'item-merchant-metalsmith-0', quantity: 1 });
+    }
+    if (stats.profession.match(/Bread Seller|Water-Carrier|Porter|Servant/i)) {
+      professionBasics.push({ id: 'start-waterskin', quantity: 1 });
+    }
+
+    pickUnique(classBasics, Math.max(2, Math.min(4, classBasics.length)));
+    pickUnique(genderBasics, Math.min(1, genderBasics.length));
+    pickUnique(professionBasics, Math.min(3, professionBasics.length));
+
+    if (startingInventory.length < 3) {
+      pickUnique(
+        [
+          { id: 'start-dates', quantity: 2 },
+          { id: 'start-olives', quantity: 2 },
+          { id: 'start-dried-figs', quantity: 2 },
+          { id: 'start-apricots', quantity: 2 }
+        ],
+        3 - startingInventory.length
+      );
     }
 
     return {
@@ -305,7 +483,10 @@ function App() {
         stats: {
           charisma: playerStats.charisma,
           piety: playerStats.piety,
-          currency: playerStats.currency
+          currency: playerStats.currency,
+          health: playerStats.health,
+          reputation: playerStats.reputation,
+          wealth: playerStats.wealth
         }
       },
       environment: {
@@ -339,6 +520,18 @@ function App() {
         return [{ type: 'playerStat', stat: 'currency', delta: -2 }];
       case 'bribe_large':
         return [{ type: 'playerStat', stat: 'currency', delta: -5 }];
+      case 'health_up':
+        return [{ type: 'playerStat', stat: 'health', delta: 5 }];
+      case 'health_down':
+        return [{ type: 'playerStat', stat: 'health', delta: -5 }];
+      case 'reputation_up':
+        return [{ type: 'playerStat', stat: 'reputation', delta: 3 }];
+      case 'reputation_down':
+        return [{ type: 'playerStat', stat: 'reputation', delta: -3 }];
+      case 'wealth_up':
+        return [{ type: 'playerStat', stat: 'wealth', delta: 4 }];
+      case 'wealth_down':
+        return [{ type: 'playerStat', stat: 'wealth', delta: -4 }];
       case 'flee':
         return [{ type: 'worldFlag', key: 'fled', value: true }];
       case 'appeal_faith':
@@ -361,7 +554,7 @@ function App() {
       effectKey: string;
       outcomeText?: string;
       followupEventId?: string;
-      requirements?: { stat?: 'charisma' | 'piety' | 'currency'; min?: number; max?: number };
+      requirements?: { stat?: 'charisma' | 'piety' | 'currency' | 'health' | 'reputation' | 'wealth'; min?: number; max?: number };
     }>;
   }): EventInstance => {
     const options = payload.options
@@ -371,7 +564,9 @@ function App() {
         id: option.id || `opt-${index + 1}`,
         label: option.label.trim(),
         outcomeText: option.outcomeText,
-        followupEventId: option.followupEventId,
+        followupEventId: option.followupEventId && getEventById(option.followupEventId)
+          ? option.followupEventId
+          : undefined,
         requirements: option.requirements?.stat ? {
           stat: option.requirements.stat,
           min: option.requirements.min,
@@ -455,6 +650,12 @@ function App() {
 
     const context = buildEventContext(params.contextOverrides);
     const event = makeEventInstance(def, params.source, context);
+    setLastEventNote(`${params.when}:${params.targetType}:${params.targetId}`);
+    try {
+      localStorage.setItem('eventTriggerState', JSON.stringify(triggerStateRef.current));
+    } catch {
+      // Ignore storage errors.
+    }
     void enqueueEventWithOptionalLLM(event);
   }, [buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, stats.simTime]);
 
@@ -489,9 +690,18 @@ function App() {
   const applyEffects = useCallback((effects: EventEffect[]) => {
     effects.forEach(effect => {
       if (effect.type === 'playerStat') {
+        const clampStat = (stat: EventEffect['stat'], value: number) => {
+          if (stat === 'health' || stat === 'reputation' || stat === 'wealth') {
+            return Math.max(0, Math.min(100, value));
+          }
+          return value;
+        };
         setPlayerStats(prev => ({
           ...prev,
-          [effect.stat]: (prev[effect.stat] as number) + effect.delta
+          [effect.stat]: clampStat(
+            effect.stat,
+            (prev[effect.stat] as number) + effect.delta
+          )
         }));
       } else if (effect.type === 'npcStat') {
         setOutdoorNpcPool(prev => prev.map(record => {
@@ -521,6 +731,39 @@ function App() {
 
   const resolveEvent = useCallback((option: EventOption) => {
     applyEffects(option.effects);
+
+    // Handle "insist on following" option for dismissed NPC
+    if (option.id === 'insist_follow' && dismissedNpcRef.current) {
+      const dismissedNpc = dismissedNpcRef.current;
+
+      // Lower NPC disposition significantly (-25) and increase panic (+15)
+      setOutdoorNpcPool(prev => prev.map(record => {
+        if (record.stats.id !== dismissedNpc.npcId) return record;
+        return {
+          ...record,
+          stats: {
+            ...record.stats,
+            disposition: Math.max(0, record.stats.disposition - 25),
+            panicLevel: Math.min(100, record.stats.panicLevel + 15)
+          }
+        };
+      }));
+
+      // Reopen encounter modal with the now-angry NPC after a brief delay
+      const npcRecord = outdoorNpcPool.find(r => r.stats.id === dismissedNpc.npcId);
+      if (npcRecord) {
+        setTimeout(() => {
+          setSelectedNpc(npcRecord);
+          setIsNPCInitiatedEncounter(false);
+          setIsFollowingAfterDismissal(true); // NPC will be angry/fearful
+          setShowEncounterModal(true);
+        }, 500);
+      }
+
+      // Clear the dismissed NPC ref
+      dismissedNpcRef.current = null;
+    }
+
     if (option.followupEventId) {
       const def = getEventById(option.followupEventId);
       if (def) {
@@ -534,7 +777,7 @@ function App() {
       setActiveEvent(next || null);
       return rest;
     });
-  }, [applyEffects, buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance]);
+  }, [applyEffects, buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, outdoorNpcPool]);
 
   // Handle conversation end - save summary and apply impact to NPC disposition
   const handleConversationResult = useCallback((npcId: string, summary: ConversationSummary, impact: ConversationImpact) => {
@@ -581,7 +824,10 @@ function App() {
         stats: {
           charisma: playerStats.charisma,
           piety: playerStats.piety,
-          currency: playerStats.currency
+          currency: playerStats.currency,
+          health: playerStats.health,
+          reputation: playerStats.reputation,
+          wealth: playerStats.wealth
         }
       },
       npc: {
@@ -612,6 +858,38 @@ function App() {
     }
   }, [currentWeather, enqueueEventWithOptionalLLM, outdoorNpcPool, params.mapX, params.mapY, params.timeOfDay, playerStats, stats.simTime]);
 
+  // Handle triggering events from conversation actions (e.g., NPC dismissing player)
+  const handleTriggerConversationEvent = useCallback((eventId: string, npcContext?: { npcId: string; npcName: string }) => {
+    const def = getEventById(eventId);
+    if (!def) return;
+
+    // Store NPC context for handling "insist on following" option
+    if (npcContext) {
+      dismissedNpcRef.current = npcContext;
+    }
+
+    // Close the encounter modal first
+    setShowEncounterModal(false);
+
+    // Build context with NPC info if available
+    const npcRecord = npcContext ? outdoorNpcPool.find(r => r.stats.id === npcContext.npcId) : undefined;
+    const contextOverrides: Partial<EventContextSnapshot> = npcRecord ? {
+      npc: {
+        id: npcRecord.stats.id,
+        name: npcRecord.stats.name,
+        profession: npcRecord.stats.profession,
+        socialClass: npcRecord.stats.socialClass,
+        religion: npcRecord.stats.religion,
+        disposition: npcRecord.stats.disposition,
+        panic: npcRecord.stats.panicLevel
+      }
+    } : undefined;
+
+    const context = buildEventContext(contextOverrides);
+    const event = makeEventInstance(def, 'system', context);
+    void enqueueEventWithOptionalLLM(event);
+  }, [buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, outdoorNpcPool]);
+
   const handleDebugEvent = useCallback(() => {
     const district = getDistrictType(params.mapX, params.mapY);
     const biome = getBiomeForDistrict(district);
@@ -626,7 +904,10 @@ function App() {
         stats: {
           charisma: playerStats.charisma,
           piety: playerStats.piety,
-          currency: playerStats.currency
+          currency: playerStats.currency,
+          health: playerStats.health,
+          reputation: playerStats.reputation,
+          wealth: playerStats.wealth
         }
       },
       environment: {
@@ -718,8 +999,8 @@ function App() {
       if (e.key === 'Enter' && sceneMode === 'outdoor' && nearBuilding && nearBuilding.isOpen && !showEnterModal) {
         setShowEnterModal(true);
       }
-      // Open merchant modal with 'E' key
-      if (e.key === 'e' && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal) {
+      // Open merchant modal with 'E' key (merchants take priority over regular NPCs)
+      if (e.key === 'e' && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && !showEncounterModal) {
         setShowMerchantModal(true);
         tryTriggerEvent({
           when: 'merchantOpen',
@@ -727,6 +1008,30 @@ function App() {
           targetId: 'any',
           source: 'environment'
         });
+      }
+      // Open encounter modal with 'E' key when near an NPC (but not if near a merchant)
+      else if (e.key === 'e' && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        setSelectedNpc(nearSpeakableNpc);
+        setIsNPCInitiatedEncounter(false);
+        setIsFollowingAfterDismissal(false);
+        tryTriggerEvent({
+          when: 'npcApproach',
+          targetType: 'npcProfession',
+          targetId: nearSpeakableNpc.stats.profession,
+          contextOverrides: {
+            npc: {
+              id: nearSpeakableNpc.stats.id,
+              name: nearSpeakableNpc.stats.name,
+              profession: nearSpeakableNpc.stats.profession,
+              socialClass: nearSpeakableNpc.stats.socialClass,
+              disposition: nearSpeakableNpc.stats.disposition,
+              panic: nearSpeakableNpc.stats.panicLevel,
+              religion: nearSpeakableNpc.stats.religion
+            }
+          },
+          source: 'player'
+        });
+        setShowEncounterModal(true);
       }
       // Close merchant modal with Escape
       if (e.key === 'Escape' && showMerchantModal) {
@@ -768,7 +1073,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showEncounterModal3, showPlayerModal, tryTriggerEvent]);
+  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showEncounterModal3, showPlayerModal, tryTriggerEvent]);
 
   // Action trigger function
   const triggerAction = useCallback((actionId: ActionId) => {
@@ -971,6 +1276,11 @@ function App() {
         record.location = 'interior';
         return;
       }
+      // Keep infected and deceased NPCs inside their homes
+      if (record.homeBuildingId && (record.state === AgentState.INFECTED || record.state === AgentState.DECEASED)) {
+        record.location = 'interior';
+        return;
+      }
       if (record.homeBuildingId) {
         const shouldHome = shouldNpcBeHome(record, timeOfDay);
         record.location = shouldHome ? 'interior' : 'outdoor';
@@ -1001,15 +1311,34 @@ function App() {
       const timeSinceUpdate = stats.simTime - record.lastUpdateSimTime;
       if (record.location === 'outdoor' && timeSinceUpdate < 0.5) continue;
       if (timeSinceUpdate >= 0.25) {
+        const prevState = record.state;
         if (record.location === 'interior' && record.homeBuildingId && householdRisk.get(record.homeBuildingId)) {
           applyHouseholdExposure(record, stats.simTime, timeSinceUpdate);
         }
-        advanceNpcHealth(record, stats.simTime);
+        const stateChanged = advanceNpcHealth(record, stats.simTime);
+
+        // Trigger toast when NPC becomes infected
+        if (stateChanged && record.state === AgentState.INFECTED && prevState === AgentState.INCUBATING && record.homeBuildingId) {
+          const building = tileBuildings.find((b) => b.id === record.homeBuildingId);
+          if (building) {
+            const direction = calculateDirection(
+              playerPositionRef.current.x,
+              playerPositionRef.current.z,
+              building.position[0],
+              building.position[2]
+            );
+            const district = formatDistrictName(getDistrictType(params.mapX, params.mapY));
+            const id = `infection-${toastIdCounter.current++}`;
+            const message = `${record.stats.name} is now infected with plague in their home to the ${direction} of the ${district} area`;
+            setToastMessages((prev) => [...prev, { id, message, duration: 6000 }]);
+          }
+        }
+
         record.lastUpdateSimTime = stats.simTime;
       }
     }
     offscreenHealthCursorRef.current = (offscreenHealthCursorRef.current + 1) % CHUNK_COUNT;
-  }, [stats.simTime]);
+  }, [stats.simTime, tileBuildings, params.mapX, params.mapY]);
 
   const getBuildingLabel = useCallback((type: BuildingType) => {
     switch (type) {
@@ -1416,6 +1745,50 @@ function App() {
     });
   }, [stats.simTime]);
 
+  const handleDropItem = useCallback((item: { inventoryId: string; itemId: string; label: string; appearance?: import('./types').ItemAppearance }) => {
+    const position = playerPositionRef.current;
+    const offsetX = 0.4 + Math.random() * 0.2;
+    const offsetZ = 0.2 + Math.random() * 0.2;
+    const dropId = `drop-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    const details = getItemDetailsByItemId(item.itemId);
+    const label = details?.name ?? item.label ?? item.itemId;
+    const dropLocation = sceneMode === 'interior' ? 'interior' : 'outdoor';
+    const interiorId = interiorBuilding?.id ?? interiorSpec?.buildingId ?? undefined;
+
+    setPlayerStats(prev => {
+      const existingIndex = prev.inventory.findIndex((entry) => entry.id === item.inventoryId);
+      if (existingIndex === -1) {
+        return prev;
+      }
+      const nextInventory = [...prev.inventory];
+      const target = nextInventory[existingIndex];
+      if (target.quantity <= 1) {
+        nextInventory.splice(existingIndex, 1);
+      } else {
+        nextInventory[existingIndex] = { ...target, quantity: target.quantity - 1 };
+      }
+      return { ...prev, inventory: nextInventory };
+    });
+
+    setDropRequests(prev => {
+      const next = [
+        ...prev,
+        {
+          id: dropId,
+          itemId: item.itemId,
+          label,
+          position: [position.x + offsetX, 0.1, position.z + offsetZ],
+          location: dropLocation,
+          interiorId,
+          appearance: item.appearance
+        }
+      ];
+      return next.length > 200 ? next.slice(-200) : next;
+    });
+
+    setPickupToast({ message: `Dropped ${label}`, id: Date.now() });
+  }, [sceneMode, interiorBuilding, interiorSpec]);
+
   const handlePlagueExposure = useCallback((updatedPlague: import('./types').PlagueStatus) => {
     setPlayerStats(prev => ({
       ...prev,
@@ -1545,6 +1918,7 @@ function App() {
         setShowEncounterModal3={setShowEncounterModal3}
         conversationHistories={conversationHistories}
         onConversationResult={handleConversationResult}
+        onTriggerConversationEvent={handleTriggerConversationEvent}
         selectedNpcActivity={selectedNpcActivity}
         selectedNpcNearbyInfected={selectedNpcNearbyInfected}
         selectedNpcNearbyDeceased={selectedNpcNearbyDeceased}
@@ -1554,14 +1928,20 @@ function App() {
         onTriggerDebugEvent={handleDebugEvent}
         llmEventsEnabled={llmEventsEnabled}
         setLlmEventsEnabled={setLlmEventsEnabled}
+        lastEventNote={lastEventNote}
         showDemographicsOverlay={showDemographicsOverlay}
         setShowDemographicsOverlay={setShowDemographicsOverlay}
         onForceNpcState={handleForceNpcState}
         onForceAllNpcState={handleForceAllNpcState}
         isNPCInitiatedEncounter={isNPCInitiatedEncounter}
+        isFollowingAfterDismissal={isFollowingAfterDismissal}
+        onResetFollowingState={() => setIsFollowingAfterDismissal(false)}
         nearbyNPCs={nearbyNPCs}
         onOpenGuideModal={handleOpenGuideModal}
         onSelectGuideEntry={handleOpenGuideEntry}
+        infectedHouseholds={infectedHouseholds}
+        onNavigateToHousehold={handleNavigateToHousehold}
+        onDropItem={handleDropItem}
       />
 
       {/* Subtle Performance Indicator - only shows when adjusting, click to dismiss */}
@@ -1654,6 +2034,13 @@ function App() {
         </div>
       )}
 
+      {/* NPC Speak Prompt (only when no merchant nearby) */}
+      {sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal && (
+        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
+          Press <span className="font-bold text-amber-400">E</span> to speak to {nearSpeakableNpc.stats.name}
+        </div>
+      )}
+
       <Canvas
         shadows
         camera={canvasCamera}
@@ -1743,6 +2130,10 @@ function App() {
               onPlagueExposure={handlePlagueExposure}
               onNPCInitiatedEncounter={handleNPCInitiatedEncounter}
               onFallDamage={handleFallDamage}
+              cameraViewTarget={cameraViewTarget}
+              onPlayerStartMove={handlePlayerStartMove}
+              dropRequests={dropRequests}
+              onNearSpeakableNpc={setNearSpeakableNpc}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -1759,6 +2150,8 @@ function App() {
               showDemographicsOverlay={showDemographicsOverlay}
               npcStateOverride={npcStateOverride}
               onPlagueExposure={handlePlagueExposure}
+              onPlayerPositionUpdate={(pos) => playerPositionRef.current.copy(pos)}
+              dropRequests={dropRequests}
             />
           )}
         </Suspense>
@@ -1820,6 +2213,12 @@ function App() {
           </div>
         </div>
       )}
+
+      {/* Toast Notifications */}
+      <Toast
+        messages={toastMessages}
+        onDismiss={(id) => setToastMessages((prev) => prev.filter((msg) => msg.id !== id))}
+      />
     </div>
   );
 }

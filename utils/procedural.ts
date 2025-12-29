@@ -1766,6 +1766,19 @@ export const generatePlayerStats = (
   const perceptiveness = 6 + Math.floor(rand() * 10) + (profession.includes('Merchant') || profession.includes('Scribe') ? 2 : 0);
   const neuroticism = 6 + Math.floor(rand() * 10);
   const charisma = 6 + Math.floor(rand() * 10) + (socialClass === SocialClass.MERCHANT || socialClass === SocialClass.NOBILITY ? 2 : 0);
+  const health = Math.round(80 + rand() * 20);
+  const reputation = Math.round(
+    socialClass === SocialClass.NOBILITY ? 75 + rand() * 15 :
+    socialClass === SocialClass.CLERGY ? 65 + rand() * 15 :
+    socialClass === SocialClass.MERCHANT ? 55 + rand() * 15 :
+    40 + rand() * 15
+  );
+  const wealth = Math.round(
+    socialClass === SocialClass.NOBILITY ? 80 + rand() * 15 :
+    socialClass === SocialClass.CLERGY ? 60 + rand() * 15 :
+    socialClass === SocialClass.MERCHANT ? 55 + rand() * 15 :
+    30 + rand() * 15
+  );
 
   const humors = {
     blood: 20 + Math.floor(rand() * 30),
@@ -1884,6 +1897,26 @@ export const generatePlayerStats = (
     rand() > 0.7 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none'
   ].filter(a => a !== 'none');
 
+  const ailmentPool = [
+    { id: 'blurred_vision', label: 'Blurred vision', zone: 'eyes' },
+    { id: 'hard_of_hearing', label: 'Hard of hearing', zone: 'ears' },
+    { id: 'chronic_headache', label: 'Chronic headaches', zone: 'head', systemic: true },
+    { id: 'low_fever', label: 'Low fever', zone: 'systemic', systemic: true },
+    { id: 'limping', label: 'Limping gait', zone: 'lower legs' },
+    { id: 'anemia', label: 'Anemia', zone: 'systemic', systemic: true },
+    { id: 'asthma', label: 'Asthmatic cough', zone: 'lungs', systemic: false },
+    { id: 'stomach_pain', label: 'Stomach pains', zone: 'abdomen' },
+    { id: 'arthritic_hands', label: 'Arthritic hands', zone: 'hands' }
+  ];
+  const baselineAilments: Array<{ id: string; label: string; zone: string; systemic?: boolean }> = [];
+  const ailmentCountTarget = rand() > 0.85 ? 2 : rand() > 0.65 ? 1 : 0;
+  const ailmentIndices = [...Array(ailmentPool.length).keys()];
+  for (let i = 0; i < ailmentCountTarget; i++) {
+    const index = Math.floor(rand() * ailmentIndices.length);
+    const poolIndex = ailmentIndices.splice(index, 1)[0];
+    baselineAilments.push(ailmentPool[poolIndex]);
+  }
+
   return {
     name,
     age,
@@ -1929,8 +1962,12 @@ export const generatePlayerStats = (
     perceptiveness,
     neuroticism,
     charisma,
+    health,
+    reputation,
+    wealth,
     humors,
-    humoralBalance
+    humoralBalance,
+    baselineAilments
   };
 };
 

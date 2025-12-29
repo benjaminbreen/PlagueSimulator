@@ -3,14 +3,14 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent, PlagueStatus, NpcStateOverride, NPCRecord, BuildingInfectionState } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent, PlagueStatus, NpcStateOverride, NPCRecord, BuildingInfectionState, DroppedItemRequest } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents, MoraleStats } from './Agents';
 import { Rats, Rat } from './Rats';
 import { Player } from './Player';
 import { MarketStall } from './MarketStall';
 import { MerchantNPC } from './MerchantNPC';
-import { AgentSnapshot, SpatialHash, buildBuildingHash, buildObstacleHash } from '../utils/spatial';
+import { AgentSnapshot, SpatialHash, buildBuildingHash, buildObstacleHash, queryNearbyAgents } from '../utils/spatial';
 import { PushableObject, PickupInfo, createPushable } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
@@ -27,6 +27,7 @@ import { FluteMusic } from './audio/FluteMusic';
 import { Astrologer } from './npcs/Astrologer';
 import { Scribe } from './npcs/Scribe';
 import { exposePlayerToPlague } from '../utils/plague';
+import { InfectedBuildingMarkers } from './environment/InfectedBuildingMarkers';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -38,6 +39,8 @@ interface SimulationProps {
   onNearBuilding: (building: BuildingMetadata | null) => void;
   onBuildingsUpdate?: (buildings: BuildingMetadata[]) => void;
   onNearMerchant?: (merchant: MerchantNPCType | null) => void;
+  /** Callback when player is near an NPC they can speak to (for "E to speak" prompt) */
+  onNearSpeakableNpc?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   onNpcUpdate?: (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: import('../types').NPCPlagueMeta) => void;
   selectedNpcId?: string | null;
@@ -62,6 +65,12 @@ interface SimulationProps {
   onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
   /** Callback when player takes fall damage */
   onFallDamage?: (fallHeight: number, fatal: boolean) => void;
+  /** Target position to move camera view to (for UI navigation like clicking infected households) - does NOT move player */
+  cameraViewTarget?: [number, number, number] | null;
+  /** Callback when player starts moving (to clear camera view target) */
+  onPlayerStartMove?: () => void;
+  /** Requests to spawn dropped items near the player */
+  dropRequests?: DroppedItemRequest[];
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -1177,7 +1186,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1230,6 +1239,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [climbablesState, setClimbablesState] = useState<import('../types').ClimbableAccessory[]>([]);
   const [currentNearBuilding, setCurrentNearBuilding] = useState<BuildingMetadata | null>(null);
   const [currentNearMerchant, setCurrentNearMerchant] = useState<MerchantNPCType | null>(null);
+  const [currentNearSpeakableNpc, setCurrentNearSpeakableNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
+  const nearSpeakableNpcTickRef = useRef(0);
 
   // Ambient audio state
   const moraleStatsRef = useRef<MoraleStats>({ avgAwareness: 0, avgPanic: 0, agentCount: 0 });
@@ -1239,6 +1250,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const terrainSeed = useMemo(() => params.mapX * 1000 + params.mapY * 13 + 19, [params.mapX, params.mapY]);
   const sessionSeed = useMemo(() => Math.floor(Math.random() * 1000000), []);
   const district = useMemo(() => getDistrictType(params.mapX, params.mapY), [params.mapX, params.mapY]);
+
+  // cameraViewTarget is passed directly to Player component - only moves camera, not player
   const isOutskirts = district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT';
   useEffect(() => {
     // Start at edge to avoid spawning inside buildings in dense districts
@@ -1468,6 +1481,31 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   useEffect(() => {
     pushablesRef.current = pushables;
   }, [pushables]);
+  const processedDropsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!dropRequests || dropRequests.length === 0) return;
+    setPushables(prev => {
+      const next = [...prev];
+      dropRequests.forEach((drop) => {
+        if (processedDropsRef.current.has(drop.id)) return;
+        if (drop.location !== 'outdoor') return;
+        const item = createPushable(
+          drop.id,
+          'droppedItem',
+          drop.position,
+          0.25,
+          0.4,
+          Math.random() * Math.PI * 2,
+          'cloth',
+          drop.appearance
+        );
+        item.pickup = { type: 'item', label: drop.label, itemId: drop.itemId };
+        next.push(item);
+        processedDropsRef.current.add(drop.id);
+      });
+      return next;
+    });
+  }, [dropRequests]);
   const handlePickupItem = useCallback((itemId: string, pickup: PickupInfo) => {
     setPushables(prev => prev.filter(item => item.id !== itemId));
     onPickupItem?.(pickup);
@@ -2459,6 +2497,41 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
       }
 
+      // Check for nearby speakable NPCs (throttled for performance - every ~150ms)
+      const npcCheckTime = state.clock.elapsedTime;
+      if (npcCheckTime - nearSpeakableNpcTickRef.current > 0.15 && agentHashRef.current && npcPool.length > 0) {
+        nearSpeakableNpcTickRef.current = npcCheckTime;
+
+        const nearbyAgents = queryNearbyAgents(pos, agentHashRef.current);
+        let closestNpc: { stats: NPCStats; state: AgentState } | null = null;
+        let minNpcDist = 4; // 4 unit interaction range for speaking
+
+        for (const agent of nearbyAgents) {
+          // Skip dead NPCs
+          if (agent.state === 3) continue; // 3 = dead state
+
+          const dx = agent.pos.x - pos.x;
+          const dz = agent.pos.z - pos.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+
+          if (dist < minNpcDist) {
+            // Look up full NPC stats from pool
+            const npcRecord = npcPool.find(r => r.stats.id === agent.id);
+            if (npcRecord) {
+              minNpcDist = dist;
+              closestNpc = { stats: npcRecord.stats, state: npcRecord.state };
+            }
+          }
+        }
+
+        if (closestNpc?.stats.id !== currentNearSpeakableNpc?.stats.id) {
+          setCurrentNearSpeakableNpc(closestNpc);
+          if (onNearSpeakableNpc) {
+            onNearSpeakableNpc(closestNpc);
+          }
+        }
+      }
+
       if (onMinimapUpdate) {
         const now = state.clock.elapsedTime;
         if (now - minimapTickRef.current > 0.5) {
@@ -2750,7 +2823,15 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       )}
       {devSettings.showTorches && <TorchLightPool buildings={buildingsState} playerRef={playerRef} timeOfDay={params.timeOfDay} />}
       {devSettings.showTorches && <WindowLightPool buildings={buildingsState} timeOfDay={params.timeOfDay} />}
-      <InfectionMarkerPool buildings={buildingsState} infection={buildingInfection} />
+      <InfectedBuildingMarkers
+        buildings={buildingsState}
+        buildingInfection={buildingInfection}
+        playerPosition={[
+          playerRef.current?.position.x ?? 0,
+          playerRef.current?.position.y ?? 0,
+          playerRef.current?.position.z ?? 0
+        ]}
+      />
       {devSettings.showRats && <Rats ref={ratsRef} ratsRef={ratsRef} params={params} playerPos={playerRef.current?.position} catPos={catPositionRef.current} npcPositions={npcPositionsRef.current} agentHashRef={agentHashRef} />}
 
       <Player
@@ -2785,6 +2866,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onClimbingStateChange={onClimbingStateChange}
         climbInputRef={climbInputRef}
         onFallDamage={onFallDamage}
+        cameraViewTarget={cameraViewTarget}
+        onPlayerStartMove={onPlayerStartMove}
       />
 
       {/* Footprints in sand (OUTSKIRTS_DESERT only) */}

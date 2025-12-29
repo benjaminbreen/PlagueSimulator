@@ -2,7 +2,7 @@ import React, { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
-import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState, CONSTANTS, PANIC_SUSCEPTIBILITY, NpcStateOverride, NPCPlagueMeta, PlagueType } from '../types';
+import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState, CONSTANTS, PANIC_SUSCEPTIBILITY, NpcStateOverride, NPCPlagueMeta, PlagueType, DroppedItemRequest } from '../types';
 import { EXPOSURE_CONFIG, calculatePlagueProtection } from '../utils/plagueExposure';
 import { exposePlayerToPlague } from '../utils/plague';
 import { createNpcPlagueMeta } from '../utils/npcHealth';
@@ -11,6 +11,7 @@ import { Player } from './Player';
 import { Humanoid } from './Humanoid';
 import { generateInteriorObstacles } from '../utils/interior';
 import { PushableObject, createPushable } from '../utils/pushables';
+import { PushableDroppedItem } from './environment/decorations/Pushables';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
 import { createRugTexture, createNoiseTexture, createPlankTexture, createWallTexture, createPlasterTexture, createPatchTexture, createTileTexture, createReligiousWallTexture, createCivicWallTexture, createAdobeWallTexture, createGeometricBandTexture, createPackedEarthTexture, createWidePlankTexture, createNarrowPlankTexture, createHerringboneTexture, createTerracottaTileTexture, createStoneSlabTexture, createBrickFloorTexture, createReedMatTexture } from './interior/materials';
 import { FlickerLight } from './interior/primitives/Lighting';
@@ -30,12 +31,14 @@ interface InteriorSceneProps {
   selectedNpcId?: string | null;
   showDemographicsOverlay?: boolean;
   npcStateOverride?: NpcStateOverride | null;
+  onPlayerPositionUpdate?: (pos: THREE.Vector3) => void;
+  dropRequests?: DroppedItemRequest[];
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null);
@@ -103,6 +106,12 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const [pickedUpIds, setPickedUpIds] = useState<Set<string>>(new Set());
   const [hoveredNpcId, setHoveredNpcId] = useState<string | null>(null);
   const npcStatsMap = useMemo(() => new Map(spec.npcs.map((npc) => [npc.id, npc.stats])), [spec.npcs]);
+
+  useFrame(() => {
+    if (playerRef.current) {
+      onPlayerPositionUpdate?.(playerRef.current.position);
+    }
+  });
 
   // Helper function to determine ring color based on health state
   const getHealthRingColor = (state: AgentState) => {
@@ -199,7 +208,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     map.set(InteriorPropType.BASKET, { itemId: 'interior-basket', label: 'Market Basket' });
     return map;
   }, []);
-  const pushables = useMemo<PushableObject[]>(() => {
+  const basePushables = useMemo<PushableObject[]>(() => {
     const items: PushableObject[] = [];
     const pushableTypes = new Set<InteriorPropType>([
       InteriorPropType.BENCH,
@@ -346,11 +355,53 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     });
     return items;
   }, [activeProps, pickupMap]);
+  const [pushables, setPushables] = useState<PushableObject[]>(() => basePushables);
+  useEffect(() => {
+    setPushables(prev => {
+      const drops = prev.filter((item) => item.kind === 'droppedItem');
+      return [...basePushables, ...drops];
+    });
+  }, [basePushables]);
   const pushablesRef = useRef<PushableObject[]>(pushables);
   useEffect(() => {
     pushablesRef.current = pushables;
   }, [pushables]);
+  const processedDropsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    processedDropsRef.current.clear();
+  }, [spec.id]);
+  useEffect(() => {
+    if (!dropRequests || dropRequests.length === 0) return;
+    setPushables(prev => {
+      const next = [...prev];
+      dropRequests.forEach((drop) => {
+        if (processedDropsRef.current.has(drop.id)) return;
+        if (drop.location !== 'interior') return;
+        if (drop.interiorId && drop.interiorId !== spec.buildingId) return;
+        const item = createPushable(
+          drop.id,
+          'droppedItem',
+          drop.position,
+          0.25,
+          0.4,
+          Math.random() * Math.PI * 2,
+          'cloth',
+          drop.appearance
+        );
+        item.pickup = { type: 'item', label: drop.label, itemId: drop.itemId };
+        next.push(item);
+        processedDropsRef.current.add(drop.id);
+      });
+      return next;
+    });
+  }, [dropRequests]);
   const handlePickup = useCallback((itemId: string, pickup: import('../utils/pushables').PickupInfo) => {
+    const pushable = pushablesRef.current.find((item) => item.id === itemId);
+    if (pushable?.kind === 'droppedItem') {
+      setPushables(prev => prev.filter(item => item.id !== itemId));
+      onPickupItem?.(pickup);
+      return;
+    }
     const propId = itemId.startsWith('interior-') ? itemId.slice('interior-'.length) : itemId;
     setPickedUpIds((prev) => {
       if (prev.has(propId)) return prev;
@@ -1460,6 +1511,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           />
         );
       })}
+
+      {pushables.filter((item) => item.kind === 'droppedItem').map((item) => (
+        <PushableDroppedItem key={item.id} item={item} />
+      ))}
 
       {spec.npcs.map((npc) => (
         <group

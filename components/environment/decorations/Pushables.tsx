@@ -7,6 +7,9 @@ import React from 'react';
 import * as THREE from 'three';
 import { PushableObject } from '../../../utils/pushables';
 import { HoverableGroup } from '../shared/HoverSystem';
+import { InventoryItemMesh } from '../../items/ItemMeshes';
+import { getItemDetailsByItemId } from '../../../utils/merchantItems';
+import { ItemAppearance } from '../../../types';
 
 // ==================== BENCH ====================
 
@@ -212,6 +215,38 @@ export const PushableTwine: React.FC<{ item: PushableObject }> = ({ item }) => (
     </mesh>
   </HoverableGroup>
 );
+
+// ==================== DROPPED ITEM ====================
+
+export const PushableDroppedItem: React.FC<{ item: PushableObject }> = ({ item }) => {
+  const itemId = item.pickup?.itemId ?? 'unknown';
+  const details = getItemDetailsByItemId(itemId);
+  const name = details?.name ?? item.pickup?.label ?? 'Dropped Item';
+  const category = details?.category ?? 'Apparel';
+  const rarity = details?.rarity ?? 'common';
+  const appearance = item.appearance as ItemAppearance | undefined;
+
+  return (
+    <HoverableGroup
+      position={[item.position.x, item.position.y, item.position.z]}
+      positionVector={item.position}
+      boxSize={[0.7, 0.6, 0.7]}
+      labelTitle={name}
+      labelLines={['Dropped item']}
+      labelOffset={[0, 0.6, 0]}
+    >
+      <group rotation={[0, item.rotation ?? 0, 0]}>
+        <InventoryItemMesh
+          itemId={itemId}
+          name={name}
+          category={String(category)}
+          rarity={rarity}
+          appearance={appearance}
+        />
+      </group>
+    </HoverableGroup>
+  );
+};
 
 // ==================== CRATE ====================
 

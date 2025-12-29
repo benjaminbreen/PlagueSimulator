@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption } from '../types';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance } from '../types';
 import { MoraleStats } from './Agents';
 import { ActionBar } from './ActionBar';
 import { Humanoid } from './Humanoid';
@@ -42,8 +42,9 @@ import { EventModal } from './EventModal';
 import { ConversationSummary } from '../types';
 import { ConversationImpact } from '../utils/friendliness';
 import { SicknessMeter } from './SicknessMeter';
-import { getPlagueTypeLabel } from '../utils/plague';
+import { getHealthStatusLabel, getPlagueTypeLabel, getSymptomLabels } from '../utils/plague';
 import { GuideTab } from './HistoricalGuide';
+import { ItemPreview3D } from './ItemPreview3D';
 
 interface UIProps {
   params: SimulationParams;
@@ -77,6 +78,8 @@ interface UIProps {
   conversationHistories: ConversationSummary[];
   /** Handler for when conversation ends - receives npcId, summary, and impact for disposition updates */
   onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact) => void;
+  /** Handler for triggering events from conversation actions (e.g., NPC dismissing player) */
+  onTriggerConversationEvent?: (eventId: string, npcContext?: { npcId: string; npcName: string }) => void;
   selectedNpcActivity: string;
   selectedNpcNearbyInfected: number;
   selectedNpcNearbyDeceased: number;
@@ -86,18 +89,42 @@ interface UIProps {
   onTriggerDebugEvent: () => void;
   llmEventsEnabled: boolean;
   setLlmEventsEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+  lastEventNote: string | null;
   showDemographicsOverlay: boolean;
   setShowDemographicsOverlay: React.Dispatch<React.SetStateAction<boolean>>;
   onForceNpcState: (id: string, state: AgentState) => void;
   onForceAllNpcState: (state: AgentState) => void;
   /** Whether the current encounter was initiated by an NPC approaching the player */
   isNPCInitiatedEncounter?: boolean;
+  /** Whether the player insisted on following after being dismissed - NPC is angry/fearful */
+  isFollowingAfterDismissal?: boolean;
+  /** Callback to reset the following state when encounter ends */
+  onResetFollowingState?: () => void;
   /** Nearby NPCs for historical guide context */
   nearbyNPCs?: NPCStats[];
   /** Callback to open the historical guide modal */
   onOpenGuideModal?: () => void;
   /** Callback to open guide modal to a specific entry */
   onSelectGuideEntry?: (entryId: string) => void;
+  /** List of infected households for epidemic report */
+  infectedHouseholds: import('../types').InfectedHouseholdInfo[];
+  /** Callback to navigate to an infected household */
+  onNavigateToHousehold?: (buildingPosition: [number, number, number]) => void;
+  /** Drop an inventory item near the player */
+  onDropItem?: (item: { inventoryId: string; itemId: string; label: string; appearance?: ItemAppearance }) => void;
+}
+
+interface InventoryEntry {
+  id: string;
+  itemId: string;
+  quantity: number;
+  acquiredAt: number;
+  name: string;
+  description: string;
+  rarity: 'common' | 'uncommon' | 'rare';
+  category: string;
+  effects?: Array<{ type: string; value: number }>;
+  appearance?: ItemAppearance;
 }
 
 const WeatherModal: React.FC<{
@@ -508,14 +535,23 @@ const MapModal: React.FC<{
   );
 };
 
-const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior' }> = ({ data, sceneMode }) => {
+const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void }> = ({ data, sceneMode, onClose }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [minimapSize, setMinimapSize] = useState(() => (window.innerWidth < 640 ? 150 : 220));
+
+  useEffect(() => {
+    const handleResize = () => {
+      setMinimapSize(window.innerWidth < 640 ? 150 : 220);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     if (!data || sceneMode !== 'outdoor') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const size = 220;
+    const size = minimapSize;
     const dpr = window.devicePixelRatio || 1;
     canvas.width = size * dpr;
     canvas.height = size * dpr;
@@ -737,7 +773,7 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     ctx.fill();
 
     ctx.restore();
-  }, [data, sceneMode]);
+  }, [data, minimapSize, sceneMode]);
 
   if (!data || sceneMode !== 'outdoor') return null;
 
@@ -757,7 +793,7 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     'Residential';
 
   return (
-    <div className="absolute top-20 right-6 pointer-events-none">
+    <div className="absolute top-20 right-6 pointer-events-auto group">
       <div
         className="rounded-full p-[3px]"
         style={{ background: 'linear-gradient(135deg, #7a5a2e, #d3a45a 45%, #6b4b22)' }}
@@ -768,6 +804,12 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
             className="absolute inset-0 rounded-full pointer-events-none"
             style={{ background: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.12), transparent 55%)' }}
           />
+          <button
+            onClick={onClose}
+            className="absolute top-2 right-2 rounded-full border border-amber-700/50 bg-black/70 px-2 py-0.5 text-[9px] uppercase tracking-widest text-amber-200/80 opacity-0 transition-opacity duration-200 hover:text-amber-100 group-hover:opacity-100"
+          >
+            Close
+          </button>
         </div>
       </div>
       <div className="mt-2 text-[9px] uppercase tracking-[0.3em] text-amber-200/60 text-center">
@@ -1108,7 +1150,7 @@ const EncounterModalLegacy: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationResult, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
@@ -1130,6 +1172,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [spreadRate, setSpreadRate] = useState<number | null>(null);
   const prevStatsRef = useRef<{ infected: number; incubating: number; simTime: number } | null>(null);
   const [hasPlayerMoved, setHasPlayerMoved] = useState(false);
+  const [showHealthMeter, setShowHealthMeter] = useState(false);
+  const [dossierTab, setDossierTab] = useState<'overview' | 'health' | 'inventory'>('overview');
+  const [inventoryView, setInventoryView] = useState<'list' | 'grid'>('list');
+  const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryEntry | null>(null);
+  const [minimapVisible, setMinimapVisible] = useState(true);
+  const [showMobilePerspectiveMenu, setShowMobilePerspectiveMenu] = useState(false);
 
   // Biome ambience preview for settings
   const { currentPreview, playPreview, stopPreview } = useBiomeAmbiencePreview();
@@ -1149,11 +1197,17 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   }, [hasPlayerMoved]);
 
   useEffect(() => {
+    if (playerStats.plague.state !== AgentState.HEALTHY) {
+      setShowHealthMeter(true);
+    }
+  }, [playerStats.plague.state]);
+
+  useEffect(() => {
     if (!tabPulse) return;
     const timer = window.setTimeout(() => setTabPulse(null), 260);
     return () => window.clearTimeout(timer);
   }, [tabPulse]);
-  const inventoryEntries = useMemo(() => {
+  const inventoryEntries = useMemo<InventoryEntry[]>(() => {
     const rarityRank: Record<'common' | 'uncommon' | 'rare', number> = {
       common: 0,
       uncommon: 1,
@@ -1167,6 +1221,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         description: details?.description ?? 'No description available.',
         rarity: details?.rarity ?? 'common',
         category: details?.category ?? 'Unknown',
+        effects: details?.effects ?? []
       };
     });
     entries.sort((a, b) => {
@@ -1184,6 +1239,40 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     });
     return entries;
   }, [playerStats.inventory, inventorySortBy]);
+
+  const apparelRarity: InventoryEntry['rarity'] =
+    playerStats.socialClass === SocialClass.NOBILITY ? 'rare'
+      : playerStats.socialClass === SocialClass.MERCHANT ? 'uncommon'
+      : 'common';
+
+  const buildApparelEntry = (type: 'robe' | 'headwear'): InventoryEntry => {
+    const isRobe = type === 'robe';
+    const name = isRobe ? playerStats.robeDescription : playerStats.headwearDescription;
+    const description = isRobe ? playerStats.robeDescription : playerStats.headwearDescription;
+    return {
+      id: `player-apparel-${type}`,
+      itemId: `apparel-${type}`,
+      quantity: 1,
+      acquiredAt: 0,
+      name,
+      description,
+      rarity: apparelRarity,
+      category: 'Apparel',
+      appearance: {
+        type,
+        baseColor: isRobe ? playerStats.robeBaseColor : playerStats.headwearColor,
+        accentColor: isRobe ? playerStats.robeAccentColor : undefined,
+        headwearStyle: isRobe ? undefined : playerStats.headwearStyle,
+        robeHasSash: isRobe ? playerStats.robeHasSash : undefined,
+        robeHasTrim: isRobe ? playerStats.robeHasTrim : undefined,
+        robeHemBand: isRobe ? playerStats.robeHemBand : undefined,
+        robeOverwrap: isRobe ? playerStats.robeOverwrap : undefined,
+        robeSleeves: isRobe ? playerStats.robeSleeves : undefined,
+        robePattern: isRobe ? playerStats.robePattern : undefined,
+        robeSpread: isRobe ? playerStats.robeSpread : undefined
+      }
+    };
+  };
 
   React.useEffect(() => {
     if (!devSettings.showPerfPanel) return;
@@ -1240,6 +1329,17 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     rafId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafId);
   }, [devSettings.showPerfPanel]);
+
+  useEffect(() => {
+    if (!selectedInventoryItem) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setSelectedInventoryItem(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedInventoryItem]);
 
   useEffect(() => {
     const prev = prevStatsRef.current;
@@ -1384,7 +1484,13 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col z-10 text-amber-50">
-      <MiniMap data={minimapData} sceneMode={sceneMode} />
+      {minimapVisible && (
+        <MiniMap
+          data={minimapData}
+          sceneMode={sceneMode}
+          onClose={() => setMinimapVisible(false)}
+        />
+      )}
       
       {/* TOP NAV BAR */}
       <div 
@@ -1399,7 +1505,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         </div>
 
         <div 
-          className="hidden md:flex items-center gap-6 bg-amber-950/20 px-6 py-2 rounded-full border border-amber-800/20"
+          className="flex items-center gap-6 bg-amber-950/20 px-3 md:px-6 py-2 rounded-full border border-amber-800/20"
           onClick={e => e.stopPropagation()}
         >
           <div className="flex items-center gap-2 text-amber-100/90">
@@ -1444,20 +1550,31 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         </div>
 
         <div className="flex items-center gap-4" onClick={e => e.stopPropagation()}>
-          {!hasPlayerMoved ? (
-            <div className="hidden lg:flex flex-col items-end mr-4 text-[9px] text-amber-500/50 uppercase tracking-widest font-bold">
+          {(!hasPlayerMoved && !showHealthMeter && playerStats.plague.state === AgentState.HEALTHY) ? (
+            <button
+              type="button"
+              onClick={() => setShowHealthMeter(true)}
+              className="hidden lg:flex flex-col items-end mr-4 text-[9px] text-amber-500/50 uppercase tracking-widest font-bold hover:text-amber-300/80 transition-colors"
+            >
               <div className="flex items-center gap-2"><span>Arrows to Move</span><Keyboard size={10}/></div>
               <div className="flex items-center gap-2"><span>V to Change Perspective</span><MousePointer2 size={10}/></div>
-            </div>
+            </button>
           ) : (
             <div className="hidden lg:block mr-4">
               <SicknessMeter
                 plague={playerStats.plague}
-                hasPlayerMoved={hasPlayerMoved}
+                hasPlayerMoved={hasPlayerMoved || showHealthMeter}
                 onClickDossier={() => setShowPlayerModal(true)}
               />
             </div>
           )}
+          <button
+            onClick={() => setShowMobilePerspectiveMenu(prev => !prev)}
+            className="md:hidden p-2 text-amber-500 hover:text-amber-400 transition-colors"
+            title="Change Perspective"
+          >
+            <Camera size={20} />
+          </button>
           <button 
             onClick={() => setShowSettings(!showSettings)}
             className="p-2 text-amber-500 hover:text-amber-400 transition-colors"
@@ -1466,6 +1583,52 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </button>
         </div>
       </div>
+
+      {showMobilePerspectiveMenu && (
+        <div className="absolute top-16 right-4 md:hidden pointer-events-auto bg-black/80 backdrop-blur-lg border border-amber-900/50 rounded-xl shadow-2xl p-2 w-44">
+          <div className="text-[9px] uppercase tracking-widest text-amber-500/80 font-bold mb-1 px-2">
+            Perspective
+          </div>
+          <div className="grid grid-cols-1 gap-1">
+            <button
+              onClick={() => {
+                handleChange('cameraMode', CameraMode.FIRST_PERSON);
+                setShowMobilePerspectiveMenu(false);
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.FIRST_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+            >
+              <Eye size={12} /> First Person
+            </button>
+            <button
+              onClick={() => {
+                handleChange('cameraMode', CameraMode.OVER_SHOULDER);
+                setShowMobilePerspectiveMenu(false);
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVER_SHOULDER ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+            >
+              <User size={12} /> Over Shoulder
+            </button>
+            <button
+              onClick={() => {
+                handleChange('cameraMode', CameraMode.THIRD_PERSON);
+                setShowMobilePerspectiveMenu(false);
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.THIRD_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+            >
+              <Camera size={12} /> Orbit View
+            </button>
+            <button
+              onClick={() => {
+                handleChange('cameraMode', CameraMode.OVERHEAD);
+                setShowMobilePerspectiveMenu(false);
+              }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVERHEAD ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+            >
+              <Layers size={12} /> Overhead Map
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* CENTER LOCATION PILLS */}
       <div className="absolute top-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-xs md:max-w-md pointer-events-none">
@@ -1615,6 +1778,32 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                       <span className="text-[10px] uppercase tracking-wider text-gray-600">Deceased</span>
                     </div>
                   </div>
+
+                  {/* Infected Households */}
+                  {infectedHouseholds.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-amber-900/30">
+                      <div className="text-[9px] uppercase tracking-widest text-amber-500/60 mb-2">Infected Households</div>
+                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                        {infectedHouseholds.map((household) => (
+                          <div
+                            key={household.buildingId}
+                            onClick={() => onNavigateToHousehold?.(household.buildingPosition)}
+                            className={`text-[10px] leading-relaxed cursor-pointer hover:bg-amber-900/20 px-2 py-1 rounded transition-colors ${
+                              household.status === 'deceased' ? 'text-gray-400 hover:text-gray-300' : 'text-red-400/90 hover:text-red-300'
+                            }`}
+                          >
+                            <span className="font-mono">
+                              {household.infectedCount + household.deceasedCount}
+                            </span>
+                            {' '}person{household.infectedCount + household.deceasedCount > 1 ? 's' : ''} in the home of{' '}
+                            <span className="text-amber-200/90">{household.npcName}</span>
+                            {' '}to the{' '}
+                            <span className="text-amber-300/80">{household.direction}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Civic Morale Section */}
@@ -1767,6 +1956,40 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                     More Info
                   </button>
                 </div>
+                <div className="bg-black/50 p-3 rounded-lg border border-amber-900/40 shadow-inner">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] uppercase tracking-widest text-amber-500/70">Wealth</span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-amber-700/40 bg-amber-900/30 px-2 py-0.5 text-[10px] uppercase tracking-widest text-amber-200/90">
+                      {Math.max(0, Math.round(playerStats.currency))} Dirhams
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
+                        <span className="font-bold">Health</span>
+                        <span className="font-mono">{Math.round(playerStats.health)}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-emerald-600 to-emerald-400"
+                          style={{ width: `${Math.min(100, Math.max(0, playerStats.health))}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
+                        <span className="font-bold">Reputation</span>
+                        <span className="font-mono">{Math.round(playerStats.reputation)}%</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-sky-600 to-sky-400"
+                          style={{ width: `${Math.min(100, Math.max(0, playerStats.reputation))}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Name</div>
@@ -1799,14 +2022,6 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   <div>
                     <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Weight</div>
                     <div className="font-bold">{formatWeight(playerStats.weight)}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Skin</div>
-                    <div className="font-bold">{playerStats.skinDescription}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Hair</div>
-                    <div className="font-bold">{playerStats.hairDescription}</div>
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Robe</div>
@@ -1859,7 +2074,17 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                       inventoryEntries.map((item) => (
                         <div key={item.id} className="flex items-start justify-between gap-2">
                           <div>
-                            <div className="font-semibold text-amber-100">{item.name}</div>
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="font-semibold text-amber-100">{item.name}</div>
+                              {onDropItem && (
+                                <button
+                                  onClick={() => onDropItem({ inventoryId: item.id, itemId: item.itemId, label: item.name, appearance: item.appearance })}
+                                  className="text-[9px] uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
+                                >
+                                  Drop
+                                </button>
+                              )}
+                            </div>
                             <div className="text-[10px] text-amber-100/50">{item.description}</div>
                           </div>
                           <div className="text-right">
@@ -1876,13 +2101,13 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               </div>
             ) : (
               /* Guide Tab Content */
-              <div className="space-y-3">
-                <h5 className="text-[10px] text-amber-500/50 uppercase tracking-[0.2em] font-bold">Historical Guide</h5>
+              <div>
                 <GuideTab
                   currentBiome={getLocationLabel(params.mapX, params.mapY)}
                   nearbyNPCs={nearbyNPCs}
                   onOpenEncyclopedia={onOpenGuideModal ?? (() => {})}
                   onSelectEntry={onSelectGuideEntry ?? (() => {})}
+                  playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
                 />
               </div>
             )}
@@ -2070,7 +2295,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         {/* Bottom Controls */}
         <div className="flex flex-col md:flex-row gap-4 items-end pointer-events-auto">
           {showPerspective && (
-            <div className="bg-black/70 backdrop-blur-lg p-3 rounded-xl border border-amber-900/50 shadow-2xl flex flex-col gap-2">
+            <div className="hidden md:block bg-black/70 backdrop-blur-lg p-3 rounded-xl border border-amber-900/50 shadow-2xl flex flex-col gap-2">
               <span className="text-[9px] uppercase tracking-widest text-amber-500/80 font-bold mb-1 px-1">Observation Perspective</span>
               <div className="grid grid-cols-1 gap-1">
                 <button
@@ -2493,6 +2718,9 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                         Trigger Event
                       </button>
                     </div>
+                    <div className="text-[10px] text-amber-100/40 mt-2">
+                      Last trigger: {lastEventNote || '—'}
+                    </div>
                   </div>
                 )}
 
@@ -2681,203 +2909,499 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           <div
             className="absolute inset-0 bg-black/60 -z-20"
           />
-          <div className="w-full max-w-3xl h-[85vh] bg-black/75 border border-amber-900/40 rounded-xl shadow-2xl p-6 md:p-10 animate-in slide-in-from-left-8 fade-in overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-amber-900/40 pb-4">
+          <div className="w-full max-w-4xl h-[88vh] bg-slate-950/70 border border-amber-900/40 rounded-2xl shadow-2xl p-6 md:p-10 animate-in slide-in-from-left-8 fade-in overflow-hidden">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-amber-900/30 pb-4">
               <div>
                 <h3 className="historical-font text-amber-400 text-2xl tracking-widest">Player Dossier</h3>
-                <div className="text-[10px] uppercase tracking-[0.3em] text-amber-200/40 mt-1">Detailed Record</div>
+                <div className="text-[10px] uppercase tracking-[0.3em] text-amber-200/40 mt-1">Civic & Medical Record</div>
               </div>
-              <button onClick={() => setShowPlayerModal(false)} className="text-amber-400 hover:text-amber-300">
-                <X size={24} />
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="inline-flex items-center gap-2 rounded-full bg-black/50 border border-amber-600/40 p-1.5 text-[10px] uppercase tracking-[0.35em] shadow-[0_0_18px_rgba(245,158,11,0.2)]">
+                  {(['overview', 'health', 'inventory'] as const).map((tab) => (
+                    <button
+                      key={tab}
+                      onClick={() => setDossierTab(tab)}
+                      className={`px-4 py-1.5 rounded-full transition-all font-semibold ${
+                        dossierTab === tab
+                          ? 'bg-amber-500/90 text-black shadow-[0_0_16px_rgba(245,158,11,0.45)]'
+                          : 'text-amber-200/60 hover:text-amber-200 hover:bg-amber-900/25'
+                      }`}
+                    >
+                      {tab.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+                <button onClick={() => setShowPlayerModal(false)} className="text-amber-400 hover:text-amber-300">
+                  <X size={24} />
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-6 h-[calc(85vh-140px)] overflow-y-auto pr-2">
+              {dossierTab === 'overview' && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-amber-50/85 text-[12px]">
+                  <div className="lg:col-span-2 space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Identity</div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between"><span>Name</span><span className="font-bold">{playerStats.name}</span></div>
+                          <div className="flex justify-between"><span>Age</span><span>{playerStats.age}</span></div>
+                          <div className="flex justify-between"><span>Profession</span><span>{playerStats.profession}</span></div>
+                          <div className="flex justify-between"><span>Social Class</span><span>{playerStats.socialClass}</span></div>
+                          <div className="flex justify-between"><span>Family</span><span>{playerStats.family}</span></div>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Appearance</div>
+                        <div className="space-y-2">
+                          <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Skin</span><div>{playerStats.skinDescription}</div></div>
+                          <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Hair</span><div>{playerStats.hairDescription}</div></div>
+                          <button
+                            onClick={() => setSelectedInventoryItem(buildApparelEntry('robe'))}
+                            className="text-left group"
+                          >
+                            <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Robe</span>
+                            <div className="text-amber-100 group-hover:text-amber-200 transition-colors">
+                              {playerStats.robeDescription}
+                            </div>
+                          </button>
+                          <button
+                            onClick={() => setSelectedInventoryItem(buildApparelEntry('headwear'))}
+                            className="text-left group"
+                          >
+                            <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Headwear</span>
+                            <div className="text-amber-100 group-hover:text-amber-200 transition-colors">
+                              {playerStats.headwearDescription}
+                            </div>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Attributes</div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>Strength: <span className="font-bold">{playerStats.strength}</span></div>
+                          <div>Piety: <span className="font-bold">{playerStats.piety}</span></div>
+                          <div>Perceptiveness: <span className="font-bold">{playerStats.perceptiveness}</span></div>
+                          <div>Neuroticism: <span className="font-bold">{playerStats.neuroticism}</span></div>
+                          <div>Charisma: <span className="font-bold">{playerStats.charisma}</span></div>
+                          <div>Humoral Balance: <span className="font-bold">{playerStats.humoralBalance}</span></div>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
+                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Four Humors</div>
+                        <div className="space-y-2">
+                          <div className="flex justify-between"><span>Blood</span><span className="font-bold">{playerStats.humors.blood}</span></div>
+                          <div className="flex justify-between"><span>Phlegm</span><span className="font-bold">{playerStats.humors.phlegm}</span></div>
+                          <div className="flex justify-between"><span>Yellow Bile</span><span className="font-bold">{playerStats.humors.yellowBile}</span></div>
+                          <div className="flex justify-between"><span>Black Bile</span><span className="font-bold">{playerStats.humors.blackBile}</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-white/10 bg-gradient-to-br from-amber-500/15 via-transparent to-amber-500/10 p-4">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Current Health</div>
+                      <div className="text-lg font-semibold text-amber-100">{getHealthStatusLabel(playerStats.plague)}</div>
+                      <div className="mt-2 text-[11px] text-amber-200/60">
+                        {playerStats.healthHistory}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Wardrobe</div>
+                      <div className="text-[11px] text-amber-100/80">{playerStats.clothing.join(', ')}</div>
+                    </div>
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Accessories</div>
+                      <div className="text-[11px] text-amber-100/80">{playerStats.accessories.length ? playerStats.accessories.join(', ') : 'None noted'}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {dossierTab === 'health' && (
+                <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 text-amber-50/85 text-[12px]">
+                  <div className="space-y-6">
+                    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-slate-900/60 to-slate-950/80 p-5">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-4">Vital Map</div>
+                      <div
+                        className="relative mx-auto h-[420px] w-[220px] rounded-[28px] border border-white/5"
+                        style={{
+                          backgroundImage: 'linear-gradient(120deg, rgba(255,255,255,0.05), transparent 40%), radial-gradient(circle at 40% 30%, rgba(245,158,11,0.12), transparent 60%)',
+                        }}
+                      >
+                        <div className="absolute inset-0 rounded-[28px] bg-[radial-gradient(circle_at_50%_30%,rgba(148,163,184,0.08),transparent_55%)]" />
+                        <div className={`absolute left-[86px] top-[6px] h-12 w-12 rounded-full border border-amber-400/40 bg-amber-400/10 ${playerStats.plague.delirium > 0 ? 'shadow-[0_0_22px_rgba(124,58,237,0.5)] border-purple-400/70' : ''}`} />
+                        <div className={`absolute left-[60px] top-[52px] h-5 w-5 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'ears') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute right-[60px] top-[52px] h-5 w-5 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'ears') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[98px] top-[52px] h-10 w-8 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'neck' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
+                        <div className={`absolute left-[80px] top-[60px] h-6 w-6 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'eyes') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[116px] top-[60px] h-6 w-6 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'eyes') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[95px] top-[80px] h-5 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'mouth') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[100px] top-[92px] h-4 w-8 rounded-full border border-amber-400/20 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'throat') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[78px] top-[96px] h-[136px] w-20 rounded-[22px] border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.coughingBlood > 0 ? 'shadow-[0_0_22px_rgba(239,68,68,0.55)] border-red-400/70' : ''}`} />
+                        <div className={`absolute left-[70px] top-[110px] h-12 w-16 rounded-[18px] border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.weakness > 0 ? 'shadow-[0_0_18px_rgba(245,158,11,0.45)]' : ''}`} />
+                        <div className={`absolute left-[78px] top-[120px] h-10 w-12 rounded-[18px] border border-amber-400/20 bg-amber-500/10 ${playerStats.plague.coughingBlood > 0 || playerStats.baselineAilments.some(a => a.zone === 'lungs') ? 'shadow-[0_0_18px_rgba(239,68,68,0.45)] border-red-400/70' : ''}`} />
+                        <div className={`absolute right-[78px] top-[120px] h-10 w-12 rounded-[18px] border border-amber-400/20 bg-amber-500/10 ${playerStats.plague.coughingBlood > 0 || playerStats.baselineAilments.some(a => a.zone === 'lungs') ? 'shadow-[0_0_18px_rgba(239,68,68,0.45)] border-red-400/70' : ''}`} />
+                        <div className={`absolute left-[26px] top-[112px] h-24 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'armpit' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
+                        <div className={`absolute right-[26px] top-[112px] h-24 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'armpit' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
+                        <div className={`absolute left-[18px] top-[150px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute right-[18px] top-[150px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[18px] top-[200px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute right-[18px] top-[200px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[14px] top-[255px] h-10 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'hands') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute right-[14px] top-[255px] h-10 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'hands') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[64px] top-[180px] h-[72px] w-24 rounded-[20px] border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'groin' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
+                        <div className={`absolute left-[68px] top-[210px] h-[104px] w-[72px] rounded-[18px] border border-amber-400/20 bg-amber-500/5 ${playerStats.baselineAilments.some(a => a.zone === 'abdomen') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[70px] top-[130px] h-16 w-16 rounded-[20px] border border-amber-400/20 bg-amber-500/5 ${playerStats.baselineAilments.some(a => a.zone === 'heart') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[80px] top-[230px] h-24 w-[72px] rounded-[18px] border border-amber-400/20 bg-amber-500/5 ${playerStats.baselineAilments.some(a => a.zone === 'digestive system') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[58px] top-[260px] h-64 w-28 rounded-[30px] border border-amber-400/20 bg-amber-500/5 ${playerStats.plague.skinBleeding > 0 ? 'shadow-[0_0_20px_rgba(239,68,68,0.35)] border-red-400/60' : ''}`} />
+                        <div className={`absolute left-[46px] top-[320px] h-24 w-16 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute right-[46px] top-[320px] h-24 w-16 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[46px] top-[360px] h-[72px] w-14 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute right-[46px] top-[360px] h-[72px] w-14 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
+                        <div className={`absolute left-[50px] top-[395px] h-10 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.gangrene > 0 || playerStats.baselineAilments.some(a => a.zone === 'feet') ? 'shadow-[0_0_20px_rgba(107,114,128,0.6)] border-gray-400/70' : ''}`} />
+                        <div className={`absolute right-[50px] top-[395px] h-10 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.gangrene > 0 || playerStats.baselineAilments.some(a => a.zone === 'feet') ? 'shadow-[0_0_20px_rgba(107,114,128,0.6)] border-gray-400/70' : ''}`} />
+                        <div className="absolute inset-0 rounded-[32px] border border-white/10" />
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-slate-900/50 to-slate-950/80 p-5">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Humoral Balance</div>
+                      <div className="space-y-3 text-[11px]">
+                        {[
+                          { label: 'Blood', value: playerStats.humors.blood, tone: 'from-red-500 to-rose-400' },
+                          { label: 'Phlegm', value: playerStats.humors.phlegm, tone: 'from-slate-300 to-cyan-300' },
+                          { label: 'Yellow Bile', value: playerStats.humors.yellowBile, tone: 'from-amber-400 to-yellow-300' },
+                          { label: 'Black Bile', value: playerStats.humors.blackBile, tone: 'from-violet-500 to-indigo-400' }
+                        ].map((humor) => (
+                          <div key={humor.label}>
+                            <div className="flex justify-between mb-1 text-amber-200/70">
+                              <span>{humor.label}</span>
+                              <span>{humor.value}</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-black/40 overflow-hidden">
+                              <div className={`h-full bg-gradient-to-r ${humor.tone}`} style={{ width: `${Math.min(100, Math.max(0, humor.value))}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-5">
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">Status</div>
+                          <div className="text-lg font-semibold text-amber-100">
+                            {playerStats.plague.state === AgentState.INFECTED
+                              ? `${getPlagueTypeLabel(playerStats.plague.plagueType)} plague`
+                              : playerStats.plague.state === AgentState.INCUBATING
+                                ? 'Incubating plague'
+                                : getHealthStatusLabel(playerStats.plague)
+                            }
+                          </div>
+                        </div>
+                        <div className="text-right text-[11px] text-amber-300/70">
+                          <div>Day {playerStats.plague.daysInfected}</div>
+                          <div>Survival {playerStats.plague.survivalChance}%</div>
+                        </div>
+                      </div>
+                      <div className="mt-4 h-2 rounded-full bg-black/40 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500 transition-all"
+                          style={{ width: `${playerStats.plague.state === AgentState.HEALTHY ? 100 : Math.max(30, playerStats.plague.overallSeverity)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Symptoms</div>
+                      <div className="flex flex-wrap gap-2">
+                        {(() => {
+                          const symptomEntries = [
+                            ...(playerStats.plague.fever > 0 ? [{ label: 'Fever', zone: 'systemic', systemic: true }] : []),
+                            ...(playerStats.plague.weakness > 0 ? [{ label: 'Weakness', zone: 'systemic', systemic: true }] : []),
+                            ...(playerStats.plague.buboes > 0 ? [{ label: 'Buboes', zone: playerStats.plague.buboLocation }] : []),
+                            ...(playerStats.plague.coughingBlood > 0 ? [{ label: 'Coughing blood', zone: 'lungs' }] : []),
+                            ...(playerStats.plague.skinBleeding > 0 ? [{ label: 'Skin bleeding', zone: 'systemic', systemic: true }] : []),
+                            ...(playerStats.plague.delirium > 0 ? [{ label: 'Delirium', zone: 'head' }] : []),
+                            ...(playerStats.plague.gangrene > 0 ? [{ label: 'Gangrene', zone: 'feet' }] : []),
+                            ...playerStats.baselineAilments.map((ailment) => ({
+                              label: ailment.label,
+                              zone: ailment.zone,
+                              systemic: ailment.systemic
+                            }))
+                          ];
+
+                          if (symptomEntries.length === 0) {
+                            return <span className="text-emerald-300/80 text-sm">No reported symptoms.</span>;
+                          }
+
+                          return symptomEntries.map((entry, index) => (
+                            <span key={`${entry.label}-${index}`} className="px-3 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-200/80">
+                              {entry.label}
+                              <span className="ml-2 text-[10px] uppercase tracking-widest text-amber-200/50">
+                                {entry.systemic ? 'systemic' : entry.zone}
+                              </span>
+                            </span>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Baseline Ailments</div>
+                      {playerStats.baselineAilments.length === 0 ? (
+                        <div className="text-emerald-300/80 text-sm">No chronic ailments noted.</div>
+                      ) : (
+                        <div className="space-y-2 text-[11px] text-amber-200/80">
+                          {playerStats.baselineAilments.map((ailment) => (
+                            <div key={ailment.id} className="flex items-center justify-between">
+                              <span>{ailment.label}</span>
+                              <span className="text-[10px] uppercase tracking-widest text-amber-200/50">
+                                {ailment.systemic ? 'systemic' : ailment.zone}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Symptom Intensity</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                        {[
+                          { label: 'Fever', value: playerStats.plague.fever, tone: 'from-orange-500 to-red-500' },
+                          { label: 'Weakness', value: playerStats.plague.weakness, tone: 'from-amber-500 to-orange-400' },
+                          { label: 'Buboes', value: playerStats.plague.buboes, tone: 'from-purple-500 to-fuchsia-400' },
+                          { label: 'Coughing Blood', value: playerStats.plague.coughingBlood, tone: 'from-red-500 to-rose-400' },
+                          { label: 'Skin Bleeding', value: playerStats.plague.skinBleeding, tone: 'from-red-600 to-red-400' },
+                          { label: 'Delirium', value: playerStats.plague.delirium, tone: 'from-purple-500 to-indigo-400' },
+                          { label: 'Gangrene', value: playerStats.plague.gangrene, tone: 'from-slate-500 to-gray-400' }
+                        ].filter((entry) => entry.value > 0).map((entry) => (
+                          <div key={entry.label} className="rounded-lg border border-white/10 bg-black/30 p-3">
+                            <div className="flex justify-between mb-2">
+                              <span className="text-amber-200/70">{entry.label}</span>
+                              <span className="text-amber-300">{Math.round(entry.value)}%</span>
+                            </div>
+                            <div className="h-2 rounded-full bg-black/40 overflow-hidden">
+                              <div className={`h-full bg-gradient-to-r ${entry.tone}`} style={{ width: `${entry.value}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {dossierTab === 'inventory' && (
+                <div className="space-y-5 text-amber-50/85 text-[12px]">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">Inventory</div>
+                      <div className="text-amber-200/80 text-sm">Items carried: {playerStats.inventory.length} / {playerStats.maxInventorySlots}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setInventoryView('list')}
+                        className={`px-3 py-1.5 rounded-full text-[10px] uppercase tracking-widest border ${
+                          inventoryView === 'list' ? 'bg-amber-600/80 text-black border-amber-400/70' : 'border-white/10 text-amber-200/60 hover:text-amber-200'
+                        }`}
+                      >
+                        List
+                      </button>
+                      <button
+                        onClick={() => setInventoryView('grid')}
+                        className={`px-3 py-1.5 rounded-full text-[10px] uppercase tracking-widest border ${
+                          inventoryView === 'grid' ? 'bg-amber-600/80 text-black border-amber-400/70' : 'border-white/10 text-amber-200/60 hover:text-amber-200'
+                        }`}
+                      >
+                        Grid
+                      </button>
+                    </div>
+                  </div>
+
+                  {inventoryView === 'list' ? (
+                    <div className="space-y-3">
+                      {inventoryEntries.map((entry) => {
+                        const name = entry.name.toLowerCase();
+                        const icon = name.includes('dagger') || name.includes('sword') ? '🗡️'
+                          : name.includes('bread') || name.includes('fig') || name.includes('olive') || name.includes('apricot') ? '🥖'
+                          : name.includes('satchel') || name.includes('bag') ? '🧺'
+                          : name.includes('water') || name.includes('waterskin') ? '🪣'
+                          : name.includes('herb') || name.includes('spice') ? '🧪'
+                          : '📦';
+                        return (
+                          <button
+                            key={entry.id}
+                            onClick={() => setSelectedInventoryItem(entry)}
+                            className="w-full text-left rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all"
+                          >
+                            <div className="flex items-center gap-4">
+                              <div className="h-10 w-10 rounded-full bg-black/40 border border-amber-500/40 flex items-center justify-center text-lg">
+                                {icon}
+                              </div>
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <div className="font-semibold text-amber-100">{entry.name}</div>
+                                  <div className="text-[10px] text-amber-200/50">x{entry.quantity}</div>
+                                </div>
+                                <div className="text-[10px] text-amber-200/50 mt-1">{entry.description}</div>
+                              </div>
+                              <div className="flex flex-col items-end gap-2">
+                                <span className="text-[9px] uppercase tracking-widest px-2 py-1 rounded-full border border-amber-400/30 text-amber-300/70">
+                                  {entry.rarity}
+                                </span>
+                                {onDropItem && (
+                                  <button
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      onDropItem({ inventoryId: entry.id, itemId: entry.itemId, label: entry.name, appearance: entry.appearance });
+                                    }}
+                                    className="text-[9px] uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
+                                  >
+                                    Drop
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {inventoryEntries.map((entry) => {
+                        const name = entry.name.toLowerCase();
+                        const icon = name.includes('dagger') || name.includes('sword') ? '🗡️'
+                          : name.includes('bread') || name.includes('fig') || name.includes('olive') || name.includes('apricot') ? '🥖'
+                          : name.includes('satchel') || name.includes('bag') ? '🧺'
+                          : name.includes('water') || name.includes('waterskin') ? '🪣'
+                          : name.includes('herb') || name.includes('spice') ? '🧪'
+                          : '📦';
+                        return (
+                          <button
+                            key={entry.id}
+                            onClick={() => setSelectedInventoryItem(entry)}
+                            className="rounded-2xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all"
+                          >
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="h-10 w-10 rounded-full bg-black/40 border border-amber-500/40 flex items-center justify-center text-lg">
+                                {icon}
+                              </div>
+                              <span className="text-[9px] uppercase tracking-widest px-2 py-1 rounded-full border border-amber-400/30 text-amber-300/70">
+                                {entry.rarity}
+                              </span>
+                            </div>
+                            <div className="text-sm font-semibold text-amber-100">{entry.name}</div>
+                            <div className="text-[10px] text-amber-200/50 mt-1">{entry.description}</div>
+                            <div className="mt-3 flex items-center justify-between text-[10px] text-amber-200/70">
+                              <span>Qty: {entry.quantity}</span>
+                              {onDropItem && (
+                                <button
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    onDropItem({ inventoryId: entry.id, itemId: entry.itemId, label: entry.name, appearance: entry.appearance });
+                                  }}
+                                  className="uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
+                                >
+                                  Drop
+                                </button>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedInventoryItem && (
+        <div
+          className="absolute inset-0 z-[80] flex items-center justify-center bg-black/70 backdrop-blur-md p-6 pointer-events-auto"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedInventoryItem(null);
+            }
+          }}
+        >
+          <div className="w-full max-w-4xl rounded-2xl border border-amber-900/40 bg-slate-950/80 shadow-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-amber-900/30">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.35em] text-amber-400/70">Inventory Item</div>
+                <div className="text-xl text-amber-100 font-semibold mt-1">{selectedInventoryItem.name}</div>
+              </div>
+              <button
+                onClick={() => setSelectedInventoryItem(null)}
+                className="text-amber-400 hover:text-amber-300"
+              >
+                <X size={22} />
               </button>
             </div>
-
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-8 text-amber-50/85 text-[12px]">
-              <div className="space-y-3">
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Name</span><div className="font-bold">{playerStats.name}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Age</span><div>{playerStats.age} Years</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Class</span><div>{playerStats.socialClass}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Profession</span><div>{playerStats.profession}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Family</span><div>{playerStats.family}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Health History</span><div>{playerStats.healthHistory}</div></div>
-              </div>
-
-              <div className="space-y-3">
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Skin</span><div>{playerStats.skinDescription}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Hair</span><div>{playerStats.hairDescription}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Robe</span><div>{playerStats.robeDescription}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Headwear</span><div>{playerStats.headwearDescription}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Footwear</span><div>{playerStats.footwearDescription}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Accessories</span><div>{playerStats.accessories.length ? playerStats.accessories.join(', ') : 'None noted'}</div></div>
-                <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Clothing</span><div>{playerStats.clothing.join(', ')}</div></div>
-              </div>
-            </div>
-
-            <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-8 text-amber-50/85 text-[12px]">
-              <div>
-                <div className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-2">Attributes</div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>Strength: <span className="font-bold">{playerStats.strength}</span></div>
-                  <div>Piety: <span className="font-bold">{playerStats.piety}</span></div>
-                  <div>Perceptiveness: <span className="font-bold">{playerStats.perceptiveness}</span></div>
-                  <div>Neuroticism: <span className="font-bold">{playerStats.neuroticism}</span></div>
-                  <div>Charisma: <span className="font-bold">{playerStats.charisma}</span></div>
-                  <div>Humoral Balance: <span className="font-bold">{playerStats.humoralBalance}</span></div>
+            <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-6 p-6">
+              <div className="h-[380px]">
+                <ItemPreview3D
+                  itemId={selectedInventoryItem.itemId}
+                  name={selectedInventoryItem.name}
+                  category={selectedInventoryItem.category}
+                  rarity={selectedInventoryItem.rarity}
+                  appearance={selectedInventoryItem.appearance}
+                />
+                <div className="mt-3 text-[10px] uppercase tracking-widest text-amber-400/60">
+                  Drag to rotate · Scroll to zoom
                 </div>
               </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-widest text-amber-400/80 mb-2">Four Humors</div>
-                <div className="space-y-2">
-                  <div className="flex justify-between"><span>Blood</span><span className="font-bold">{playerStats.humors.blood}</span></div>
-                  <div className="flex justify-between"><span>Phlegm</span><span className="font-bold">{playerStats.humors.phlegm}</span></div>
-                  <div className="flex justify-between"><span>Yellow Bile</span><span className="font-bold">{playerStats.humors.yellowBile}</span></div>
-                  <div className="flex justify-between"><span>Black Bile</span><span className="font-bold">{playerStats.humors.blackBile}</span></div>
-                </div>
-              </div>
-            </div>
-
-            {/* Health Status Section */}
-            <div className="mt-8 border-t border-amber-900/40 pt-6">
-              <div className="text-[11px] uppercase tracking-widest text-amber-400/80 mb-4 flex items-center gap-2">
-                <Activity size={14} />
-                Health Status
-              </div>
-
-              {playerStats.plague.state === AgentState.HEALTHY && (
-                <div className="text-emerald-400 font-bold text-sm">
-                  ✓ Currently healthy and robust
-                </div>
-              )}
-
-              {playerStats.plague.state === AgentState.INCUBATING && (
-                <div className="bg-amber-950/30 border border-amber-600/30 rounded-lg p-4">
-                  <div className="text-amber-400 font-bold mb-2">Incubation Period</div>
-                  <div className="text-[11px] text-amber-200/70">
-                    Exposed to plague. No visible symptoms yet. The disease is developing silently.
+              <div className="space-y-4 text-amber-50/80 text-[12px]">
+                {onDropItem && (
+                  <button
+                    onClick={() => onDropItem({ inventoryId: selectedInventoryItem.id, itemId: selectedInventoryItem.itemId, label: selectedInventoryItem.name, appearance: selectedInventoryItem.appearance })}
+                    className="w-full rounded-full border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-[10px] uppercase tracking-widest text-amber-200 hover:bg-amber-500/20"
+                  >
+                    Drop Item
+                  </button>
+                )}
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Details</div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between"><span>Category</span><span>{selectedInventoryItem.category}</span></div>
+                    <div className="flex justify-between"><span>Rarity</span><span className="uppercase">{selectedInventoryItem.rarity}</span></div>
+                    <div className="flex justify-between"><span>Quantity</span><span>{selectedInventoryItem.quantity}</span></div>
                   </div>
                 </div>
-              )}
-
-              {playerStats.plague.state === AgentState.INFECTED && (
-                <div className="space-y-4">
-                  <div className={`${playerStats.plague.overallSeverity > 70 ? 'bg-red-950/30 border-red-600/30' : 'bg-orange-950/30 border-orange-600/30'} border rounded-lg p-4`}>
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <div className={`${playerStats.plague.overallSeverity > 70 ? 'text-red-400' : 'text-orange-400'} font-bold text-sm`}>
-                          {getPlagueTypeLabel(playerStats.plague.plagueType)} PLAGUE
-                        </div>
-                        <div className="text-[10px] text-amber-200/50 uppercase tracking-wider">
-                          Day {playerStats.plague.daysInfected} of Infection
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-[10px] text-amber-200/50 uppercase">Survival</div>
-                        <div className={`font-bold ${playerStats.plague.survivalChance < 20 ? 'text-red-400' : playerStats.plague.survivalChance < 50 ? 'text-orange-400' : 'text-amber-400'}`}>
-                          {playerStats.plague.survivalChance}%
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Symptom Bars */}
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Description</div>
+                  <div className="text-amber-200/80 text-sm leading-relaxed">
+                    {selectedInventoryItem.description}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Effects</div>
+                  {selectedInventoryItem.effects && selectedInventoryItem.effects.length > 0 ? (
                     <div className="space-y-2">
-                      {playerStats.plague.fever > 0 && (
-                        <div>
-                          <div className="flex justify-between text-[10px] mb-1">
-                            <span className="text-amber-200/70">🔥 Fever</span>
-                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.fever)}%</span>
-                          </div>
-                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
-                            <div className="h-full bg-gradient-to-r from-orange-500 to-red-500" style={{ width: `${playerStats.plague.fever}%` }} />
-                          </div>
+                      {selectedInventoryItem.effects.map((effect, index) => (
+                        <div key={`${effect.type}-${index}`} className="flex justify-between text-[11px] text-amber-200/80">
+                          <span>{effect.type}</span>
+                          <span>{effect.value}</span>
                         </div>
-                      )}
-
-                      {playerStats.plague.buboes > 0 && (
-                        <div>
-                          <div className="flex justify-between text-[10px] mb-1">
-                            <span className="text-amber-200/70">
-                              💉 {playerStats.plague.buboLocation.charAt(0).toUpperCase() + playerStats.plague.buboLocation.slice(1)} Bubo
-                              {playerStats.plague.buboBurst && <span className="text-emerald-400"> (burst - improved prognosis)</span>}
-                            </span>
-                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.buboes)}%</span>
-                          </div>
-                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
-                            <div className="h-full bg-purple-500" style={{ width: `${playerStats.plague.buboes}%` }} />
-                          </div>
-                        </div>
-                      )}
-
-                      {playerStats.plague.weakness > 0 && (
-                        <div>
-                          <div className="flex justify-between text-[10px] mb-1">
-                            <span className="text-amber-200/70">😓 Weakness</span>
-                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.weakness)}%</span>
-                          </div>
-                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
-                            <div className="h-full bg-amber-500" style={{ width: `${playerStats.plague.weakness}%` }} />
-                          </div>
-                        </div>
-                      )}
-
-                      {playerStats.plague.coughingBlood > 0 && (
-                        <div>
-                          <div className="flex justify-between text-[10px] mb-1">
-                            <span className="text-amber-200/70">🫁 Coughing Blood</span>
-                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.coughingBlood)}%</span>
-                          </div>
-                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
-                            <div className="h-full bg-red-500" style={{ width: `${playerStats.plague.coughingBlood}%` }} />
-                          </div>
-                        </div>
-                      )}
-
-                      {playerStats.plague.skinBleeding > 0 && (
-                        <div>
-                          <div className="flex justify-between text-[10px] mb-1">
-                            <span className="text-amber-200/70">🩸 Skin Bleeding</span>
-                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.skinBleeding)}%</span>
-                          </div>
-                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
-                            <div className="h-full bg-red-600" style={{ width: `${playerStats.plague.skinBleeding}%` }} />
-                          </div>
-                        </div>
-                      )}
-
-                      {playerStats.plague.delirium > 0 && (
-                        <div>
-                          <div className="flex justify-between text-[10px] mb-1">
-                            <span className="text-amber-200/70">😵‍💫 Delirium</span>
-                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.delirium)}%</span>
-                          </div>
-                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
-                            <div className="h-full bg-purple-600" style={{ width: `${playerStats.plague.delirium}%` }} />
-                          </div>
-                        </div>
-                      )}
-
-                      {playerStats.plague.gangrene > 0 && (
-                        <div>
-                          <div className="flex justify-between text-[10px] mb-1">
-                            <span className="text-amber-200/70">☠️ Gangrene</span>
-                            <span className="text-amber-400 font-bold">{Math.round(playerStats.plague.gangrene)}%</span>
-                          </div>
-                          <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden">
-                            <div className="h-full bg-gray-700" style={{ width: `${playerStats.plague.gangrene}%` }} />
-                          </div>
-                        </div>
-                      )}
+                      ))}
                     </div>
-                  </div>
-
-                  {/* Treatment Options (placeholder for future) */}
-                  <div className="bg-amber-950/20 border border-amber-900/30 rounded-lg p-4">
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60 mb-2">Medieval Remedies</div>
-                    <div className="text-[11px] text-amber-200/50 italic">
-                      Seek a physician to lance buboes, or try herbal remedies. Prayer may provide comfort.
-                    </div>
-                  </div>
+                  ) : (
+                    <div className="text-[11px] text-amber-200/60">No known effects.</div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </div>
@@ -2917,9 +3441,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           publicMorale={moraleStats}
           simulationStats={stats}
           conversationHistory={conversationHistories}
-          onClose={() => setShowEncounterModal(false)}
+          onClose={() => {
+            setShowEncounterModal(false);
+            if (onResetFollowingState) onResetFollowingState();
+          }}
           onConversationResult={onConversationResult}
+          onTriggerEvent={onTriggerConversationEvent}
           isNPCInitiated={isNPCInitiatedEncounter}
+          isFollowingAfterDismissal={isFollowingAfterDismissal}
         />
       )}
 
@@ -2930,6 +3459,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           onTriggerAction={onTriggerAction}
           simTime={simTime}
           playerStats={playerStats}
+          inventoryItems={inventoryEntries}
+          onOpenItemModal={(item) => setSelectedInventoryItem(item)}
         />
       )}
     </div>

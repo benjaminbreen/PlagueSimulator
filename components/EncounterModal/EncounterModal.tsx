@@ -13,7 +13,7 @@ import {
 } from '../../types';
 import { ConversationImpact } from '../../utils/friendliness';
 import { MoraleStats } from '../Agents';
-import { useConversation } from './useConversation';
+import { useConversation, ConversationAction } from './useConversation';
 import * as THREE from 'three';
 
 interface EncounterModalProps {
@@ -35,8 +35,12 @@ interface EncounterModalProps {
   onClose: () => void;
   /** Called when conversation ends with both summary and impact */
   onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact) => void;
+  /** Called when NPC triggers an event (e.g., end_conversation triggers npc_dismissed_player event) */
+  onTriggerEvent?: (eventId: string, context?: { npcId: string; npcName: string }) => void;
   /** If true, the NPC approached the player (not vice versa) - uses different greeting style */
   isNPCInitiated?: boolean;
+  /** If true, the player insisted on following the NPC after being dismissed - NPC is now angry/fearful */
+  isFollowingAfterDismissal?: boolean;
 }
 
 // Animated portrait wrapper with lifelike breathing, speaking, and idle animations
@@ -203,7 +207,9 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   conversationHistory,
   onClose,
   onConversationResult,
-  isNPCInitiated = false
+  onTriggerEvent,
+  isNPCInitiated = false,
+  isFollowingAfterDismissal = false
 }) => {
   const [activeTab, setActiveTab] = useState<'conversation' | 'history'>('conversation');
   const [inputValue, setInputValue] = useState('');
@@ -212,10 +218,22 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [barsAnimated, setBarsAnimated] = useState(false);
   const [nativeLanguageMode, setNativeLanguageMode] = useState(false);
+  const [pendingAction, setPendingAction] = useState<ConversationAction>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasSummarizedRef = useRef(false);
+
+  // Store the NPC that triggered dismissal for the effect to use
+  const dismissingNpcRef = useRef<NPCStats | null>(null);
+
+  // Handle NPC action - just set state, effect will handle the rest
+  const handleNPCAction = useCallback((action: ConversationAction, actionNpc: NPCStats) => {
+    if (action === 'end_conversation') {
+      dismissingNpcRef.current = actionNpc;
+      setPendingAction(action);
+    }
+  }, []);
 
   // Build context for conversation
   const context: EncounterContext = {
@@ -233,7 +251,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
     publicMorale,
     simulationStats,
     conversationHistory: conversationHistory.filter(h => h.npcId === npc.id),
-    nativeLanguageMode
+    nativeLanguageMode,
+    isFollowingAfterDismissal
   };
 
   const {
@@ -249,8 +268,31 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
     onConversationEnd: (result) => {
       onConversationResult(npc.id, result.summary, result.impact);
     },
+    onNPCAction: handleNPCAction,
     isNPCInitiated
   });
+
+  // Handle NPC dismissal: save conversation summary, then trigger event after delay
+  useEffect(() => {
+    if (pendingAction === 'end_conversation' && !hasSummarizedRef.current) {
+      hasSummarizedRef.current = true;
+
+      // Save the conversation summary first
+      endConversation();
+
+      // After delay, trigger the dismissal event
+      const timer = setTimeout(() => {
+        if (onTriggerEvent && dismissingNpcRef.current) {
+          onTriggerEvent('npc_dismissed_player', {
+            npcId: dismissingNpcRef.current.id,
+            npcName: dismissingNpcRef.current.name
+          });
+        }
+      }, 2500); // 2.5 second delay to read the NPC's response
+
+      return () => clearTimeout(timer);
+    }
+  }, [pendingAction, endConversation, onTriggerEvent]);
 
   // Entry animation
   useEffect(() => {
@@ -713,15 +755,15 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                       value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
                       onKeyDown={handleKeyDown}
-                      placeholder="Ask your question..."
-                      disabled={isLoading}
+                      placeholder={pendingAction === 'end_conversation' ? 'They have ended the conversation...' : 'Ask your question...'}
+                      disabled={isLoading || pendingAction === 'end_conversation'}
                       className="flex-1 bg-stone-900/80 border border-amber-900/30 rounded-lg px-4 py-2.5 text-sm text-amber-100 placeholder-amber-100/30 focus:outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/20 focus:shadow-[0_0_15px_rgba(251,191,36,0.15)] transition-all duration-200 disabled:opacity-50"
                     />
                     <button
                       onClick={handleSend}
-                      disabled={!inputValue.trim() || isLoading}
+                      disabled={!inputValue.trim() || isLoading || pendingAction === 'end_conversation'}
                       className={`px-4 py-2.5 rounded-lg transition-all duration-200 flex items-center gap-2 ${
-                        inputValue.trim() && !isLoading
+                        inputValue.trim() && !isLoading && pendingAction !== 'end_conversation'
                           ? 'bg-amber-600 hover:bg-amber-500 text-amber-50 shadow-lg shadow-amber-900/30 hover:shadow-amber-800/40 hover:scale-105'
                           : 'bg-stone-700/50 text-stone-400 cursor-not-allowed'
                       }`}

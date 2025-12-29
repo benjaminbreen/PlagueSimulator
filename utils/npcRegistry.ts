@@ -148,26 +148,53 @@ export const createTileNPCRegistry = (
     let rngSeed = tileSeed + 99999; // Offset to avoid collision with other seeded values
     const rand = () => seededRandom(rngSeed++);
 
+    // Separate building residents from street NPCs
+    const buildingResidentIds = ids.filter(id => {
+      const record = npcMap.get(id);
+      return record?.homeBuildingId !== null;
+    });
+    const streetNpcIds = ids.filter(id => {
+      const record = npcMap.get(id);
+      return record?.homeBuildingId === null;
+    });
+
     // Fisher-Yates shuffle to randomly order IDs without splice mutation issues
-    for (let i = ids.length - 1; i > 0; i--) {
+    for (let i = buildingResidentIds.length - 1; i > 0; i--) {
       const j = Math.floor(rand() * (i + 1));
-      [ids[i], ids[j]] = [ids[j], ids[i]];
+      [buildingResidentIds[i], buildingResidentIds[j]] = [buildingResidentIds[j], buildingResidentIds[i]];
     }
 
-    const infectedCount = Math.min(ids.length, 1 + Math.floor(rand() * 2));
-    let pickedIndex = 0;
+    // Always start with at least one infected building by infecting a building resident
+    // and placing them inside their home
+    if (buildingResidentIds.length > 0) {
+      const firstInfectedId = buildingResidentIds[0];
+      const record = npcMap.get(firstInfectedId);
+      if (record) {
+        seedNpcInfectedNearDeath(record, simTime);
+        record.location = 'interior'; // Ensure they start inside so building is marked infected
+      }
+    }
 
-    for (let i = 0; i < infectedCount; i += 1) {
-      const id = ids[pickedIndex++];
+    // Seed additional infected NPCs (can be street or building NPCs)
+    const allShuffledIds = [...buildingResidentIds.slice(1), ...streetNpcIds];
+    for (let i = allShuffledIds.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [allShuffledIds[i], allShuffledIds[j]] = [allShuffledIds[j], allShuffledIds[i]];
+    }
+
+    const additionalInfectedCount = Math.min(allShuffledIds.length, Math.floor(rand() * 2));
+    for (let i = 0; i < additionalInfectedCount; i += 1) {
+      const id = allShuffledIds[i];
       const record = npcMap.get(id);
       if (!record) continue;
       seedNpcInfectedNearDeath(record, simTime);
     }
 
-    const remaining = ids.length - pickedIndex;
-    const incubatingCount = Math.min(remaining, 1 + Math.floor(rand() * 4));
+    // Seed incubating cases from remaining NPCs
+    const remainingIds = allShuffledIds.slice(additionalInfectedCount);
+    const incubatingCount = Math.min(remainingIds.length, 1 + Math.floor(rand() * 4));
     for (let i = 0; i < incubatingCount; i += 1) {
-      const id = ids[pickedIndex++];
+      const id = remainingIds[i];
       const record = npcMap.get(id);
       if (!record) continue;
       seedNpcInfection(record, simTime);

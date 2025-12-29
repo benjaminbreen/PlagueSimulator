@@ -4,7 +4,7 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/
 
 interface EventRequest {
   context: {
-    player: { name: string; socialClass: string; stats: { charisma: number; piety: number; currency: number } };
+    player: { name: string; socialClass: string; stats: { charisma: number; piety: number; currency: number; health: number; reputation: number; wealth: number } };
     npc?: { name: string; profession: string; socialClass: string; disposition: number; panic: number; religion: string };
     environment: { district: string; timeOfDay: number; weather: string };
     conversation?: { playerMessages: string[]; npcMessages: string[] };
@@ -30,12 +30,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const systemPrompt = [
     'You generate short in-world decision events for a historical simulation set in Damascus, 1348.',
     'Return JSON only, matching this schema:',
-    '{ "title": string, "body": string, "options": [ { "id": string, "label": string, "effectKey": string, "outcomeText"?: string, "followupEventId"?: string, "requirements": { "stat"?: "charisma"|"piety"|"currency", "min"?: number, "max"?: number } } ] }',
+    '{ "title": string, "body": string, "options": [ { "id": string, "label": string, "effectKey": string, "outcomeText"?: string, "followupEventId"?: string, "requirements": { "stat"?: "charisma"|"piety"|"currency"|"health"|"reputation"|"wealth", "min"?: number, "max"?: number } } ] }',
     'Rules:',
     '- 2 to 4 options only.',
     '- Keep body under 3 sentences.',
     '- Use period-appropriate language.',
-    '- effectKey must be one of: "end_conversation", "bribe_small", "bribe_large", "flee", "appeal_faith", "calm_crowd", "escalate".',
+    '- effectKey must be one of: "end_conversation", "bribe_small", "bribe_large", "flee", "appeal_faith", "calm_crowd", "escalate", "health_up", "health_down", "reputation_up", "reputation_down", "wealth_up", "wealth_down".',
     eventSeed ? `- Event seed: ${eventSeed}` : ''
   ].filter(Boolean).join('\n');
 

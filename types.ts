@@ -226,6 +226,9 @@ export interface PlayerStats {
   perceptiveness: number;
   neuroticism: number;
   charisma: number;
+  health: number;      // 0-100 overall vitality
+  reputation: number;  // 0-100 social standing in the city
+  wealth: number;      // 0-100 perceived prosperity
   humors: {
     blood: number;
     phlegm: number;
@@ -233,6 +236,12 @@ export interface PlayerStats {
     blackBile: number;
   };
   humoralBalance: number;
+  baselineAilments: Array<{
+    id: string;
+    label: string;
+    zone: string;
+    systemic?: boolean;
+  }>;
   currency: number;         // Dirhams (Islamic currency)
   inventory: PlayerItem[];
   maxInventorySlots: number; // Start with 20
@@ -606,6 +615,30 @@ export interface PlayerItem {
   acquiredAt: number; // Sim time
 }
 
+export interface ItemAppearance {
+  type: 'robe' | 'headwear';
+  baseColor: string;
+  accentColor?: string;
+  headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
+  robeHasSash?: boolean;
+  robeHasTrim?: boolean;
+  robeHemBand?: boolean;
+  robeSleeves?: boolean;
+  robeOverwrap?: boolean;
+  robePattern?: string;
+  robeSpread?: number;
+}
+
+export interface DroppedItemRequest {
+  id: string;
+  itemId: string;
+  label: string;
+  position: [number, number, number];
+  location: 'outdoor' | 'interior';
+  interiorId?: string;
+  appearance?: ItemAppearance;
+}
+
 export type SpecialNPCType = 'SUFI_MYSTIC' | 'ASTROLOGER' | 'SCRIBE';
 
 export interface MiniMapData {
@@ -676,6 +709,16 @@ export type BuildingInfectionStatus = 'clear' | 'incubating' | 'infected' | 'dec
 export interface BuildingInfectionState {
   status: BuildingInfectionStatus;
   lastSeenSimTime: number;
+}
+
+export interface InfectedHouseholdInfo {
+  buildingId: string;
+  npcName: string;
+  direction: string;
+  status: 'infected' | 'deceased';
+  infectedCount: number;
+  deceasedCount: number;
+  buildingPosition: [number, number, number];
 }
 
 export const CONSTANTS = {
@@ -936,6 +979,8 @@ export interface EncounterContext {
   simulationStats: SimulationStats;
   conversationHistory: ConversationSummary[];
   nativeLanguageMode: boolean;
+  /** If true, the player insisted on following after being dismissed - NPC is angry/fearful */
+  isFollowingAfterDismissal?: boolean;
 }
 
 // ============================================
@@ -948,12 +993,12 @@ export interface EventOption {
   consequenceText?: string;
   outcomeText?: string;
   followupEventId?: string;
-  requirements?: { stat: 'charisma' | 'piety' | 'currency'; min?: number; max?: number };
+  requirements?: { stat: 'charisma' | 'piety' | 'currency' | 'health' | 'reputation' | 'wealth'; min?: number; max?: number };
   effects: EventEffect[];
 }
 
 export type EventEffect =
-  | { type: 'playerStat'; stat: 'piety' | 'charisma' | 'currency'; delta: number }
+  | { type: 'playerStat'; stat: 'piety' | 'charisma' | 'currency' | 'health' | 'reputation' | 'wealth'; delta: number }
   | { type: 'npcStat'; npcId: string; stat: 'disposition' | 'panic'; delta: number }
   | { type: 'worldFlag'; key: string; value: boolean | number | string }
   | { type: 'triggerEvent'; eventId: string }
@@ -973,7 +1018,7 @@ export interface EventContextSnapshot {
     id: string;
     name: string;
     socialClass: SocialClass;
-    stats: Pick<PlayerStats, 'charisma' | 'piety' | 'currency'>;
+    stats: Pick<PlayerStats, 'charisma' | 'piety' | 'currency' | 'health' | 'reputation' | 'wealth'>;
   };
   npc?: {
     id: string;

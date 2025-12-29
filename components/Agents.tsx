@@ -207,6 +207,7 @@ export const Agents: React.FC<AgentsProps> = ({
             buildings={buildings}
             buildingHash={buildingHash || undefined}
             buildingInfection={buildingInfection}
+            homeBuildingId={record.homeBuildingId}
             obstacles={obstacles}
             obstacleHash={obstacleHash || undefined}
             agentHash={localAgentHashRef.current || undefined}

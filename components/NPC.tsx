@@ -6,7 +6,7 @@ import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, Buildin
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
-import { seededRandom } from '../utils/procedural';
+import { seededRandom, applyMourningColors, getPlagueProtectiveAccessories } from '../utils/procedural';
 import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
 import { createNpcPlagueMeta } from '../utils/npcHealth';
 
@@ -138,6 +138,7 @@ interface NPCProps {
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
   buildingInfection?: Record<string, BuildingInfectionState>;
+  homeBuildingId?: string | null;
   agentHash?: SpatialHash<AgentSnapshot> | null;
   obstacles?: Obstacle[];
   obstacleHash?: SpatialHash<Obstacle> | null;
@@ -172,6 +173,7 @@ export const NPC: React.FC<NPCProps> = memo(({
   buildings,
   buildingHash = null,
   buildingInfection,
+  homeBuildingId = null,
   agentHash = null,
   obstacles = [],
   obstacleHash = null,
@@ -362,6 +364,59 @@ export const NPC: React.FC<NPCProps> = memo(({
     }
     return { skin, scarf, robe, accent, hair, headwear };
   }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, idSeed]);
+
+  // Apply mourning colors if NPC's building has deceased residents
+  const mourningAdjustedColors = useMemo(() => {
+    if (!homeBuildingId || !buildingInfection) {
+      return { robe: appearance.robe, accent: appearance.accent };
+    }
+
+    const buildingState = buildingInfection[homeBuildingId];
+    if (!buildingState || buildingState.status !== 'deceased') {
+      return { robe: appearance.robe, accent: appearance.accent };
+    }
+
+    // Calculate mourning intensity based on time since death
+    const currentSimTime = getSimTime();
+    const hoursSinceDeath = currentSimTime - buildingState.lastSeenSimTime;
+    const daysSinceDeath = hoursSinceDeath / 24;
+
+    // Mourning fades over 14 days (historical: 3-40 days depending on relation)
+    const mourningIntensity = Math.max(0, Math.min(1, 1.0 - daysSinceDeath / 14));
+
+    if (mourningIntensity < 0.1) {
+      // Mourning period has ended
+      return { robe: appearance.robe, accent: appearance.accent };
+    }
+
+    // Apply mourning colors
+    const mourningColors = applyMourningColors(
+      appearance.robe,
+      appearance.accent,
+      mourningIntensity
+    );
+
+    return { robe: mourningColors.base, accent: mourningColors.accent };
+  }, [homeBuildingId, buildingInfection, appearance.robe, appearance.accent, getSimTime]);
+
+  // Add protective accessories based on plague awareness
+  const effectiveAccessories = useMemo(() => {
+    if (!buildingInfection || !homeBuildingId) {
+      return stats.accessories ?? [];
+    }
+
+    const buildingState = buildingInfection[homeBuildingId];
+
+    const plagueContext = {
+      buildingHasDeceased: buildingState?.status === 'deceased',
+      buildingHasInfected: buildingState?.status === 'infected',
+      awarenessLevel: stats.awarenessLevel,
+      socialClass: stats.socialClass,
+    };
+
+    return getPlagueProtectiveAccessories(plagueContext, stats.accessories ?? []);
+  }, [buildingInfection, homeBuildingId, stats.accessories, stats.awarenessLevel, stats.socialClass]);
+
   const moodDisplay = moodOverride ?? stats.mood;
   const lastOverrideNonceRef = useRef<number | null>(null);
 
@@ -1274,11 +1329,11 @@ export const NPC: React.FC<NPCProps> = memo(({
           </mesh>
         </group>
         <Humanoid
-          color={stateRef.current === AgentState.DECEASED ? '#111' : appearance.robe}
+          color={stateRef.current === AgentState.DECEASED ? '#111' : mourningAdjustedColors.robe}
           headColor={appearance.skin}
           turbanColor={appearance.headwear}
           headscarfColor={appearance.scarf}
-          robeAccentColor={appearance.accent}
+          robeAccentColor={mourningAdjustedColors.accent}
           hairColor={appearance.hair}
           gender={stats.gender}
           age={stats.age}
@@ -1297,7 +1352,7 @@ export const NPC: React.FC<NPCProps> = memo(({
           sleeveCoverage={stats.sleeveCoverage}
           footwearStyle={stats.footwearStyle}
           footwearColor={stats.footwearColor}
-          accessories={stats.accessories}
+          accessories={effectiveAccessories}
           sicknessLevel={stateRef.current === AgentState.INFECTED ? 1.0 : stateRef.current === AgentState.INCUBATING ? 0.4 : 0}
           isInfected={stateRef.current === AgentState.INFECTED}
           isIncubating={stateRef.current === AgentState.INCUBATING}

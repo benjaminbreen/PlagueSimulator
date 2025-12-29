@@ -6,20 +6,49 @@ import { GUIDE_ENTRIES } from './historicalGuideData';
 import { NPCStats } from '../types';
 
 // Map biome names to district entry IDs
+// These map specific location names from getLocationLabel() to guide entries
 const BIOME_TO_DISTRICT: Record<string, string> = {
+  // Market areas
+  'buzuriyah': 'market-district',
+  'bazaar': 'market-district',
   'market': 'market-district',
   'marketplace': 'market-district',
-  'residential': 'residential-quarter',
-  'wealthy': 'wealthy-quarter',
-  'palace': 'wealthy-quarter',
-  'slum': 'slums',
-  'hovels': 'slums',
-  'poor': 'slums',
-  'caravanserai': 'caravanserai',
-  'khan': 'caravanserai',
-  'religious': 'religious-district',
+  'suq': 'market-district',
+  // Religious areas
+  'umayyad': 'religious-district',
   'mosque': 'religious-district',
   'madrasa': 'religious-district',
+  'religious': 'religious-district',
+  // Wealthy/residential areas
+  'salihiyya': 'wealthy-quarter',
+  'qaymariyya': 'wealthy-quarter',
+  'wealthy': 'wealthy-quarter',
+  'hillside': 'wealthy-quarter',
+  'palace': 'wealthy-quarter',
+  // Poor areas
+  'shaghour': 'slums',
+  'hovels': 'slums',
+  'poor': 'slums',
+  'slum': 'slums',
+  // Civic/citadel
+  'citadel': 'residential-quarter',
+  'mamluk': 'residential-quarter',
+  'civic': 'residential-quarter',
+  // Specific quarters
+  'yahud': 'residential-quarter',
+  'jewish': 'residential-quarter',
+  'nasara': 'residential-quarter',
+  'christian': 'residential-quarter',
+  'bab sharqi': 'caravanserai',
+  'eastern': 'caravanserai',
+  // Trade areas
+  'caravanserai': 'caravanserai',
+  'khan': 'caravanserai',
+  // Rural/outskirts
+  'ghouta': 'residential-quarter',
+  'farmland': 'residential-quarter',
+  'desert': 'caravanserai',
+  'outskirts': 'caravanserai',
 };
 
 /**

@@ -69,9 +69,11 @@ export const SicknessMeter: React.FC<SicknessMeterProps> = ({
   };
 
   const colors = getColorScheme();
-  const progressPercent = plague.state === AgentState.HEALTHY || plague.state === AgentState.INCUBATING
+  const progressPercent = plague.state === AgentState.HEALTHY
     ? 100
-    : plague.overallSeverity;
+    : plague.state === AgentState.INCUBATING
+      ? 85
+      : plague.overallSeverity;
 
   return (
     <button
@@ -94,13 +96,20 @@ export const SicknessMeter: React.FC<SicknessMeterProps> = ({
           <span className={`${colors.text} font-bold text-[10px] uppercase tracking-widest`}>
             {plague.state === AgentState.INFECTED
               ? `PLAGUE: ${getPlagueTypeLabel(plague.plagueType)}`
-              : `HEALTH: ${healthStatus}`
+              : plague.state === AgentState.INCUBATING
+                ? 'HEALTH: Incubating plague'
+                : `HEALTH: ${healthStatus}`
             }
           </span>
         </div>
         {plague.state === AgentState.INFECTED && (
           <span className={`${colors.text} text-[9px] font-bold`}>
             Day {plague.daysInfected}
+          </span>
+        )}
+        {plague.state === AgentState.INCUBATING && (
+          <span className={`${colors.text} text-[9px] font-bold opacity-70`}>
+            Minor fatigue
           </span>
         )}
       </div>
@@ -127,10 +136,6 @@ export const SicknessMeter: React.FC<SicknessMeterProps> = ({
               {i < symptoms.length - 1 && <span className="mx-1">•</span>}
             </span>
           ))}
-        </div>
-      ) : plague.state === AgentState.INCUBATING ? (
-        <div className="text-[10px] text-amber-400/60 font-medium">
-          ⚠️ Minor fatigue
         </div>
       ) : null}
 

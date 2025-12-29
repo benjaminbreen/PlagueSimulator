@@ -47,7 +47,8 @@ import {
   PushableCandleStub,
   PushableTwine,
   PushableCrate,
-  PushableAmphora
+  PushableAmphora,
+  PushableDroppedItem
 } from './environment/decorations/Pushables';
 import { PushableBoulder } from './environment/decorations/Boulder';
 import {
@@ -2103,6 +2104,7 @@ const PushableDecorations: React.FC<{ items: PushableObject[] }> = ({ items }) =
       if (item.kind === 'twine') return <PushableTwine key={item.id} item={item} />;
       if (item.kind === 'crate') return <PushableCrate key={item.id} item={item} />;
       if (item.kind === 'amphora') return <PushableAmphora key={item.id} item={item} />;
+      if (item.kind === 'droppedItem') return <PushableDroppedItem key={item.id} item={item} />;
       return null;
     })}
   </>

@@ -2,6 +2,26 @@ import { DistrictType, EventDefinition } from '../../types';
 
 export const EVENT_CATALOG: EventDefinition[] = [
   {
+    id: 'npc_dismissed_player',
+    title: 'Conversation Ended',
+    body: 'They have made clear they no longer wish to speak with you. Their expression is stern.',
+    tags: ['conversation:dismissed'],
+    options: [
+      {
+        id: 'walk_away',
+        label: 'Walk away',
+        outcomeText: 'You step back and let them go. Perhaps another time.',
+        effects: [{ type: 'endConversation' }]
+      },
+      {
+        id: 'insist_follow',
+        label: 'Insist on following them',
+        outcomeText: 'You pursue them. Their expression darkens with anger and fear.',
+        effects: [{ type: 'worldFlag', key: 'insisted_after_dismissed', value: true }]
+      }
+    ]
+  },
+  {
     id: 'conversation_guard_warning',
     title: 'Guarded Warning',
     body: 'The other person stiffens and looks around, clearly unsettled by your words.',
@@ -33,16 +53,19 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'listen',
         label: 'Pause to listen',
+        outcomeText: 'You catch the price and the seller’s keen glance.',
         effects: [{ type: 'worldFlag', key: 'heard_market_call', value: true }]
       },
       {
         id: 'ask',
         label: 'Ask about the price',
+        outcomeText: 'The seller replies quickly and goes back to work.',
         effects: [{ type: 'playerStat', stat: 'charisma', delta: 1 }]
       },
       {
         id: 'move',
         label: 'Move on',
+        outcomeText: 'You slip through the crowd without delay.',
         effects: []
       }
     ]
@@ -259,11 +282,13 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'offer',
         label: 'Offer help with the seal',
+        outcomeText: 'He nods once and lets you hold the wax steady.',
         effects: [{ type: 'playerStat', stat: 'piety', delta: 1 }]
       },
       {
         id: 'leave',
         label: 'Leave him to his work',
+        outcomeText: 'You step aside; the scribe’s pen resumes its scratch.',
         effects: []
       }
     ]
@@ -367,11 +392,13 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'ask',
         label: 'Ask for a fair price',
+        outcomeText: 'He leans in, considering your request.',
         effects: [{ type: 'playerStat', stat: 'charisma', delta: 1 }]
       },
       {
         id: 'accept',
         label: 'Accept the first offer',
+        outcomeText: 'The merchant seems pleased by your haste.',
         effects: []
       }
     ]
@@ -502,12 +529,18 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'return',
         label: 'Return it to the nearest merchant',
-        effects: [{ type: 'playerStat', stat: 'piety', delta: 1 }]
+        effects: [
+          { type: 'playerStat', stat: 'piety', delta: 1 },
+          { type: 'playerStat', stat: 'reputation', delta: 2 }
+        ]
       },
       {
         id: 'keep',
         label: 'Keep it',
-        effects: [{ type: 'playerStat', stat: 'currency', delta: 5 }]
+        effects: [
+          { type: 'playerStat', stat: 'currency', delta: 5 },
+          { type: 'playerStat', stat: 'wealth', delta: 2 }
+        ]
       },
       {
         id: 'ask',
@@ -525,17 +558,23 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'carry',
         label: 'Carry it aside and offer scraps',
-        effects: [{ type: 'playerStat', stat: 'piety', delta: 1 }]
+        effects: [
+          { type: 'playerStat', stat: 'piety', delta: 1 },
+          { type: 'playerStat', stat: 'reputation', delta: 1 }
+        ]
       },
       {
         id: 'ignore',
         label: 'Ignore and move on',
-        effects: []
+        effects: [{ type: 'playerStat', stat: 'reputation', delta: -1 }]
       },
       {
         id: 'water',
         label: 'Ask a vendor for water',
-        effects: [{ type: 'worldFlag', key: 'kitten_helped', value: true }]
+        effects: [
+          { type: 'worldFlag', key: 'kitten_helped', value: true },
+          { type: 'playerStat', stat: 'reputation', delta: 1 }
+        ]
       }
     ]
   },
@@ -640,17 +679,26 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'wash',
         label: 'Wash the wound',
-        effects: [{ type: 'worldFlag', key: 'rat_bite_washed', value: true }]
+        effects: [
+          { type: 'worldFlag', key: 'rat_bite_washed', value: true },
+          { type: 'playerStat', stat: 'health', delta: 1 }
+        ]
       },
       {
         id: 'bind',
         label: 'Bind it and keep moving',
-        effects: [{ type: 'worldFlag', key: 'rat_bite_bound', value: true }]
+        effects: [
+          { type: 'worldFlag', key: 'rat_bite_bound', value: true },
+          { type: 'playerStat', stat: 'health', delta: -2 }
+        ]
       },
       {
         id: 'healer',
         label: 'Seek a healer',
-        effects: [{ type: 'worldFlag', key: 'sought_healer', value: true }]
+        effects: [
+          { type: 'worldFlag', key: 'sought_healer', value: true },
+          { type: 'playerStat', stat: 'health', delta: 2 }
+        ]
       }
     ]
   },
@@ -663,17 +711,23 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'ignore',
         label: 'Ignore it',
-        effects: []
+        effects: [{ type: 'playerStat', stat: 'health', delta: -3 }]
       },
       {
         id: 'clean',
         label: 'Clean your face and hands',
-        effects: [{ type: 'playerStat', stat: 'piety', delta: 1 }]
+        effects: [
+          { type: 'playerStat', stat: 'piety', delta: 1 },
+          { type: 'playerStat', stat: 'health', delta: -1 }
+        ]
       },
       {
         id: 'remedy',
         label: 'Ask locals for a remedy',
-        effects: [{ type: 'worldFlag', key: 'asked_remedy', value: true }]
+        effects: [
+          { type: 'worldFlag', key: 'asked_remedy', value: true },
+          { type: 'playerStat', stat: 'health', delta: 1 }
+        ]
       }
     ]
   },
@@ -686,12 +740,18 @@ export const EVENT_CATALOG: EventDefinition[] = [
       {
         id: 'keep',
         label: 'Keep it',
-        effects: [{ type: 'playerStat', stat: 'currency', delta: 2 }]
+        effects: [
+          { type: 'playerStat', stat: 'currency', delta: 2 },
+          { type: 'playerStat', stat: 'wealth', delta: 1 }
+        ]
       },
       {
         id: 'owner',
         label: 'Look for its owner',
-        effects: [{ type: 'worldFlag', key: 'sought_owner', value: true }]
+        effects: [
+          { type: 'worldFlag', key: 'sought_owner', value: true },
+          { type: 'playerStat', stat: 'reputation', delta: 1 }
+        ]
       },
       {
         id: 'empty',

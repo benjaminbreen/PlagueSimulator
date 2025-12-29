@@ -79,6 +79,8 @@ interface PlayerProps {
   onClimbablePrompt?: (prompt: string | null) => void;
   climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
   onFallDamage?: (fallHeight: number, fatal: boolean) => void;
+  cameraViewTarget?: [number, number, number] | null;
+  onPlayerStartMove?: () => void;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -112,7 +114,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onClimbingStateChange,
   onClimbablePrompt,
   climbInputRef,
-  onFallDamage
+  onFallDamage,
+  cameraViewTarget,
+  onPlayerStartMove
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -1338,6 +1342,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         direction.normalize();
         moveVec = direction;
 
+        // Clear camera view target when player auto-walks
+        if (cameraViewTarget && onPlayerStartMove) {
+          onPlayerStartMove();
+        }
+
         // Reuse same movement code as keyboard
         const airControl = isGrounded.current ? 1 : 0.6;
         const damp = landingDamp.current > 0 ? 0.7 : 1.0;
@@ -1388,6 +1397,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     // Keyboard input cancels click-to-move target
     if (moving && targetPosition && setTargetPosition) {
       setTargetPosition(null);
+    }
+
+    // Clear camera view target when player starts moving
+    if (moving && cameraViewTarget && onPlayerStartMove) {
+      onPlayerStartMove();
     }
 
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
@@ -1673,12 +1687,16 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       camera.rotation.z = 0;
       group.current.rotation.y = fpYaw.current;
     } else if (cameraMode === CameraMode.OVERHEAD && orbitRef.current) {
-      const playerPos = group.current.position;
-      if (playerPos.distanceToSquared(lastPlayerPos.current) > 0.0001) {
+      // Use cameraViewTarget if provided (e.g. when clicking infected household), otherwise follow player
+      const targetPos = cameraViewTarget
+        ? new THREE.Vector3(cameraViewTarget[0], cameraViewTarget[1], cameraViewTarget[2])
+        : group.current.position;
+
+      if (targetPos.distanceToSquared(lastPlayerPos.current) > 0.0001) {
         const offset = camera.position.clone().sub(orbitRef.current.target);
-        orbitRef.current.target.copy(playerPos);
-        camera.position.copy(playerPos.clone().add(offset));
-        lastPlayerPos.current.copy(playerPos);
+        orbitRef.current.target.copy(targetPos);
+        camera.position.copy(targetPos.clone().add(offset));
+        lastPlayerPos.current.copy(targetPos);
       }
       if (northLocked) {
         orbitRef.current.setAzimuthalAngle(0);

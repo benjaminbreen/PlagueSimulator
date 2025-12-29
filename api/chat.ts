@@ -8,6 +8,11 @@ interface ChatRequest {
   playerMessage: string;
 }
 
+interface ChatResponse {
+  message: string;
+  action: 'end_conversation' | null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Only allow POST
   if (req.method !== 'POST') {
@@ -75,7 +80,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(500).json({ error: 'No response from Gemini' });
     }
 
-    return res.status(200).json({ response: responseText });
+    // Try to parse as JSON (new structured format)
+    // Expected: { "message": "dialogue", "action": null | "end_conversation" }
+    try {
+      // Strip markdown code blocks if present
+      const cleanedText = responseText
+        .replace(/^```json\s*/i, '')
+        .replace(/^```\s*/i, '')
+        .replace(/\s*```$/i, '')
+        .trim();
+
+      const parsed = JSON.parse(cleanedText) as ChatResponse;
+      if (typeof parsed.message === 'string') {
+        return res.status(200).json({
+          response: parsed.message,
+          action: parsed.action || null
+        });
+      }
+    } catch {
+      // Not valid JSON - return as plain text (backwards compatible)
+    }
+
+    // Fallback: return as plain text response
+    return res.status(200).json({ response: responseText, action: null });
 
   } catch (error) {
     console.error('Chat API error:', error);
