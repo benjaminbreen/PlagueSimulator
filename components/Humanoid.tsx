@@ -377,6 +377,8 @@ interface HumanoidProps {
   distanceFromCamera?: number;  // PERFORMANCE: LOD - skip detail when far
   enableSimpleLod?: boolean;
   simpleLodDistance?: number;
+  animationLodDistance?: number;
+  shadowLodDistance?: number;
   showGroundShadow?: boolean;
   // Gaze tracking - world position to look toward (e.g., player position)
   gazeTarget?: { x: number; y: number; z: number };
@@ -446,6 +448,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   distanceFromCamera = 0,
   enableSimpleLod = false,
   simpleLodDistance = 45,
+  animationLodDistance = 22,
+  shadowLodDistance = 20,
   showGroundShadow = true,
   gazeTarget,
   worldPosition,
@@ -462,6 +466,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   panicLevel = 0,
 }) => {
   const simpleLodActive = enableSimpleLod && distanceFromCamera > simpleLodDistance;
+  const animationLodActive = distanceFromCamera > animationLodDistance;
+  const castShadowEnabled = distanceFromCamera <= shadowLodDistance;
   // PERFORMANCE: LOD - skip facial details beyond 25 units
   const showFacialDetails = distanceFromCamera < 25;
   // PERFORMANCE: Hair LOD tiers - high detail when close, simplified when far
@@ -497,6 +503,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     return baseColor.getStyle();
   }, [headColor, sicknessLevel, age]);
+  const rootRef = useRef<THREE.Group>(null);
+  const lastShadowEnabledRef = useRef<boolean | null>(null);
   const leftLeg = useRef<THREE.Group>(null);
   const rightLeg = useRef<THREE.Group>(null);
   const leftKnee = useRef<THREE.Group>(null);
@@ -731,7 +739,15 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const eyeScanCooldown = useRef(0.8 + Math.random() * 1.5);
 
   useFrame((state) => {
-    if (simpleLodActive) return;
+    if (rootRef.current && lastShadowEnabledRef.current !== castShadowEnabled) {
+      lastShadowEnabledRef.current = castShadowEnabled;
+      rootRef.current.traverse((obj) => {
+        if ((obj as THREE.Mesh).isMesh) {
+          (obj as THREE.Mesh).castShadow = castShadowEnabled;
+        }
+      });
+    }
+    if (simpleLodActive || animationLodActive) return;
     if (isDead) {
       if (bodyGroup.current) {
         // Corpse falls forward and lies on the ground
@@ -1658,7 +1674,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
   if (simpleLodActive) {
     return (
-      <group scale={scale}>
+      <group ref={rootRef} scale={scale}>
         <mesh position={[0, 1.0, 0]} castShadow>
           <cylinderGeometry args={[0.35, 0.45, 1.2, 8]} />
           <meshStandardMaterial color={color} roughness={0.9} />
@@ -1672,7 +1688,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   }
 
   return (
-    <group scale={scale}>
+    <group ref={rootRef} scale={scale}>
       <group ref={bodyGroup}>
         {!isDead && showGroundShadow && (
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
@@ -1698,12 +1714,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         {isFemale ? (
           <group>
             <mesh position={[0, 1.05, 0]} castShadow>
-              <coneGeometry args={[0.55 * femaleRobeSpread, 1.2, 10]} />
+              <coneGeometry args={[0.55 * femaleRobeSpread, 1.2, 8]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
             {motifMap && (
               <mesh position={[0, 1.05, 0.01]} castShadow>
-                <coneGeometry args={[0.56 * femaleRobeSpread, 1.19, 10]} />
+                <coneGeometry args={[0.56 * femaleRobeSpread, 1.19, 8]} />
                 <meshStandardMaterial
                   color={robeAccentColor}
                   alphaMap={motifMap}
@@ -1715,33 +1731,29 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               </mesh>
             )}
             <mesh position={[0, 1.35, 0]} castShadow>
-              <cylinderGeometry args={[0.22, 0.28, 0.35, 10]} />
+              <cylinderGeometry args={[0.22, 0.28, 0.35, 8]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
             <mesh position={[0, 1.05, 0]} castShadow>
-              <cylinderGeometry args={[0.24, 0.24, 0.7, 10]} />
+              <cylinderGeometry args={[0.24, 0.24, 0.7, 8]} />
               <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
             </mesh>
             {robeOverwrap && (
               <mesh position={[0, 1.05, 0.08]} castShadow>
-                <coneGeometry args={[0.62 * femaleRobeSpread, 1.05, 10]} />
+                <coneGeometry args={[0.62 * femaleRobeSpread, 1.05, 8]} />
                 <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
               </mesh>
             )}
-            <mesh position={[0, 0.95, 0.24]} castShadow>
-              <boxGeometry args={[0.12, 1.2, 0.02]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
-            </mesh>
             <mesh position={[0, 1.18, -0.12]} castShadow>
               <boxGeometry args={[0.5, 0.2, 0.16]} />
               <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
             </mesh>
             <mesh position={[0, 0.6, 0]} castShadow>
-              <coneGeometry args={[0.75 * femaleRobeSpread, 0.9, 12]} />
+              <coneGeometry args={[0.75 * femaleRobeSpread, 0.9, 8]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
             <mesh position={[0, 0.2, 0]} castShadow>
-              <cylinderGeometry args={[0.78 * femaleRobeSpread, 0.78 * femaleRobeSpread, 0.1, 12]} />
+              <cylinderGeometry args={[0.78 * femaleRobeSpread, 0.78 * femaleRobeSpread, 0.1, 8]} />
               <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
             </mesh>
             <mesh position={[0, 0.25, -0.18]} castShadow>
@@ -1750,13 +1762,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             </mesh>
             {robeHasSash && (
               <mesh position={[0, 0.95, 0]} castShadow>
-                <torusGeometry args={[0.38 * femaleRobeSpread, 0.035, 8, 16]} />
+                <torusGeometry args={[0.38 * femaleRobeSpread, 0.035, 6, 12]} />
                 <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} map={sashMap ?? undefined} />
               </mesh>
             )}
             {femaleRobeBand && (
               <mesh position={[0, 1.35, 0]} castShadow>
-                <cylinderGeometry args={[0.18, 0.22, 0.1, 10]} />
+                <cylinderGeometry args={[0.18, 0.22, 0.1, 8]} />
                 <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
               </mesh>
             )}

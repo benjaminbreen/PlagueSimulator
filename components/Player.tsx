@@ -78,6 +78,7 @@ interface PlayerProps {
   onClimbingStateChange?: (state: ClimbingState | boolean) => void;
   onClimbablePrompt?: (prompt: string | null) => void;
   climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
+  onFallDamage?: (fallHeight: number, fatal: boolean) => void;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -110,7 +111,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   climbables = [],
   onClimbingStateChange,
   onClimbablePrompt,
-  climbInputRef
+  climbInputRef,
+  onFallDamage
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -185,6 +187,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const landingDamp = useRef(0);
   const lastSpace = useRef(false);
   const lastCRef = useRef(false); // For C key edge detection (climbing)
+  const fallStartHeight = useRef<number | null>(null); // Track height when falling started for fall damage
   const lastMovePosRef = useRef(new THREE.Vector3());
   const stuckTimerRef = useRef(0);
   const interactSwingRef = useRef(0);
@@ -511,6 +514,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     jumpTimer.current = 0;
     jumpBuffer.current = 0;
     lastJumpChargeRef.current = charge;
+    // Track height when jump started for fall damage calculation
+    if (group.current) {
+      fallStartHeight.current = group.current.position.y;
+    }
     playJump();
   };
 
@@ -835,6 +842,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       isGrounded.current = false;
       velV.current = 0; // Start with zero vertical velocity (natural fall)
       coyoteTimer.current = 0; // Allow brief coyote time for recovery jump
+      // Track height when edge fall started for fall damage calculation
+      fallStartHeight.current = group.current.position.y;
     }
 
     // Update C key state for climbing edge detection
@@ -932,6 +941,23 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         landingDamp.current = 0.2;
         chargingRef.current = false;
         landingImpulseRef.current = 1;
+
+        // FALL DAMAGE: Calculate damage based on fall height
+        if (fallStartHeight.current !== null) {
+          const fallHeight = fallStartHeight.current - groundHeight;
+          console.log(`[FALL] Start: ${fallStartHeight.current.toFixed(2)}, Ground: ${groundHeight.toFixed(2)}, Fall: ${fallHeight.toFixed(2)}, Callback: ${!!onFallDamage}`);
+
+          // Only apply damage for significant falls (more than ~1 story / 3 units)
+          const DAMAGE_THRESHOLD = 3.0; // Minimum fall height to take damage
+          const FATAL_THRESHOLD = 6.0;  // 2+ stories = fatal fall
+
+          if (fallHeight > DAMAGE_THRESHOLD && onFallDamage) {
+            const isFatal = fallHeight >= FATAL_THRESHOLD;
+            console.log(`[FALL DAMAGE] Height: ${fallHeight.toFixed(2)}, Fatal: ${isFatal}`);
+            onFallDamage(fallHeight, isFatal);
+          }
+        }
+        fallStartHeight.current = null; // Reset fall tracking
       }
     }
     if (isGrounded.current && !lastGroundedRef.current) {

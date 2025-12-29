@@ -5,6 +5,7 @@
  */
 
 import { AgentState, PlagueType, BuboLocation, PlagueStatus } from '../types';
+import { seededRandom } from './procedural';
 
 // Game time constants (assumed - adjust based on your game's time system)
 export const GAME_DAY_LENGTH = 60; // seconds per game day (adjust to match your simulation)
@@ -62,16 +63,22 @@ export function initializePlague(): PlagueStatus {
  * @param exposureType Type of exposure
  * @param intensity Exposure intensity (0-1)
  * @param currentTime Current game time
+ * @param seed Optional seed for deterministic RNG (for reproducibility)
  * @returns Updated plague status
  */
 export function exposePlayerToPlague(
   currentPlague: PlagueStatus,
   exposureType: 'flea' | 'airborne' | 'contact',
   intensity: number,
-  currentTime: number
+  currentTime: number,
+  seed?: number
 ): PlagueStatus {
   // Already infected
   if (currentPlague.state !== AgentState.HEALTHY) return currentPlague;
+
+  // Use seeded RNG for deterministic results when seed provided
+  let rngSeed = seed ?? Math.floor(Math.random() * 1000000);
+  const rand = () => seededRandom(rngSeed++);
 
   // Exposure chance based on type and intensity
   const exposureChances = {
@@ -80,7 +87,7 @@ export function exposePlayerToPlague(
     contact: 0.1 * intensity    // 10% for corpse/item contact
   };
 
-  if (Math.random() > exposureChances[exposureType]) {
+  if (rand() > exposureChances[exposureType]) {
     return currentPlague; // Exposure failed
   }
 
@@ -89,7 +96,7 @@ export function exposePlayerToPlague(
   if (exposureType === 'airborne') {
     plagueType = PlagueType.PNEUMONIC; // Always pneumonic from airborne
   } else {
-    const roll = Math.random();
+    const roll = rand();
     if (roll < 0.80) plagueType = PlagueType.BUBONIC;
     else if (roll < 0.95) plagueType = PlagueType.PNEUMONIC;
     else plagueType = PlagueType.SEPTICEMIC;
@@ -98,7 +105,7 @@ export function exposePlayerToPlague(
   // Determine bubo location if bubonic
   let buboLocation = BuboLocation.NONE;
   if (plagueType === PlagueType.BUBONIC) {
-    const locationRoll = Math.random();
+    const locationRoll = rand();
     if (locationRoll < 0.6) buboLocation = BuboLocation.GROIN;
     else if (locationRoll < 0.9) buboLocation = BuboLocation.ARMPIT;
     else buboLocation = BuboLocation.NECK;

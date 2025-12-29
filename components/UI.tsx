@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId } from '../types';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption } from '../types';
 import { MoraleStats } from './Agents';
 import { ActionBar } from './ActionBar';
 import { Humanoid } from './Humanoid';
@@ -38,10 +38,12 @@ import {
 import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
 import { SoundDebugPanel } from './audio/SoundDebugPanel';
 import { EncounterModal } from './EncounterModal/EncounterModal';
+import { EventModal } from './EventModal';
 import { ConversationSummary } from '../types';
 import { ConversationImpact } from '../utils/friendliness';
 import { SicknessMeter } from './SicknessMeter';
 import { getPlagueTypeLabel } from '../utils/plague';
+import { GuideTab } from './HistoricalGuide';
 
 interface UIProps {
   params: SimulationParams;
@@ -75,12 +77,27 @@ interface UIProps {
   conversationHistories: ConversationSummary[];
   /** Handler for when conversation ends - receives npcId, summary, and impact for disposition updates */
   onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact) => void;
+  selectedNpcActivity: string;
+  selectedNpcNearbyInfected: number;
+  selectedNpcNearbyDeceased: number;
+  selectedNpcRumors: string[];
+  activeEvent: EventInstance | null;
+  onResolveEvent: (option: EventOption) => void;
+  onTriggerDebugEvent: () => void;
+  llmEventsEnabled: boolean;
+  setLlmEventsEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   showDemographicsOverlay: boolean;
   setShowDemographicsOverlay: React.Dispatch<React.SetStateAction<boolean>>;
   onForceNpcState: (id: string, state: AgentState) => void;
   onForceAllNpcState: (state: AgentState) => void;
   /** Whether the current encounter was initiated by an NPC approaching the player */
   isNPCInitiatedEncounter?: boolean;
+  /** Nearby NPCs for historical guide context */
+  nearbyNPCs?: NPCStats[];
+  /** Callback to open the historical guide modal */
+  onOpenGuideModal?: () => void;
+  /** Callback to open guide modal to a specific entry */
+  onSelectGuideEntry?: (entryId: string) => void;
 }
 
 const WeatherModal: React.FC<{
@@ -1091,11 +1108,11 @@ const EncounterModalLegacy: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationResult, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationResult, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
-  const [reportTab, setReportTab] = useState<'epidemic' | 'player'>('epidemic');
+  const [reportTab, setReportTab] = useState<'epidemic' | 'player' | 'guide'>('epidemic');
   const [settingsTab, setSettingsTab] = useState<'about' | 'music' | 'dev'>('about');
   const [showPerspective, setShowPerspective] = useState(true);
   const [perfStats, setPerfStats] = useState({
@@ -1107,7 +1124,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     heapMB: null as number | null
   });
   const [inventorySortBy, setInventorySortBy] = useState<'name' | 'rarity' | 'quantity'>('name');
-  const [tabPulse, setTabPulse] = useState<'epidemic' | 'player' | null>(null);
+  const [tabPulse, setTabPulse] = useState<'epidemic' | 'player' | 'guide' | null>(null);
   const [reportsPanelCollapsed, setReportsPanelCollapsed] = useState(false);
   const [alchemistTableCollapsed, setAlchemistTableCollapsed] = useState(true);
   const [spreadRate, setSpreadRate] = useState<number | null>(null);
@@ -1556,6 +1573,18 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   <span className={`absolute inset-0 rounded-full bg-amber-300/30 blur-[2px] transition-all duration-300 ${tabPulse === 'player' ? 'opacity-100 scale-110' : 'opacity-0 scale-95'}`} />
                   Player
                 </button>
+                <button
+                  onClick={() => {
+                    setReportTab('guide');
+                    setTabPulse('guide');
+                  }}
+                  className={`relative px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all overflow-hidden ${
+                    reportTab === 'guide' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/50 hover:text-amber-200'
+                  }`}
+                >
+                  <span className={`absolute inset-0 rounded-full bg-amber-300/30 blur-[2px] transition-all duration-300 ${tabPulse === 'guide' ? 'opacity-100 scale-110' : 'opacity-0 scale-95'}`} />
+                  Guide
+                </button>
               </div>
             </div>
 
@@ -1727,7 +1756,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   </div>
                 </div>
               </div>
-            ) : (
+            ) : reportTab === 'player' ? (
               <div className="space-y-3 text-[12px] text-amber-50/90">
                 <div className="flex items-center justify-between">
                   <div className="historical-font text-amber-400 text-sm uppercase tracking-widest">Player Report</div>
@@ -1844,6 +1873,17 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                     )}
                   </div>
                 </div>
+              </div>
+            ) : (
+              /* Guide Tab Content */
+              <div className="space-y-3">
+                <h5 className="text-[10px] text-amber-500/50 uppercase tracking-[0.2em] font-bold">Historical Guide</h5>
+                <GuideTab
+                  currentBiome={getLocationLabel(params.mapX, params.mapY)}
+                  nearbyNPCs={nearbyNPCs}
+                  onOpenEncyclopedia={onOpenGuideModal ?? (() => {})}
+                  onSelectEntry={onSelectGuideEntry ?? (() => {})}
+                />
               </div>
             )}
             </div>
@@ -2132,6 +2172,21 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                     <li>Mortality peaks at 24 hours.</li>
                     <li>Rats appear when sanitation falls below 40%.</li>
                   </ul>
+                  <div className="mt-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg">
+                    <h4 className="text-xs font-bold text-amber-500 uppercase mb-2">Event Generation</h4>
+                    <label className="flex items-center justify-between text-[11px] uppercase tracking-widest text-amber-200/70">
+                      <span>LLM Events</span>
+                      <input
+                        type="checkbox"
+                        checked={llmEventsEnabled}
+                        onChange={(e) => setLlmEventsEnabled(e.target.checked)}
+                        className="accent-amber-600"
+                      />
+                    </label>
+                    <p className="text-[10px] text-amber-100/40 mt-2">
+                      When off, events are fully deterministic and prewritten.
+                    </p>
+                  </div>
                 </div>
               </div>
             ) : settingsTab === 'music' ? (
@@ -2416,7 +2471,30 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                       className="accent-amber-600"
                     />
                   </label>
+                  <label className="flex items-center justify-between">
+                    <span className="text-amber-300/80">Event Debug</span>
+                    <input
+                      type="checkbox"
+                      checked={devSettings.showEventDebug}
+                      onChange={(e) => setDevSettings(prev => ({ ...prev, showEventDebug: e.target.checked }))}
+                      className="accent-amber-600"
+                    />
+                  </label>
                 </div>
+
+                {devSettings.showEventDebug && (
+                  <div className="bg-black/40 border border-amber-900/40 rounded-lg p-4">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/80 font-bold">Event Debug</div>
+                      <button
+                        onClick={onTriggerDebugEvent}
+                        className="px-3 py-2 rounded-md border border-amber-500/40 text-amber-200 hover:bg-amber-600/20 text-[10px] uppercase tracking-widest"
+                      >
+                        Trigger Event
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="bg-black/40 border border-amber-900/40 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
@@ -2805,6 +2883,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         </div>
       )}
 
+      {activeEvent && (
+        <EventModal
+          event={activeEvent}
+          playerStats={playerStats}
+          onChoose={onResolveEvent}
+        />
+      )}
+
       {showEncounterModal3 && selectedNpc && (
         <EncounterModalLegacy
           npc={selectedNpc}
@@ -2823,8 +2909,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             weather: currentWeather,
             mapX: params.mapX,
             mapY: params.mapY,
-            nearbyInfected: stats.infected,
-            nearbyDeceased: stats.deceased
+            nearbyInfected: selectedNpcNearbyInfected,
+            nearbyDeceased: selectedNpcNearbyDeceased,
+            currentActivity: selectedNpcActivity,
+            localRumors: selectedNpcRumors
           }}
           publicMorale={moraleStats}
           simulationStats={stats}

@@ -26,6 +26,8 @@ interface EncounterModalProps {
     mapY: number;
     nearbyInfected: number;
     nearbyDeceased: number;
+    currentActivity: string;
+    localRumors: string[];
   };
   publicMorale: MoraleStats;
   simulationStats: SimulationStats;
@@ -224,7 +226,9 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
       weather: environment.weather,
       district: getLocationLabel(environment.mapX, environment.mapY),
       nearbyInfected: environment.nearbyInfected,
-      nearbyDeceased: environment.nearbyDeceased
+      nearbyDeceased: environment.nearbyDeceased,
+      currentActivity: environment.currentActivity,
+      localRumors: environment.localRumors
     },
     publicMorale,
     simulationStats,

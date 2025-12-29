@@ -3976,7 +3976,8 @@ export const Buildings: React.FC<{
   torchIntensity: number;
   nightFactor: number;
   heightmap?: TerrainHeightmap | null;
-}> = ({ mapX, mapY, sessionSeed = 0, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap }) => {
+  isSprinting?: boolean;
+}> = ({ mapX, mapY, sessionSeed = 0, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap, isSprinting = false }) => {
   // PERFORMANCE: Use cached textures instead of recreating on every mount
   const noiseTextures = CACHED_NOISE_TEXTURES;
   const grimeTexture = useMemo(() => createGrimeTexture(256), []);
@@ -4291,13 +4292,15 @@ export const Buildings: React.FC<{
   const frustumMatrix = useMemo(() => new THREE.Matrix4(), []);
   const expandedFrustum = useMemo(() => new THREE.Frustum(), []);
   const boundingSphere = useMemo(() => new THREE.Sphere(), []);
+  const tempVec3 = useMemo(() => new THREE.Vector3(), []);
   const lastCullUpdateRef = React.useRef(0);
   const SHADOW_CULL_EXPAND = 15;
 
   useFrame((state) => {
     const elapsed = state.clock.elapsedTime;
-    // Update frustum culling every 0.2 seconds (5 times per second)
-    if (elapsed - lastCullUpdateRef.current < 0.2) return;
+    const cullInterval = isSprinting ? 0.35 : 0.2;
+    // Update frustum culling periodically to reduce per-frame cost
+    if (elapsed - lastCullUpdateRef.current < cullInterval) return;
     lastCullUpdateRef.current = elapsed;
 
     frustumMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
@@ -4325,7 +4328,7 @@ export const Buildings: React.FC<{
     for (const building of metadata) {
       // Create bounding sphere for building (approximate radius of 10 units)
       boundingSphere.set(
-        new THREE.Vector3(building.position[0], building.position[1], building.position[2]),
+        tempVec3.set(building.position[0], building.position[1], building.position[2]),
         10 // radius - covers most building sizes
       );
 
@@ -4736,7 +4739,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
       <HoverLabelContext.Provider value={enableHoverLabel}>
         <group>
           <Ground onClick={onGroundClick} district={district} seed={groundSeed} terrainSeed={terrainSeed} timeOfDay={timeOfDay} fogColor={fogColor} onHeightmapBuilt={onHeightmapBuilt} />
-          <Buildings mapX={mapX} mapY={mapY} sessionSeed={sessionSeed} onBuildingsGenerated={handleBuildingsGenerated} nearBuildingId={nearBuildingId} torchIntensity={torchIntensity} nightFactor={nightFactor} heightmap={heightmap} />
+          <Buildings mapX={mapX} mapY={mapY} sessionSeed={sessionSeed} onBuildingsGenerated={handleBuildingsGenerated} nearBuildingId={nearBuildingId} torchIntensity={torchIntensity} nightFactor={nightFactor} heightmap={heightmap} isSprinting={isSprinting} />
           {/* Render climbables at world level (not inside Building groups) */}
           {climbablesForRendering.map((accessory) => (
             <ClimbableAccessory key={accessory.id} accessory={accessory} nightFactor={nightFactor} />

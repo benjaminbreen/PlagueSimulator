@@ -51,6 +51,12 @@ async function callChatAPI(
   return responseText;
 }
 
+function sanitizeNpcResponse(text: string): string {
+  if (!text) return '';
+  // Just normalize whitespace, preserve all content including *italics*
+  return text.replace(/\s{2,}/g, ' ').trim();
+}
+
 interface ConversationResult {
   summary: ConversationSummary;
   impact: ConversationImpact;
@@ -146,10 +152,11 @@ export function useConversation({
       );
 
       // Add NPC response
+      const sanitizedResponse = sanitizeNpcResponse(responseText);
       const npcMessage: ConversationMessage = {
         id: `msg-${Date.now() + 1}`,
         role: 'npc',
-        content: responseText,
+        content: sanitizedResponse || getFallbackResponse(npc),
         timestamp: Date.now()
       };
 
@@ -217,15 +224,15 @@ export function useConversation({
 // Fallback responses for when API fails
 function getFallbackResponse(npc: NPCStats): string {
   const fallbacks = [
-    `*${npc.name} seems distracted and doesn't respond clearly*`,
-    `*The ${npc.profession.toLowerCase()} glances around nervously* I... I must go.`,
-    `*${npc.name} mutters something unintelligible*`,
+    `${npc.name} seems distracted and doesn't respond clearly.`,
+    `The ${npc.profession.toLowerCase()} glances around nervously. I... I must go.`,
+    `${npc.name} mutters something unintelligible.`,
     `Forgive me, my mind wanders. These are troubling times.`,
-    `*pauses, as if lost in thought* What were you saying?`
+    `What were you saying?`
   ];
 
   if (npc.panicLevel > 60) {
-    return `*${npc.name} is too frightened to speak coherently*`;
+    return `${npc.name} is too frightened to speak coherently.`;
   }
 
   return fallbacks[Math.floor(Math.random() * fallbacks.length)];

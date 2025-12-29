@@ -11,6 +11,7 @@
  */
 
 import { DistrictType } from '../../types';
+import { devLog, devWarn, devError } from '../../utils/dev-logging';
 
 // Weather types (matches Simulation.tsx)
 export type WeatherType = 'CLEAR' | 'OVERCAST' | 'SANDSTORM';
@@ -100,9 +101,9 @@ export class AmbientSoundEngine {
       this.masterGain.gain.value = 0; // Start silent
       this.masterGain.connect(this.ctx.destination);
 
-      console.log('[AmbientSoundEngine] Initialized');
+      devLog('AmbientSoundEngine', 'Initialized');
     } catch (error) {
-      console.error('[AmbientSoundEngine] Failed to initialize:', error);
+      devError('AmbientSoundEngine', 'Failed to initialize:', error);
     }
   }
 
@@ -111,13 +112,13 @@ export class AmbientSoundEngine {
    */
   registerLayer(layer: SoundLayer): void {
     if (!this.ctx || !this.masterGain) {
-      console.warn('[AmbientSoundEngine] Cannot register layer before initialization');
+      devWarn('AmbientSoundEngine', 'Cannot register layer before initialization');
       return;
     }
 
     this.layers.set(layer.name, layer);
     layer.connect(this.masterGain);
-    console.log(`[AmbientSoundEngine] Registered layer: ${layer.name}`);
+    devLog('AmbientSoundEngine', `Registered layer: ${layer.name}`);
   }
 
   /**
@@ -145,7 +146,7 @@ export class AmbientSoundEngine {
       );
     }
 
-    console.log('[AmbientSoundEngine] Started');
+    devLog('AmbientSoundEngine', 'Started');
   }
 
   /**
@@ -168,7 +169,7 @@ export class AmbientSoundEngine {
       this.layers.forEach((layer) => layer.stop());
     }, 1100);
 
-    console.log('[AmbientSoundEngine] Stopped');
+    devLog('AmbientSoundEngine', 'Stopped');
   }
 
   /**
@@ -192,7 +193,7 @@ export class AmbientSoundEngine {
       try {
         layer.update(state, delta);
       } catch (error) {
-        console.warn(`[AmbientSoundEngine] Layer ${layer.name} update failed:`, error);
+        devWarn('AmbientSoundEngine', `Layer ${layer.name} update failed:`, error);
       }
     });
   }
@@ -257,7 +258,7 @@ export class AmbientSoundEngine {
     }
 
     this.masterGain = null;
-    console.log('[AmbientSoundEngine] Disposed');
+    devLog('AmbientSoundEngine', 'Disposed');
   }
 
   /**

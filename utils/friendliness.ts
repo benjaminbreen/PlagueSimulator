@@ -133,6 +133,8 @@ export interface ConversationImpact {
   friendlinessChange: number; // Change to apply to disposition (-30 to +15)
   panicChange: number;        // Change to apply to panic (-10 to +40)
   sentiment: 'positive' | 'neutral' | 'negative'; // Overall sentiment for history
+  threatLevel: number;        // 0-100 threat signal from player messages
+  offenseLevel: number;       // 0-100 offense/insult signal from player messages
 }
 
 /**
@@ -144,11 +146,13 @@ export function analyzeConversationImpact(
   const playerMessages = messages.filter(m => m.role === 'player');
 
   if (playerMessages.length === 0) {
-    return { friendlinessChange: 0, panicChange: 0, sentiment: 'neutral' };
+    return { friendlinessChange: 0, panicChange: 0, sentiment: 'neutral', threatLevel: 0, offenseLevel: 0 };
   }
 
   let friendlinessDelta = 0;
   let panicDelta = 0;
+  let threatLevel = 0;
+  let offenseLevel = 0;
 
   for (const msg of playerMessages) {
     const text = msg.content.toLowerCase();
@@ -160,11 +164,13 @@ export function analyzeConversationImpact(
     if (/you will die|going to die|death comes for you|plague will take you|curse you/.test(text)) {
       panicDelta += 20;
       friendlinessDelta -= 15;
+      threatLevel += 30;
     }
     // Death/plague mentions (moderate panic)
     else if (/\b(die|dying|death|plague|pestilence|curse|damned|doom)\b/.test(text)) {
       panicDelta += 8;
       friendlinessDelta -= 5;
+      threatLevel += 10;
     }
 
     // Mentions of sickness nearby
@@ -172,23 +178,38 @@ export function analyzeConversationImpact(
       panicDelta += 5;
     }
 
+    // Direct threats or demands
+    if (/give me your money|hand over|pay me now|i will hurt you|or else|i will take it/.test(text)) {
+      threatLevel += 35;
+      friendlinessDelta -= 10;
+    }
+
+    if (/\b(rob|steal|threaten|harm|kill|stab)\b/.test(text)) {
+      threatLevel += 20;
+      friendlinessDelta -= 8;
+    }
+
     // Shouting (ALL CAPS detection)
     const capsWords = words.filter(w => w.length > 2 && w === w.toUpperCase());
     if (capsWords.length >= 2) {
       panicDelta += 3;
       friendlinessDelta -= 3;
+      threatLevel += 5;
     }
 
     // === AGGRESSIVE/INSULTING LANGUAGE ===
 
     if (/\b(fool|idiot|stupid|worthless|scum|pig|dog|filth|wretch)\b/.test(text)) {
       friendlinessDelta -= 10;
+      offenseLevel += 20;
     }
     if (/get out|go away|leave me|shut up|be silent/.test(text)) {
       friendlinessDelta -= 6;
+      offenseLevel += 10;
     }
     if (/\b(hate|despise|loathe)\b/.test(text)) {
       friendlinessDelta -= 8;
+      offenseLevel += 12;
     }
 
     // === POSITIVE/KIND LANGUAGE ===
@@ -232,6 +253,8 @@ export function analyzeConversationImpact(
   // Clamp values
   friendlinessDelta = clamp(Math.round(friendlinessDelta), -30, 15);
   panicDelta = clamp(Math.round(panicDelta), -10, 40);
+  threatLevel = clamp(Math.round(threatLevel), 0, 100);
+  offenseLevel = clamp(Math.round(offenseLevel), 0, 100);
 
   // Determine overall sentiment
   let sentiment: 'positive' | 'neutral' | 'negative';
@@ -246,7 +269,9 @@ export function analyzeConversationImpact(
   return {
     friendlinessChange: friendlinessDelta,
     panicChange: panicDelta,
-    sentiment
+    sentiment,
+    threatLevel,
+    offenseLevel
   };
 }
 

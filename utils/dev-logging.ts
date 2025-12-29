@@ -3,6 +3,34 @@
  * Only active when devSettings are enabled
  */
 
+// Check if we're in development mode
+const isDev = typeof process !== 'undefined' && process.env?.NODE_ENV === 'development';
+
+/**
+ * Log a message only in development mode
+ */
+export const devLog = (tag: string, ...args: unknown[]) => {
+  if (isDev) {
+    console.log(`[${tag}]`, ...args);
+  }
+};
+
+/**
+ * Log a warning only in development mode
+ */
+export const devWarn = (tag: string, ...args: unknown[]) => {
+  if (isDev) {
+    console.warn(`[${tag}]`, ...args);
+  }
+};
+
+/**
+ * Log an error (always logs, but prefixed consistently)
+ */
+export const devError = (tag: string, ...args: unknown[]) => {
+  console.error(`[${tag}]`, ...args);
+};
+
 export interface RenderStats {
   district: string;
   renderer: string;

@@ -8,15 +8,22 @@ import { MoraleStats } from './components/Agents';
 import { InteriorScene } from './components/InteriorScene';
 import { UI } from './components/UI';
 import { MerchantModal } from './components/MerchantModal';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState } from './types';
+import { GuideModal } from './components/HistoricalGuide';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, EventInstance, EventEffect, EventContextSnapshot, EventDefinition, EventOption, PlagueType } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
 import { shouldNpcBeHome } from './utils/npcSchedule';
 import { advanceNpcHealth, applyHouseholdExposure, ensureNpcPlagueMeta, resetNpcPlagueMeta } from './utils/npcHealth';
 import { updateBuildingInfections } from './utils/buildingInfection';
-import { initializePlague, progressPlague } from './utils/plague';
+import { initializePlague, progressPlague, getPlagueTypeLabel, exposePlayerToPlague } from './utils/plague';
 import { ConversationImpact, applyConversationImpact } from './utils/friendliness';
+import { PlagueUI } from './components/PlagueUI';
+import { usePlagueMonitor } from './hooks/usePlagueMonitor';
+import { checkBiomeRandomEvent, checkConversationTrigger, getBiomeForDistrict } from './utils/eventTriggers';
+import { getEventsForBiome, getEventById } from './utils/events/catalog';
+import { evaluateTriggers, TriggerState } from './utils/events/triggerSystem';
+import { TriggerTargetType, TriggerWhen } from './utils/events/triggerCatalog';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -48,12 +55,28 @@ function App() {
   const [interiorNarrator, setInteriorNarrator] = useState<InteriorNarratorState | null>(null);
   const [interiorBuilding, setInteriorBuilding] = useState<BuildingMetadata | null>(null);
   const [selectedNpc, setSelectedNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
+  const lastOutdoorIdsRef = useRef<string[]>([]);
+  const lastStatsUpdateRef = useRef(0);
+  const lastMoraleUpdateRef = useRef(0);
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
   const [showMerchantModal, setShowMerchantModal] = useState(false);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showEncounterModal, setShowEncounterModal] = useState(false);
   const [showEncounterModal3, setShowEncounterModal3] = useState(false);
   const [isNPCInitiatedEncounter, setIsNPCInitiatedEncounter] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
+  const [selectedNpcActivity, setSelectedNpcActivity] = useState('');
+  const [selectedNpcNearbyInfected, setSelectedNpcNearbyInfected] = useState(0);
+  const [selectedNpcNearbyDeceased, setSelectedNpcNearbyDeceased] = useState(0);
+  const [selectedNpcRumors, setSelectedNpcRumors] = useState<string[]>([]);
+  const [activeEvent, setActiveEvent] = useState<EventInstance | null>(null);
+  const [eventQueue, setEventQueue] = useState<EventInstance[]>([]);
+  const [llmEventsEnabled, setLlmEventsEnabled] = useState(false);
+  const [worldFlags, setWorldFlags] = useState<Record<string, boolean | number | string>>({});
+  const eventCooldownsRef = useRef<Record<string, number>>({});
+  const npcThreatMemoryRef = useRef<Record<string, { count: number; lastSimTime: number }>>({});
+  const triggerStateRef = useRef<TriggerState>({ counts: {}, lastTriggeredDay: {} });
   const [showDemographicsOverlay, setShowDemographicsOverlay] = useState(false);
   const [npcStateOverride, setNpcStateOverride] = useState<NpcStateOverride | null>(null);
   const [tileBuildings, setTileBuildings] = useState<BuildingMetadata[]>([]);
@@ -61,7 +84,10 @@ function App() {
   const [buildingInfectionState, setBuildingInfectionState] = useState<Record<string, BuildingInfectionState>>({});
   const tileRegistriesRef = useRef<Map<string, { npcMap: Map<string, NPCRecord>; lastScheduleSimTime: number }>>(new Map());
   const buildingInfectionRef = useRef<Map<string, Map<string, BuildingInfectionState>>>(new Map());
+  const npcActivityRef = useRef<Map<string, { lastPos: THREE.Vector3; lastSimTime: number; activity: string; location: 'outdoor' | 'interior' }>>(new Map());
+  const rumorPoolRef = useRef<Map<import('./types').DistrictType, Array<{ text: string; simTime: number }>>>(new Map());
   const scheduleTickRef = useRef(0);
+  const offscreenHealthCursorRef = useRef(0);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [climbablePrompt, setClimbablePrompt] = useState<string | null>(null);
@@ -79,38 +105,16 @@ function App() {
   // Conversation history state (session-only, keyed by NPC id)
   const [conversationHistories, setConversationHistories] = useState<ConversationSummary[]>([]);
 
-  // Handle conversation end - save summary and apply impact to NPC disposition
-  const handleConversationResult = useCallback((npcId: string, summary: ConversationSummary, impact: ConversationImpact) => {
-    // Save conversation summary to history
-    setConversationHistories(prev => [...prev, summary]);
+  // Game over state (fall death, plague death, etc.)
+  const [gameOver, setGameOver] = useState<{ reason: string; description: string } | null>(null);
 
-    // Apply impact to NPC disposition and panic in the pool
-    setOutdoorNpcPool(prev => prev.map(record => {
-      if (record.stats.id !== npcId) return record;
-
-      // Apply the conversation impact to update disposition and panic
-      const { newDisposition, newPanicLevel } = applyConversationImpact(record.stats, impact);
-
-      return {
-        ...record,
-        stats: {
-          ...record.stats,
-          disposition: newDisposition,
-          panicLevel: newPanicLevel
-        }
-      };
-    }));
-  }, []);
-
-  // Handle NPC-initiated encounters (friendly NPCs approaching the player)
-  const handleNPCInitiatedEncounter = useCallback((npc: { stats: NPCStats; state: AgentState }) => {
-    // Don't trigger if any modal is already open
-    if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || showEncounterModal3) return;
-
-    setSelectedNpc(npc);
-    setIsNPCInitiatedEncounter(true);
-    setShowEncounterModal(true);
-  }, [showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, showEncounterModal3]);
+  useEffect(() => {
+    if (!activeEvent) return;
+    setShowEncounterModal(false);
+    setShowEncounterModal3(false);
+    setShowMerchantModal(false);
+    setShowEnterModal(false);
+  }, [activeEvent]);
 
   const handleForceNpcState = useCallback((id: string, state: AgentState) => {
     setNpcStateOverride({ id, state, nonce: Date.now() });
@@ -157,6 +161,8 @@ function App() {
 
   const lastOutdoorMap = useRef<{ mapX: number; mapY: number } | null>(null);
   const playerSeed = useMemo(() => Math.floor(Math.random() * 1_000_000_000), []);
+  const forcedPlagueTimeRef = useRef(Math.max(1, seededRandom(playerSeed + 731) * 23));
+  const forcedPlagueTriggeredRef = useRef(false);
   const [playerStats, setPlayerStats] = useState<PlayerStats>(() => {
     const stats = generatePlayerStats(playerSeed, { districtType: getDistrictType(params.mapX, params.mapY) });
 
@@ -216,6 +222,51 @@ function App() {
       plague: initializePlague()
     };
   });
+
+  // Plague notification state
+  const [showPlagueModal, setShowPlagueModal] = useState(false);
+  const [plagueNotification, setPlagueNotification] = useState<string | null>(null);
+  const prevSimSpeedRef = useRef(params.simulationSpeed);
+
+  usePlagueMonitor({
+    plague: playerStats.plague,
+    onShowInfectedModal: () => setShowPlagueModal(true),
+    onNotify: (message) => setPlagueNotification(message),
+    onDeath: (summary) => setGameOver(summary)
+  });
+
+  useEffect(() => {
+    if (forcedPlagueTriggeredRef.current) return;
+    if (playerStats.plague.state !== AgentState.HEALTHY) {
+      forcedPlagueTriggeredRef.current = true;
+      return;
+    }
+    if (stats.simTime < forcedPlagueTimeRef.current) return;
+
+    const baseSeed = playerSeed + 9001;
+    let infectedPlague = exposePlayerToPlague(playerStats.plague, 'airborne', 1, stats.simTime, baseSeed);
+    if (infectedPlague.state === AgentState.HEALTHY) {
+      infectedPlague = exposePlayerToPlague(playerStats.plague, 'flea', 1, stats.simTime, baseSeed + 1);
+    }
+    if (infectedPlague.state === AgentState.HEALTHY) {
+      infectedPlague = exposePlayerToPlague(playerStats.plague, 'contact', 1, stats.simTime, baseSeed + 2);
+    }
+    if (infectedPlague.state === AgentState.HEALTHY) {
+      infectedPlague = {
+        ...playerStats.plague,
+        state: AgentState.INCUBATING,
+        exposureTime: stats.simTime,
+        plagueType: playerStats.plague.plagueType === PlagueType.NONE ? PlagueType.BUBONIC : playerStats.plague.plagueType
+      };
+    }
+
+    forcedPlagueTriggeredRef.current = true;
+    setPlayerStats(prev => ({
+      ...prev,
+      plague: infectedPlague
+    }));
+  }, [playerSeed, playerStats.plague, stats.simTime]);
+
   const [devSettings, setDevSettings] = useState<DevSettings>({
     enabled: false,
     weatherOverride: 'auto',
@@ -227,13 +278,367 @@ function App() {
     showShadows: true,
     showClouds: true,
     showFog: true,
-    showTorches: true,
+    showTorches: false,
     showNPCs: true,
     showRats: true,
     showMiasma: true,
     showCityWalls: true,
     showSoundDebug: false,
+    showEventDebug: false,
   });
+
+  const enqueueEvent = useCallback((event: EventInstance) => {
+    if (!activeEvent) {
+      setActiveEvent(event);
+    } else {
+      setEventQueue(prev => [...prev, event]);
+    }
+  }, [activeEvent]);
+
+  const buildEventContext = useCallback((overrides?: Partial<EventContextSnapshot>): EventContextSnapshot => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    return {
+      player: {
+        id: playerStats.id,
+        name: playerStats.name,
+        socialClass: playerStats.socialClass,
+        stats: {
+          charisma: playerStats.charisma,
+          piety: playerStats.piety,
+          currency: playerStats.currency
+        }
+      },
+      environment: {
+        district,
+        timeOfDay: params.timeOfDay,
+        weather: currentWeather
+      },
+      ...overrides
+    };
+  }, [currentWeather, params.mapX, params.mapY, params.timeOfDay, playerStats]);
+
+  const makeEventInstance = useCallback((def: EventDefinition, source: EventInstance['source'], context: EventContextSnapshot): EventInstance => {
+    return {
+      id: `${def.id}-${Date.now()}`,
+      source,
+      context,
+      content: {
+        title: def.title,
+        body: def.body,
+        options: def.options
+      },
+      definitionId: def.id
+    };
+  }, []);
+
+  const mapEffectKey = useCallback((effectKey: string): EventEffect[] => {
+    switch (effectKey) {
+      case 'end_conversation':
+        return [{ type: 'endConversation' }];
+      case 'bribe_small':
+        return [{ type: 'playerStat', stat: 'currency', delta: -2 }];
+      case 'bribe_large':
+        return [{ type: 'playerStat', stat: 'currency', delta: -5 }];
+      case 'flee':
+        return [{ type: 'worldFlag', key: 'fled', value: true }];
+      case 'appeal_faith':
+        return [{ type: 'playerStat', stat: 'piety', delta: 1 }];
+      case 'calm_crowd':
+        return [{ type: 'worldFlag', key: 'calmed_crowd', value: true }];
+      case 'escalate':
+        return [{ type: 'worldFlag', key: 'escalated', value: true }];
+      default:
+        return [];
+    }
+  }, []);
+
+  const buildLlmEventInstance = useCallback((baseEvent: EventInstance, payload: {
+    title: string;
+    body: string;
+    options: Array<{
+      id?: string;
+      label: string;
+      effectKey: string;
+      outcomeText?: string;
+      followupEventId?: string;
+      requirements?: { stat?: 'charisma' | 'piety' | 'currency'; min?: number; max?: number };
+    }>;
+  }): EventInstance => {
+    const options = payload.options
+      .filter(option => typeof option.label === 'string' && option.label.trim().length > 0)
+      .slice(0, 4)
+      .map((option, index) => ({
+        id: option.id || `opt-${index + 1}`,
+        label: option.label.trim(),
+        outcomeText: option.outcomeText,
+        followupEventId: option.followupEventId,
+        requirements: option.requirements?.stat ? {
+          stat: option.requirements.stat,
+          min: option.requirements.min,
+          max: option.requirements.max
+        } : undefined,
+        effects: mapEffectKey(option.effectKey)
+      }));
+
+    return {
+      ...baseEvent,
+      content: {
+        title: payload.title,
+        body: payload.body,
+        options
+      }
+    };
+  }, [mapEffectKey]);
+
+  const enqueueEventWithOptionalLLM = useCallback(async (event: EventInstance) => {
+    if (!llmEventsEnabled) {
+      enqueueEvent(event);
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: event.context,
+          eventSeed: event.definitionId
+        })
+      });
+
+      if (!response.ok) {
+        enqueueEvent(event);
+        return;
+      }
+
+      const data = await response.json();
+      const text = data.response;
+      if (!text) {
+        enqueueEvent(event);
+        return;
+      }
+
+      const parsed = JSON.parse(text);
+      const validOptions = Array.isArray(parsed.options) && parsed.options.length >= 2;
+      if (!parsed.title || !parsed.body || !validOptions) {
+        enqueueEvent(event);
+        return;
+      }
+
+      const llmEvent = buildLlmEventInstance(event, parsed);
+      if (llmEvent.content.options.length < 2) {
+        enqueueEvent(event);
+        return;
+      }
+      enqueueEvent(llmEvent);
+    } catch {
+      enqueueEvent(event);
+    }
+  }, [buildLlmEventInstance, enqueueEvent, llmEventsEnabled]);
+
+  const tryTriggerEvent = useCallback((params: {
+    when: TriggerWhen;
+    targetType: TriggerTargetType;
+    targetId: string;
+    contextOverrides?: Partial<EventContextSnapshot>;
+    source: EventInstance['source'];
+  }) => {
+    const dayIndex = Math.floor(stats.simTime);
+    const def = evaluateTriggers({
+      when: params.when,
+      targetType: params.targetType,
+      targetId: params.targetId,
+      dayIndex,
+      state: triggerStateRef.current
+    });
+    if (!def) return;
+
+    const context = buildEventContext(params.contextOverrides);
+    const event = makeEventInstance(def, params.source, context);
+    void enqueueEventWithOptionalLLM(event);
+  }, [buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, stats.simTime]);
+
+  // Handle NPC-initiated encounters (friendly NPCs approaching the player)
+  const handleNPCInitiatedEncounter = useCallback((npc: { stats: NPCStats; state: AgentState }) => {
+    // Don't trigger if any modal is already open
+    if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || showEncounterModal3 || activeEvent) return;
+
+    tryTriggerEvent({
+      when: 'npcApproach',
+      targetType: 'npcProfession',
+      targetId: npc.stats.profession,
+      contextOverrides: {
+        npc: {
+          id: npc.stats.id,
+          name: npc.stats.name,
+          profession: npc.stats.profession,
+          socialClass: npc.stats.socialClass,
+          disposition: npc.stats.disposition,
+          panic: npc.stats.panicLevel,
+          religion: npc.stats.religion
+        }
+      },
+      source: 'conversation'
+    });
+
+    setSelectedNpc(npc);
+    setIsNPCInitiatedEncounter(true);
+    setShowEncounterModal(true);
+  }, [activeEvent, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, showEncounterModal3, tryTriggerEvent]);
+
+  const applyEffects = useCallback((effects: EventEffect[]) => {
+    effects.forEach(effect => {
+      if (effect.type === 'playerStat') {
+        setPlayerStats(prev => ({
+          ...prev,
+          [effect.stat]: (prev[effect.stat] as number) + effect.delta
+        }));
+      } else if (effect.type === 'npcStat') {
+        setOutdoorNpcPool(prev => prev.map(record => {
+          if (record.stats.id !== effect.npcId) return record;
+          return {
+            ...record,
+            stats: {
+              ...record.stats,
+              disposition: effect.stat === 'disposition' ? record.stats.disposition + effect.delta : record.stats.disposition,
+              panicLevel: effect.stat === 'panic' ? record.stats.panicLevel + effect.delta : record.stats.panicLevel
+            }
+          };
+        }));
+      } else if (effect.type === 'worldFlag') {
+        setWorldFlags(prev => ({ ...prev, [effect.key]: effect.value }));
+      } else if (effect.type === 'triggerEvent') {
+        const def = getEventById(effect.eventId);
+        if (!def) return;
+        const context = buildEventContext();
+        void enqueueEventWithOptionalLLM(makeEventInstance(def, 'system', context));
+      } else if (effect.type === 'endConversation') {
+        setShowEncounterModal(false);
+        setShowEncounterModal3(false);
+      }
+    });
+  }, [buildEventContext, makeEventInstance, enqueueEventWithOptionalLLM]);
+
+  const resolveEvent = useCallback((option: EventOption) => {
+    applyEffects(option.effects);
+    if (option.followupEventId) {
+      const def = getEventById(option.followupEventId);
+      if (def) {
+        const context = buildEventContext();
+        const followup = makeEventInstance(def, 'system', context);
+        void enqueueEventWithOptionalLLM(followup);
+      }
+    }
+    setEventQueue(prev => {
+      const [next, ...rest] = prev;
+      setActiveEvent(next || null);
+      return rest;
+    });
+  }, [applyEffects, buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance]);
+
+  // Handle conversation end - save summary and apply impact to NPC disposition
+  const handleConversationResult = useCallback((npcId: string, summary: ConversationSummary, impact: ConversationImpact) => {
+    // Save conversation summary to history
+    setConversationHistories(prev => [...prev, summary]);
+
+    // Apply impact to NPC disposition and panic in the pool
+    setOutdoorNpcPool(prev => prev.map(record => {
+      if (record.stats.id !== npcId) return record;
+
+      // Apply the conversation impact to update disposition and panic
+      const { newDisposition, newPanicLevel } = applyConversationImpact(record.stats, impact);
+
+      return {
+        ...record,
+        stats: {
+          ...record.stats,
+          disposition: newDisposition,
+          panicLevel: newPanicLevel
+        }
+      };
+    }));
+
+    const npcRecord = outdoorNpcPool.find(record => record.stats.id === npcId);
+    if (!npcRecord) return;
+
+    const threatEntry = npcThreatMemoryRef.current[npcId];
+    const recentWindow = 1;
+    let threatCount = threatEntry?.count ?? 0;
+    if (impact.threatLevel >= 40 || impact.offenseLevel >= 50) {
+      if (!threatEntry || stats.simTime - threatEntry.lastSimTime > recentWindow) {
+        threatCount = 1;
+      } else {
+        threatCount += 1;
+      }
+      npcThreatMemoryRef.current[npcId] = { count: threatCount, lastSimTime: stats.simTime };
+    }
+
+    const context: EventContextSnapshot = {
+      player: {
+        id: playerStats.id,
+        name: playerStats.name,
+        socialClass: playerStats.socialClass,
+        stats: {
+          charisma: playerStats.charisma,
+          piety: playerStats.piety,
+          currency: playerStats.currency
+        }
+      },
+      npc: {
+        id: npcRecord.stats.id,
+        name: npcRecord.stats.name,
+        profession: npcRecord.stats.profession,
+        socialClass: npcRecord.stats.socialClass,
+        disposition: npcRecord.stats.disposition,
+        panic: npcRecord.stats.panicLevel,
+        religion: npcRecord.stats.religion
+      },
+      environment: {
+        district: getDistrictType(params.mapX, params.mapY),
+        timeOfDay: params.timeOfDay,
+        weather: currentWeather
+      },
+      flags: {
+        threatMemory: threatCount
+      }
+    };
+
+    const dayIndex = Math.floor(stats.simTime);
+    const recentIds = Object.keys(eventCooldownsRef.current).filter(id => eventCooldownsRef.current[id] === dayIndex);
+    const convoEvent = checkConversationTrigger(context, impact, recentIds);
+    if (convoEvent) {
+      eventCooldownsRef.current[convoEvent.definitionId || convoEvent.id] = dayIndex;
+      void enqueueEventWithOptionalLLM(convoEvent);
+    }
+  }, [currentWeather, enqueueEventWithOptionalLLM, outdoorNpcPool, params.mapX, params.mapY, params.timeOfDay, playerStats, stats.simTime]);
+
+  const handleDebugEvent = useCallback(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    const biome = getBiomeForDistrict(district);
+    const candidates = getEventsForBiome(biome);
+    if (candidates.length === 0) return;
+
+    const context: EventContextSnapshot = {
+      player: {
+        id: playerStats.id,
+        name: playerStats.name,
+        socialClass: playerStats.socialClass,
+        stats: {
+          charisma: playerStats.charisma,
+          piety: playerStats.piety,
+          currency: playerStats.currency
+        }
+      },
+      environment: {
+        district,
+        timeOfDay: params.timeOfDay,
+        weather: currentWeather
+      }
+    };
+
+    const event = makeEventInstance(candidates[0], 'system', context);
+    void enqueueEventWithOptionalLLM(event);
+  }, [currentWeather, enqueueEventWithOptionalLLM, makeEventInstance, params.mapX, params.mapY, params.timeOfDay, playerStats]);
 
   useEffect(() => {
     if (sceneMode === 'interior') {
@@ -252,8 +657,11 @@ function App() {
 
   // Performance tracking for adaptive resolution
   const [performanceDegraded, setPerformanceDegraded] = useState(false);
+  const [indicatorDismissed, setIndicatorDismissed] = useState(false);
   const lastPerfChangeRef = useRef(0);
+  const shadowsDisabledByPerf = useRef(false); // Track if we disabled shadows due to low FPS
   const PERF_DEBOUNCE_MS = 2000; // Debounce performance state changes by 2 seconds
+  const LOW_FPS_THRESHOLD = 20; // Disable shadows below this FPS
 
   // Time tracking
   useEffect(() => {
@@ -313,6 +721,12 @@ function App() {
       // Open merchant modal with 'E' key
       if (e.key === 'e' && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal) {
         setShowMerchantModal(true);
+        tryTriggerEvent({
+          when: 'merchantOpen',
+          targetType: 'merchantAny',
+          targetId: 'any',
+          source: 'environment'
+        });
       }
       // Close merchant modal with Escape
       if (e.key === 'Escape' && showMerchantModal) {
@@ -321,6 +735,23 @@ function App() {
       if (e.key === '4' && selectedNpc && !showEncounterModal && !showEncounterModal3 && !showMerchantModal && !showEnterModal && !showPlayerModal) {
         e.preventDefault();
         setIsNPCInitiatedEncounter(false); // Player-initiated, not NPC
+        tryTriggerEvent({
+          when: 'npcApproach',
+          targetType: 'npcProfession',
+          targetId: selectedNpc.stats.profession,
+          contextOverrides: {
+            npc: {
+              id: selectedNpc.stats.id,
+              name: selectedNpc.stats.name,
+              profession: selectedNpc.stats.profession,
+              socialClass: selectedNpc.stats.socialClass,
+              disposition: selectedNpc.stats.disposition,
+              panic: selectedNpc.stats.panicLevel,
+              religion: selectedNpc.stats.religion
+            }
+          },
+          source: 'conversation'
+        });
         setShowEncounterModal(true);
       }
       if (e.key === 'Escape' && showEncounterModal) {
@@ -337,7 +768,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showEncounterModal3, showPlayerModal]);
+  }, [nearBuilding, showEnterModal, nearMerchant, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showEncounterModal3, showPlayerModal, tryTriggerEvent]);
 
   // Action trigger function
   const triggerAction = useCallback((actionId: ActionId) => {
@@ -414,14 +845,30 @@ function App() {
   const handleMapChange = useCallback((dx: number, dy: number) => {
     setTransitioning(true);
     setTimeout(() => {
+      const nextX = params.mapX + dx;
+      const nextY = params.mapY + dy;
+      const nextDistrict = getDistrictType(nextX, nextY);
+      tryTriggerEvent({
+        when: 'districtEnter',
+        targetType: 'district',
+        targetId: nextDistrict,
+        contextOverrides: {
+          environment: {
+            district: nextDistrict,
+            timeOfDay: params.timeOfDay,
+            weather: currentWeather
+          }
+        },
+        source: 'environment'
+      });
       setParams(prev => ({
         ...prev,
-        mapX: prev.mapX + dx,
-        mapY: prev.mapY + dy,
+        mapX: nextX,
+        mapY: nextY,
       }));
       setTransitioning(false);
     }, 600);
-  }, []);
+  }, [currentWeather, params.mapX, params.mapY, params.timeOfDay, tryTriggerEvent]);
 
   useEffect(() => {
     setTileBuildings([]);
@@ -436,6 +883,20 @@ function App() {
   const handleFastTravel = useCallback((x: number, y: number) => {
     setTransitioning(true);
     setTimeout(() => {
+      const nextDistrict = getDistrictType(x, y);
+      tryTriggerEvent({
+        when: 'districtEnter',
+        targetType: 'district',
+        targetId: nextDistrict,
+        contextOverrides: {
+          environment: {
+            district: nextDistrict,
+            timeOfDay: params.timeOfDay,
+            weather: currentWeather
+          }
+        },
+        source: 'environment'
+      });
       setParams(prev => ({
         ...prev,
         mapX: x,
@@ -443,11 +904,36 @@ function App() {
       }));
       setTransitioning(false);
     }, 800);
-  }, []);
+  }, [currentWeather, params.timeOfDay, tryTriggerEvent]);
 
   const handleStatsUpdate = useCallback((counts: SimulationCounts) => {
-    setStats(prev => ({ ...prev, ...counts }));
+    const now = performance.now() * 0.001;
+    if (now - lastStatsUpdateRef.current < 0.6) return;
+    lastStatsUpdateRef.current = now;
+    setStats(prev => {
+      if (prev.healthy === counts.healthy &&
+          prev.incubating === counts.incubating &&
+          prev.infected === counts.infected &&
+          prev.deceased === counts.deceased) {
+        return prev;
+      }
+      return { ...prev, ...counts };
+    });
   }, []);
+
+  const handleMoraleUpdate = useCallback((morale: MoraleStats) => {
+    const now = performance.now() * 0.001;
+    if (now - lastMoraleUpdateRef.current < 0.8) return;
+    lastMoraleUpdateRef.current = now;
+    const prev = moraleStats;
+    if (prev &&
+        Math.abs(prev.avgAwareness - morale.avgAwareness) < 0.5 &&
+        Math.abs(prev.avgPanic - morale.avgPanic) < 0.5 &&
+        prev.agentCount === morale.agentCount) {
+      return;
+    }
+    setMoraleStats(morale);
+  }, [moraleStats]);
 
   const setBuildingInfectionSnapshot = useCallback((nextMap: Map<string, BuildingInfectionState>) => {
     const nextRecord: Record<string, BuildingInfectionState> = {};
@@ -505,9 +991,15 @@ function App() {
       }
     });
 
-    registry.npcMap.forEach((record) => {
+    const npcList = Array.from(registry.npcMap.values());
+    const CHUNK_COUNT = 4;
+    const chunkSize = Math.max(1, Math.ceil(npcList.length / CHUNK_COUNT));
+    const start = (offscreenHealthCursorRef.current % CHUNK_COUNT) * chunkSize;
+    const end = Math.min(npcList.length, start + chunkSize);
+    for (let i = start; i < end; i++) {
+      const record = npcList[i];
       const timeSinceUpdate = stats.simTime - record.lastUpdateSimTime;
-      if (record.location === 'outdoor' && timeSinceUpdate < 0.5) return;
+      if (record.location === 'outdoor' && timeSinceUpdate < 0.5) continue;
       if (timeSinceUpdate >= 0.25) {
         if (record.location === 'interior' && record.homeBuildingId && householdRisk.get(record.homeBuildingId)) {
           applyHouseholdExposure(record, stats.simTime, timeSinceUpdate);
@@ -515,8 +1007,101 @@ function App() {
         advanceNpcHealth(record, stats.simTime);
         record.lastUpdateSimTime = stats.simTime;
       }
-    });
+    }
+    offscreenHealthCursorRef.current = (offscreenHealthCursorRef.current + 1) % CHUNK_COUNT;
   }, [stats.simTime]);
+
+  const getBuildingLabel = useCallback((type: BuildingType) => {
+    switch (type) {
+      case BuildingType.RESIDENTIAL: return 'Private Residence';
+      case BuildingType.COMMERCIAL: return 'Merchant Stall';
+      case BuildingType.RELIGIOUS: return 'Holy Sanctuary';
+      case BuildingType.CIVIC: return 'Governor\'s Office';
+      default: return 'Structure';
+    }
+  }, []);
+
+  const getDistrictActivityLabel = useCallback((districtType: import('./types').DistrictType) => {
+    const labels: Record<import('./types').DistrictType, string> = {
+      MARKET: 'the market street',
+      WEALTHY: 'a wealthy residential lane',
+      HOVELS: 'a cramped lane',
+      CIVIC: 'the civic quarter',
+      RESIDENTIAL: 'a residential street',
+      ALLEYS: 'a narrow alley',
+      JEWISH_QUARTER: 'the Jewish quarter street',
+      CHRISTIAN_QUARTER: 'the Christian quarter street',
+      UMAYYAD_MOSQUE: 'the mosque precinct',
+      SALHIYYA: 'the hillside district',
+      OUTSKIRTS_FARMLAND: 'the farmland edge',
+      OUTSKIRTS_DESERT: 'the desert fringe',
+      CARAVANSERAI: 'the caravanserai yard',
+      MOUNTAIN_SHRINE: 'the mountain path',
+      SOUTHERN_ROAD: 'the southern road'
+    };
+    return labels[districtType] ?? 'the street';
+  }, []);
+
+  const buildNpcActivityLabel = useCallback((location: 'outdoor' | 'interior', isMoving: boolean) => {
+    if (location === 'interior') {
+      const buildingType = interiorBuilding?.type ?? interiorSpec?.buildingType ?? null;
+      const placeLabel = buildingType ? getBuildingLabel(buildingType) : 'Building';
+      const place = placeLabel.toLowerCase();
+      return isMoving ? `moving through a ${place}` : `inside a ${place}`;
+    }
+    const districtType = getDistrictType(params.mapX, params.mapY);
+    const area = getDistrictActivityLabel(districtType);
+    return isMoving ? `walking through ${area}` : `standing in ${area}`;
+  }, [getDistrictActivityLabel, getBuildingLabel, interiorBuilding, interiorSpec, params.mapX, params.mapY]);
+
+  const getCurrentNpcActivity = useCallback((npcId: string) => {
+    const entry = npcActivityRef.current.get(npcId);
+    if (entry?.activity) return entry.activity;
+    const districtType = getDistrictType(params.mapX, params.mapY);
+    const area = getDistrictActivityLabel(districtType);
+    return sceneMode === 'interior' ? 'inside a building' : `standing in ${area}`;
+  }, [getDistrictActivityLabel, params.mapX, params.mapY, sceneMode]);
+
+  const getNpcNearbyCounts = useCallback((npcId: string) => {
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const registry = tileRegistriesRef.current.get(tileKey);
+    if (!registry) return { infected: 0, deceased: 0 };
+    const subjectPos = npcActivityRef.current.get(npcId)?.lastPos;
+    if (!subjectPos) return { infected: 0, deceased: 0 };
+    let infected = 0;
+    let deceased = 0;
+    const radiusSq = 15 * 15;
+    registry.npcMap.forEach((record) => {
+      if (record.id === npcId) return;
+      const pos = npcActivityRef.current.get(record.id)?.lastPos;
+      if (!pos) return;
+      const distSq = pos.distanceToSquared(subjectPos);
+      if (distSq <= radiusSq) {
+        if (record.state === AgentState.INFECTED) infected++;
+        if (record.state === AgentState.DECEASED) deceased++;
+      }
+    });
+    return { infected, deceased };
+  }, [params.mapX, params.mapY]);
+
+  const addDistrictRumor = useCallback((district: import('./types').DistrictType, text: string, simTime: number) => {
+    const pool = rumorPoolRef.current.get(district) ?? [];
+    const fresh = pool.filter((entry) => simTime - entry.simTime <= 24);
+    if (!fresh.some((entry) => entry.text === text)) {
+      fresh.unshift({ text, simTime });
+    }
+    if (fresh.length > 6) fresh.length = 6;
+    rumorPoolRef.current.set(district, fresh);
+  }, []);
+
+  const getDistrictRumors = useCallback((district: import('./types').DistrictType, simTime: number) => {
+    const pool = rumorPoolRef.current.get(district) ?? [];
+    const fresh = pool.filter((entry) => simTime - entry.simTime <= 24);
+    if (fresh.length !== pool.length) {
+      rumorPoolRef.current.set(district, fresh);
+    }
+    return fresh.map((entry) => entry.text).slice(0, 2);
+  }, []);
 
   const handleNpcUpdate = useCallback((id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: import('./types').NPCPlagueMeta) => {
     const tileKey = getTileKey(params.mapX, params.mapY);
@@ -524,6 +1109,7 @@ function App() {
     if (!registry) return;
     const record = registry.npcMap.get(id);
     if (!record) return;
+    const prevState = record.state;
     if (record.state !== state) {
       record.state = state;
       record.stateStartTime = stats.simTime;
@@ -548,7 +1134,31 @@ function App() {
     if (location === 'outdoor') {
       record.lastOutdoorPos = [pos.x, pos.y, pos.z];
     }
-  }, [params.mapX, params.mapY, stats.simTime]);
+
+    if (prevState !== AgentState.DECEASED && state === AgentState.DECEASED) {
+      const district = getDistrictType(params.mapX, params.mapY);
+      const building = record.homeBuildingId
+        ? tileBuildings.find((entry) => entry.id === record.homeBuildingId)
+        : null;
+      const profession = record.stats.profession.toLowerCase();
+      const ownerName = building?.ownerName ?? record.stats.name;
+      const placeHint = building ? `near the ${building.ownerProfession?.toLowerCase() ?? 'homes'}` : district.toLowerCase().replace(/_/g, ' ');
+      const rumorText = `${ownerName}, a ${profession}, died ${placeHint}.`;
+      addDistrictRumor(district, rumorText, stats.simTime);
+    }
+
+    const activityEntry = npcActivityRef.current.get(id);
+    const lastPos = activityEntry?.lastPos ?? pos.clone();
+    const dist = pos.distanceTo(lastPos);
+    const isMoving = location === 'outdoor' && dist > 0.35;
+    const activity = buildNpcActivityLabel(location, isMoving);
+    npcActivityRef.current.set(id, {
+      lastPos: pos.clone(),
+      lastSimTime: stats.simTime,
+      activity,
+      location
+    });
+  }, [addDistrictRumor, buildNpcActivityLabel, params.mapX, params.mapY, stats.simTime, tileBuildings]);
 
   const handleBuildingsUpdate = useCallback((buildings: BuildingMetadata[]) => {
     scheduleTickRef.current = 0;
@@ -566,7 +1176,13 @@ function App() {
     updateRegistryForSchedule(registry);
     updateOffscreenHealth(registry);
     const outdoor = Array.from(registry.npcMap.values()).filter((record) => record.location === 'outdoor');
-    setOutdoorNpcPool(outdoor);
+    const nextIds = outdoor.map((record) => record.id);
+    const prevIds = lastOutdoorIdsRef.current;
+    const sameIds = nextIds.length === prevIds.length && nextIds.every((id, idx) => id === prevIds[idx]);
+    if (!sameIds) {
+      lastOutdoorIdsRef.current = nextIds;
+      setOutdoorNpcPool(outdoor);
+    }
     if (sceneMode === 'outdoor' && selectedNpc && !outdoor.some((record) => record.id === selectedNpc.stats.id)) {
       setSelectedNpc(null);
     }
@@ -608,7 +1224,51 @@ function App() {
     lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
     setNearBuilding(null);
     setSceneMode('interior');
-  }, [ensureTileRegistry, hashToSeed, params.mapX, params.mapY, tileBuildings]);
+
+    tryTriggerEvent({
+      when: 'interiorEnter',
+      targetType: 'interiorAny',
+      targetId: 'any',
+      contextOverrides: {
+        environment: {
+          district: getDistrictType(params.mapX, params.mapY),
+          timeOfDay: params.timeOfDay,
+          weather: currentWeather
+        }
+      },
+      source: 'environment'
+    });
+
+    tryTriggerEvent({
+      when: 'interiorEnter',
+      targetType: 'buildingType',
+      targetId: building.type,
+      contextOverrides: {
+        environment: {
+          district: getDistrictType(params.mapX, params.mapY),
+          timeOfDay: params.timeOfDay,
+          weather: currentWeather
+        }
+      },
+      source: 'environment'
+    });
+
+    if (building.district) {
+      tryTriggerEvent({
+        when: 'interiorEnter',
+        targetType: 'buildingDistrict',
+        targetId: building.district,
+        contextOverrides: {
+          environment: {
+            district: building.district,
+            timeOfDay: params.timeOfDay,
+            weather: currentWeather
+          }
+        },
+        source: 'environment'
+      });
+    }
+  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent]);
 
   const handlePurchase = useCallback((item: import('./types').MerchantItem, quantity: number) => {
     if (!nearMerchant) return;
@@ -763,21 +1423,32 @@ function App() {
     }));
   }, []);
 
+  // Handle fall damage from jumping off rooftops
+  const handleFallDamage = useCallback((fallHeight: number, fatal: boolean) => {
+    if (fatal) {
+      // Fatal fall - game over
+      const stories = Math.floor(fallHeight / 3);
+      setGameOver({
+        reason: 'Fallen to Death',
+        description: `You fell ${stories > 2 ? 'from a great height' : 'from a rooftop'}, ${fallHeight.toFixed(1)} cubits to the unforgiving stones below. Your journey ends here in the narrow streets of Damascus.`
+      });
+    } else {
+      // Non-fatal fall - reduce strength significantly
+      const damage = Math.floor((fallHeight - 3) * 15); // 15 damage per unit above threshold
+      setPlayerStats(prev => ({
+        ...prev,
+        strength: Math.max(1, prev.strength - damage),
+        healthStatus: prev.strength - damage <= 20 ? 'Gravely injured' : 'Injured'
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     if (interiorNarrator) {
       (window as any).__interiorState = interiorNarrator;
     }
   }, [interiorNarrator]);
 
-  const getBuildingLabel = (type: BuildingType) => {
-    switch (type) {
-      case BuildingType.RESIDENTIAL: return 'Private Residence';
-      case BuildingType.COMMERCIAL: return 'Merchant Stall';
-      case BuildingType.RELIGIOUS: return 'Holy Sanctuary';
-      case BuildingType.CIVIC: return 'Governor\'s Office';
-      default: return 'Structure';
-    }
-  };
   const interiorInfo = useMemo(() => {
     if (sceneMode !== 'interior' || !interiorSpec) return null;
     const building = interiorBuilding;
@@ -796,6 +1467,44 @@ function App() {
     const guestLabel = guestCount === 0 ? 'No other customers present' : `Other customers present: ${guestCount}`;
     return `${placeLabel} of ${ownerName} in the ${location} district. ${guestLabel}.`;
   }, [sceneMode, interiorSpec, interiorBuilding, params.mapX, params.mapY]);
+
+  // Get nearby NPCs for the Historical Guide context
+  const nearbyNPCs = useMemo(() => {
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const registry = tileRegistriesRef.current.get(tileKey);
+    if (!registry) return [];
+
+    const npcs: NPCStats[] = [];
+    registry.npcMap.forEach((record) => {
+      if (record.location === 'outdoor' && record.state !== 'dead') {
+        npcs.push(record.stats);
+      }
+    });
+
+    return npcs.slice(0, 10); // Limit to 10 for performance
+  }, [params.mapX, params.mapY, stats.simTime]); // Re-compute when tile or time changes
+
+  // Handler to open guide modal to a specific entry
+  const handleOpenGuideEntry=useCallback((entryId: string) => {
+    setSelectedGuideEntryId(entryId);
+    setShowGuideModal(true);
+  }, []);
+
+  // Handler to open guide modal
+  const handleOpenGuideModal = useCallback(() => {
+    setSelectedGuideEntryId(null);
+    setShowGuideModal(true);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedNpc || !showEncounterModal) return;
+    setSelectedNpcActivity(getCurrentNpcActivity(selectedNpc.stats.id));
+    const counts = getNpcNearbyCounts(selectedNpc.stats.id);
+    setSelectedNpcNearbyInfected(counts.infected);
+    setSelectedNpcNearbyDeceased(counts.deceased);
+    const district = getDistrictType(params.mapX, params.mapY);
+    setSelectedNpcRumors(getDistrictRumors(district, stats.simTime));
+  }, [getCurrentNpcActivity, getDistrictRumors, getNpcNearbyCounts, params.mapX, params.mapY, selectedNpc, showEncounterModal, stats.simTime]);
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden select-none">
@@ -836,17 +1545,33 @@ function App() {
         setShowEncounterModal3={setShowEncounterModal3}
         conversationHistories={conversationHistories}
         onConversationResult={handleConversationResult}
+        selectedNpcActivity={selectedNpcActivity}
+        selectedNpcNearbyInfected={selectedNpcNearbyInfected}
+        selectedNpcNearbyDeceased={selectedNpcNearbyDeceased}
+        selectedNpcRumors={selectedNpcRumors}
+        activeEvent={activeEvent}
+        onResolveEvent={resolveEvent}
+        onTriggerDebugEvent={handleDebugEvent}
+        llmEventsEnabled={llmEventsEnabled}
+        setLlmEventsEnabled={setLlmEventsEnabled}
         showDemographicsOverlay={showDemographicsOverlay}
         setShowDemographicsOverlay={setShowDemographicsOverlay}
         onForceNpcState={handleForceNpcState}
         onForceAllNpcState={handleForceAllNpcState}
         isNPCInitiatedEncounter={isNPCInitiatedEncounter}
+        nearbyNPCs={nearbyNPCs}
+        onOpenGuideModal={handleOpenGuideModal}
+        onSelectGuideEntry={handleOpenGuideEntry}
       />
 
-      {/* Subtle Performance Indicator - only shows when adjusting */}
-      {performanceDegraded && devSettings.showPerfPanel && (
-        <div className="absolute top-2 right-2 bg-black/60 text-yellow-400 text-xs px-3 py-1.5 rounded-md border border-yellow-600/30 backdrop-blur-sm font-mono z-50">
-          ⚡ Adaptive Quality Active
+      {/* Subtle Performance Indicator - only shows when adjusting, click to dismiss */}
+      {performanceDegraded && !indicatorDismissed && (
+        <div
+          className="absolute top-2 right-2 bg-black/60 text-yellow-400 text-xs px-3 py-1.5 rounded-md border border-yellow-600/30 backdrop-blur-sm font-mono z-50 cursor-pointer hover:bg-black/80 transition-colors"
+          onClick={() => setIndicatorDismissed(true)}
+          title="Click to dismiss"
+        >
+          ⚡ Adaptive Quality Active {shadowsDisabledByPerf.current && '(shadows off)'}
         </div>
       )}
 
@@ -901,6 +1626,16 @@ function App() {
         />
       )}
 
+      {/* Historical Guide Modal */}
+      <GuideModal
+        isOpen={showGuideModal}
+        onClose={() => {
+          setShowGuideModal(false);
+          setSelectedGuideEntryId(null);
+        }}
+        initialEntryId={selectedGuideEntryId}
+      />
+
       {sceneMode === 'interior' && interiorInfo && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[11px] tracking-wide z-50 pointer-events-none max-w-[88vw] text-center">
           {interiorInfo}
@@ -943,6 +1678,12 @@ function App() {
             if (now - lastPerfChangeRef.current > PERF_DEBOUNCE_MS) {
               lastPerfChangeRef.current = now;
               setPerformanceDegraded(false);
+              setIndicatorDismissed(false); // Reset dismissal when performance recovers
+              // Re-enable shadows if we disabled them due to low FPS
+              if (shadowsDisabledByPerf.current) {
+                shadowsDisabledByPerf.current = false;
+                setDevSettings(prev => ({ ...prev, showShadows: true }));
+              }
             }
           }}
           onDecline={() => {
@@ -953,10 +1694,17 @@ function App() {
             }
           }}
           flipflops={5}
-          onChange={({ factor }) => {
+          onChange={({ factor, fps }) => {
             // Log performance changes in dev mode
             if (devSettings.enabled && devSettings.showPerfPanel) {
-              console.log(`Performance factor: ${factor.toFixed(2)}x`);
+              console.log(`Performance: ${fps?.toFixed(1) ?? '?'} FPS, factor: ${factor.toFixed(2)}x`);
+            }
+            // Disable shadows when FPS drops below threshold
+            if (fps !== undefined && fps < LOW_FPS_THRESHOLD && devSettings.showShadows && !shadowsDisabledByPerf.current) {
+              shadowsDisabledByPerf.current = true;
+              setDevSettings(prev => ({ ...prev, showShadows: false }));
+              setPerformanceDegraded(true);
+              console.log(`[Performance] Shadows disabled due to low FPS (${fps.toFixed(1)} < ${LOW_FPS_THRESHOLD})`);
             }
           }}
         />
@@ -984,7 +1732,7 @@ function App() {
               onPickupItem={handlePickupItem}
               onWeatherUpdate={setCurrentWeather}
               onPushCharge={setPushCharge}
-              onMoraleUpdate={setMoraleStats}
+              onMoraleUpdate={handleMoraleUpdate}
               actionEvent={actionEvent}
               showDemographicsOverlay={showDemographicsOverlay}
               npcStateOverride={npcStateOverride}
@@ -994,6 +1742,7 @@ function App() {
               dossierMode={showPlayerModal}
               onPlagueExposure={handlePlagueExposure}
               onNPCInitiatedEncounter={handleNPCInitiatedEncounter}
+              onFallDamage={handleFallDamage}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -1014,6 +1763,63 @@ function App() {
           )}
         </Suspense>
       </Canvas>
+
+      <PlagueUI
+        plague={playerStats.plague}
+        showPlagueModal={showPlagueModal}
+        plagueNotification={plagueNotification}
+        onCloseModal={() => setShowPlagueModal(false)}
+        onClearNotification={() => setPlagueNotification(null)}
+        onModalPauseToggle={(paused) => {
+          if (paused) {
+            prevSimSpeedRef.current = params.simulationSpeed;
+            setParams(prev => ({ ...prev, simulationSpeed: 0 }));
+          } else {
+            setParams(prev => ({
+              ...prev,
+              simulationSpeed: prev.simulationSpeed === 0 ? prevSimSpeedRef.current : prev.simulationSpeed
+            }));
+          }
+        }}
+      />
+
+      {/* Game Over Screen */}
+      {gameOver && (
+        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-500">
+          <div className="bg-[#1a1209] border-4 border-red-900/60 p-10 rounded-lg shadow-2xl max-w-lg w-full text-center relative overflow-hidden">
+            {/* Dark parchment effect */}
+            <div className="absolute inset-0 opacity-20 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]"></div>
+
+            {/* Skull or death symbol */}
+            <div className="text-6xl mb-4 opacity-80">💀</div>
+
+            <h2 className="text-4xl text-red-700 mb-4 tracking-tight uppercase font-bold">
+              {gameOver.reason}
+            </h2>
+
+            <div className="w-16 h-0.5 bg-red-900/40 mx-auto mb-6"></div>
+
+            <p className="text-amber-200/80 text-lg mb-8 leading-relaxed italic">
+              {gameOver.description}
+            </p>
+
+            <p className="text-amber-400/60 text-sm mb-8">
+              Damascus, 1348
+            </p>
+
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-red-900 hover:bg-red-800 text-amber-100 px-12 py-4 rounded-full tracking-widest transition-all shadow-lg active:scale-95 text-lg uppercase"
+            >
+              Begin Anew
+            </button>
+
+            <div className="mt-8 text-[10px] text-amber-900/50 uppercase tracking-widest">
+              "In the midst of life we are in death"
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

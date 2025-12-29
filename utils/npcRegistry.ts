@@ -142,22 +142,32 @@ export const createTileNPCRegistry = (
   });
 
   // Seed initial incubating cases once at the start of a playthrough.
+  // Uses deterministic seeded RNG for reproducibility
   if (simTime <= 0.1 && npcMap.size > 0) {
     const ids = Array.from(npcMap.keys());
-    const infectedCount = Math.min(ids.length, 1 + Math.floor(Math.random() * 2));
+    let rngSeed = tileSeed + 99999; // Offset to avoid collision with other seeded values
+    const rand = () => seededRandom(rngSeed++);
+
+    // Fisher-Yates shuffle to randomly order IDs without splice mutation issues
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+
+    const infectedCount = Math.min(ids.length, 1 + Math.floor(rand() * 2));
+    let pickedIndex = 0;
+
     for (let i = 0; i < infectedCount; i += 1) {
-      const pickIndex = Math.floor(Math.random() * ids.length);
-      const id = ids.splice(pickIndex, 1)[0];
+      const id = ids[pickedIndex++];
       const record = npcMap.get(id);
       if (!record) continue;
       seedNpcInfectedNearDeath(record, simTime);
     }
 
-    const remaining = ids.length;
-    const incubatingCount = Math.min(remaining, 1 + Math.floor(Math.random() * 4));
+    const remaining = ids.length - pickedIndex;
+    const incubatingCount = Math.min(remaining, 1 + Math.floor(rand() * 4));
     for (let i = 0; i < incubatingCount; i += 1) {
-      const pickIndex = Math.floor(Math.random() * ids.length);
-      const id = ids.splice(pickIndex, 1)[0];
+      const id = ids[pickedIndex++];
       const record = npcMap.get(id);
       if (!record) continue;
       seedNpcInfection(record, simTime);

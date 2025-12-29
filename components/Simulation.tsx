@@ -60,6 +60,8 @@ interface SimulationProps {
   onPlagueExposure?: (plague: PlagueStatus) => void;
   /** Callback when a friendly NPC approaches and initiates an encounter */
   onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
+  /** Callback when player takes fall damage */
+  onFallDamage?: (fallHeight: number, fatal: boolean) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -226,6 +228,12 @@ const CloudLayer: React.FC<{ weather: React.MutableRefObject<WeatherState>; time
   const meshRef = useRef<THREE.InstancedMesh>(null);
   const tempObj = useMemo(() => new THREE.Object3D(), []);
   const count = 12;
+  const cloudColors = useMemo(() => ({
+    tint: new THREE.Color('#ffffff'),
+    warm: new THREE.Color('#ffd5a8'),
+    cool: new THREE.Color('#c8e6ff'),
+    sandstorm: new THREE.Color('#c9a25f')
+  }), []);
 
   const clouds = useMemo(() => {
     return Array.from({ length: count }).map(() => ({
@@ -268,12 +276,11 @@ const CloudLayer: React.FC<{ weather: React.MutableRefObject<WeatherState>; time
     const dayFactor = smoothstep(-0.1, 0.35, elevation);
     const duskFactor = smoothstep(0.05, -0.2, -elevation) * (1 - dayFactor);
     const dawnFactor = smoothstep(-0.2, 0.05, elevation) * (1 - dayFactor);
-    const tint = new THREE.Color('#ffffff');
+    const { tint, warm, cool, sandstorm } = cloudColors;
+    tint.set('#ffffff');
     if (weather.current.weatherType === WeatherType.SANDSTORM) {
-      tint.set('#c9a25f');
+      tint.copy(sandstorm);
     } else {
-      const warm = new THREE.Color('#ffd5a8');
-      const cool = new THREE.Color('#c8e6ff');
       tint.lerp(warm, Math.max(duskFactor, dawnFactor) * 0.6);
       tint.lerp(cool, (1 - Math.max(duskFactor, dawnFactor)) * (1 - dayFactor) * 0.2);
     }
@@ -1170,7 +1177,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1209,6 +1216,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const impactPuffIndexRef = useRef(0);
   const atmosphereTickRef = useRef(0);
   const minimapTickRef = useRef(0);
+  const lastMinimapPosRef = useRef<THREE.Vector3 | null>(null);
+  const lastMinimapYawRef = useRef(0);
   const heightmapRef = useRef<import('../utils/terrain').TerrainHeightmap | null>(null);
   
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
@@ -2452,8 +2461,26 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
       if (onMinimapUpdate) {
         const now = state.clock.elapsedTime;
-        if (now - minimapTickRef.current > 0.25) {
+        if (now - minimapTickRef.current > 0.5) {
           minimapTickRef.current = now;
+          const lastPos = lastMinimapPosRef.current;
+          const posX = pos.x;
+          const posZ = pos.z;
+          const movedSq = lastPos
+            ? ((posX - lastPos.x) * (posX - lastPos.x) + (posZ - lastPos.z) * (posZ - lastPos.z))
+            : Number.POSITIVE_INFINITY;
+          const cameraYaw = Math.atan2(pos.x - state.camera.position.x, pos.z - state.camera.position.z);
+          const yawDelta = Math.abs(cameraYaw - lastMinimapYawRef.current);
+          if (movedSq < 1 && yawDelta < 0.1) {
+            lastMinimapYawRef.current = cameraYaw;
+            return;
+          }
+          if (!lastMinimapPosRef.current) {
+            lastMinimapPosRef.current = new THREE.Vector3(posX, 0, posZ);
+          } else {
+            lastMinimapPosRef.current.set(posX, 0, posZ);
+          }
+          lastMinimapYawRef.current = cameraYaw;
           const district = getDistrictType(params.mapX, params.mapY);
           const radius = district === 'ALLEYS' || district === 'JEWISH_QUARTER' ? 20 : district === 'HOVELS' ? 26 : 34;
           const maxDistSq = (radius * 1.25) * (radius * 1.25);
@@ -2480,15 +2507,6 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
               });
             });
           }
-
-          // Calculate proper camera yaw from camera position (not euler angles)
-          // This prevents pitch changes from affecting the minimap rotation
-          const cameraOffset = new THREE.Vector3(
-            pos.x - state.camera.position.x,
-            0, // Ignore vertical component - only horizontal rotation matters
-            pos.z - state.camera.position.z
-          );
-          const cameraYaw = Math.atan2(cameraOffset.x, cameraOffset.z);
 
           // Add special NPCs to minimap
           const specialNPCs: MiniMapData['specialNPCs'] = [];
@@ -2710,6 +2728,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           rats={ratsRef.current}
           buildings={buildingsRef.current}
           buildingHash={buildingHashRef.current}
+          buildingInfection={buildingInfection}
           obstacles={obstacles}
           obstacleHash={obstacleHash}
           maxAgents={20}
@@ -2765,6 +2784,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onClimbablePrompt={onClimbablePrompt}
         onClimbingStateChange={onClimbingStateChange}
         climbInputRef={climbInputRef}
+        onFallDamage={onFallDamage}
       />
 
       {/* Footprints in sand (OUTSKIRTS_DESERT only) */}

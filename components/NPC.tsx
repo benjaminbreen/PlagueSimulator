@@ -2,7 +2,7 @@ import React, { useRef, useState, useMemo, memo, useEffect } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
-import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingType, DistrictType, Obstacle, PANIC_SUSCEPTIBILITY, PlayerActionEvent, NpcStateOverride, NPCPlagueMeta, PlagueType } from '../types';
+import { AgentState, NPCStats, SocialClass, CONSTANTS, BuildingMetadata, BuildingInfectionState, BuildingType, DistrictType, Obstacle, PANIC_SUSCEPTIBILITY, PlayerActionEvent, NpcStateOverride, NPCPlagueMeta, PlagueType } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
@@ -137,6 +137,7 @@ interface NPCProps {
   simulationSpeed: number;
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
+  buildingInfection?: Record<string, BuildingInfectionState>;
   agentHash?: SpatialHash<AgentSnapshot> | null;
   obstacles?: Obstacle[];
   obstacleHash?: SpatialHash<Obstacle> | null;
@@ -170,6 +171,7 @@ export const NPC: React.FC<NPCProps> = memo(({
   simulationSpeed,
   buildings,
   buildingHash = null,
+  buildingInfection,
   agentHash = null,
   obstacles = [],
   obstacleHash = null,
@@ -189,7 +191,9 @@ export const NPC: React.FC<NPCProps> = memo(({
   globalApproachCooldownRef
 }) => {
   const ENABLE_SIMPLE_LOD = true;
-  const SIMPLE_LOD_DISTANCE = 45;
+  const SIMPLE_LOD_DISTANCE = 60;
+  const ANIMATION_LOD_DISTANCE = 30;
+  const SHADOW_LOD_DISTANCE = 26;
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
   const [displayState, setDisplayState] = useState<AgentState>(initialState);
@@ -243,11 +247,13 @@ export const NPC: React.FC<NPCProps> = memo(({
 
   // PERFORMANCE: Throttle infection checks to once per second instead of every frame
   const infectionCheckTimerRef = useRef(0);
+  const infectionCheckJitterRef = useRef(Math.random() * 0.6);
 
   // MORALE SYSTEM: Track awareness and panic levels
   const awarenessRef = useRef(stats.awarenessLevel);
   const panicRef = useRef(stats.panicLevel);
   const rumorCheckTimerRef = useRef(0);
+  const rumorCheckJitterRef = useRef(Math.random() * 0.4);
   const lastWitnessedDeathIdRef = useRef<string | null>(null);
 
   // PLAYER ACTION RESPONSE: Track last processed action
@@ -920,36 +926,38 @@ export const NPC: React.FC<NPCProps> = memo(({
       return cachedNeighbors ?? [];
     };
 
-    // 3. Infection Spread (Throttled to once per second for performance)
+    // 3. Infection Spread (Throttled and de-synced for performance)
     if (stateRef.current === AgentState.HEALTHY && agentHash) {
       infectionCheckTimerRef.current += simDelta;
 
-      // Only check infection once per second instead of every frame (60x performance improvement)
-      if (infectionCheckTimerRef.current >= 1.0) {
+      // Only check infection on a jittered interval (de-synced across NPCs)
+      if (infectionCheckTimerRef.current >= 1.2 + infectionCheckJitterRef.current) {
         infectionCheckTimerRef.current = 0;
+        infectionCheckJitterRef.current = Math.random() * 0.6;
 
-        const neighbors = getNeighbors();
-        for (const other of neighbors) {
-          if (other.id === stats.id) continue;
-          if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
-            if (currentPosRef.current.distanceToSquared(other.pos) < 4.0) {
-              // Compensate for 1-second intervals to maintain same infection rate
-              // At 60fps, we went from 60 checks/sec to 1 check/sec, so multiply by 60
-              const contagionMod = other.state === AgentState.INFECTED
-                ? (other.plagueType === PlagueType.PNEUMONIC ? 1 : other.plagueType === PlagueType.BUBONIC ? 0.35 : 0.2)
-                : (other.plagueType === PlagueType.PNEUMONIC ? 0.35 : 0.12);
-              const exposureChance = Math.min(0.25, infectionRate * simulationSpeed * 0.5 * 60 * contagionMod);
-              if (Math.random() < exposureChance) {
-                const meta = createNpcPlagueMeta(idSeed + Math.floor(simTime * 10), simTime);
-                plagueTypeRef.current = meta.plagueType;
-                exposureTimeRef.current = meta.exposureTime;
-                incubationHoursRef.current = meta.incubationHours;
-                deathHoursRef.current = meta.deathHours;
-                onsetTimeRef.current = meta.onsetTime;
-                stateRef.current = AgentState.INCUBATING;
-                stateStartTimeRef.current = simTime;
-                isApproachingPlayerRef.current = false; // Sick NPCs don't approach
-                break;
+        if (distanceFromCameraRef.current < 45) {
+          const neighbors = getNeighbors();
+          for (const other of neighbors) {
+            if (other.id === stats.id) continue;
+            if (other.state === AgentState.INFECTED || other.state === AgentState.INCUBATING) {
+              if (currentPosRef.current.distanceToSquared(other.pos) < 4.0) {
+                // Compensate for slower cadence to maintain same infection rate
+                const contagionMod = other.state === AgentState.INFECTED
+                  ? (other.plagueType === PlagueType.PNEUMONIC ? 1 : other.plagueType === PlagueType.BUBONIC ? 0.35 : 0.2)
+                  : (other.plagueType === PlagueType.PNEUMONIC ? 0.35 : 0.12);
+                const exposureChance = Math.min(0.25, infectionRate * simulationSpeed * 0.5 * 48 * contagionMod);
+                if (Math.random() < exposureChance) {
+                  const meta = createNpcPlagueMeta(idSeed + Math.floor(simTime * 10), simTime);
+                  plagueTypeRef.current = meta.plagueType;
+                  exposureTimeRef.current = meta.exposureTime;
+                  incubationHoursRef.current = meta.incubationHours;
+                  deathHoursRef.current = meta.deathHours;
+                  onsetTimeRef.current = meta.onsetTime;
+                  stateRef.current = AgentState.INCUBATING;
+                  stateStartTimeRef.current = simTime;
+                  isApproachingPlayerRef.current = false; // Sick NPCs don't approach
+                  break;
+                }
               }
             }
           }
@@ -957,50 +965,53 @@ export const NPC: React.FC<NPCProps> = memo(({
       }
     }
 
-    // 3b. RUMOR SPREAD & PANIC (Throttled to twice per second - faster than plague)
+    // 3b. RUMOR SPREAD & PANIC (Throttled and de-synced)
     if (agentHash) {
       rumorCheckTimerRef.current += simDelta;
 
-      if (rumorCheckTimerRef.current >= 0.5) {
+      if (rumorCheckTimerRef.current >= 0.9 + rumorCheckJitterRef.current) {
         rumorCheckTimerRef.current = 0;
+        rumorCheckJitterRef.current = Math.random() * 0.4;
 
-        const neighbors = getNeighbors();
-        const panicMod = PANIC_SUSCEPTIBILITY[stats.socialClass] ?? 1.0;
+        if (distanceFromCameraRef.current < 55) {
+          const neighbors = getNeighbors();
+          const panicMod = PANIC_SUSCEPTIBILITY[stats.socialClass] ?? 1.0;
 
-        for (const other of neighbors) {
-          if (other.id === stats.id) continue;
+          for (const other of neighbors) {
+            if (other.id === stats.id) continue;
 
-          const distSq = currentPosRef.current.distanceToSquared(other.pos);
+            const distSq = currentPosRef.current.distanceToSquared(other.pos);
 
-          // WITNESS DEATH: Seeing a body causes major panic spike
-          if (other.state === AgentState.DECEASED && distSq < 9) {
-            if (lastWitnessedDeathIdRef.current !== other.id) {
-              lastWitnessedDeathIdRef.current = other.id;
-              awarenessRef.current = Math.min(100, awarenessRef.current + 30);
-              panicRef.current = Math.min(100, panicRef.current + 25 * panicMod);
-              setMoodOverride('Horrified');
-              moodExpireRef.current = performance.now() + 20000;
+            // WITNESS DEATH: Seeing a body causes major panic spike
+            if (other.state === AgentState.DECEASED && distSq < 9) {
+              if (lastWitnessedDeathIdRef.current !== other.id) {
+                lastWitnessedDeathIdRef.current = other.id;
+                awarenessRef.current = Math.min(100, awarenessRef.current + 30);
+                panicRef.current = Math.min(100, panicRef.current + 25 * panicMod);
+                setMoodOverride('Horrified');
+                moodExpireRef.current = performance.now() + 20000;
+              }
             }
-          }
-          // WITNESS INFECTED: Seeing visibly sick people increases awareness
-          else if (other.state === AgentState.INFECTED && distSq < 6) {
-            awarenessRef.current = Math.min(100, awarenessRef.current + 3);
-            panicRef.current = Math.min(100, panicRef.current + 1.5 * panicMod);
-          }
+            // WITNESS INFECTED: Seeing visibly sick people increases awareness
+            else if (other.state === AgentState.INFECTED && distSq < 6) {
+              awarenessRef.current = Math.min(100, awarenessRef.current + 3);
+              panicRef.current = Math.min(100, panicRef.current + 1.5 * panicMod);
+            }
 
-          // RUMOR SPREAD: Information flows from high awareness to low
-          // Rumors spread further than plague (16 distSq = 4 unit radius)
-          if (distSq < 16) {
-            const theirAwareness = other.awareness ?? 0;
-            const myAwareness = awarenessRef.current;
+            // RUMOR SPREAD: Information flows from high awareness to low
+            // Rumors spread further than plague (16 distSq = 4 unit radius)
+            if (distSq < 16) {
+              const theirAwareness = other.awareness ?? 0;
+              const myAwareness = awarenessRef.current;
 
-            if (theirAwareness > myAwareness + 10) {
-              // I learn from them - transfer rate based on difference
-              const transfer = (theirAwareness - myAwareness) * 0.08;
-              awarenessRef.current = Math.min(100, myAwareness + transfer);
+              if (theirAwareness > myAwareness + 10) {
+                // I learn from them - transfer rate based on difference
+                const transfer = (theirAwareness - myAwareness) * 0.08;
+                awarenessRef.current = Math.min(100, myAwareness + transfer);
 
-              // Panic follows awareness with class modifier
-              panicRef.current = Math.min(100, panicRef.current + transfer * 0.4 * panicMod);
+                // Panic follows awareness with class modifier
+                panicRef.current = Math.min(100, panicRef.current + transfer * 0.4 * panicMod);
+              }
             }
           }
         }
@@ -1264,44 +1275,46 @@ export const NPC: React.FC<NPCProps> = memo(({
         </group>
         <Humanoid
           color={stateRef.current === AgentState.DECEASED ? '#111' : appearance.robe}
-        headColor={appearance.skin}
-        turbanColor={appearance.headwear}
-        headscarfColor={appearance.scarf}
-        robeAccentColor={appearance.accent}
-        hairColor={appearance.hair}
+          headColor={appearance.skin}
+          turbanColor={appearance.headwear}
+          headscarfColor={appearance.scarf}
+          robeAccentColor={appearance.accent}
+          hairColor={appearance.hair}
           gender={stats.gender}
           age={stats.age}
-        scale={[stats.weight, stats.height, stats.weight] as [number, number, number]}
-        robeHasTrim={stats.robeHasTrim}
-        robeHasSash={stats.robeHasSash}
-        robeHemBand={stats.robeHemBand}
-        robeSpread={stats.robeSpread}
-        robeOverwrap={stats.robeOverwrap}
-        robePattern={stats.robePattern}
-        robePatternScale={stats.robePatternScale}
-        sashPattern={stats.sashPattern}
-        hairStyle={stats.hairStyle}
-        headwearStyle={stats.headwearStyle}
-        facialHair={stats.facialHair}
-        sleeveCoverage={stats.sleeveCoverage}
-        footwearStyle={stats.footwearStyle}
-        footwearColor={stats.footwearColor}
-        accessories={stats.accessories}
-        sicknessLevel={stateRef.current === AgentState.INFECTED ? 1.0 : stateRef.current === AgentState.INCUBATING ? 0.4 : 0}
-        isInfected={stateRef.current === AgentState.INFECTED}
-        isIncubating={stateRef.current === AgentState.INCUBATING}
-        enableArmSwing
-        armSwingMode="both"
-        isWalking={simulationSpeed > 0 && stateRef.current !== AgentState.DECEASED && (!quarantine || stateRef.current !== AgentState.INFECTED)}
-        isDead={stateRef.current === AgentState.DECEASED}
-        walkSpeed={10 * simulationSpeed * (
-          stateRef.current === AgentState.INFECTED ? 0.5 :  // 50% slower when infected
-          stateRef.current === AgentState.INCUBATING ? 0.8 : // 20% slower when incubating
-          1.0 // Normal speed
-        )}
-        distanceFromCamera={distanceFromCameraRef.current}
-        enableSimpleLod={ENABLE_SIMPLE_LOD}
-        simpleLodDistance={SIMPLE_LOD_DISTANCE}
+          scale={[stats.weight, stats.height, stats.weight] as [number, number, number]}
+          robeHasTrim={stats.robeHasTrim}
+          robeHasSash={stats.robeHasSash}
+          robeHemBand={stats.robeHemBand}
+          robeSpread={stats.robeSpread}
+          robeOverwrap={stats.robeOverwrap}
+          robePattern={stats.robePattern}
+          robePatternScale={stats.robePatternScale}
+          sashPattern={stats.sashPattern}
+          hairStyle={stats.hairStyle}
+          headwearStyle={stats.headwearStyle}
+          facialHair={stats.facialHair}
+          sleeveCoverage={stats.sleeveCoverage}
+          footwearStyle={stats.footwearStyle}
+          footwearColor={stats.footwearColor}
+          accessories={stats.accessories}
+          sicknessLevel={stateRef.current === AgentState.INFECTED ? 1.0 : stateRef.current === AgentState.INCUBATING ? 0.4 : 0}
+          isInfected={stateRef.current === AgentState.INFECTED}
+          isIncubating={stateRef.current === AgentState.INCUBATING}
+          enableArmSwing
+          armSwingMode="both"
+          isWalking={simulationSpeed > 0 && stateRef.current !== AgentState.DECEASED && (!quarantine || stateRef.current !== AgentState.INFECTED)}
+          isDead={stateRef.current === AgentState.DECEASED}
+          walkSpeed={10 * simulationSpeed * (
+            stateRef.current === AgentState.INFECTED ? 0.5 :  // 50% slower when infected
+            stateRef.current === AgentState.INCUBATING ? 0.8 : // 20% slower when incubating
+            1.0 // Normal speed
+          )}
+          distanceFromCamera={distanceFromCameraRef.current}
+          enableSimpleLod={ENABLE_SIMPLE_LOD}
+          simpleLodDistance={SIMPLE_LOD_DISTANCE}
+          animationLodDistance={ANIMATION_LOD_DISTANCE}
+          shadowLodDistance={SHADOW_LOD_DISTANCE}
         />
         {stats.heldItem && stats.heldItem !== 'none' && (
           <group ref={propGroupRef} position={[0.38, 1.02, 0.15]}>

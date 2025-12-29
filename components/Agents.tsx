@@ -1,7 +1,7 @@
-import React, { useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
-import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, Obstacle, NPCStats, DistrictType, getDistrictType, PlayerActionEvent, NpcStateOverride, NPCRecord, PlayerStats } from '../types';
+import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, BuildingInfectionState, Obstacle, NPCStats, DistrictType, getDistrictType, PlayerActionEvent, NpcStateOverride, NPCRecord, PlayerStats } from '../types';
 import { NPC } from './NPC';
 import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
 import { TerrainHeightmap } from '../utils/terrain';
@@ -21,6 +21,7 @@ interface AgentsProps {
   rats: any[];
   buildings: BuildingMetadata[];
   buildingHash?: SpatialHash<BuildingMetadata> | null;
+  buildingInfection?: Record<string, BuildingInfectionState>;
   obstacles?: Obstacle[];
   obstacleHash?: SpatialHash<Obstacle> | null;
   maxAgents?: number;
@@ -50,6 +51,7 @@ export const Agents: React.FC<AgentsProps> = ({
   actionEvent,
   buildings,
   buildingHash = null,
+  buildingInfection,
   obstacles = [],
   obstacleHash = null,
   maxAgents = 30,
@@ -173,42 +175,60 @@ export const Agents: React.FC<AgentsProps> = ({
     }
   });
 
+  const activeSlice = useMemo(() => pool.slice(0, activeCount), [pool, activeCount]);
+  const positionTargetsRef = useRef(new Map<string, { pos: THREE.Vector3; target: THREE.Vector3 }>());
+
   return (
     <group>
-      {pool.slice(0, activeCount).map((record) => (
-        <NPC
-          key={record.stats.id}
-          stats={record.stats}
-          position={new THREE.Vector3(record.lastOutdoorPos[0], record.lastOutdoorPos[1], record.lastOutdoorPos[2])}
-          target={new THREE.Vector3(record.lastOutdoorPos[0] + 4, 0, record.lastOutdoorPos[2] + 4)}
-          getSimTime={() => simTime}
-          onUpdate={handleUpdate}
-          infectionRate={params.infectionRate}
-          quarantine={params.quarantine}
-          simulationSpeed={params.simulationSpeed}
-          buildings={buildings}
-          buildingHash={buildingHash || undefined}
-          obstacles={obstacles}
-          obstacleHash={obstacleHash || undefined}
-          agentHash={localAgentHashRef.current || undefined}
-          impactMapRef={impactMapRef}
-          playerRef={playerRef}
-          timeOfDay={params.timeOfDay}
-          initialState={record.state}
-          plagueMeta={record.plagueMeta}
-          onSelect={onNpcSelect}
-          isSelected={selectedNpcId === record.stats.id}
-          district={district ?? getDistrictType(params.mapX, params.mapY)}
-          terrainSeed={terrainSeed}
-          heightmap={heightmap}
-          actionEvent={actionEvent}
-          showDemographicsOverlay={showDemographicsOverlay}
-          npcStateOverride={npcStateOverride}
-          playerStats={playerStats}
-          onNPCInitiatedEncounter={onNPCInitiatedEncounter ? handleNPCInitiatedEncounter : undefined}
-          globalApproachCooldownRef={globalApproachCooldownRef}
-        />
-      ))}
+      {activeSlice.map((record) => {
+        let cached = positionTargetsRef.current.get(record.stats.id);
+        if (!cached) {
+          cached = {
+            pos: new THREE.Vector3(record.lastOutdoorPos[0], record.lastOutdoorPos[1], record.lastOutdoorPos[2]),
+            target: new THREE.Vector3(record.lastOutdoorPos[0] + 4, 0, record.lastOutdoorPos[2] + 4)
+          };
+          positionTargetsRef.current.set(record.stats.id, cached);
+        } else {
+          cached.pos.set(record.lastOutdoorPos[0], record.lastOutdoorPos[1], record.lastOutdoorPos[2]);
+          cached.target.set(record.lastOutdoorPos[0] + 4, 0, record.lastOutdoorPos[2] + 4);
+        }
+
+        return (
+          <NPC
+            key={record.stats.id}
+            stats={record.stats}
+            position={cached.pos}
+            target={cached.target}
+            getSimTime={() => simTime}
+            onUpdate={handleUpdate}
+            infectionRate={params.infectionRate}
+            quarantine={params.quarantine}
+            simulationSpeed={params.simulationSpeed}
+            buildings={buildings}
+            buildingHash={buildingHash || undefined}
+            buildingInfection={buildingInfection}
+            obstacles={obstacles}
+            obstacleHash={obstacleHash || undefined}
+            agentHash={localAgentHashRef.current || undefined}
+            impactMapRef={impactMapRef}
+            playerRef={playerRef}
+            timeOfDay={params.timeOfDay}
+            initialState={record.state}
+            plagueMeta={record.plagueMeta}
+            onSelect={onNpcSelect}
+            isSelected={selectedNpcId === record.stats.id}
+            district={district ?? getDistrictType(params.mapX, params.mapY)}
+            terrainSeed={terrainSeed}
+            heightmap={heightmap}
+            actionEvent={actionEvent}
+            showDemographicsOverlay={showDemographicsOverlay}
+            npcStateOverride={npcStateOverride}
+            playerStats={playerStats}
+            onNPCInitiatedEncounter={onNPCInitiatedEncounter ? handleNPCInitiatedEncounter : undefined}
+            globalApproachCooldownRef={globalApproachCooldownRef}
+          />
+        );
+      })}
     </group>
   );
 };

@@ -651,6 +651,303 @@ const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: str
   ],
 };
 
+/**
+ * Ethnicity and Religion Color Preferences
+ *
+ * Historical clothing color preferences by ethnic and religious group in 1348 Damascus.
+ * Returns weighted color preferences that filter the base social class options.
+ */
+interface ColorPreference {
+  preferredHues: string[];  // Hex colors that should be weighted higher
+  avoidedHues: string[];    // Hex colors that should be weighted lower
+  weight: number;           // Multiplier for matching colors (1.0 = neutral)
+}
+
+const ETHNICITY_COLOR_PREFERENCES: Partial<Record<Ethnicity, ColorPreference>> = {
+  'Persian': {
+    preferredHues: ['#4a2848', '#6a3a5a', '#a83030', '#d4a030', '#2a5040'], // Purple, red, gold, deep green
+    avoidedHues: [],
+    weight: 2.5,
+  },
+  'Armenian': {
+    preferredHues: ['#2d415a', '#3a5a8a', '#9a3428', '#d4a965'], // Deep blue, crimson, gold accents
+    avoidedHues: ['#6a7a5a', '#5a8a8a'], // Avoid greens
+    weight: 2.0,
+  },
+  'Venetian': {
+    preferredHues: ['#9a3428', '#a83030', '#1f1f1f', '#4a2848'], // Venetian red, black, purple (status)
+    avoidedHues: ['#d4a030', '#e0a83a'], // Avoid saffron/gold (Muslim merchant colors)
+    weight: 2.5,
+  },
+  'Genoese': {
+    preferredHues: ['#1f1f1f', '#2d3d4f', '#9a3428', '#4a5a6b'], // Black, navy, dark red
+    avoidedHues: [],
+    weight: 2.0,
+  },
+  'Maghrebi': {
+    preferredHues: ['#d4a030', '#e0a83a', '#2d415a', '#3a5a8a'], // Saffron, gold, indigo blue
+    avoidedHues: [],
+    weight: 2.0,
+  },
+  'Kurdish': {
+    preferredHues: ['#7a5a3f', '#8a6b4f', '#9a3428', '#2a5040'], // Earth tones, red accents, forest green
+    avoidedHues: ['#4a2848', '#6a3a5a'], // Avoid purples (Persian association)
+    weight: 1.5,
+  },
+  'Greek/Rum': {
+    preferredHues: ['#2d415a', '#3a5a8a', '#1f2f3f', '#5a2830'], // Byzantine blues, burgundy
+    avoidedHues: [],
+    weight: 1.8,
+  },
+  'Coptic': {
+    preferredHues: ['#2d3d4f', '#4a3f35', '#5b5247'], // Dark, austere colors (Christian minority)
+    avoidedHues: ['#d4a030', '#e0a83a', '#9a3428'], // Avoid bright colors (modest)
+    weight: 2.0,
+  },
+  'Indian': {
+    preferredHues: ['#d4a030', '#a83030', '#3a5a8a', '#a06040'], // Saffron, red, blue, orange
+    avoidedHues: [],
+    weight: 2.0,
+  },
+};
+
+const RELIGION_COLOR_PREFERENCES: Partial<Record<Religion, ColorPreference>> = {
+  'Jewish': {
+    preferredHues: ['#2d3d4f', '#4a3f35', '#2d415a', '#7a5a3f'], // Dark blues, browns (sumptuary laws)
+    avoidedHues: ['#9a3428', '#a83030', '#d4a030', '#e0a83a'], // Avoid bright reds/gold (restricted)
+    weight: 2.5,
+  },
+  'Eastern Orthodox': {
+    preferredHues: ['#2d415a', '#3a5a8a', '#5a2830', '#4a3f35'], // Byzantine blues, burgundy, dark browns
+    avoidedHues: ['#d4a030', '#e0a83a'], // Avoid saffron (Muslim association)
+    weight: 2.0,
+  },
+  'Armenian Apostolic': {
+    preferredHues: ['#2d415a', '#9a3428', '#4a3f35'], // Deep blue, Armenian red, dark brown
+    avoidedHues: [],
+    weight: 2.0,
+  },
+  'Syriac Orthodox': {
+    preferredHues: ['#4a3f35', '#2d3d4f', '#7a5a3f'], // Dark browns, navy, earth tones (austere)
+    avoidedHues: ['#9a3428', '#d4a030'], // Avoid bright colors
+    weight: 2.0,
+  },
+  'Coptic Orthodox': {
+    preferredHues: ['#2d3d4f', '#4a3f35', '#2d415a'], // Dark, conservative colors
+    avoidedHues: ['#d4a030', '#e0a83a', '#9a3428'], // Avoid luxury colors
+    weight: 2.5,
+  },
+  'Latin Christian': {
+    preferredHues: ['#9a3428', '#1f1f1f', '#4a2848', '#4a5a6b'], // Merchant blacks, reds, purples
+    avoidedHues: ['#d4a030', '#e0a83a'], // Avoid saffron (distinctly Islamic)
+    weight: 2.0,
+  },
+  'Druze': {
+    preferredHues: ['#1f1f1f', '#2f2a25', '#4a3f35', '#2d3d4f'], // Black, dark browns (religious requirement)
+    avoidedHues: ['#9a3428', '#d4a030', '#e0a83a', '#4a2848'], // Avoid all bright/luxury colors
+    weight: 3.0,
+  },
+};
+
+/**
+ * Filter and weight robe options based on ethnicity and religion
+ * Returns same array but with culturally appropriate colors weighted higher in selection
+ */
+const getEthnicityWeightedRobes = (
+  baseOptions: Array<{ desc: string; base: string; accent: string; sash: boolean; sleeves: boolean }>,
+  ethnicity: Ethnicity,
+  religion: Religion,
+  rand: () => number
+): { desc: string; base: string; accent: string; sash: boolean; sleeves: boolean } => {
+  const ethnicPref = ETHNICITY_COLOR_PREFERENCES[ethnicity];
+  const religionPref = RELIGION_COLOR_PREFERENCES[religion];
+
+  // Calculate weighted scores for each option
+  const weighted = baseOptions.map(option => {
+    let score = 1.0;
+
+    // Check ethnicity preferences
+    if (ethnicPref) {
+      const matchesPreferred = ethnicPref.preferredHues.some(hue =>
+        colorDistance(option.base, hue) < 40 || colorDistance(option.accent, hue) < 40
+      );
+      const matchesAvoided = ethnicPref.avoidedHues.some(hue =>
+        colorDistance(option.base, hue) < 40 || colorDistance(option.accent, hue) < 40
+      );
+
+      if (matchesPreferred) score *= ethnicPref.weight;
+      if (matchesAvoided) score *= 0.3;
+    }
+
+    // Check religion preferences (stronger than ethnicity)
+    if (religionPref) {
+      const matchesPreferred = religionPref.preferredHues.some(hue =>
+        colorDistance(option.base, hue) < 40 || colorDistance(option.accent, hue) < 40
+      );
+      const matchesAvoided = religionPref.avoidedHues.some(hue =>
+        colorDistance(option.base, hue) < 40 || colorDistance(option.accent, hue) < 40
+      );
+
+      if (matchesPreferred) score *= religionPref.weight;
+      if (matchesAvoided) score *= 0.2;
+    }
+
+    return { option, score };
+  });
+
+  // Calculate total weight
+  const totalWeight = weighted.reduce((sum, w) => sum + w.score, 0);
+
+  // Weighted random selection
+  let randomValue = rand() * totalWeight;
+  for (const { option, score } of weighted) {
+    randomValue -= score;
+    if (randomValue <= 0) return option;
+  }
+
+  // Fallback to last option
+  return baseOptions[baseOptions.length - 1];
+};
+
+/**
+ * Calculate perceptual distance between two hex colors
+ * Using simplified RGB distance (good enough for color matching)
+ */
+const colorDistance = (hex1: string, hex2: string): number => {
+  const r1 = parseInt(hex1.slice(1, 3), 16);
+  const g1 = parseInt(hex1.slice(3, 5), 16);
+  const b1 = parseInt(hex1.slice(5, 7), 16);
+  const r2 = parseInt(hex2.slice(1, 3), 16);
+  const g2 = parseInt(hex2.slice(3, 5), 16);
+  const b2 = parseInt(hex2.slice(5, 7), 16);
+
+  return Math.sqrt(
+    Math.pow(r1 - r2, 2) +
+    Math.pow(g1 - g2, 2) +
+    Math.pow(b1 - b2, 2)
+  );
+};
+
+/**
+ * Plague-Aware Clothing Modifications
+ *
+ * Modifies NPC clothing colors and accessories based on plague context.
+ * - Mourning: Darkens colors to black/dark grey for NPCs from infected buildings
+ * - Protective: Adds prayer beads, perfumed cloths for aware NPCs
+ * - Performance: Color modifications only, no geometry changes
+ */
+
+export interface PlagueClothingContext {
+  buildingHasDeceased?: boolean;      // NPC's building has deceased residents
+  buildingHasInfected?: boolean;      // NPC's building has infected residents
+  awarenessLevel?: number;            // 0-100, how aware NPC is of plague
+  socialClass: SocialClass;
+}
+
+/**
+ * Apply mourning colors to existing robe colors
+ * Mourning protocol in 1348 Damascus: dark/black clothes for 3-40 days depending on relation
+ */
+export const applyMourningColors = (
+  baseColor: string,
+  accentColor: string,
+  intensity: number = 1.0 // 0-1, how much to darken (1.0 = full mourning black)
+): { base: string; accent: string } => {
+  // Mourning colors: deep black to dark charcoal
+  const mourningBase = '#1a1a1a';  // Near-black
+  const mourningAccent = '#3a3a3a'; // Dark charcoal
+
+  if (intensity >= 0.9) {
+    // Full mourning (immediate family, < 1 week)
+    return { base: mourningBase, accent: mourningAccent };
+  } else if (intensity >= 0.5) {
+    // Partial mourning (extended family, 1-2 weeks)
+    return {
+      base: lerpColor(baseColor, mourningBase, intensity),
+      accent: lerpColor(accentColor, mourningAccent, intensity),
+    };
+  } else {
+    // Light mourning or returning to normal
+    return {
+      base: darkenColor(baseColor, 0.6 + intensity * 0.2),
+      accent: darkenColor(accentColor, 0.7 + intensity * 0.2),
+    };
+  }
+};
+
+/**
+ * Determine if NPC should have protective accessories
+ * Returns accessories that should be added based on plague awareness
+ */
+export const getPlagueProtectiveAccessories = (
+  context: PlagueClothingContext,
+  existingAccessories: string[]
+): string[] => {
+  const newAccessories = [...existingAccessories];
+
+  // Prayer beads (tasbih) - more common during plague for religious comfort
+  // Worn by Muslims when fearful or seeking protection
+  if (context.awarenessLevel && context.awarenessLevel > 40) {
+    if (!newAccessories.includes('prayer beads') && Math.random() > 0.6) {
+      newAccessories.push('prayer beads');
+    }
+  }
+
+  // Perfumed cloth - wealthy NPCs use to ward off "bad air" (miasma theory)
+  if (
+    context.socialClass === SocialClass.NOBILITY ||
+    context.socialClass === SocialClass.MERCHANT
+  ) {
+    if (context.buildingHasInfected && !newAccessories.includes('perfumed cloth')) {
+      if (Math.random() > 0.5) {
+        newAccessories.push('perfumed cloth');
+      }
+    }
+  }
+
+  // Protective amulet - common across all classes during plague
+  if (context.awarenessLevel && context.awarenessLevel > 60) {
+    if (!newAccessories.includes('protective amulet') && Math.random() > 0.7) {
+      newAccessories.push('protective amulet');
+    }
+  }
+
+  return newAccessories;
+};
+
+/**
+ * Linear interpolation between two hex colors
+ */
+const lerpColor = (color1: string, color2: string, t: number): string => {
+  const r1 = parseInt(color1.slice(1, 3), 16);
+  const g1 = parseInt(color1.slice(3, 5), 16);
+  const b1 = parseInt(color1.slice(5, 7), 16);
+  const r2 = parseInt(color2.slice(1, 3), 16);
+  const g2 = parseInt(color2.slice(3, 5), 16);
+  const b2 = parseInt(color2.slice(5, 7), 16);
+
+  const r = Math.round(r1 + (r2 - r1) * t);
+  const g = Math.round(g1 + (g2 - g1) * t);
+  const b = Math.round(b1 + (b2 - b1) * t);
+
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+};
+
+/**
+ * Darken a hex color by a factor
+ */
+const darkenColor = (color: string, factor: number): string => {
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+
+  const newR = Math.round(r * factor);
+  const newG = Math.round(g * factor);
+  const newB = Math.round(b * factor);
+
+  return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
+};
+
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 const PROFESSION_TAGS: Record<string, Array<'military' | 'cleric' | 'artisan' | 'service' | 'noble' | 'youth' | 'retired'>> = {
@@ -1065,7 +1362,13 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     : socialClass === SocialClass.CLERGY ? (rand() > 0.5 ? 'full' : 'lower')
     : rand() > 0.7 ? 'none' : 'lower';
 
-  const robePickBase = ROBE_OPTIONS_BY_CLASS[socialClass][Math.floor(rand() * ROBE_OPTIONS_BY_CLASS[socialClass].length)];
+  // Use ethnicity/religion-weighted color selection
+  const robePickBase = getEthnicityWeightedRobes(
+    ROBE_OPTIONS_BY_CLASS[socialClass],
+    ethnicity,
+    religion,
+    rand
+  );
   const robePick = {
     ...robePickBase,
     base: adjustHex(robePickBase.base, 0.94 + rand() * 0.12),
@@ -1367,7 +1670,13 @@ export const generatePlayerStats = (
   const isMerchant = /(Merchant|Draper|Trader|Coppersmith|Weaver|Carpenter|Herbalist|Midwife|Dyer)/i.test(profession);
   const isLaborer = /(Day-Laborer|Water-Carrier|Tanner|Porter|Bread Seller|Laundry|Servant|Water-Bearer)/i.test(profession);
 
-  const robePickBase = ROBE_OPTIONS_BY_CLASS[socialClass][Math.floor(rand() * ROBE_OPTIONS_BY_CLASS[socialClass].length)];
+  // Use ethnicity/religion-weighted color selection
+  const robePickBase = getEthnicityWeightedRobes(
+    ROBE_OPTIONS_BY_CLASS[socialClass],
+    ethnicity,
+    religion,
+    rand
+  );
   let robePick = {
     ...robePickBase,
     base: adjustHex(robePickBase.base, 0.94 + rand() * 0.12),

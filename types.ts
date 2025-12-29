@@ -646,6 +646,7 @@ export interface DevSettings {
   showMiasma: boolean;
   showCityWalls: boolean;
   showSoundDebug: boolean;
+  showEventDebug: boolean;
 }
 
 export interface SimulationStats {
@@ -916,6 +917,8 @@ export interface EncounterEnvironment {
   district: string;
   nearbyInfected: number;
   nearbyDeceased: number;
+  currentActivity: string;
+  localRumors: string[];
 }
 
 // Note: Also defined in components/Agents.tsx - keep in sync
@@ -933,4 +936,74 @@ export interface EncounterContext {
   simulationStats: SimulationStats;
   conversationHistory: ConversationSummary[];
   nativeLanguageMode: boolean;
+}
+
+// ============================================
+// EVENT SYSTEM
+// ============================================
+
+export interface EventOption {
+  id: string;
+  label: string;
+  consequenceText?: string;
+  outcomeText?: string;
+  followupEventId?: string;
+  requirements?: { stat: 'charisma' | 'piety' | 'currency'; min?: number; max?: number };
+  effects: EventEffect[];
+}
+
+export type EventEffect =
+  | { type: 'playerStat'; stat: 'piety' | 'charisma' | 'currency'; delta: number }
+  | { type: 'npcStat'; npcId: string; stat: 'disposition' | 'panic'; delta: number }
+  | { type: 'worldFlag'; key: string; value: boolean | number | string }
+  | { type: 'triggerEvent'; eventId: string }
+  | { type: 'endConversation' };
+
+export interface EventDefinition {
+  id: string;
+  title: string;
+  body: string;
+  options: EventOption[];
+  tags?: string[];
+  conditions?: { district?: DistrictType; timeOfDay?: [number, number]; socialClassMin?: SocialClass };
+}
+
+export interface EventContextSnapshot {
+  player: {
+    id: string;
+    name: string;
+    socialClass: SocialClass;
+    stats: Pick<PlayerStats, 'charisma' | 'piety' | 'currency'>;
+  };
+  npc?: {
+    id: string;
+    name: string;
+    profession: string;
+    socialClass: SocialClass;
+    disposition: number;
+    panic: number;
+    religion: Religion;
+  };
+  environment: {
+    district: DistrictType;
+    timeOfDay: number;
+    weather: string;
+  };
+  conversation?: {
+    playerMessages: string[];
+    npcMessages: string[];
+  };
+  flags?: {
+    recentEvents?: string[];
+    threatMemory?: number;
+  };
+}
+
+export interface EventInstance {
+  id: string;
+  source: 'conversation' | 'environment' | 'action' | 'system';
+  context: EventContextSnapshot;
+  content: { title: string; body: string; options: EventOption[] };
+  definitionId?: string;
+  resolvedAt?: number;
 }

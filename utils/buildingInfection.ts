@@ -25,15 +25,22 @@ export const updateBuildingInfections = (
 ) => {
   const nextMap = new Map<string, BuildingInfectionState>();
   const buildingIds = new Set(buildings.map((b) => b.id));
+  const interiorStatusByBuilding = new Map<string, BuildingInfectionState['status']>();
+
+  npcMap.forEach((record) => {
+    if (record.location !== 'interior' || !record.homeBuildingId) return;
+    const existing = interiorStatusByBuilding.get(record.homeBuildingId) ?? 'clear';
+    if (record.state === AgentState.DECEASED) {
+      interiorStatusByBuilding.set(record.homeBuildingId, pickStatus(existing, 'deceased'));
+    } else if (record.state === AgentState.INFECTED) {
+      interiorStatusByBuilding.set(record.homeBuildingId, pickStatus(existing, 'infected'));
+    } else if (record.state === AgentState.INCUBATING) {
+      interiorStatusByBuilding.set(record.homeBuildingId, pickStatus(existing, 'incubating'));
+    }
+  });
 
   buildings.forEach((building) => {
-    let status: BuildingInfectionState['status'] = 'clear';
-    npcMap.forEach((record) => {
-      if (record.homeBuildingId !== building.id || record.location !== 'interior') return;
-      if (record.state === AgentState.DECEASED) status = pickStatus(status, 'deceased');
-      else if (record.state === AgentState.INFECTED) status = pickStatus(status, 'infected');
-      else if (record.state === AgentState.INCUBATING) status = pickStatus(status, 'incubating');
-    });
+    const status = interiorStatusByBuilding.get(building.id) ?? 'clear';
 
     const prev = previous.get(building.id);
     if (status === 'clear' && prev && prev.status !== 'clear') {
