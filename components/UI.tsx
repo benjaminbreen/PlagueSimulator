@@ -73,13 +73,11 @@ interface UIProps {
   setShowPlayerModal: React.Dispatch<React.SetStateAction<boolean>>;
   showEncounterModal: boolean;
   setShowEncounterModal: React.Dispatch<React.SetStateAction<boolean>>;
-  showEncounterModal3: boolean;
-  setShowEncounterModal3: React.Dispatch<React.SetStateAction<boolean>>;
   conversationHistories: ConversationSummary[];
   /** Handler for when conversation ends - receives npcId, summary, and impact for disposition updates */
-  onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact) => void;
+  onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact, meta?: { action?: 'end_conversation' | null }) => void;
   /** Handler for triggering events from conversation actions (e.g., NPC dismissing player) */
-  onTriggerConversationEvent?: (eventId: string, npcContext?: { npcId: string; npcName: string }) => void;
+  onTriggerConversationEvent?: (eventId: string, npcContext?: { npcId: string; npcName: string }, delayMs?: number) => void;
   selectedNpcActivity: string;
   selectedNpcNearbyInfected: number;
   selectedNpcNearbyDeceased: number;
@@ -112,6 +110,14 @@ interface UIProps {
   onNavigateToHousehold?: (buildingPosition: [number, number, number]) => void;
   /** Drop an inventory item near the player */
   onDropItem?: (item: { inventoryId: string; itemId: string; label: string; appearance?: ItemAppearance }) => void;
+  /** Drop an inventory item at a screen coordinate */
+  onDropItemAtScreen?: (item: { inventoryId: string; itemId: string; label: string; appearance?: ItemAppearance }, clientX: number, clientY: number) => void;
+  perfDebug?: {
+    schedulePhase: number;
+    scheduleActive: boolean;
+    lastScheduleMs: number;
+    lastScheduleSimTime: number;
+  };
 }
 
 interface InventoryEntry {
@@ -907,250 +913,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-const EncounterModalLegacy: React.FC<{
-  npc: { stats: NPCStats; state: AgentState };
-  timeOfDay: number;
-  currentWeather: string;
-  onClose: () => void;
-}> = ({ npc, timeOfDay, currentWeather, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'conversation' | 'history'>('conversation');
-  const [styleVariant, setStyleVariant] = useState<'guild' | 'noir'>('guild');
-  const displayHour = Math.floor(timeOfDay);
-  const displayMin = Math.floor((timeOfDay - displayHour) * 60);
-  const suffix = displayHour >= 12 ? 'PM' : 'AM';
-  const hourLabel = displayHour % 12 === 0 ? 12 : displayHour % 12;
-  const timeLabel = `${hourLabel}:${displayMin.toString().padStart(2, '0')} ${suffix}`;
-
-  const conversation = useMemo(() => ([
-    {
-      role: 'npc',
-      text: `Peace upon you. I am ${npc.stats.name}, a ${npc.stats.profession} of Damascus. The streets feel restless today.`
-    },
-    {
-      role: 'player',
-      text: 'I seek a word of counsel. What rumors do you hear along the market road?'
-    },
-    {
-      role: 'npc',
-      text: 'Whispers speak of sickness in the southern quarter. Some shut their doors; others barter as if tomorrow is distant.'
-    }
-  ]), [npc.stats.name, npc.stats.profession]);
-
-  const history = useMemo(() => ([
-    {
-      title: 'A market-side warning',
-      summary: `${npc.stats.name} warned of rising fear and urged caution near crowded wells.`
-    },
-    {
-      title: 'A shared prayer',
-      summary: 'You exchanged blessings and agreed to keep watch over the neighbors.'
-    }
-  ]), [npc.stats.name]);
-
-  const containerClass = styleVariant === 'guild'
-    ? 'bg-gradient-to-br from-[#15100c]/95 via-[#0c0a08]/95 to-[#17110b]/95 border border-amber-900/40 shadow-[0_30px_80px_rgba(0,0,0,0.6)]'
-    : 'bg-gradient-to-br from-[#0b0b0b]/95 via-[#111111]/95 to-[#0d0d0d]/95 border border-stone-700/40 shadow-[0_30px_80px_rgba(0,0,0,0.6)]';
-  const textureClass = styleVariant === 'guild'
-    ? "opacity-12 bg-[url('https://www.transparenttextures.com/patterns/old-map.png')]"
-    : "opacity-10 bg-[url('https://www.transparenttextures.com/patterns/black-linen.png')]";
-  const panelClass = styleVariant === 'guild'
-    ? 'bg-black/50 border border-amber-900/30'
-    : 'bg-black/45 border border-stone-700/30';
-  const accentTextClass = styleVariant === 'guild'
-    ? 'text-amber-300'
-    : 'text-stone-200';
-  const mutedTextClass = styleVariant === 'guild'
-    ? 'text-amber-200/60'
-    : 'text-stone-200/60';
-  const tabActiveClass = styleVariant === 'guild'
-    ? 'text-amber-200 border-b border-amber-500'
-    : 'text-stone-100 border-b border-stone-300/70';
-  const tabInactiveClass = styleVariant === 'guild'
-    ? 'text-amber-200/50 hover:text-amber-200 border-b border-transparent'
-    : 'text-stone-300/70 hover:text-stone-100 border-b border-transparent';
-  const messageBaseClass = styleVariant === 'guild'
-    ? 'text-amber-50/90'
-    : 'text-stone-100/90';
-  const npcBubbleClass = styleVariant === 'guild'
-    ? 'bg-[#18120c] border border-amber-900/40'
-    : 'bg-[#151515] border border-stone-700/40';
-  const playerBubbleClass = styleVariant === 'guild'
-    ? 'bg-amber-500/15 border border-amber-500/40'
-    : 'bg-stone-500/15 border border-stone-400/30';
-
-  return (
-    <div className="absolute inset-0 z-[80] pointer-events-auto">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative mx-auto mt-6 md:mt-10 w-[92vw] max-w-5xl">
-        <div className={`absolute inset-0 rounded-[28px] ${containerClass}`} />
-        <div className={`absolute inset-0 rounded-[28px] pointer-events-none ${textureClass}`} />
-        <div className="relative grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 p-5 md:p-7">
-          <div className="space-y-5">
-            <div className={`${panelClass} rounded-2xl p-4`}>
-              <div className={`text-[9px] uppercase tracking-[0.3em] ${mutedTextClass}`}>Portrait</div>
-              <div className="relative mt-3 aspect-[3/4] rounded-2xl bg-gradient-to-b from-black/60 to-black/90 p-2">
-                <div className="absolute inset-2 rounded-2xl border border-amber-500/20 pointer-events-none" />
-                <div className="absolute inset-4 pointer-events-none">
-                  <div className="absolute left-0 top-0 w-4 h-4 border-l border-t border-amber-500/40" />
-                  <div className="absolute right-0 top-0 w-4 h-4 border-r border-t border-amber-500/40" />
-                  <div className="absolute left-0 bottom-0 w-4 h-4 border-l border-b border-amber-500/40" />
-                  <div className="absolute right-0 bottom-0 w-4 h-4 border-r border-b border-amber-500/40" />
-                </div>
-                <NpcPortrait
-                  npc={npc.stats}
-                  sizeClassName="w-full h-full"
-                  frameClassName="rounded-2xl"
-                  cameraPosition={[0, 1.25, 2.0]}
-                  cameraFov={26}
-                  lookAtY={1.25}
-                  groupOffsetY={-1.1}
-                />
-              </div>
-              <div className="mt-4 border-t border-amber-900/40 pt-4 space-y-2 text-[11px] text-amber-100/80">
-                <div className="historical-font text-amber-100 text-lg">{npc.stats.name}</div>
-                <div className={`text-[10px] uppercase tracking-widest ${mutedTextClass}`}>
-                  {npc.stats.gender} · {npc.stats.age} years
-                </div>
-              </div>
-              <div className="mt-4 border-t border-amber-900/40 pt-3 space-y-3 text-[11px]">
-                <div className="flex items-center justify-between">
-                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Profession</span>
-                  <span className={accentTextClass}>{npc.stats.profession}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Class</span>
-                  <span className="px-2 py-0.5 rounded-full border border-amber-500/30 text-[10px] text-amber-200/90">
-                    {npc.stats.socialClass}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Mood</span>
-                  <span className="text-emerald-200">{npc.stats.mood}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Awareness</span>
-                  <span className="text-amber-100/80">{Math.round(npc.stats.awarenessLevel)}%</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className={`uppercase tracking-widest ${mutedTextClass}`}>Panic</span>
-                  <span className="text-amber-100/80">{Math.round(npc.stats.panicLevel)}%</span>
-                </div>
-                {npc.stats.goalOfDay && (
-                  <div className="border-t border-amber-900/30 pt-3 text-[10px] text-amber-100/70">
-                    <div className={`uppercase tracking-widest ${mutedTextClass}`}>Today’s Goal</div>
-                    <div className="mt-2 italic">“{npc.stats.goalOfDay}”</div>
-                  </div>
-                )}
-              </div>
-            </div>
-            <div className={`${panelClass} rounded-2xl p-4 space-y-3 text-[10px] ${mutedTextClass}`}>
-              <div className="flex items-center justify-between">
-                <span className="uppercase tracking-widest">Setting</span>
-                <span className="text-amber-100/80">{timeLabel}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="uppercase tracking-widest">Weather</span>
-                <span className="text-amber-100/80">{currentWeather}</span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="uppercase tracking-widest">Mood</span>
-                <span className="text-amber-100/80">{npc.stats.mood}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col min-h-[60vh]">
-            <div className="flex items-center justify-between border-b border-amber-900/30 pb-4">
-              <div>
-                <div className={`text-[10px] uppercase tracking-[0.35em] ${mutedTextClass}`}>Encounter</div>
-                <h3 className={`historical-font text-2xl tracking-widest ${accentTextClass}`}>
-                  {npc.stats.name}
-                </h3>
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setStyleVariant(styleVariant === 'guild' ? 'noir' : 'guild')}
-                  className="text-[9px] uppercase tracking-widest text-amber-400/70 border border-amber-700/40 px-2 py-1 rounded-full hover:text-amber-200"
-                >
-                  {styleVariant === 'guild' ? 'Option A' : 'Option B'}
-                </button>
-                <button onClick={onClose} className="text-amber-400 hover:text-amber-300">
-                  <X size={22} />
-                </button>
-              </div>
-            </div>
-
-            <div className={`mt-4 flex items-center gap-6 text-[10px] uppercase tracking-[0.3em] ${mutedTextClass}`}>
-              <button
-                className={`pb-2 ${activeTab === 'conversation' ? tabActiveClass : tabInactiveClass}`}
-                onClick={() => setActiveTab('conversation')}
-              >
-                Conversation
-              </button>
-              <button
-                className={`pb-2 ${activeTab === 'history' ? tabActiveClass : tabInactiveClass}`}
-                onClick={() => setActiveTab('history')}
-              >
-                History
-              </button>
-            </div>
-
-            {activeTab === 'conversation' ? (
-              <div className="mt-4 flex flex-col gap-4 flex-1">
-                <div className="flex-1 overflow-y-auto max-h-[44vh] pr-2 space-y-3">
-                  {conversation.map((entry, index) => (
-                    <div
-                      key={`${entry.role}-${index}`}
-                      className={`rounded-xl px-4 py-3 text-[13px] leading-relaxed ${messageBaseClass} ${
-                        entry.role === 'player'
-                          ? `${playerBubbleClass} ml-auto`
-                          : npcBubbleClass
-                      }`}
-                    >
-                      <div className={`text-[9px] uppercase tracking-widest ${mutedTextClass} mb-1`}>
-                        {entry.role === 'player' ? 'You' : npc.stats.name}
-                      </div>
-                      {entry.text}
-                    </div>
-                  ))}
-                </div>
-                <div className="border-t border-amber-900/30 pt-3">
-                  <div className="flex items-center gap-2">
-                    <textarea
-                      rows={2}
-                      placeholder="Compose your response..."
-                      className="flex-1 resize-none rounded-xl bg-black/55 border border-amber-900/40 px-3 py-2 text-[12px] text-amber-100/80 placeholder:text-amber-300/30 focus:outline-none focus:ring-2 focus:ring-amber-600/30"
-                    />
-                    <button
-                      className="px-4 py-2 rounded-xl bg-amber-600/20 border border-amber-500/30 text-[11px] uppercase tracking-widest text-amber-200/70"
-                      disabled
-                    >
-                      Send
-                    </button>
-                  </div>
-                  <div className={`mt-2 text-[9px] uppercase tracking-[0.3em] ${mutedTextClass}`}>
-                    Press Enter to send · ESC to close
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-4 flex-1 overflow-y-auto max-h-[48vh] pr-2 space-y-3">
-                {history.map((entry) => (
-                  <div key={entry.title} className="rounded-xl border border-amber-900/40 bg-black/55 p-4">
-                    <div className={`text-[10px] uppercase tracking-widest ${mutedTextClass}`}>{entry.title}</div>
-                    <div className={`mt-2 text-[12px] leading-relaxed ${messageBaseClass}`}>{entry.summary}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, showEncounterModal3, setShowEncounterModal3, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
@@ -1163,7 +926,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     avgMs: 0,
     p95Ms: 0,
     longFrames: 0,
-    heapMB: null as number | null
+    heapMB: null as number | null,
+    now: performance.now()
   });
   const [inventorySortBy, setInventorySortBy] = useState<'name' | 'rarity' | 'quantity'>('name');
   const [tabPulse, setTabPulse] = useState<'epidemic' | 'player' | 'guide' | null>(null);
@@ -1319,7 +1083,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           avgMs,
           p95Ms,
           longFrames,
-          heapMB
+          heapMB,
+          now
         });
         frames = 0;
         lastReport = now;
@@ -1526,8 +1291,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           
           <div className="flex gap-1 bg-white/5 rounded-lg p-1">
             <button 
-              onClick={() => handleChange('simulationSpeed', 0)}
-              className={`p-1.5 rounded transition-all ${params.simulationSpeed === 0 ? 'bg-red-700 text-white shadow-[0_0_10px_rgba(185,28,28,0.5)]' : 'hover:bg-white/10 text-gray-400'}`}
+              onClick={() => handleChange('simulationSpeed', 0.01)}
+              className={`p-1.5 rounded transition-all ${params.simulationSpeed === 0.01 ? 'bg-red-700 text-white shadow-[0_0_10px_rgba(185,28,28,0.5)]' : 'hover:bg-white/10 text-gray-400'}`}
               title="Freeze Simulation"
             >
               <Pause size={14} />
@@ -2208,10 +1973,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               <div className="mt-4 flex items-center justify-between text-[10px] text-amber-100/70">
                 <span className="uppercase tracking-widest text-amber-500/60">Encounter</span>
                 <button
-                  onClick={() => setShowEncounterModal3(true)}
+                  onClick={() => setShowEncounterModal(true)}
                   className="px-3 py-1 rounded-full border border-amber-700/60 bg-amber-600/10 text-amber-200 hover:bg-amber-600/20"
                 >
-                  Press 3 to Speak
+                  Click to speak to {selectedNpc.stats.name}
                 </button>
               </div>
             </div>
@@ -2272,7 +2037,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </div>
         )}
         {pickupToast && (
-          <div className="absolute bottom-36 left-1/2 -translate-x-1/2 bg-gradient-to-r from-amber-950/90 via-black/80 to-amber-950/90 backdrop-blur-md px-5 py-2 rounded-full border border-amber-500/50 text-amber-100 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_30px_rgba(245,158,11,0.35)]">
+          <div
+            className={`absolute bottom-36 left-1/2 -translate-x-1/2 px-6 py-2 rounded-full border text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_30px_rgba(245,158,11,0.35)] backdrop-blur-md ${
+              pickupToast.toLowerCase().startsWith('dropped')
+                ? 'bg-gradient-to-r from-amber-900/90 via-black/80 to-amber-900/90 border-amber-400/70 text-amber-100 shadow-[0_0_40px_rgba(245,158,11,0.55)]'
+                : 'bg-gradient-to-r from-amber-950/90 via-black/80 to-amber-950/90 border-amber-500/50 text-amber-100'
+            }`}
+          >
+            {pickupToast.toLowerCase().startsWith('dropped') ? '⬇ ' : ''}
             {pickupToast}
           </div>
         )}
@@ -2847,6 +2619,22 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               <span className="text-amber-200/60">Long</span>
               <span className="font-mono">{perfStats.longFrames}</span>
             </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">Sched</span>
+              <span className="font-mono">
+                {perfDebug?.scheduleActive
+                  ? `P${perfDebug.schedulePhase}`
+                  : 'idle'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">Sched Age</span>
+              <span className="font-mono">
+                {perfDebug?.lastScheduleMs
+                  ? `${Math.max(0, (perfStats.now - perfDebug.lastScheduleMs) / 1000).toFixed(2)}s`
+                  : '—'}
+              </span>
+            </div>
             <div className="flex items-center justify-between col-span-2">
               <span className="text-amber-200/60">Heap MB</span>
               <span className="font-mono">{perfStats.heapMB ?? '—'}</span>
@@ -3415,15 +3203,6 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         />
       )}
 
-      {showEncounterModal3 && selectedNpc && (
-        <EncounterModalLegacy
-          npc={selectedNpc}
-          timeOfDay={params.timeOfDay}
-          currentWeather={currentWeather}
-          onClose={() => setShowEncounterModal3(false)}
-        />
-      )}
-
       {showEncounterModal && selectedNpc && (
         <EncounterModal
           npc={selectedNpc.stats}
@@ -3461,6 +3240,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           playerStats={playerStats}
           inventoryItems={inventoryEntries}
           onOpenItemModal={(item) => setSelectedInventoryItem(item)}
+          onDropItemAtScreen={onDropItemAtScreen}
         />
       )}
     </div>

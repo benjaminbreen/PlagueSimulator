@@ -71,6 +71,10 @@ interface SimulationProps {
   onPlayerStartMove?: () => void;
   /** Requests to spawn dropped items near the player */
   dropRequests?: DroppedItemRequest[];
+  /** Observe action mode */
+  observeMode?: boolean;
+  /** Initial game loading state - delays camera animations */
+  gameLoading?: boolean;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -1186,7 +1190,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1492,13 +1496,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         const item = createPushable(
           drop.id,
           'droppedItem',
-          drop.position,
+          [drop.position[0], drop.position[1] + 1.6, drop.position[2]],
           0.25,
           0.4,
           Math.random() * Math.PI * 2,
-          'cloth',
+          drop.material ?? 'cloth',
           drop.appearance
         );
+        item.velocity.set((Math.random() - 0.5) * 1.2, 0, (Math.random() - 0.5) * 1.2);
         item.pickup = { type: 'item', label: drop.label, itemId: drop.itemId };
         next.push(item);
         processedDropsRef.current.add(drop.id);
@@ -2868,6 +2873,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onFallDamage={onFallDamage}
         cameraViewTarget={cameraViewTarget}
         onPlayerStartMove={onPlayerStartMove}
+        observeMode={observeMode}
+        gameLoading={gameLoading}
       />
 
       {/* Footprints in sand (OUTSKIRTS_DESERT only) */}

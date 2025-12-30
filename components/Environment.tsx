@@ -3785,7 +3785,7 @@ const InstancedWindows: React.FC<{
         if (sideRand < 0.3) return;
 
         const rot = side * (Math.PI / 2);
-        const off = buildingSize / 2 + 0.05;
+        const off = buildingSize / 2 + 0.12; // Increased from 0.05 to prevent z-fighting with walls
         const wPos = new THREE.Vector3(building.position[0], height / 2 - 2 + building.position[1], building.position[2]);
         if (side === 0) wPos.z += off;
         else if (side === 1) wPos.x += off;
@@ -3956,7 +3956,13 @@ const InstancedWindows: React.FC<{
       {/* Window frames */}
       <instancedMesh ref={meshRef} args={[undefined, undefined, windowData.length]} receiveShadow>
         <boxGeometry args={[1.4, 2.1, 0.08]} />
-        <meshStandardMaterial color="#1f140a" roughness={1} />
+        <meshStandardMaterial
+          color="#1f140a"
+          roughness={1}
+          polygonOffset={true}
+          polygonOffsetFactor={-1}
+          polygonOffsetUnits={-1}
+        />
       </instancedMesh>
 
       {/* Window glow for lit windows at night */}
@@ -4068,40 +4074,39 @@ export const Buildings: React.FC<{
     let seed = (mapX * 100) + mapY + sessionSeed; // Include session seed for procedural variation
 
     if (district === 'ALLEYS') {
-      const cellSize = 7;
-      const halfCells = 4;
+      // cellSize must be > BUILDING_SIZE (8) to have gaps between buildings
+      const cellSize = 11;  // ~3 unit gaps between buildings
+      const halfCells = 3;  // 7x7 grid fits in map area
       const openCells = new Set<string>();
+
+      // Create main road - always 2 cells wide (22 units)
       let pathX = 0;
       for (let z = -halfCells; z <= halfCells; z++) {
         const stepRoll = seededRandom(seed + z * 31);
-        if (stepRoll > 0.66 && pathX < halfCells - 1) pathX += 1;
-        else if (stepRoll < 0.33 && pathX > -halfCells + 1) pathX -= 1;
-        // Widen main path from 2 cells to 3 cells for better movement
-        openCells.add(`${pathX - 1},${z}`);
+        if (stepRoll > 0.75 && pathX < halfCells - 2) pathX += 1;
+        else if (stepRoll < 0.25 && pathX > -halfCells + 1) pathX -= 1;
+        // Main path is always 2 cells wide
         openCells.add(`${pathX},${z}`);
         openCells.add(`${pathX + 1},${z}`);
       }
 
-      const branchCount = seededRandom(seed + 99) > 0.5 ? 3 : 2;
-      for (let i = 0; i < branchCount; i++) {
-        const z = Math.floor(seededRandom(seed + 120 + i) * (halfCells * 2 - 2)) - (halfCells - 1);
-        const baseX = Math.round(Math.sin(z * 0.7 + seed) * 1.6);
-        const dir = seededRandom(seed + 160 + i) > 0.5 ? 1 : -1;
-        const length = seededRandom(seed + 180 + i) > 0.5 ? 2 : 1;
-        for (let l = 1; l <= length; l++) {
-          openCells.add(`${baseX + dir * l},${z}`);
-        }
+      // Add 1 cross alley
+      const crossZ = Math.floor(seededRandom(seed + 210) * (halfCells * 2)) - halfCells;
+      for (let x = -halfCells; x <= halfCells; x++) {
+        openCells.add(`${x},${crossZ}`);
       }
 
+      // Place buildings with random jitter for organic feel
       for (let x = -halfCells; x <= halfCells; x++) {
         for (let z = -halfCells; z <= halfCells; z++) {
-          const key = `${x},${z}`;
-          if (openCells.has(key)) continue;
-          const worldX = x * cellSize;
-          const worldZ = z * cellSize;
-          const localSeed = seed + Math.abs(worldX) * 1000 + Math.abs(worldZ);
-          // Reduced from 0.05 to 0.18 for better movement (was 95% density, now 82%)
-          if (seededRandom(localSeed) < 0.18) continue;
+          if (openCells.has(`${x},${z}`)) continue;
+          const localSeed = seed + Math.abs(x) * 1000 + Math.abs(z) * 17;
+          if (seededRandom(localSeed) < 0.18) continue;  // 18% skip = 82% density but with gaps
+          // Add small random offset for organic placement
+          const jitterX = (seededRandom(localSeed + 1) - 0.5) * 1.5;
+          const jitterZ = (seededRandom(localSeed + 2) - 0.5) * 1.5;
+          const worldX = x * cellSize + jitterX;
+          const worldZ = z * cellSize + jitterZ;
           const data = generateBuildingMetadata(localSeed, worldX, worldZ);
           bldMetadata.push(data);
         }
@@ -4680,8 +4685,12 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
   const torchIntensity = 0.3 + nightFactor * 1.2;
 
-  // Hide city walls in marketplace - it's an open commercial district
-  const displayCityWalls = district === 'MARKET' ? false : showCityWalls;
+  // City walls only appear on certain perimeter districts, and even then randomly
+  const wallSeed = mapX * 73 + mapY * 137;
+  const wallRoll = ((wallSeed % 100) / 100);
+  const isPerimeterDistrict = district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_FARMLAND' ||
+    district === 'SOUTHERN_ROAD' || district === 'CARAVANSERAI';
+  const displayCityWalls = showCityWalls && isPerimeterDistrict && wallRoll > 0.4;
 
   // Track building positions for path generation
   const [buildingPositions, setBuildingPositions] = React.useState<Array<[number, number, number]>>([]);

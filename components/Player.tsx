@@ -2,7 +2,7 @@
 import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { OrbitControls, PointerLockControls } from '@react-three/drei';
+import { OrbitControls } from '@react-three/drei';
 import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent, AgentState, ClimbableAccessory, ClimbingState, PlagueType } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
@@ -31,6 +31,7 @@ const materialToSound = (mat: PushableMaterial): CollisionMaterial => {
     case 'wood': return 'wood';
     case 'stone': return 'stone';
     case 'cloth': return 'cloth';
+    case 'metal': return 'metal';
     default: return 'stone';
   }
 };
@@ -81,6 +82,8 @@ interface PlayerProps {
   onFallDamage?: (fallHeight: number, fatal: boolean) => void;
   cameraViewTarget?: [number, number, number] | null;
   onPlayerStartMove?: () => void;
+  observeMode?: boolean;
+  gameLoading?: boolean;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -116,11 +119,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   climbInputRef,
   onFallDamage,
   cameraViewTarget,
-  onPlayerStartMove
+  onPlayerStartMove,
+  observeMode = false,
+  gameLoading = true
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
-  const pointerRef = useRef<any>(null);
   const markerRef = useRef<THREE.Mesh>(null);
   const markerGlowRef = useRef<THREE.Mesh>(null);
 
@@ -153,6 +157,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const lastPlayerPos = useRef(new THREE.Vector3());
   const fpYaw = useRef(0);
   const fpPitch = useRef(0);
+
+  // Mouse drag state for first-person camera look
+  const isDraggingRef = useRef(false);
+  const lastMouseRef = useRef({ x: 0, y: 0 });
+  const mouseDeltaRef = useRef({ x: 0, y: 0 });
+
   const { camera, size } = useThree();
   const [isWalking, setIsWalking] = useState(false);
   const [isSprinting, setIsSprinting] = useState(false);
@@ -221,6 +231,35 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   // Sprint camera pullback (over-shoulder mode)
   const sprintCameraOffsetRef = useRef(0); // 0 = normal, 1 = full sprint zoom
 
+  // Dynamic FOV for sprint effect
+  const currentFovRef = useRef(75); // Base FOV
+  const BASE_FOV = 35;
+  const SPRINT_FOV = 82; // Wider when sprinting
+
+  // Camera bob for landing impact
+  const cameraBobRef = useRef(0); // Current vertical offset from landing
+
+  // Camera collision - how far to pull camera forward when obstructed
+  const cameraCollisionOffsetRef = useRef(0);
+
+  // Camera mode transition system
+  const prevCameraModeRef = useRef<CameraMode>(cameraMode);
+  const modeTransitionProgressRef = useRef(1); // 0 = just switched, 1 = complete
+  const transitionStartPosRef = useRef<THREE.Vector3 | null>(null);
+  const transitionStartTargetRef = useRef<THREE.Vector3 | null>(null);
+
+  // Cinematic dolly zoom for third-person mode
+  const thirdPersonDollyProgress = useRef(0); // 0 = start, 1 = fully zoomed in
+  const thirdPersonStartDistance = useRef<number | null>(null);
+  const thirdPersonSmoothDistance = useRef<number | null>(null); // Smoothly interpolated distance
+  const thirdPersonSmoothPolar = useRef<number | null>(null); // Smoothly interpolated polar
+  const thirdPersonStartAzimuth = useRef<number | null>(null); // Starting horizontal angle
+  const thirdPersonSmoothAzimuth = useRef<number | null>(null); // Smoothly interpolated azimuth
+  const DOLLY_DURATION = 2; // seconds for full zoom-in
+  const DOLLY_ZOOM_FACTOR = 0.8; // End at 80% of starting distance
+  const DOLLY_AZIMUTH_PAN = -0.5; // Pan ~30 degrees right to center player facing camera
+  const DOLLY_PAN_DELAY = 0.6; // Start azimuth pan after 60% of dolly complete
+
   // Dossier mode camera state
   const savedCameraPos = useRef<THREE.Vector3 | null>(null);
   const savedCameraTarget = useRef<THREE.Vector3 | null>(null);
@@ -288,6 +327,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
+      if (observeMode) return;
       const k = e.key.toLowerCase();
       if (!audioCtxRef.current) {
         const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
@@ -329,6 +369,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     };
     const up = (e: KeyboardEvent) => {
+      if (observeMode) return;
       const k = e.key.toLowerCase();
       if (k === 'arrowup') setKeys(prev => ({ ...prev, up: false }));
       if (k === 'arrowdown') setKeys(prev => ({ ...prev, down: false }));
@@ -360,7 +401,61 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
-  }, []);
+  }, [observeMode]);
+
+  useEffect(() => {
+    if (!observeMode) return;
+    setKeys({
+      up: false,
+      down: false,
+      left: false,
+      right: false,
+      w: false,
+      a: false,
+      s: false,
+      d: false,
+      shift: false,
+      space: false,
+      c: false
+    });
+    velV.current = 0;
+    velH.current.set(0, 0, 0);
+    isDraggingRef.current = false;
+    mouseDeltaRef.current.x = 0;
+    mouseDeltaRef.current.y = 0;
+  }, [observeMode]);
+
+  // Mouse drag handlers for first-person camera look
+  useEffect(() => {
+    const onMouseDown = (e: MouseEvent) => {
+      if (observeMode) return;
+      if (cameraMode === CameraMode.FIRST_PERSON) {
+        isDraggingRef.current = true;
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      }
+    };
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+    };
+    const onMouseMove = (e: MouseEvent) => {
+      if (observeMode) return;
+      if (cameraMode === CameraMode.FIRST_PERSON && isDraggingRef.current) {
+        const dx = e.clientX - lastMouseRef.current.x;
+        const dy = e.clientY - lastMouseRef.current.y;
+        mouseDeltaRef.current.x += dx;
+        mouseDeltaRef.current.y += dy;
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      }
+    };
+    window.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mouseup', onMouseUp);
+    window.addEventListener('mousemove', onMouseMove);
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mouseup', onMouseUp);
+      window.removeEventListener('mousemove', onMouseMove);
+    };
+  }, [cameraMode, observeMode]);
 
   // Trigger action animation when actionEvent changes
   useEffect(() => {
@@ -527,15 +622,40 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   useEffect(() => {
     if (!orbitRef.current || !group.current) return;
+
+    // Detect camera mode change and start transition
+    if (cameraMode !== prevCameraModeRef.current) {
+      // Save current camera state for smooth transition
+      transitionStartPosRef.current = camera.position.clone();
+      transitionStartTargetRef.current = orbitRef.current.target.clone();
+      modeTransitionProgressRef.current = 0;
+      prevCameraModeRef.current = cameraMode;
+
+      // Reset cinematic dolly zoom when entering third-person
+      if (cameraMode === CameraMode.THIRD_PERSON) {
+        thirdPersonDollyProgress.current = 0;
+        thirdPersonStartDistance.current = null;
+        thirdPersonSmoothDistance.current = null;
+        thirdPersonSmoothPolar.current = null;
+        thirdPersonStartAzimuth.current = null;
+        thirdPersonSmoothAzimuth.current = null;
+      }
+    }
+
     if (cameraMode === CameraMode.OVERHEAD) {
       lastPlayerPos.current.copy(group.current.position);
       orbitRef.current.target.copy(group.current.position);
       orbitRef.current.update();
     }
-  }, [cameraMode]);
+  }, [cameraMode, camera]);
 
   useFrame((state, delta) => {
     if (!group.current) return;
+
+    // Camera mode transition - advance transition progress
+    if (modeTransitionProgressRef.current < 1) {
+      modeTransitionProgressRef.current = Math.min(1, modeTransitionProgressRef.current + delta * 2.5); // ~0.4s transition
+    }
 
     // 0. Dossier Mode Camera Animation
     if (dossierMode && orbitRef.current) {
@@ -765,13 +885,27 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
     // === END CLIMBING SYSTEM ===
 
-    // 1. Camera Adjustment Logic (WASD)
+    // 1. Camera Adjustment Logic
     if (cameraMode === CameraMode.FIRST_PERSON) {
-      fpYaw.current += (keys.a ? CAMERA_SENSITIVITY * delta : 0);
-      fpYaw.current -= (keys.d ? CAMERA_SENSITIVITY * delta : 0);
-      fpPitch.current += (keys.w ? CAMERA_SENSITIVITY * delta : 0);
-      fpPitch.current -= (keys.s ? CAMERA_SENSITIVITY * delta : 0);
-      fpPitch.current = THREE.MathUtils.clamp(fpPitch.current, -1.2, 1.2);
+      if (observeMode) {
+        const PAN_SPEED = (Math.PI * 2) / 180; // 360 deg over ~180s
+        fpYaw.current += delta * PAN_SPEED;
+        fpPitch.current = THREE.MathUtils.lerp(fpPitch.current, 0.05, 0.08);
+      } else {
+        // WASD controls camera look
+        fpYaw.current += (keys.a ? CAMERA_SENSITIVITY * delta : 0);
+        fpYaw.current -= (keys.d ? CAMERA_SENSITIVITY * delta : 0);
+        fpPitch.current += (keys.w ? CAMERA_SENSITIVITY * delta : 0);
+        fpPitch.current -= (keys.s ? CAMERA_SENSITIVITY * delta : 0);
+        // Mouse drag also controls camera look
+        const MOUSE_SENSITIVITY = 0.003;
+        fpYaw.current -= mouseDeltaRef.current.x * MOUSE_SENSITIVITY;
+        fpPitch.current -= mouseDeltaRef.current.y * MOUSE_SENSITIVITY;
+        fpPitch.current = THREE.MathUtils.clamp(fpPitch.current, -1.2, 1.2);
+        // Clear mouse delta after applying
+        mouseDeltaRef.current.x = 0;
+        mouseDeltaRef.current.y = 0;
+      }
     } else if (cameraMode === CameraMode.OVERHEAD && orbitRef.current) {
       const angle = OVERHEAD_ROTATE_SPEED * delta;
       if (keys.a) orbitRef.current.setAzimuthalAngle(orbitRef.current.getAzimuthalAngle() + angle);
@@ -989,6 +1123,15 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       const now = state.clock.elapsedTime;
       const items = pushablesRef.current;
       for (const item of items) {
+        if (item.kind === 'droppedItem') {
+          const groundHeight = heightmap
+            ? sampleTerrainHeight(heightmap, item.position.x, item.position.z)
+            : 0;
+          if (item.position.y > groundHeight + 0.02 || item.velocity.y > 0) {
+            const gravity = -18;
+            item.velocity.y += gravity * delta;
+          }
+        }
         if (item.velocity.lengthSq() < 0.00001) continue;
         const speed = item.velocity.length();
         const next = item.position.clone().add(item.velocity.clone().multiplyScalar(delta));
@@ -1024,7 +1167,36 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             objectImpactCooldownRef.current.set(item.id, now);
           }
         }
-        const friction = 3.0 + item.mass * 0.4;
+        if (item.kind === 'droppedItem') {
+          const groundHeight = heightmap
+            ? sampleTerrainHeight(heightmap, item.position.x, item.position.z)
+            : 0;
+          if (item.position.y <= groundHeight + 0.02) {
+            const impactSpeed = Math.abs(item.velocity.y);
+            item.position.y = groundHeight + 0.02;
+            const materialBounce = item.material === 'metal'
+              ? 0.7
+              : item.material === 'ceramic'
+                ? 0.5
+                : item.material === 'wood'
+                  ? 0.4
+                  : 0.28;
+            const weightFactor = Math.max(0.45, 1 - item.mass * 0.08);
+            const restitution = Math.max(0.18, materialBounce * weightFactor);
+            if (impactSpeed > 0.35) {
+              const intensity = Math.min(1, impactSpeed / 6);
+              playObjectImpact(item.material, intensity);
+              onImpactPuff?.(item.position, intensity * 0.5);
+            }
+            item.velocity.y = impactSpeed * restitution;
+            if (impactSpeed < 0.12) {
+              item.velocity.y = 0;
+            }
+          }
+        }
+        const friction = item.kind === 'droppedItem'
+          ? 0.6 + item.mass * 0.15
+          : 3.0 + item.mass * 0.4;
         item.velocity.multiplyScalar(Math.max(0, 1 - friction * delta));
         if (item.velocity.lengthSq() < 0.00002) {
           item.velocity.set(0, 0, 0);
@@ -1067,6 +1239,31 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
               }
             }
           }
+        }
+      }
+    }
+
+    // 2c. Dropped item slope drift (lightweight)
+    if (pushablesRef?.current && heightmap) {
+      const SLOPE_FORCE = 1.8;
+      const MIN_SLOPE = 0.05;
+      const MAX_SPEED = 2.0;
+      for (const item of pushablesRef.current) {
+        if (item.kind !== 'droppedItem') continue;
+        const terrainY = sampleTerrainHeight(heightmap, item.position.x, item.position.z);
+        const grounded = item.position.y <= terrainY + 0.03 && Math.abs(item.velocity.y) < 0.05;
+        if (!grounded) continue;
+        item.position.y = terrainY + 0.03;
+        const gradient = calculateTerrainGradient(heightmap, item.position.x, item.position.z);
+        if (gradient.slopeAngle > MIN_SLOPE) {
+          const slopeForce = gradient.slope.clone()
+            .normalize()
+            .multiplyScalar(SLOPE_FORCE * Math.sin(gradient.slopeAngle) * delta);
+          item.velocity.add(slopeForce);
+        }
+        const speed = item.velocity.length();
+        if (speed > MAX_SPEED) {
+          item.velocity.normalize().multiplyScalar(MAX_SPEED);
         }
       }
     }
@@ -1261,13 +1458,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
     right.y = 0; right.normalize();
 
+    // Arrow keys always control movement
     if (keys.up) moveVec.add(forward);
     if (keys.down) moveVec.sub(forward);
     if (keys.right) moveVec.add(right);
     if (keys.left) moveVec.sub(right);
-    if (cameraMode === CameraMode.FIRST_PERSON) {
-      // WASD controls look in first person; movement uses arrow keys.
-    }
+    // In first-person mode: WASD controls camera look, arrow keys control movement
 
     const moving = moveVec.lengthSq() > 0.01;
     if (walkingRef.current !== moving) {
@@ -1703,20 +1899,37 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
       orbitRef.current.update();
     } else if (cameraMode === CameraMode.OVER_SHOULDER && orbitRef.current) {
-      // Over-shoulder camera: tight follow with auto-rotation
+      // Over-shoulder camera: tight follow with auto-rotation and shoulder offset
       const playerPos = group.current.position.clone();
+
+      // Faster lerp during mode transitions for smooth switching
+      const isTransitioning = modeTransitionProgressRef.current < 1;
+      const baseLerpSpeed = 0.18;
+      const transitionLerpSpeed = 0.35;
+      const lerpSpeed = isTransitioning ? transitionLerpSpeed : baseLerpSpeed;
 
       // Sprint camera: smooth transition to show more of the world
       const targetSprintOffset = sprintingRef.current ? 1.0 : 0.0;
       sprintCameraOffsetRef.current = THREE.MathUtils.lerp(sprintCameraOffsetRef.current, targetSprintOffset, 0.08);
 
       // When sprinting: look higher, camera pulls back and tilts up
-      const baseLookHeight = 2.0; // Raised from 1.2 for wider world view
-      const sprintLookHeight = 4.0; // Raised from 2.5 for dramatic sprint view
+      const baseLookHeight = 2.0;
+      const sprintLookHeight = 4.0;
       const lookHeight = THREE.MathUtils.lerp(baseLookHeight, sprintLookHeight, sprintCameraOffsetRef.current);
 
-      const targetLookAt = playerPos.clone().add(new THREE.Vector3(0, lookHeight, 0));
-      orbitRef.current.target.lerp(targetLookAt, 0.15);
+      // Shoulder offset: position camera slightly to the right of player for authentic over-shoulder framing
+      const SHOULDER_OFFSET = 0.6; // Units to the right
+      const playerRight = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), group.current.rotation.y);
+      const shoulderOffset = playerRight.multiplyScalar(SHOULDER_OFFSET);
+
+      const targetLookAt = playerPos.clone().add(new THREE.Vector3(0, lookHeight, 0)).add(shoulderOffset);
+      orbitRef.current.target.lerp(targetLookAt, lerpSpeed);
+
+      // Manual rotation adjustment via A/D keys (subtle, gets smoothly overridden)
+      const manualRotateSpeed = 1.2 * delta;
+      let manualOffset = 0;
+      if (keys.a) manualOffset += manualRotateSpeed;
+      if (keys.d) manualOffset -= manualRotateSpeed;
 
       // Auto-rotate camera to follow player facing direction (horizontal)
       const targetAngle = group.current.rotation.y + Math.PI; // Behind player
@@ -1726,37 +1939,137 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       const angleDiff = targetAngle - currentAngle;
       const normalizedDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
 
-      // Interpolate using the shortest path
-      const nextAngle = currentAngle + normalizedDiff * (ORBIT_RECENTER_SPEED * delta * 1.5);
+      // Interpolate using the shortest path, with reduced speed when manually adjusting
+      const autoRecenterSpeed = (manualOffset !== 0) ? 0.3 : 1.5; // Slower recenter when manually rotating
+      const nextAngle = currentAngle + normalizedDiff * (ORBIT_RECENTER_SPEED * delta * autoRecenterSpeed) + manualOffset;
       orbitRef.current.setAzimuthalAngle(nextAngle);
 
       // Set a lower viewing angle for cinematic upward look (vertical)
-      // When sprinting: tilt camera up to show more world ahead
-      const basePolarAngle = Math.PI / 2.2; // Higher angle (was π/2.0) for better world view
-      const sprintPolarAngle = Math.PI / 2.5; // Much higher when sprinting (was π/2.15)
+      // W/S keys allow slight vertical adjustment
+      let verticalAdjust = 0;
+      if (keys.w) verticalAdjust -= 0.8 * delta;
+      if (keys.s) verticalAdjust += 0.8 * delta;
+
+      const basePolarAngle = Math.PI / 2.2;
+      const sprintPolarAngle = Math.PI / 2.5;
       const targetPolarAngle = THREE.MathUtils.lerp(basePolarAngle, sprintPolarAngle, sprintCameraOffsetRef.current);
 
       const currentPolarAngle = orbitRef.current.getPolarAngle();
-      const nextPolarAngle = THREE.MathUtils.lerp(currentPolarAngle, targetPolarAngle, 0.05);
+      // Blend toward target but allow manual adjustment
+      const adjustedTarget = THREE.MathUtils.clamp(targetPolarAngle + verticalAdjust, 0.5, Math.PI / 1.7);
+      const nextPolarAngle = THREE.MathUtils.lerp(currentPolarAngle, adjustedTarget, 0.08);
       orbitRef.current.setPolarAngle(nextPolarAngle);
 
       // Additional distance pullback when sprinting (move camera further back)
       if (sprintCameraOffsetRef.current > 0.01) {
         const cameraToTarget = camera.position.clone().sub(orbitRef.current.target);
         const currentDistance = cameraToTarget.length();
-        const sprintExtraDistance = 5.0; // Pull back 5 units when sprinting (was 3.0)
+        const sprintExtraDistance = 5.0;
         const targetDistance = currentDistance + sprintExtraDistance * sprintCameraOffsetRef.current;
         const direction = cameraToTarget.normalize();
         camera.position.copy(orbitRef.current.target.clone().add(direction.multiplyScalar(targetDistance)));
       }
     } else if (cameraMode === CameraMode.THIRD_PERSON && orbitRef.current) {
       orbitRef.current.target.lerp(group.current.position.clone().add(new THREE.Vector3(0, 1.5, 0)), 0.1);
+
+      // Cinematic dolly zoom - slowly push camera in like a film shot
+      const cameraToTarget = camera.position.clone().sub(orbitRef.current.target);
+      const currentDistance = cameraToTarget.length();
+      const currentPolar = orbitRef.current.getPolarAngle();
+      const currentAzimuth = orbitRef.current.getAzimuthalAngle();
+
+      // Capture starting values on first frame
+      if (thirdPersonStartDistance.current === null) {
+        thirdPersonStartDistance.current = currentDistance;
+        thirdPersonSmoothDistance.current = currentDistance;
+        thirdPersonSmoothPolar.current = currentPolar;
+        thirdPersonStartAzimuth.current = currentAzimuth;
+        thirdPersonSmoothAzimuth.current = currentAzimuth;
+      }
+
+      // Progress the dolly zoom (only after loading screen fades)
+      if (thirdPersonDollyProgress.current < 1 && !gameLoading) {
+        thirdPersonDollyProgress.current = Math.min(1, thirdPersonDollyProgress.current + delta / DOLLY_DURATION);
+
+        // Use easeOutCubic for even smoother deceleration
+        const t = thirdPersonDollyProgress.current;
+        const eased = 1 - Math.pow(1 - t, 3);
+
+        // Calculate target distance and polar angle
+        const startDist = thirdPersonStartDistance.current;
+        const endDist = startDist * DOLLY_ZOOM_FACTOR;
+        const goalDist = THREE.MathUtils.lerp(startDist, endDist, eased);
+
+        const startPolar = 0.8;
+        const endPolar = 1.35;
+        const goalPolar = THREE.MathUtils.lerp(startPolar, endPolar, eased);
+
+        // Calculate target azimuth - pan camera to center player facing forward
+        // Delay the pan until after zoom/tilt are mostly complete
+        const startAzimuth = thirdPersonStartAzimuth.current!;
+        const endAzimuth = startAzimuth + DOLLY_AZIMUTH_PAN;
+        // Remap progress: azimuth only animates during last portion (after DOLLY_PAN_DELAY)
+        const azimuthProgress = Math.max(0, (t - DOLLY_PAN_DELAY) / (1 - DOLLY_PAN_DELAY));
+        const azimuthEased = 1 - Math.pow(1 - azimuthProgress, 3); // easeOutCubic
+        const goalAzimuth = THREE.MathUtils.lerp(startAzimuth, endAzimuth, azimuthEased);
+
+        // Smoothly interpolate our tracking values (this is the key to smooth motion)
+        const smoothFactor = 1 - Math.pow(0.02, delta); // Frame-rate independent smoothing
+        thirdPersonSmoothDistance.current = THREE.MathUtils.lerp(
+          thirdPersonSmoothDistance.current!,
+          goalDist,
+          smoothFactor
+        );
+        thirdPersonSmoothPolar.current = THREE.MathUtils.lerp(
+          thirdPersonSmoothPolar.current!,
+          goalPolar,
+          smoothFactor
+        );
+        thirdPersonSmoothAzimuth.current = THREE.MathUtils.lerp(
+          thirdPersonSmoothAzimuth.current!,
+          goalAzimuth,
+          smoothFactor
+        );
+
+        // Apply smooth distance - move camera along the direction to target
+        const direction = cameraToTarget.normalize();
+        const newPos = orbitRef.current.target.clone().add(
+          direction.multiplyScalar(thirdPersonSmoothDistance.current!)
+        );
+        camera.position.lerp(newPos, smoothFactor);
+
+        // Apply smooth polar and azimuthal angles
+        orbitRef.current.setPolarAngle(thirdPersonSmoothPolar.current!);
+        orbitRef.current.setAzimuthalAngle(thirdPersonSmoothAzimuth.current!);
+      }
+
+      // Subtle auto-recenter when moving: gently drift camera behind player
+      const isMoving = walkingRef.current;
+      const isUserRotating = keys.a || keys.d; // User is manually rotating camera
+
       if (recenterRef.current || recenterAmount.current > 0) {
+        // R key held: strong recenter
         const targetAngle = group.current.rotation.y;
         const currentAngle = orbitRef.current.getAzimuthalAngle();
         const nextAngle = THREE.MathUtils.lerp(currentAngle, targetAngle, ORBIT_RECENTER_SPEED * delta);
         orbitRef.current.setAzimuthalAngle(nextAngle);
         recenterAmount.current = Math.max(0, recenterAmount.current - delta * 2);
+      } else if (isMoving && !isUserRotating) {
+        // Subtle auto-recenter while moving (very gentle drift)
+        const targetAngle = group.current.rotation.y;
+        const currentAngle = orbitRef.current.getAzimuthalAngle();
+
+        // Calculate angular difference
+        const angleDiff = targetAngle - currentAngle;
+        const normalizedDiff = ((angleDiff + Math.PI) % (2 * Math.PI)) - Math.PI;
+
+        // Only apply if camera is significantly off-center (> 45 degrees)
+        // Use very slow drift speed for subtle, non-jarring movement
+        if (Math.abs(normalizedDiff) > Math.PI / 4) {
+          const SUBTLE_RECENTER_SPEED = 0.15; // Much slower than manual recenter
+          const nextAngle = currentAngle + normalizedDiff * SUBTLE_RECENTER_SPEED * delta;
+          orbitRef.current.setAzimuthalAngle(nextAngle);
+        }
       }
     }
 
@@ -1834,6 +2147,70 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         }
       });
       occludedMeshesRef.current.clear();
+    }
+
+    // === CAMERA EFFECTS SYSTEM ===
+
+    // 4a. Camera collision prevention - pull camera forward when obstructed
+    if (cameraMode !== CameraMode.FIRST_PERSON && cameraMode !== CameraMode.OVERHEAD && group.current) {
+      const playerPos = group.current.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+      const cameraPos = camera.position.clone();
+      const toCamera = cameraPos.clone().sub(playerPos);
+      const distance = toCamera.length();
+
+      if (distance > 0.5) {
+        const direction = toCamera.normalize();
+        raycasterRef.current.set(playerPos, direction);
+        raycasterRef.current.far = distance;
+
+        const intersects = raycasterRef.current.intersectObjects(camera.parent?.children || [], true);
+
+        let closestObstruction = distance;
+        for (const hit of intersects) {
+          // Check for buildings/terrain (not the player or decorations)
+          if (hit.object.userData?.isBuildingWall || hit.object.userData?.isBuilding || hit.object.userData?.isTerrain) {
+            if (hit.distance < closestObstruction) {
+              closestObstruction = hit.distance;
+            }
+          }
+        }
+
+        // Calculate how much to pull camera forward
+        const targetOffset = closestObstruction < distance ? (distance - closestObstruction + 0.5) : 0;
+        cameraCollisionOffsetRef.current = THREE.MathUtils.lerp(cameraCollisionOffsetRef.current, targetOffset, 0.15);
+
+        // Apply the offset
+        if (cameraCollisionOffsetRef.current > 0.1) {
+          const pullDirection = direction.negate();
+          camera.position.add(pullDirection.multiplyScalar(cameraCollisionOffsetRef.current));
+        }
+      }
+    }
+
+    // 4b. Sprint FOV widening - increase FOV when sprinting for speed sensation
+    if (camera instanceof THREE.PerspectiveCamera) {
+      const targetFov = sprintingRef.current ? SPRINT_FOV : BASE_FOV;
+      currentFovRef.current = THREE.MathUtils.lerp(currentFovRef.current, targetFov, 0.08);
+
+      // Only update if changed significantly (avoid unnecessary updates)
+      if (Math.abs(camera.fov - currentFovRef.current) > 0.1) {
+        camera.fov = currentFovRef.current;
+        camera.updateProjectionMatrix();
+      }
+    }
+
+    // 4c. Landing camera bob - subtle dip when landing from jumps
+    if (landingImpulseRef.current > 0) {
+      // Decay the landing impulse
+      cameraBobRef.current = landingImpulseRef.current * 0.15; // Max 0.15 unit dip
+    } else {
+      // Smoothly return to normal
+      cameraBobRef.current = THREE.MathUtils.lerp(cameraBobRef.current, 0, 0.1);
+    }
+
+    // Apply camera bob to vertical position (except first-person which handles its own positioning)
+    if (cameraMode !== CameraMode.FIRST_PERSON && Math.abs(cameraBobRef.current) > 0.001) {
+      camera.position.y -= cameraBobRef.current;
     }
 
     // 5. Plague exposure check (once per second)
@@ -1934,40 +2311,41 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   return (
     <>
-      {cameraMode !== CameraMode.FIRST_PERSON ? (
-        <OrbitControls
-          ref={orbitRef}
-          makeDefault
-          minDistance={
-            cameraMode === CameraMode.OVERHEAD ? 12 :
-            cameraMode === CameraMode.OVER_SHOULDER ? 7 :
-            7
-          }
-          maxDistance={
-            cameraMode === CameraMode.OVERHEAD ? 120 :
-            cameraMode === CameraMode.OVER_SHOULDER ? 18 :
-            50
-          }
-          minPolarAngle={
-            cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
-            cameraMode === CameraMode.OVER_SHOULDER ? 0.5 :
-            0.1
-          }
-          maxPolarAngle={
-            cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
-            cameraMode === CameraMode.OVER_SHOULDER ? Math.PI / 1.7 :
-            Math.PI / 2.1
-          }
-          enablePan={cameraMode === CameraMode.OVERHEAD}
-          enableRotate={cameraMode === CameraMode.THIRD_PERSON}
-          enableDamping
-          dampingFactor={ORBIT_DAMPING}
-          screenSpacePanning={cameraMode === CameraMode.OVERHEAD}
-          mouseButtons={cameraMode === CameraMode.OVERHEAD ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN } : undefined}
-        />
-      ) : (
-        <PointerLockControls ref={pointerRef} makeDefault />
-      )}
+      <OrbitControls
+        ref={orbitRef}
+        makeDefault
+        enabled={cameraMode !== CameraMode.FIRST_PERSON}
+        minDistance={
+          cameraMode === CameraMode.OVERHEAD ? 12 :
+          cameraMode === CameraMode.OVER_SHOULDER ? 4 :
+          7
+        }
+        maxDistance={
+          cameraMode === CameraMode.OVERHEAD ? 120 :
+          cameraMode === CameraMode.OVER_SHOULDER ? 10 :
+          50
+        }
+        minPolarAngle={
+          cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
+          cameraMode === CameraMode.OVER_SHOULDER ? 0.5 :
+          0.1
+        }
+        maxPolarAngle={
+          cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
+          cameraMode === CameraMode.OVER_SHOULDER ? Math.PI / 1.7 :
+          Math.PI / 2.1
+        }
+        enablePan={cameraMode === CameraMode.OVERHEAD}
+        enableRotate={cameraMode === CameraMode.THIRD_PERSON}
+        enableDamping
+        dampingFactor={ORBIT_DAMPING}
+        screenSpacePanning={cameraMode === CameraMode.OVERHEAD}
+        mouseButtons={
+          cameraMode === CameraMode.OVERHEAD
+            ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
+            : undefined
+        }
+      />
       <group ref={group} position={initialPosition}>
         {cameraMode !== CameraMode.FIRST_PERSON && (
           <Humanoid

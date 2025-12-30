@@ -40,66 +40,54 @@ const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
 
 // Sound configuration per biome
 interface BiomeProfile {
-  water: number;        // Fountain/water sounds
-  chickens: number;     // Clucking
-  dogs: number;         // Barking
-  donkeys: number;      // Braying
-  hammering: number;    // Blacksmith
-  babies: number;       // Crying infants
-  droneFreq: number;    // Base atmosphere frequency
-  droneLevel: number;   // Atmospheric drone level
+  conversation: number;  // Low murmur of voices (unused, kept for compatibility)
+  birds: number;         // Subtle bird chirps
+  hammering: number;     // Blacksmith strikes
+  footsteps: number;     // Occasional footstep sounds
+  wind: number;          // Gentle breeze (unused)
+  merchantCalls: number; // Merchant vocal calls
 }
 
 const BIOME_PROFILES: Record<BiomeType, BiomeProfile> = {
   marketplace: {
-    water: 0.15,
-    chickens: 0.35,
-    dogs: 0.2,
-    donkeys: 0.25,
-    hammering: 0.4,
-    babies: 0.05,
-    droneFreq: 90,
-    droneLevel: 0.08,
+    conversation: 0.6,   // Busy market chatter
+    birds: 0.3,          // Some birds
+    hammering: 0.5,      // Active blacksmithing
+    footsteps: 0.4,      // People walking
+    wind: 0.1,           // Minimal wind
+    merchantCalls: 0.5,  // Active merchant calls
   },
   wealthy: {
-    water: 0.7,
-    chickens: 0,
-    dogs: 0.05,
-    donkeys: 0,
-    hammering: 0,
-    babies: 0,
-    droneFreq: 65,
-    droneLevel: 0.12,
+    conversation: 0.2,   // Quiet, refined
+    birds: 0.6,          // Lots of birdsong
+    hammering: 0,        // No crafts
+    footsteps: 0.15,     // Few people
+    wind: 0.2,           // Gentle breeze
+    merchantCalls: 0,    // No merchants
   },
   hovels: {
-    water: 0,
-    chickens: 0.25,
-    dogs: 0.4,
-    donkeys: 0.1,
-    hammering: 0.15,
-    babies: 0.4,
-    droneFreq: 80,
-    droneLevel: 0.1,
+    conversation: 0.35,  // Some activity
+    birds: 0.15,         // Few birds
+    hammering: 0.25,     // Some crafts
+    footsteps: 0.3,      // Moderate traffic
+    wind: 0.15,          // Normal wind
+    merchantCalls: 0.1,  // Occasional street vendors
   },
   desert: {
-    water: 0,
-    chickens: 0,
-    dogs: 0.08,
-    donkeys: 0.15,
-    hammering: 0,
-    babies: 0,
-    droneFreq: 50,
-    droneLevel: 0.15,
+    conversation: 0.05,  // Very sparse
+    birds: 0.2,          // Occasional desert birds
+    hammering: 0,        // No industry
+    footsteps: 0.1,      // Few travelers
+    wind: 0.7,           // Strong wind
+    merchantCalls: 0,    // No merchants
   },
   civic: {
-    water: 0.4,
-    chickens: 0,
-    dogs: 0.03,
-    donkeys: 0,
-    hammering: 0,
-    babies: 0,
-    droneFreq: 55,
-    droneLevel: 0.1,
+    conversation: 0.3,   // Moderate public space
+    birds: 0.4,          // Pleasant birdsong
+    hammering: 0,        // No crafts
+    footsteps: 0.25,     // Some foot traffic
+    wind: 0.2,           // Gentle wind
+    merchantCalls: 0,    // No merchants
   },
 };
 
@@ -108,40 +96,29 @@ export class BiomeLayer implements SoundLayer {
 
   private ctx: AudioContext;
   private output: GainNode;
-  private volume: number = 0.12;
+  private volume: number = 0.15;
   private isPlaying: boolean = false;
 
   // Current state
   private currentBiome: BiomeType = 'marketplace';
   private currentProfile: BiomeProfile = BIOME_PROFILES.marketplace;
 
-  // Water sounds
-  private waterNoise: AudioBufferSourceNode | null = null;
-  private waterFilter: BiquadFilterNode;
-  private waterGain: GainNode;
-  private waterLfo: OscillatorNode | null = null;
+  // No continuous background sounds - only occasional discrete sounds
 
-  // Atmospheric drone
-  private droneOsc1: OscillatorNode | null = null;
-  private droneOsc2: OscillatorNode | null = null;
-  private droneGain: GainNode;
-  private droneLfo: OscillatorNode | null = null;
-
-  // Timing for sporadic sounds
-  private lastChickenTime: number = 0;
-  private lastDogTime: number = 0;
-  private lastDonkeyTime: number = 0;
+  // Timing for occasional sounds
+  private lastBirdTime: number = 0;
   private lastHammerTime: number = 0;
-  private lastBabyTime: number = 0;
-  private lastDripTime: number = 0;
+  private lastFootstepTime: number = 0;
+  private lastMerchantCallTime: number = 0;
 
-  // Minimum intervals (ms) - converted from ctx.currentTime
-  private readonly CHICKEN_MIN_INTERVAL = 4000;
-  private readonly DOG_MIN_INTERVAL = 10000;
-  private readonly DONKEY_MIN_INTERVAL = 25000;
-  private readonly HAMMER_MIN_INTERVAL = 6000;
-  private readonly BABY_MIN_INTERVAL = 20000;
-  private readonly DRIP_MIN_INTERVAL = 800;
+  // Minimum intervals (ms) - more frequent for pleasant ambience
+  private readonly BIRD_MIN_INTERVAL = 3000;
+  private readonly HAMMER_MIN_INTERVAL = 3000;
+  private readonly FOOTSTEP_MIN_INTERVAL = 2000;
+  private readonly MERCHANT_MIN_INTERVAL = 5000;
+
+  // Distance-based attenuation
+  private readonly MAX_ACTIVITY_DISTANCE = 120; // Units from center where sounds fade to zero
 
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
@@ -150,21 +127,7 @@ export class BiomeLayer implements SoundLayer {
     this.output = ctx.createGain();
     this.output.gain.value = this.volume;
 
-    // Water chain
-    this.waterFilter = ctx.createBiquadFilter();
-    this.waterFilter.type = 'bandpass';
-    this.waterFilter.frequency.value = 2000;
-    this.waterFilter.Q.value = 0.8;
-
-    this.waterGain = ctx.createGain();
-    this.waterGain.gain.value = 0;
-    this.waterFilter.connect(this.waterGain);
-    this.waterGain.connect(this.output);
-
-    // Drone chain
-    this.droneGain = ctx.createGain();
-    this.droneGain.gain.value = 0;
-    this.droneGain.connect(this.output);
+    // No continuous sounds - everything goes directly to output
   }
 
   connect(destination: AudioNode): void {
@@ -186,15 +149,10 @@ export class BiomeLayer implements SoundLayer {
     if (this.isPlaying) return;
     this.isPlaying = true;
 
-    // Start water
-    this.setupWater();
-
-    // Start drone
-    this.setupDrone();
-
+    // No continuous sounds to start - just enable the layer
     // Fade in
     this.output.gain.setValueAtTime(0, this.ctx.currentTime);
-    this.output.gain.linearRampToValueAtTime(this.volume, this.ctx.currentTime + 2);
+    this.output.gain.linearRampToValueAtTime(this.volume, this.ctx.currentTime + 1);
   }
 
   stop(): void {
@@ -225,117 +183,53 @@ export class BiomeLayer implements SoundLayer {
       this.transitionToBiome(newBiome);
     }
 
+    // Calculate distance from map center for activity attenuation
+    const [px, py, pz] = state.playerPosition;
+    const distanceFromCenter = Math.sqrt(px * px + pz * pz); // XZ plane distance
+
+    // Sounds get quieter and less frequent as player moves away from center
+    // Full volume at center, fades to 0 at MAX_ACTIVITY_DISTANCE
+    const distanceMult = Math.max(0, 1 - (distanceFromCenter / this.MAX_ACTIVITY_DISTANCE));
+
     // Interior dampening
-    const interiorMult = state.sceneMode === 'interior' ? 0.15 : 1.0;
+    const interiorMult = state.sceneMode === 'interior' ? 0.2 : 1.0;
 
     // Night reduction (less activity sounds at night)
     const isNight = state.timeOfDay < 6 || state.timeOfDay > 21;
-    const nightMult = isNight ? 0.2 : 1.0;
+    const nightMult = isNight ? 0.3 : 1.0;
 
     const profile = this.currentProfile;
 
-    // Update water level
-    const waterTarget = profile.water * 0.08 * interiorMult;
-    this.waterGain.gain.setTargetAtTime(waterTarget, now, 1);
+    // Apply distance attenuation to master volume
+    const totalMult = interiorMult * distanceMult;
+    this.output.gain.setTargetAtTime(this.volume * totalMult, now, 0.3);
 
-    // Update drone
-    const droneTarget = profile.droneLevel * 0.05 * interiorMult;
-    this.droneGain.gain.setTargetAtTime(droneTarget, now, 2);
+    // No continuous background sounds - only occasional discrete sounds
+    // This eliminates the "shush-shush" filtered noise entirely
 
-    // Maybe update drone frequency (smooth transition)
-    if (this.droneOsc1) {
-      this.droneOsc1.frequency.setTargetAtTime(profile.droneFreq, now, 3);
-    }
-    if (this.droneOsc2) {
-      this.droneOsc2.frequency.setTargetAtTime(profile.droneFreq * 1.5, now, 3);
-    }
-
-    // Sporadic sounds (only outdoors, modulated by time)
-    if (state.sceneMode === 'outdoor') {
-      // Chickens
-      if (profile.chickens > 0 && !isNight) {
-        this.maybePlayChicken(nowMs, profile.chickens * nightMult);
-      }
-
-      // Dogs
-      if (profile.dogs > 0) {
-        this.maybePlayDog(nowMs, profile.dogs * nightMult * 0.7);
-      }
-
-      // Donkeys
-      if (profile.donkeys > 0 && !isNight) {
-        this.maybePlayDonkey(nowMs, profile.donkeys * nightMult);
+    // Occasional sounds (only outdoors, modulated by time and distance)
+    if (state.sceneMode === 'outdoor' && distanceMult > 0.05) {
+      // Birds (daytime only)
+      if (profile.birds > 0 && !isNight) {
+        this.maybePlayBird(nowMs, profile.birds * distanceMult);
       }
 
       // Hammering (only during work hours)
       const isWorkHours = state.timeOfDay >= 7 && state.timeOfDay <= 18;
       if (profile.hammering > 0 && isWorkHours) {
-        this.maybePlayHammer(nowMs, profile.hammering);
+        this.maybePlayHammer(nowMs, profile.hammering * distanceMult);
       }
 
-      // Babies (any time, but less at night)
-      if (profile.babies > 0) {
-        this.maybePlayBaby(nowMs, profile.babies * (isNight ? 0.3 : 1));
+      // Footsteps (less at night)
+      if (profile.footsteps > 0) {
+        this.maybePlayFootstep(nowMs, profile.footsteps * nightMult * distanceMult);
       }
 
-      // Water drips
-      if (profile.water > 0.3) {
-        this.maybePlayDrip(nowMs, profile.water);
+      // Merchant calls (work hours, louder in marketplace)
+      if (profile.merchantCalls > 0 && isWorkHours) {
+        this.maybePlayMerchantCall(nowMs, profile.merchantCalls * distanceMult);
       }
     }
-  }
-
-  private setupWater(): void {
-    const buffer = getSharedNoiseBuffer(this.ctx);
-    this.waterNoise = this.ctx.createBufferSource();
-    this.waterNoise.buffer = buffer;
-    this.waterNoise.loop = true;
-    this.waterNoise.connect(this.waterFilter);
-    this.waterNoise.start();
-
-    // LFO for water variation
-    this.waterLfo = this.ctx.createOscillator();
-    this.waterLfo.frequency.value = 1.2;
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = 600;
-    this.waterLfo.connect(lfoGain);
-    lfoGain.connect(this.waterFilter.frequency);
-    this.waterLfo.start();
-  }
-
-  private setupDrone(): void {
-    const freq = this.currentProfile.droneFreq;
-
-    // Root tone
-    this.droneOsc1 = this.ctx.createOscillator();
-    this.droneOsc1.frequency.value = freq;
-    this.droneOsc1.type = 'sine';
-
-    // Fifth
-    this.droneOsc2 = this.ctx.createOscillator();
-    this.droneOsc2.frequency.value = freq * 1.5;
-    this.droneOsc2.type = 'sine';
-
-    // Lowpass for warmth
-    const droneFilter = this.ctx.createBiquadFilter();
-    droneFilter.type = 'lowpass';
-    droneFilter.frequency.value = 200;
-
-    this.droneOsc1.connect(droneFilter);
-    this.droneOsc2.connect(droneFilter);
-    droneFilter.connect(this.droneGain);
-
-    // Slow LFO for subtle movement
-    this.droneLfo = this.ctx.createOscillator();
-    this.droneLfo.frequency.value = 0.06;
-    const lfoGain = this.ctx.createGain();
-    lfoGain.gain.value = freq * 0.02;
-    this.droneLfo.connect(lfoGain);
-    lfoGain.connect(this.droneOsc1.frequency);
-
-    this.droneOsc1.start();
-    this.droneOsc2.start();
-    this.droneLfo.start();
   }
 
   private transitionToBiome(biome: BiomeType): void {
@@ -343,180 +237,84 @@ export class BiomeLayer implements SoundLayer {
     // Could add more complex transition logic here if needed
   }
 
-  // --- Sporadic Sound Generators ---
+  // --- Pleasant Sporadic Sound Generators ---
 
-  private maybePlayChicken(nowMs: number, probability: number): void {
-    if (nowMs - this.lastChickenTime < this.CHICKEN_MIN_INTERVAL) return;
-    if (Math.random() > probability * 0.015) return;
+  private maybePlayBird(nowMs: number, probability: number): void {
+    if (nowMs - this.lastBirdTime < this.BIRD_MIN_INTERVAL) return;
+    if (Math.random() > probability * 0.03) return; // Increased from 0.01
 
-    this.lastChickenTime = nowMs;
-    this.playChicken();
+    this.lastBirdTime = nowMs;
+    this.playBird();
   }
 
-  private playChicken(): void {
+  private playBird(): void {
     const now = this.ctx.currentTime;
-    const numClucks = 2 + Math.floor(Math.random() * 4);
+    const numChirps = 1 + Math.floor(Math.random() * 3);
 
-    for (let i = 0; i < numClucks; i++) {
-      const startTime = now + i * (0.08 + Math.random() * 0.05);
+    for (let i = 0; i < numChirps; i++) {
+      const startTime = now + i * (0.15 + Math.random() * 0.1);
 
+      // Sweet chirping sound - higher frequency, pleasant
       const osc = this.ctx.createOscillator();
-      osc.frequency.setValueAtTime(800 + Math.random() * 400, startTime);
-      osc.frequency.exponentialRampToValueAtTime(400, startTime + 0.05);
-      osc.type = 'triangle';
-
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.value = 1200;
-      filter.Q.value = 4;
+      osc.frequency.setValueAtTime(2000 + Math.random() * 1500, startTime);
+      osc.frequency.exponentialRampToValueAtTime(1800 + Math.random() * 800, startTime + 0.08);
+      osc.type = 'sine'; // Pure tone for pleasant chirp
 
       const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.04, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.06);
+      gain.gain.setValueAtTime(0.025, startTime); // Slightly louder for audibility
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.1);
 
       const panner = this.ctx.createStereoPanner();
-      panner.pan.value = (Math.random() - 0.5) * 0.6;
+      panner.pan.value = (Math.random() - 0.5) * 0.8;
 
-      osc.connect(filter);
-      filter.connect(gain);
+      osc.connect(gain);
       gain.connect(panner);
       panner.connect(this.output);
 
       osc.start(startTime);
-      osc.stop(startTime + 0.1);
+      osc.stop(startTime + 0.12);
 
       osc.onended = () => {
         osc.disconnect();
-        filter.disconnect();
         gain.disconnect();
         panner.disconnect();
       };
     }
   }
 
-  private maybePlayDog(nowMs: number, probability: number): void {
-    if (nowMs - this.lastDogTime < this.DOG_MIN_INTERVAL) return;
-    if (Math.random() > probability * 0.008) return;
+  private maybePlayFootstep(nowMs: number, probability: number): void {
+    if (nowMs - this.lastFootstepTime < this.FOOTSTEP_MIN_INTERVAL) return;
+    if (Math.random() > probability * 0.025) return; // Increased from 0.012
 
-    this.lastDogTime = nowMs;
-    this.playDog();
+    this.lastFootstepTime = nowMs;
+    this.playFootstep();
   }
 
-  private playDog(): void {
+  private playFootstep(): void {
     const now = this.ctx.currentTime;
-    const numBarks = 1 + Math.floor(Math.random() * 3);
 
-    for (let i = 0; i < numBarks; i++) {
-      const startTime = now + i * 0.25;
-
-      // Noise burst for bark texture
-      const noiseBuffer = this.ctx.createBuffer(1, this.ctx.sampleRate * 0.15, this.ctx.sampleRate);
-      const noiseData = noiseBuffer.getChannelData(0);
-      for (let j = 0; j < noiseData.length; j++) {
-        noiseData[j] = (Math.random() * 2 - 1) * Math.exp(-j / (noiseData.length * 0.3));
-      }
-
-      const noise = this.ctx.createBufferSource();
-      noise.buffer = noiseBuffer;
-
-      const formant = this.ctx.createBiquadFilter();
-      formant.type = 'bandpass';
-      formant.frequency.value = 400 + Math.random() * 200;
-      formant.Q.value = 3;
-
-      // Tonal component
-      const osc = this.ctx.createOscillator();
-      osc.frequency.setValueAtTime(200 + Math.random() * 100, startTime);
-      osc.frequency.exponentialRampToValueAtTime(150, startTime + 0.12);
-      osc.type = 'sawtooth';
-
-      const oscFilter = this.ctx.createBiquadFilter();
-      oscFilter.type = 'lowpass';
-      oscFilter.frequency.value = 600;
-
-      const mixer = this.ctx.createGain();
-      mixer.gain.setValueAtTime(0.05, startTime);
-      mixer.gain.exponentialRampToValueAtTime(0.001, startTime + 0.15);
-
-      const panner = this.ctx.createStereoPanner();
-      panner.pan.value = (Math.random() - 0.5) * 0.8;
-
-      noise.connect(formant);
-      formant.connect(mixer);
-      osc.connect(oscFilter);
-      oscFilter.connect(mixer);
-      mixer.connect(panner);
-      panner.connect(this.output);
-
-      noise.start(startTime);
-      osc.start(startTime);
-      osc.stop(startTime + 0.2);
-
-      osc.onended = () => {
-        osc.disconnect();
-        oscFilter.disconnect();
-        noise.disconnect();
-        formant.disconnect();
-        mixer.disconnect();
-        panner.disconnect();
-      };
-    }
-  }
-
-  private maybePlayDonkey(nowMs: number, probability: number): void {
-    if (nowMs - this.lastDonkeyTime < this.DONKEY_MIN_INTERVAL) return;
-    if (Math.random() > probability * 0.003) return;
-
-    this.lastDonkeyTime = nowMs;
-    this.playDonkey();
-  }
-
-  private playDonkey(): void {
-    const now = this.ctx.currentTime;
-    const duration = 1.5 + Math.random() * 1;
-
-    // Inhale (hee)
-    const osc1 = this.ctx.createOscillator();
-    osc1.frequency.setValueAtTime(200, now);
-    osc1.frequency.linearRampToValueAtTime(400, now + duration * 0.4);
-    osc1.type = 'sawtooth';
-
-    // Exhale (haw)
-    const osc2 = this.ctx.createOscillator();
-    osc2.frequency.setValueAtTime(400, now + duration * 0.4);
-    osc2.frequency.linearRampToValueAtTime(150, now + duration);
-    osc2.type = 'sawtooth';
-
-    const filter = this.ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(600, now);
-    filter.frequency.linearRampToValueAtTime(1200, now + duration * 0.4);
-    filter.frequency.linearRampToValueAtTime(400, now + duration);
+    // Simple, subtle footstep - just a brief low thump
+    const osc = this.ctx.createOscillator();
+    osc.frequency.setValueAtTime(120 + Math.random() * 80, now);
+    osc.frequency.exponentialRampToValueAtTime(60, now + 0.05);
+    osc.type = 'sine';
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.04, now + 0.1);
-    gain.gain.setValueAtTime(0.04, now + duration - 0.2);
-    gain.gain.linearRampToValueAtTime(0, now + duration);
+    gain.gain.setValueAtTime(0.012, now); // Very quiet
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
 
     const panner = this.ctx.createStereoPanner();
-    panner.pan.value = (Math.random() - 0.5) * 0.7;
+    panner.pan.value = (Math.random() - 0.5) * 0.6;
 
-    osc1.connect(filter);
-    osc2.connect(filter);
-    filter.connect(gain);
+    osc.connect(gain);
     gain.connect(panner);
     panner.connect(this.output);
 
-    osc1.start(now);
-    osc2.start(now);
-    osc1.stop(now + duration + 0.1);
-    osc2.stop(now + duration + 0.1);
+    osc.start(now);
+    osc.stop(now + 0.1);
 
-    osc2.onended = () => {
-      osc1.disconnect();
-      osc2.disconnect();
-      filter.disconnect();
+    osc.onended = () => {
+      osc.disconnect();
       gain.disconnect();
       panner.disconnect();
     };
@@ -524,7 +322,7 @@ export class BiomeLayer implements SoundLayer {
 
   private maybePlayHammer(nowMs: number, probability: number): void {
     if (nowMs - this.lastHammerTime < this.HAMMER_MIN_INTERVAL) return;
-    if (Math.random() > probability * 0.012) return;
+    if (Math.random() > probability * 0.02) return; // Increased from 0.012
 
     this.lastHammerTime = nowMs;
     this.playHammerSequence();
@@ -582,133 +380,78 @@ export class BiomeLayer implements SoundLayer {
     };
   }
 
-  private maybePlayBaby(nowMs: number, probability: number): void {
-    if (nowMs - this.lastBabyTime < this.BABY_MIN_INTERVAL) return;
-    if (Math.random() > probability * 0.004) return;
+  private maybePlayMerchantCall(nowMs: number, probability: number): void {
+    if (nowMs - this.lastMerchantCallTime < this.MERCHANT_MIN_INTERVAL) return;
+    if (Math.random() > probability * 0.015) return; // Lower probability for less frequent calls
 
-    this.lastBabyTime = nowMs;
-    this.playBaby();
+    this.lastMerchantCallTime = nowMs;
+    this.playMerchantCall();
   }
 
-  private playBaby(): void {
+  private playMerchantCall(): void {
     const now = this.ctx.currentTime;
-    const duration = 1 + Math.random() * 1.5;
+    const duration = 0.3 + Math.random() * 0.4;
+    const baseFreq = 150 + Math.random() * 100; // Male voice range
 
+    // Simple vowel synthesis for merchant call
     const osc = this.ctx.createOscillator();
-    osc.frequency.value = 400 + Math.random() * 100;
+    osc.frequency.value = baseFreq;
     osc.type = 'sawtooth';
 
-    // Vibrato
-    const vib = this.ctx.createOscillator();
-    const vibGain = this.ctx.createGain();
-    vib.frequency.value = 6;
-    vibGain.gain.value = 25;
-    vib.connect(vibGain);
-    vibGain.connect(osc.frequency);
+    // Formant filters for vowel sounds (creates "aaa", "eee", "ooo" sounds)
+    const vowels = [
+      [700, 1200, 2500], // 'a'
+      [400, 2000, 2600], // 'e'
+      [300, 900, 2200],  // 'o'
+    ];
+    const vowel = vowels[Math.floor(Math.random() * vowels.length)];
 
-    // Formants for crying sound
-    const formant1 = this.ctx.createBiquadFilter();
-    formant1.type = 'bandpass';
-    formant1.frequency.value = 800;
-    formant1.Q.value = 5;
+    const filters: BiquadFilterNode[] = [];
+    vowel.forEach(freq => {
+      const f = this.ctx.createBiquadFilter();
+      f.type = 'bandpass';
+      f.frequency.value = freq;
+      f.Q.value = 8;
+      filters.push(f);
+    });
 
-    const formant2 = this.ctx.createBiquadFilter();
-    formant2.type = 'bandpass';
-    formant2.frequency.value = 1800;
-    formant2.Q.value = 4;
+    const merger = this.ctx.createGain();
+    merger.gain.value = 0.08; // Moderate volume
 
-    // Warbling envelope
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0, now);
+    filters.forEach(f => {
+      osc.connect(f);
+      f.connect(merger);
+    });
 
-    const numWarbles = Math.floor(duration / 0.25);
-    for (let i = 0; i < numWarbles; i++) {
-      const t = now + i * 0.25;
-      gain.gain.linearRampToValueAtTime(0.03, t + 0.04);
-      gain.gain.linearRampToValueAtTime(0.01, t + 0.2);
-    }
-    gain.gain.linearRampToValueAtTime(0, now + duration);
+    // Envelope for natural attack/decay
+    const env = this.ctx.createGain();
+    env.gain.setValueAtTime(0, now);
+    env.gain.linearRampToValueAtTime(1, now + 0.05);
+    env.gain.setValueAtTime(1, now + duration - 0.1);
+    env.gain.linearRampToValueAtTime(0, now + duration);
 
+    // Stereo panning for spatial variation
     const panner = this.ctx.createStereoPanner();
-    panner.pan.value = (Math.random() - 0.5) * 0.5;
+    panner.pan.value = (Math.random() - 0.5) * 0.7;
 
-    osc.connect(formant1);
-    osc.connect(formant2);
-    formant1.connect(gain);
-    formant2.connect(gain);
-    gain.connect(panner);
+    merger.connect(env);
+    env.connect(panner);
     panner.connect(this.output);
 
     osc.start(now);
-    vib.start(now);
     osc.stop(now + duration + 0.1);
-    vib.stop(now + duration + 0.1);
 
     osc.onended = () => {
       osc.disconnect();
-      vib.disconnect();
-      vibGain.disconnect();
-      formant1.disconnect();
-      formant2.disconnect();
-      gain.disconnect();
+      filters.forEach(f => f.disconnect());
+      merger.disconnect();
+      env.disconnect();
       panner.disconnect();
     };
   }
 
-  private maybePlayDrip(nowMs: number, waterLevel: number): void {
-    if (nowMs - this.lastDripTime < this.DRIP_MIN_INTERVAL) return;
-    if (Math.random() > waterLevel * 0.03) return;
-
-    this.lastDripTime = nowMs;
-
-    const now = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    osc.frequency.setValueAtTime(2000 + Math.random() * 1000, now);
-    osc.frequency.exponentialRampToValueAtTime(400, now + 0.08);
-    osc.type = 'sine';
-
-    const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(0.02, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
-
-    osc.connect(gain);
-    gain.connect(this.output);
-
-    osc.start(now);
-    osc.stop(now + 0.15);
-
-    osc.onended = () => {
-      osc.disconnect();
-      gain.disconnect();
-    };
-  }
-
   private cleanup(): void {
-    if (this.waterNoise) {
-      try { this.waterNoise.stop(); } catch {}
-      this.waterNoise.disconnect();
-      this.waterNoise = null;
-    }
-    if (this.waterLfo) {
-      try { this.waterLfo.stop(); } catch {}
-      this.waterLfo.disconnect();
-      this.waterLfo = null;
-    }
-    if (this.droneOsc1) {
-      try { this.droneOsc1.stop(); } catch {}
-      this.droneOsc1.disconnect();
-      this.droneOsc1 = null;
-    }
-    if (this.droneOsc2) {
-      try { this.droneOsc2.stop(); } catch {}
-      this.droneOsc2.disconnect();
-      this.droneOsc2 = null;
-    }
-    if (this.droneLfo) {
-      try { this.droneLfo.stop(); } catch {}
-      this.droneLfo.disconnect();
-      this.droneLfo = null;
-    }
+    // No continuous sounds to clean up
+    // All sporadic sounds clean up after themselves via onended callbacks
   }
 }

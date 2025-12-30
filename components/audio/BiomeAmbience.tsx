@@ -44,11 +44,11 @@ interface AmbienceConfig {
 
 const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
   marketplace: {
-    crowdMurmur: 0.6,
+    crowdMurmur: 0,  // DISABLED - was creating "shush-shush" noise
     merchantCalls: 0.5,
     footsteps: 0.4,
-    water: 0.15,
-    wind: 0.1,
+    water: 0,  // DISABLED - LFO modulation creates shush
+    wind: 0,  // DISABLED - filtered noise creates shush
     birds: 0.2,
     dogs: 0.15,
     chickens: 0.3,
@@ -56,7 +56,7 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     hammersmith: 0.35,
     coughing: 0.1,
     babies: 0.1,
-    drone: 0.15,
+    drone: 0,  // DISABLED - continuous drone
     crowdDensity: 0.8,
     reverbAmount: 0.25,
     windIntensity: 0.3,
@@ -64,11 +64,11 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     description: 'Bustling bazaar with merchants, animals, and crowds',
   },
   wealthy: {
-    crowdMurmur: 0.15,
+    crowdMurmur: 0,  // DISABLED - creating shush noise
     merchantCalls: 0,
     footsteps: 0.2,
-    water: 0.7,
-    wind: 0.2,
+    water: 0,  // DISABLED - LFO modulation creates shush
+    wind: 0,  // DISABLED - filtered noise creates shush
     birds: 0.6,
     dogs: 0.05,
     chickens: 0,
@@ -76,7 +76,7 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     hammersmith: 0,
     coughing: 0,
     babies: 0,
-    drone: 0.2,
+    drone: 0,  // DISABLED - continuous drone
     crowdDensity: 0.2,
     reverbAmount: 0.4,
     windIntensity: 0.2,
@@ -84,11 +84,11 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     description: 'Tranquil courtyards with fountains and birdsong',
   },
   hovels: {
-    crowdMurmur: 0.5,
+    crowdMurmur: 0,  // DISABLED - creating shush noise
     merchantCalls: 0.1,
     footsteps: 0.3,
     water: 0,
-    wind: 0.15,
+    wind: 0,  // DISABLED - filtered noise creates shush
     birds: 0.1,
     dogs: 0.4,
     chickens: 0.25,
@@ -96,7 +96,7 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     hammersmith: 0.15,
     coughing: 0.4,
     babies: 0.35,
-    drone: 0.25,
+    drone: 0,  // DISABLED - continuous drone
     crowdDensity: 0.7,
     reverbAmount: 0.15,
     windIntensity: 0.25,
@@ -108,7 +108,7 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     merchantCalls: 0,
     footsteps: 0.1,
     water: 0,
-    wind: 0.85,
+    wind: 0,  // DISABLED - even though this is desert, the filtered noise creates shush
     birds: 0.15,
     dogs: 0.05,
     chickens: 0,
@@ -116,7 +116,7 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     hammersmith: 0,
     coughing: 0,
     babies: 0,
-    drone: 0.4,
+    drone: 0,  // DISABLED - continuous drone
     crowdDensity: 0,
     reverbAmount: 0.5,
     windIntensity: 0.9,
@@ -124,11 +124,11 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     description: 'Vast emptiness with wind and distant sounds',
   },
   civic: {
-    crowdMurmur: 0.25,
+    crowdMurmur: 0,  // DISABLED - creating shush noise
     merchantCalls: 0,
     footsteps: 0.35,
-    water: 0.3,
-    wind: 0.15,
+    water: 0,  // DISABLED - LFO modulation creates shush
+    wind: 0,  // DISABLED - filtered noise creates shush
     birds: 0.25,
     dogs: 0.05,
     chickens: 0,
@@ -136,7 +136,7 @@ const AMBIENCE_CONFIGS: Record<BiomeType, AmbienceConfig> = {
     hammersmith: 0,
     coughing: 0.05,
     babies: 0,
-    drone: 0.3,
+    drone: 0,  // DISABLED - continuous drone
     crowdDensity: 0.35,
     reverbAmount: 0.55,
     windIntensity: 0.15,

@@ -34,9 +34,9 @@ interface EncounterModalProps {
   conversationHistory: ConversationSummary[];
   onClose: () => void;
   /** Called when conversation ends with both summary and impact */
-  onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact) => void;
+  onConversationResult: (npcId: string, summary: ConversationSummary, impact: ConversationImpact, meta?: { action?: ConversationAction }) => void;
   /** Called when NPC triggers an event (e.g., end_conversation triggers npc_dismissed_player event) */
-  onTriggerEvent?: (eventId: string, context?: { npcId: string; npcName: string }) => void;
+  onTriggerEvent?: (eventId: string, context?: { npcId: string; npcName: string }, delayMs?: number) => void;
   /** If true, the NPC approached the player (not vice versa) - uses different greeting style */
   isNPCInitiated?: boolean;
   /** If true, the player insisted on following the NPC after being dismissed - NPC is now angry/fearful */
@@ -44,10 +44,21 @@ interface EncounterModalProps {
 }
 
 // Animated portrait wrapper with lifelike breathing, speaking, and idle animations
+type EmotionType = 'neutral' | 'annoyed' | 'angry' | 'fearful' | 'warm' | 'sad' | 'alert';
+
+interface EmotionSignal {
+  type: EmotionType;
+  intensity: 0 | 1 | 2;
+  ttlMs: number;
+  source: 'action' | 'impact' | 'llm' | 'system';
+  startedAt: number;
+}
+
 const AnimatedPortrait: React.FC<{
   npc: NPCStats;
   isSpeaking: boolean;
-}> = ({ npc, isSpeaking }) => {
+  emotion: EmotionSignal;
+}> = ({ npc, isSpeaking, emotion }) => {
   const groupRef = useRef<THREE.Group>(null);
 
   // Animation state refs
@@ -99,6 +110,27 @@ const AnimatedPortrait: React.FC<{
       Math.max(0, 1 - emphasisTimer.current * 3) : 0;
     if (emphasisAmount <= 0) emphasisActive.current = false;
 
+    // === EMOTION POSE OFFSETS ===
+    const intensity = emotion.intensity / 2;
+    const emotionPose = (() => {
+      switch (emotion.type) {
+        case 'angry':
+          return { tiltX: 0.05 * intensity, tiltY: 0.04 * intensity, tiltZ: 0.015 * intensity, leanZ: 0.02 * intensity, liftY: -0.004 * intensity };
+        case 'annoyed':
+          return { tiltX: 0.02 * intensity, tiltY: 0.03 * intensity, tiltZ: 0.02 * intensity, leanZ: 0.01 * intensity, liftY: -0.002 * intensity };
+        case 'fearful':
+          return { tiltX: -0.04 * intensity, tiltY: -0.03 * intensity, tiltZ: -0.015 * intensity, leanZ: -0.02 * intensity, liftY: 0.003 * intensity };
+        case 'warm':
+          return { tiltX: 0.01 * intensity, tiltY: -0.02 * intensity, tiltZ: 0, leanZ: 0.008 * intensity, liftY: 0.002 * intensity };
+        case 'sad':
+          return { tiltX: -0.03 * intensity, tiltY: 0, tiltZ: 0.015 * intensity, leanZ: -0.01 * intensity, liftY: -0.003 * intensity };
+        case 'alert':
+          return { tiltX: 0.015 * intensity, tiltY: 0.02 * intensity, tiltZ: 0, leanZ: 0.01 * intensity, liftY: 0.004 * intensity };
+        default:
+          return { tiltX: 0, tiltY: 0, tiltZ: 0, leanZ: 0, liftY: 0 };
+      }
+    })();
+
     // === CALCULATE FINAL TRANSFORMS ===
     const speak = speakIntensity.current;
     const nodAmount = Math.sin(headNodPhase.current) * 0.025 * speak;
@@ -108,14 +140,14 @@ const AnimatedPortrait: React.FC<{
 
     groupRef.current.position.set(
       swayAmount + idleShift,
-      -1.65 + breathY + emphasisAmount * 0.01,
-      emphasisLean
+      -1.65 + breathY + emphasisAmount * 0.01 + emotionPose.liftY,
+      emphasisLean + emotionPose.leanZ
     );
 
     groupRef.current.rotation.set(
-      nodAmount + emphasisLean * 0.5,
-      headTurnCurrent.current + swayAmount * 2,
-      swayAmount * 0.5
+      nodAmount + emphasisLean * 0.5 + emotionPose.tiltX,
+      headTurnCurrent.current + swayAmount * 2 + emotionPose.tiltY,
+      swayAmount * 0.5 + emotionPose.tiltZ
     );
 
     groupRef.current.scale.setScalar(1 + breathAmount);
@@ -219,21 +251,55 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   const [barsAnimated, setBarsAnimated] = useState(false);
   const [nativeLanguageMode, setNativeLanguageMode] = useState(false);
   const [pendingAction, setPendingAction] = useState<ConversationAction>(null);
+  const [emotion, setEmotion] = useState<EmotionSignal>({
+    type: 'neutral',
+    intensity: 0,
+    ttlMs: 0,
+    source: 'system',
+    startedAt: Date.now()
+  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hasSummarizedRef = useRef(false);
+  const emotionTimerRef = useRef<number | null>(null);
 
   // Store the NPC that triggered dismissal for the effect to use
   const dismissingNpcRef = useRef<NPCStats | null>(null);
 
+  const triggerEmotion = useCallback((signal: EmotionSignal) => {
+    setEmotion(signal);
+    if (emotionTimerRef.current) {
+      window.clearTimeout(emotionTimerRef.current);
+      emotionTimerRef.current = null;
+    }
+    if (signal.type !== 'neutral' && signal.ttlMs > 0) {
+      emotionTimerRef.current = window.setTimeout(() => {
+        setEmotion({
+          type: 'neutral',
+          intensity: 0,
+          ttlMs: 0,
+          source: 'system',
+          startedAt: Date.now()
+        });
+      }, signal.ttlMs);
+    }
+  }, []);
+
   // Handle NPC action - just set state, effect will handle the rest
   const handleNPCAction = useCallback((action: ConversationAction, actionNpc: NPCStats) => {
     if (action === 'end_conversation') {
+      triggerEmotion({
+        type: 'angry',
+        intensity: 2,
+        ttlMs: 4000,
+        source: 'action',
+        startedAt: Date.now()
+      });
       dismissingNpcRef.current = actionNpc;
       setPendingAction(action);
     }
-  }, []);
+  }, [triggerEmotion]);
 
   // Build context for conversation
   const context: EncounterContext = {
@@ -266,33 +332,44 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
     npc,
     context,
     onConversationEnd: (result) => {
-      onConversationResult(npc.id, result.summary, result.impact);
+      onConversationResult(npc.id, result.summary, result.impact, { action: pendingAction });
     },
     onNPCAction: handleNPCAction,
     isNPCInitiated
   });
 
-  // Handle NPC dismissal: save conversation summary, then trigger event after delay
+  // Handle NPC dismissal: save conversation summary, then trigger event immediately
   useEffect(() => {
-    if (pendingAction === 'end_conversation' && !hasSummarizedRef.current) {
-      hasSummarizedRef.current = true;
+    if (pendingAction !== 'end_conversation' || hasSummarizedRef.current) return;
 
-      // Save the conversation summary first
-      endConversation();
+    let cancelled = false;
+    hasSummarizedRef.current = true;
 
-      // After delay, trigger the dismissal event
-      const timer = setTimeout(() => {
-        if (onTriggerEvent && dismissingNpcRef.current) {
-          onTriggerEvent('npc_dismissed_player', {
-            npcId: dismissingNpcRef.current.id,
-            npcName: dismissingNpcRef.current.name
-          });
-        }
-      }, 2500); // 2.5 second delay to read the NPC's response
+    const run = async () => {
+      await endConversation();
+      if (cancelled) return;
+      if (onTriggerEvent && dismissingNpcRef.current) {
+        onTriggerEvent('npc_dismissed_player', {
+          npcId: dismissingNpcRef.current.id,
+          npcName: dismissingNpcRef.current.name
+        }, 3000);
+      }
+    };
 
-      return () => clearTimeout(timer);
-    }
+    void run();
+    return () => {
+      cancelled = true;
+    };
   }, [pendingAction, endConversation, onTriggerEvent]);
+
+  useEffect(() => {
+    return () => {
+      if (emotionTimerRef.current) {
+        window.clearTimeout(emotionTimerRef.current);
+        emotionTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Entry animation
   useEffect(() => {
@@ -471,7 +548,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                 {/* Speaking glow effect */}
                 <SpeakingGlow isSpeaking={isLoading} />
                 {/* Animated portrait */}
-                <AnimatedPortrait npc={npc} isSpeaking={isLoading} />
+                <AnimatedPortrait npc={npc} isSpeaking={isLoading} emotion={emotion} />
               </Canvas>
 
               {/* Speaking indicator overlay */}

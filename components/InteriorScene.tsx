@@ -33,12 +33,13 @@ interface InteriorSceneProps {
   npcStateOverride?: NpcStateOverride | null;
   onPlayerPositionUpdate?: (pos: THREE.Vector3) => void;
   dropRequests?: DroppedItemRequest[];
+  observeMode?: boolean;
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null);
@@ -381,13 +382,14 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         const item = createPushable(
           drop.id,
           'droppedItem',
-          drop.position,
+          [drop.position[0], drop.position[1] + 1.6, drop.position[2]],
           0.25,
           0.4,
           Math.random() * Math.PI * 2,
-          'cloth',
+          drop.material ?? 'cloth',
           drop.appearance
         );
+        item.velocity.set((Math.random() - 0.5) * 0.6, 0, (Math.random() - 0.5) * 0.6);
         item.pickup = { type: 'item', label: drop.label, itemId: drop.itemId };
         next.push(item);
         processedDropsRef.current.add(drop.id);
@@ -1628,6 +1630,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         onPickupPrompt={onPickupPrompt}
         onPickup={handlePickup}
         setTargetPosition={() => {}}
+        observeMode={observeMode}
       />
     </group>
   );

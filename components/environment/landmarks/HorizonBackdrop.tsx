@@ -231,53 +231,86 @@ export const HorizonBackdrop: React.FC<{
     buildingInstancesRef.current.instanceMatrix.needsUpdate = true;
   }, [buildingCount, buildingSeed, config, isDesert]);
 
+  // Determine which wall segments to show based on map position
+  const wallSegments = useMemo(() => {
+    const seed = mapX * 31 + mapY * 67;
+    // Randomly select 1-2 straight wall segments
+    const segments: Array<'north' | 'south' | 'east' | 'west'> = [];
+    const roll1 = (seed % 4);
+    const roll2 = ((seed * 7) % 4);
+
+    if (roll1 === 0) segments.push('north');
+    else if (roll1 === 1) segments.push('south');
+    else if (roll1 === 2) segments.push('east');
+    else segments.push('west');
+
+    // 40% chance of second wall segment
+    if ((seed % 10) > 5 && roll2 !== roll1) {
+      if (roll2 === 0) segments.push('north');
+      else if (roll2 === 1) segments.push('south');
+      else if (roll2 === 2) segments.push('east');
+      else segments.push('west');
+    }
+    return segments;
+  }, [mapX, mapY]);
+
   return (
-    <group rotation={[0, horizonRotation, 0]}>
-      {/* INSTANCED DISTANT CITY - Single draw call for buildings at horizon */}
-      <instancedMesh ref={buildingInstancesRef} args={[undefined, undefined, buildingCount]} castShadow={false} receiveShadow={false}>
-        <boxGeometry args={[1, 1, 1]} />
-        <meshStandardMaterial
-          color={silhouetteColor}
-          roughness={1}
-          transparent
-          opacity={silhouetteOpacity}
-          depthWrite={false}
-          emissive={twilightFactor > 0 ? silhouetteColor : '#000000'}
-          emissiveIntensity={twilightFactor * 0.15}
-        />
-      </instancedMesh>
+    <>
+      {/* CITY WALLS - Straight segments, fixed orientation */}
+      {showCityWalls && (
+        <group>
+          {wallSegments.map((dir) => {
+            const radius = wallRadiusUsed;
+            const wallLength = radius * 1.6;
+            const wallHeight = 8;
 
-      {/* DAMASCUS CITY WALLS - Octagonal ring with gate breaks */}
-      <group>
-        {Array.from({ length: 8 }).map((_, i) => {
-          const angle = (i / 8) * Math.PI * 2;
-          const nextAngle = ((i + 1) / 8) * Math.PI * 2;
-          const radius = wallRadiusUsed;
+            let position: [number, number, number];
+            let rotation: number;
 
-          const x1 = Math.cos(angle) * radius;
-          const z1 = Math.sin(angle) * radius;
-          const x2 = Math.cos(nextAngle) * radius;
-          const z2 = Math.sin(nextAngle) * radius;
+            switch (dir) {
+              case 'north':
+                position = [0, wallHeight / 2, -radius];
+                rotation = 0;
+                break;
+              case 'south':
+                position = [0, wallHeight / 2, radius];
+                rotation = 0;
+                break;
+              case 'east':
+                position = [radius, wallHeight / 2, 0];
+                rotation = Math.PI / 2;
+                break;
+              case 'west':
+                position = [-radius, wallHeight / 2, 0];
+                rotation = Math.PI / 2;
+                break;
+            }
 
-          const midX = (x1 + x2) / 2;
-          const midZ = (z1 + z2) / 2;
-          const wallAngle = Math.atan2(z2 - z1, x2 - x1);
-          const wallLength = Math.sqrt((x2 - x1) ** 2 + (z2 - z1) ** 2);
-
-          // Skip walls at cardinal directions (gates: North, South, East, West)
-          const isGate = i === 0 || i === 2 || i === 4 || i === 6;
-
-          if (!isGate) {
             return (
-              <mesh key={`wall-${i}`} position={[midX, 4, midZ]} rotation={[0, wallAngle, 0]} castShadow={false}>
-                <boxGeometry args={[wallLength * 0.8, 8, 2]} />
-                <meshStandardMaterial map={wallTexture ?? undefined} color={wallColor} roughness={0.92} transparent={wallOpacity < 1} opacity={wallOpacity} />
+              <mesh key={`wall-${dir}`} position={position} rotation={[0, rotation, 0]} castShadow={false}>
+                <boxGeometry args={[wallLength, wallHeight, 2.5]} />
+                <meshStandardMaterial map={wallTexture ?? undefined} color={wallColor} roughness={0.92} />
               </mesh>
             );
-          }
-          return null;
-        })}
-      </group>
+          })}
+        </group>
+      )}
+
+      {/* ROTATED HORIZON ELEMENTS - distant city, minarets, etc. */}
+      <group rotation={[0, horizonRotation, 0]}>
+        {/* INSTANCED DISTANT CITY - Single draw call for buildings at horizon */}
+        <instancedMesh ref={buildingInstancesRef} args={[undefined, undefined, buildingCount]} castShadow={false} receiveShadow={false}>
+          <boxGeometry args={[1, 1, 1]} />
+          <meshStandardMaterial
+            color={silhouetteColor}
+            roughness={1}
+            transparent
+            opacity={silhouetteOpacity}
+            depthWrite={false}
+            emissive={twilightFactor > 0 ? silhouetteColor : '#000000'}
+            emissiveIntensity={twilightFactor * 0.15}
+          />
+        </instancedMesh>
 
       {/* DISTANT HORIZON SILHOUETTES - Far away, unreachable */}
       {/* PERFORMANCE OPTIMIZED: Using instanced meshes instead of individual meshes (46 → 6 draw calls) */}
@@ -550,6 +583,7 @@ export const HorizonBackdrop: React.FC<{
           </>
         );
       })()}
-    </group>
+      </group>
+    </>
   );
 };

@@ -25,6 +25,12 @@ interface ActionBarProps {
     category: string;
     appearance?: ItemAppearance;
   }) => void;
+  onDropItemAtScreen?: (item: {
+    inventoryId: string;
+    itemId: string;
+    label: string;
+    appearance?: ItemAppearance;
+  }, clientX: number, clientY: number) => void;
 }
 
 const getActionIcon = (iconName: string, size: number = 18) => {
@@ -156,9 +162,14 @@ export const ActionBar: React.FC<ActionBarProps> = ({
   simTime,
   playerStats,
   inventoryItems,
-  onOpenItemModal
+  onOpenItemModal,
+  onDropItemAtScreen
 }) => {
   const [showInventory, setShowInventory] = useState(false);
+  const dragItemRef = React.useRef<null | ActionBarProps['inventoryItems'][number]>(null);
+  const dragStartRef = React.useRef<{ x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const itemsToShow = inventoryItems.slice(0, 8);
   const slots = [...itemsToShow];
   while (slots.length < 8) {
@@ -174,26 +185,81 @@ export const ActionBar: React.FC<ActionBarProps> = ({
 
   const getItemIcon = (name: string) => {
     const lower = name.toLowerCase();
-    if (lower.includes('dagger') || lower.includes('sword')) return '🗡️';
-    if (lower.includes('bread') || lower.includes('fig') || lower.includes('olive') || lower.includes('apricot')) return '🥖';
+    if (lower.includes('dagger') || lower.includes('scimitar') || lower.includes('sword')) return '🗡️';
+    if (lower.includes('iron nail') || lower.includes('nail')) return '🔨';
+    if (lower.includes('olive')) return '🫒';
+    if (lower.includes('lemon')) return '🍋';
+    if (lower.includes('fig') || lower.includes('dates') || lower.includes('apricot')) return '🍇';
+    if (lower.includes('bread')) return '🥖';
     if (lower.includes('satchel') || lower.includes('bag')) return '🧺';
     if (lower.includes('water') || lower.includes('waterskin')) return '🪣';
-    if (lower.includes('herb') || lower.includes('spice') || lower.includes('mint') || lower.includes('cumin')) return '🧪';
+    if (lower.includes('herb') || lower.includes('spice') || lower.includes('mint') || lower.includes('cumin') || lower.includes('cardamom') || lower.includes('saffron')) return '🫙';
+    if (lower.includes('incense') || lower.includes('resin') || lower.includes('myrrh')) return '🪔';
     if (lower.includes('candle')) return '🕯️';
-    if (lower.includes('lamp')) return '🏺';
-    if (lower.includes('cloth') || lower.includes('robe') || lower.includes('headscarf') || lower.includes('tunic')) return '🧵';
+    if (lower.includes('lamp') || lower.includes('ewer') || lower.includes('bowl') || lower.includes('plate') || lower.includes('vessel') || lower.includes('amphora')) return '🏺';
+    if (lower.includes('cloth') || lower.includes('robe') || lower.includes('headscarf') || lower.includes('tunic') || lower.includes('cloak') || lower.includes('kaftan')) return '🧵';
+    if (lower.includes('manuscript') || lower.includes('book') || lower.includes('ledger')) return '📜';
+    if (lower.includes('bell')) return '🔔';
+    if (lower.includes('mirror')) return '🪞';
+    if (lower.includes('rug') || lower.includes('carpet')) return '🧿';
+    if (lower.includes('perfume') || lower.includes('rose water')) return '🧴';
+    if (lower.includes('twine') || lower.includes('rope')) return '🪢';
     return '📦';
   };
 
+  React.useEffect(() => {
+    if (!dragging) return;
+    const handleMove = (event: PointerEvent) => {
+      setDragPosition({ x: event.clientX, y: event.clientY });
+    };
+    const handleUp = (event: PointerEvent) => {
+      if (dragItemRef.current && onDropItemAtScreen) {
+        onDropItemAtScreen(
+          {
+            inventoryId: dragItemRef.current.id,
+            itemId: dragItemRef.current.itemId,
+            label: dragItemRef.current.name,
+            appearance: dragItemRef.current.appearance
+          },
+          event.clientX,
+          event.clientY
+        );
+      }
+      dragItemRef.current = null;
+      dragStartRef.current = null;
+      setDragging(false);
+      setDragPosition(null);
+    };
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+    };
+  }, [dragging, onDropItemAtScreen]);
+
   return (
     <div className="fixed bottom-6 right-6 z-40 pointer-events-auto">
+      {dragging && dragItemRef.current && dragPosition && (
+        <div
+          className="fixed z-[120] pointer-events-none"
+          style={{ left: dragPosition.x - 24, top: dragPosition.y - 24 }}
+        >
+          <div className="h-12 w-12 rounded-xl border border-amber-400/50 bg-black/80 text-amber-100 flex items-center justify-center text-xl shadow-[0_0_20px_rgba(245,158,11,0.35)]">
+            {getItemIcon(dragItemRef.current.name)}
+          </div>
+        </div>
+      )}
       <div
         className={`
-          absolute bottom-20 right-0 w-[320px]
+          absolute bottom-24 right-0 w-[320px] md:w-[360px]
+          max-w-[92vw]
           rounded-2xl border border-amber-700/40
           bg-black/85 backdrop-blur-lg shadow-2xl
           transition-all duration-200 origin-bottom-right
           ${showInventory ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-3 pointer-events-none'}
+          md:right-0 md:translate-x-0
+          right-1/2 translate-x-1/2
         `}
       >
         <div className="px-4 py-3 border-b border-amber-800/40 flex items-center justify-between">
@@ -206,7 +272,28 @@ export const ActionBar: React.FC<ActionBarProps> = ({
             return (
               <button
                 key={item.id}
-                onClick={() => !isEmpty && onOpenItemModal(item)}
+                onPointerDown={(event) => {
+                  if (isEmpty || !onDropItemAtScreen) return;
+                  dragItemRef.current = item;
+                  dragStartRef.current = { x: event.clientX, y: event.clientY };
+                  setDragPosition({ x: event.clientX, y: event.clientY });
+                }}
+                onPointerUp={(event) => {
+                  if (isEmpty) return;
+                  if (dragStartRef.current && !dragging) {
+                    onOpenItemModal(item);
+                  }
+                  dragStartRef.current = null;
+                  dragItemRef.current = null;
+                }}
+                onPointerMove={(event) => {
+                  if (!dragStartRef.current || dragging) return;
+                  const dx = event.clientX - dragStartRef.current.x;
+                  const dy = event.clientY - dragStartRef.current.y;
+                  if (Math.hypot(dx, dy) > 6) {
+                    setDragging(true);
+                  }
+                }}
                 disabled={isEmpty}
                 className={`
                   h-16 rounded-xl border

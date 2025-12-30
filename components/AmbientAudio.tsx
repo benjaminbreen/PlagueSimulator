@@ -101,15 +101,17 @@ export const AmbientAudio: React.FC<AmbientAudioProps> = ({
     }
 
     // Register all layers
-    engine.registerLayer(new BaseDroneLayer(ctx));
+    // BaseDroneLayer disabled - too monotonous/distracting
+    // engine.registerLayer(new BaseDroneLayer(ctx));
     engine.registerLayer(new TimeLayer(ctx));
     // WeatherLayer disabled - wind/gust sounds were too intrusive
     // engine.registerLayer(new WeatherLayer(ctx));
     engine.registerLayer(new SacredLayer(ctx));
-    engine.registerLayer(new SocialLayer(ctx));
+    // SocialLayer disabled - crowd sounds not fitting
+    // engine.registerLayer(new SocialLayer(ctx));
     engine.registerLayer(new PlagueLayer(ctx));
-    // BiomeLayer disabled - kept for future use/testing via Settings preview
-    // engine.registerLayer(new BiomeLayer(ctx));
+    // BiomeLayer ENABLED - redesigned with pleasant ambient sounds for testing
+    engine.registerLayer(new BiomeLayer(ctx));
 
     engine.setMasterVolume(masterVolume);
     engine.start();

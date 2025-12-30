@@ -636,6 +636,7 @@ export interface DroppedItemRequest {
   position: [number, number, number];
   location: 'outdoor' | 'interior';
   interiorId?: string;
+  material?: 'stone' | 'wood' | 'ceramic' | 'cloth' | 'metal';
   appearance?: ItemAppearance;
 }
 

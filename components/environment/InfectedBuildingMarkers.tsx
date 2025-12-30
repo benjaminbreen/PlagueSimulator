@@ -165,12 +165,40 @@ interface GroundMarkerProps {
   status: 'infected' | 'deceased';
 }
 
-// Glowing circular marker on the ground around the building
+// Glowing circular marker on the ground around the building with radial gradient
 const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   const buildingSize = CONSTANTS.BUILDING_SIZE * sizeScale;
   const circleRadius = (buildingSize * 0.8); // Slightly larger than building footprint
+
+  const markerColor = status === 'deceased' ? '#aa0000' : '#ff0000';
+
+  // Create radial gradient texture for smooth fade-out effect
+  const gradientTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // Create radial gradient from center to edge
+    const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+
+    // Bright glow in center fading to transparent at edges
+    gradient.addColorStop(0, markerColor + 'ff'); // Fully opaque center
+    gradient.addColorStop(0.3, markerColor + 'ee'); // Very bright inner glow
+    gradient.addColorStop(0.6, markerColor + '88'); // Medium glow
+    gradient.addColorStop(0.85, markerColor + '33'); // Faint outer glow
+    gradient.addColorStop(1, markerColor + '00'); // Transparent edge
+
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 256, 256);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }, [markerColor]);
 
   // Pulsing glow animation
   useFrame((state) => {
@@ -181,10 +209,8 @@ const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status
     const pulse = (Math.sin(time * pulseSpeed) + 1) / 2; // 0-1
 
     const material = meshRef.current.material as THREE.MeshBasicMaterial;
-    material.opacity = 0.4 + pulse * 0.3; // 0.4-0.7
+    material.opacity = 0.6 + pulse * 0.4; // 0.6-1.0 for brighter pulse
   });
-
-  const markerColor = status === 'deceased' ? '#aa0000' : '#ff0000';
 
   return (
     <mesh
@@ -194,14 +220,15 @@ const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status
       receiveShadow={false}
       castShadow={false}
     >
-      <circleGeometry args={[circleRadius, 32]} />
+      <circleGeometry args={[circleRadius, 64]} />
       <meshBasicMaterial
-        color={markerColor}
+        map={gradientTexture}
         transparent
-        opacity={0.5}
+        opacity={0.8}
         side={THREE.DoubleSide}
         depthWrite={false}
         toneMapped={false}
+        blending={THREE.AdditiveBlending} // Makes it glow brighter
       />
     </mesh>
   );

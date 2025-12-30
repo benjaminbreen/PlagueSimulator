@@ -20,6 +20,7 @@ import { updateBuildingInfections } from './utils/buildingInfection';
 import { initializePlague, progressPlague, getPlagueTypeLabel, exposePlayerToPlague } from './utils/plague';
 import { ConversationImpact, applyConversationImpact } from './utils/friendliness';
 import { PlagueUI } from './components/PlagueUI';
+import { ObserveController } from './components/observe/ObserveController';
 import { usePlagueMonitor } from './hooks/usePlagueMonitor';
 import { checkBiomeRandomEvent, checkConversationTrigger, getBiomeForDistrict } from './utils/eventTriggers';
 import { getEventsForBiome, getEventById } from './utils/events/catalog';
@@ -27,13 +28,15 @@ import { evaluateTriggers, TriggerState } from './utils/events/triggerSystem';
 import { TriggerTargetType, TriggerWhen } from './utils/events/triggerCatalog';
 import { Toast, ToastMessage } from './components/Toast';
 import { calculateDirection, formatDistrictName } from './utils/directions';
+import { buildObservePrompt } from './utils/observeContext';
+import { useObserveMode } from './hooks/useObserveMode';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
     infectionRate: 0.02,
     hygieneLevel: 0.6,
     quarantine: false,
-    simulationSpeed: 0.01,
+    simulationSpeed: 1,
     timeOfDay: 12,
     cameraMode: CameraMode.THIRD_PERSON,
     mapX: 0,
@@ -51,6 +54,7 @@ function App() {
   });
 
   const [transitioning, setTransitioning] = useState(false);
+  const [gameLoading, setGameLoading] = useState(true); // Initial loading state
   const [nearBuilding, setNearBuilding] = useState<BuildingMetadata | null>(null);
   const [showEnterModal, setShowEnterModal] = useState(false);
   const [sceneMode, setSceneMode] = useState<'outdoor' | 'interior'>('outdoor');
@@ -61,12 +65,21 @@ function App() {
   const lastOutdoorIdsRef = useRef<string[]>([]);
   const lastStatsUpdateRef = useRef(0);
   const lastMoraleUpdateRef = useRef(0);
+  const scheduleWorkRef = useRef<{
+    registry: { npcMap: Map<string, NPCRecord>; lastScheduleSimTime: number };
+    phase: number;
+  } | null>(null);
+  const [perfDebug, setPerfDebug] = useState({
+    schedulePhase: -1,
+    scheduleActive: false,
+    lastScheduleMs: 0,
+    lastScheduleSimTime: 0
+  });
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
   const [nearSpeakableNpc, setNearSpeakableNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
   const [showMerchantModal, setShowMerchantModal] = useState(false);
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showEncounterModal, setShowEncounterModal] = useState(false);
-  const [showEncounterModal3, setShowEncounterModal3] = useState(false);
   const [isNPCInitiatedEncounter, setIsNPCInitiatedEncounter] = useState(false);
   const [isFollowingAfterDismissal, setIsFollowingAfterDismissal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -111,6 +124,9 @@ function App() {
   const rumorPoolRef = useRef<Map<import('./types').DistrictType, Array<{ text: string; simTime: number }>>>(new Map());
   const scheduleTickRef = useRef(0);
   const offscreenHealthCursorRef = useRef(0);
+  const simTimeRef = useRef(0);
+  const timeOfDayRef = useRef(12);
+  const lastSimCommitRef = useRef(0);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [climbablePrompt, setClimbablePrompt] = useState<string | null>(null);
@@ -118,6 +134,8 @@ function App() {
   const climbInputRef = useRef<'up' | 'down' | 'cancel' | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
   const [dropRequests, setDropRequests] = useState<import('./types').DroppedItemRequest[]>([]);
+  const r3fRef = useRef<{ camera: THREE.Camera | null; gl: THREE.WebGLRenderer | null }>({ camera: null, gl: null });
+  const dropRaycaster = useMemo(() => new THREE.Raycaster(), []);
   const [pushCharge, setPushCharge] = useState(0);
   const [currentWeather, setCurrentWeather] = useState<string>('CLEAR');
   const [moraleStats, setMoraleStats] = useState<MoraleStats>({
@@ -222,7 +240,6 @@ function App() {
   useEffect(() => {
     if (!activeEvent) return;
     setShowEncounterModal(false);
-    setShowEncounterModal3(false);
     setShowMerchantModal(false);
     setShowEnterModal(false);
   }, [activeEvent]);
@@ -240,6 +257,12 @@ function App() {
     const timeout = window.setTimeout(() => setLastEventNote(null), 4000);
     return () => window.clearTimeout(timeout);
   }, [lastEventNote]);
+
+  // Initial loading screen - gives assets time to load before revealing game
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setGameLoading(false), 2500);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   const handleForceNpcState = useCallback((id: string, state: AgentState) => {
     setNpcStateOverride({ id, state, nonce: Date.now() });
@@ -411,6 +434,37 @@ function App() {
     onShowInfectedModal: () => setShowPlagueModal(true),
     onNotify: (message) => setPlagueNotification(message),
     onDeath: (summary) => setGameOver(summary)
+  });
+
+  const observePrompt = useMemo(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    const biome = getBiomeForDistrict(district);
+    return buildObservePrompt({
+      player: playerStats,
+      params,
+      district,
+      biome,
+      weather: currentWeather,
+      sceneMode,
+      interiorInfo: null,
+      nearbyBuildings: tileBuildings
+    });
+  }, [currentWeather, params, playerStats, sceneMode, tileBuildings]);
+
+  const {
+    observeMode,
+    observeLines,
+    observeLineCount,
+    startObserveMode,
+    stopObserveMode
+  } = useObserveMode({
+    params,
+    observePrompt,
+    setParams,
+    setShowEncounterModal,
+    setShowMerchantModal,
+    setShowEnterModal,
+    setShowPlayerModal
   });
 
   useEffect(() => {
@@ -662,7 +716,7 @@ function App() {
   // Handle NPC-initiated encounters (friendly NPCs approaching the player)
   const handleNPCInitiatedEncounter = useCallback((npc: { stats: NPCStats; state: AgentState }) => {
     // Don't trigger if any modal is already open
-    if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || showEncounterModal3 || activeEvent) return;
+    if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || activeEvent) return;
 
     tryTriggerEvent({
       when: 'npcApproach',
@@ -685,7 +739,7 @@ function App() {
     setSelectedNpc(npc);
     setIsNPCInitiatedEncounter(true);
     setShowEncounterModal(true);
-  }, [activeEvent, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, showEncounterModal3, tryTriggerEvent]);
+  }, [activeEvent, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, tryTriggerEvent]);
 
   const applyEffects = useCallback((effects: EventEffect[]) => {
     effects.forEach(effect => {
@@ -724,7 +778,6 @@ function App() {
         void enqueueEventWithOptionalLLM(makeEventInstance(def, 'system', context));
       } else if (effect.type === 'endConversation') {
         setShowEncounterModal(false);
-        setShowEncounterModal3(false);
       }
     });
   }, [buildEventContext, makeEventInstance, enqueueEventWithOptionalLLM]);
@@ -780,7 +833,7 @@ function App() {
   }, [applyEffects, buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, outdoorNpcPool]);
 
   // Handle conversation end - save summary and apply impact to NPC disposition
-  const handleConversationResult = useCallback((npcId: string, summary: ConversationSummary, impact: ConversationImpact) => {
+  const handleConversationResult = useCallback((npcId: string, summary: ConversationSummary, impact: ConversationImpact, meta?: { action?: 'end_conversation' | null }) => {
     // Save conversation summary to history
     setConversationHistories(prev => [...prev, summary]);
 
@@ -849,17 +902,19 @@ function App() {
       }
     };
 
-    const dayIndex = Math.floor(stats.simTime);
-    const recentIds = Object.keys(eventCooldownsRef.current).filter(id => eventCooldownsRef.current[id] === dayIndex);
-    const convoEvent = checkConversationTrigger(context, impact, recentIds);
-    if (convoEvent) {
-      eventCooldownsRef.current[convoEvent.definitionId || convoEvent.id] = dayIndex;
-      void enqueueEventWithOptionalLLM(convoEvent);
+    if (meta?.action !== 'end_conversation') {
+      const dayIndex = Math.floor(stats.simTime);
+      const recentIds = Object.keys(eventCooldownsRef.current).filter(id => eventCooldownsRef.current[id] === dayIndex);
+      const convoEvent = checkConversationTrigger(context, impact, recentIds);
+      if (convoEvent) {
+        eventCooldownsRef.current[convoEvent.definitionId || convoEvent.id] = dayIndex;
+        void enqueueEventWithOptionalLLM(convoEvent);
+      }
     }
   }, [currentWeather, enqueueEventWithOptionalLLM, outdoorNpcPool, params.mapX, params.mapY, params.timeOfDay, playerStats, stats.simTime]);
 
   // Handle triggering events from conversation actions (e.g., NPC dismissing player)
-  const handleTriggerConversationEvent = useCallback((eventId: string, npcContext?: { npcId: string; npcName: string }) => {
+  const handleTriggerConversationEvent = useCallback((eventId: string, npcContext?: { npcId: string; npcName: string }, delayMs = 0) => {
     const def = getEventById(eventId);
     if (!def) return;
 
@@ -867,9 +922,6 @@ function App() {
     if (npcContext) {
       dismissedNpcRef.current = npcContext;
     }
-
-    // Close the encounter modal first
-    setShowEncounterModal(false);
 
     // Build context with NPC info if available
     const npcRecord = npcContext ? outdoorNpcPool.find(r => r.stats.id === npcContext.npcId) : undefined;
@@ -887,7 +939,15 @@ function App() {
 
     const context = buildEventContext(contextOverrides);
     const event = makeEventInstance(def, 'system', context);
-    void enqueueEventWithOptionalLLM(event);
+    if (delayMs > 0) {
+      window.setTimeout(() => {
+        setShowEncounterModal(false);
+        void enqueueEventWithOptionalLLM(event);
+      }, delayMs);
+    } else {
+      setShowEncounterModal(false);
+      void enqueueEventWithOptionalLLM(event);
+    }
   }, [buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, outdoorNpcPool]);
 
   const handleDebugEvent = useCallback(() => {
@@ -929,6 +989,14 @@ function App() {
   }, [sceneMode]);
 
   useEffect(() => {
+    simTimeRef.current = stats.simTime;
+  }, [stats.simTime]);
+
+  useEffect(() => {
+    timeOfDayRef.current = params.timeOfDay;
+  }, [params.timeOfDay]);
+
+  useEffect(() => {
     if (!pickupToast) return;
     const timeout = window.setTimeout(() => {
       setPickupToast(prev => (prev?.id === pickupToast.id ? null : prev));
@@ -956,27 +1024,29 @@ function App() {
       if (params.simulationSpeed > 0) {
         const simHoursDelta = dt * params.simulationSpeed / CONSTANTS.REAL_SECONDS_PER_SIM_HOUR;
 
-        setStats(prev => {
-          const newSimTime = prev.simTime + simHoursDelta;
+        simTimeRef.current += simHoursDelta;
+        timeOfDayRef.current += simHoursDelta;
+        if (timeOfDayRef.current >= 24) timeOfDayRef.current -= 24;
 
-          // Update player plague progression
+        const commitInterval = 0.1;
+        if ((now - lastSimCommitRef.current) / 1000 >= commitInterval) {
+          lastSimCommitRef.current = now;
+          const nextSimTime = simTimeRef.current;
+          const nextTimeOfDay = timeOfDayRef.current;
+          setStats(prev => ({
+            ...prev,
+            simTime: nextSimTime,
+            daysPassed: nextSimTime / 24,
+          }));
+          setParams(prev => ({
+            ...prev,
+            timeOfDay: nextTimeOfDay
+          }));
           setPlayerStats(prevPlayer => ({
             ...prevPlayer,
-            plague: progressPlague(prevPlayer.plague, newSimTime)
+            plague: progressPlague(prevPlayer.plague, nextSimTime)
           }));
-
-          return {
-            ...prev,
-            simTime: newSimTime,
-            daysPassed: newSimTime / 24,
-          };
-        });
-
-        setParams(prev => {
-          let newTime = prev.timeOfDay + simHoursDelta;
-          if (newTime >= 24) newTime -= 24;
-          return { ...prev, timeOfDay: newTime };
-        });
+        }
       }
 
       frameId = requestAnimationFrame(tick);
@@ -1037,7 +1107,7 @@ function App() {
       if (e.key === 'Escape' && showMerchantModal) {
         setShowMerchantModal(false);
       }
-      if (e.key === '4' && selectedNpc && !showEncounterModal && !showEncounterModal3 && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+      if (e.key === '4' && selectedNpc && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
         e.preventDefault();
         setIsNPCInitiatedEncounter(false); // Player-initiated, not NPC
         tryTriggerEvent({
@@ -1063,17 +1133,17 @@ function App() {
         setShowEncounterModal(false);
         setIsNPCInitiatedEncounter(false);
       }
-      if (e.key === '3' && selectedNpc && !showEncounterModal3 && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
-        e.preventDefault();
-        setShowEncounterModal3(true);
+      if (e.key === 'Escape' && observeMode) {
+        stopObserveMode();
       }
-      if (e.key === 'Escape' && showEncounterModal3) {
-        setShowEncounterModal3(false);
+      if (e.key === '3' && selectedNpc && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        e.preventDefault();
+        setShowEncounterModal(true);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showEncounterModal3, showPlayerModal, tryTriggerEvent]);
+  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode]);
 
   // Action trigger function
   const triggerAction = useCallback((actionId: ActionId) => {
@@ -1089,6 +1159,25 @@ function App() {
     // Check charisma requirement
     if (action.requiresCharisma && playerStats.charisma < action.requiresCharisma) {
       return; // Doesn't meet requirement
+    }
+
+    if (actionId === 'observe') {
+      startObserveMode();
+      if (action.cooldownSeconds > 0) {
+        setActionSlots(prev => ({
+          ...prev,
+          cooldowns: {
+            ...prev.cooldowns,
+            [actionId]: currentTime + action.cooldownSeconds
+          },
+          lastTriggered: {
+            actionId,
+            timestamp: Date.now(),
+            position: [playerPositionRef.current.x, playerPositionRef.current.y, playerPositionRef.current.z]
+          }
+        }));
+      }
+      return;
     }
 
     // Create action event
@@ -1127,7 +1216,7 @@ function App() {
     const handleActionKey = (e: KeyboardEvent) => {
       // Don't trigger if typing in an input or modal is open
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || showEncounterModal3) return;
+      if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal) return;
       if (sceneMode !== 'outdoor') return;
       if (e.key === '3' && selectedNpc) return;
 
@@ -1145,7 +1234,7 @@ function App() {
 
     window.addEventListener('keydown', handleActionKey);
     return () => window.removeEventListener('keydown', handleActionKey);
-  }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, showEncounterModal3, sceneMode, selectedNpc]);
+  }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, sceneMode, selectedNpc]);
 
   const handleMapChange = useCallback((dx: number, dy: number) => {
     setTransitioning(true);
@@ -1491,6 +1580,12 @@ function App() {
 
   const handleBuildingsUpdate = useCallback((buildings: BuildingMetadata[]) => {
     scheduleTickRef.current = 0;
+    scheduleWorkRef.current = null;
+    setPerfDebug((prev) => ({
+      ...prev,
+      schedulePhase: -1,
+      scheduleActive: false
+    }));
     setTileBuildings(buildings);
   }, []);
 
@@ -1500,26 +1595,78 @@ function App() {
     if (!registry) return;
     const scheduleInterval = 1.5;
     const shouldRun = scheduleTickRef.current === 0 || stats.simTime - scheduleTickRef.current >= scheduleInterval;
-    if (!shouldRun) return;
-    scheduleTickRef.current = stats.simTime;
-    updateRegistryForSchedule(registry);
-    updateOffscreenHealth(registry);
-    const outdoor = Array.from(registry.npcMap.values()).filter((record) => record.location === 'outdoor');
-    const nextIds = outdoor.map((record) => record.id);
-    const prevIds = lastOutdoorIdsRef.current;
-    const sameIds = nextIds.length === prevIds.length && nextIds.every((id, idx) => id === prevIds[idx]);
-    if (!sameIds) {
-      lastOutdoorIdsRef.current = nextIds;
-      setOutdoorNpcPool(outdoor);
+    if (shouldRun && !scheduleWorkRef.current) {
+      scheduleTickRef.current = stats.simTime;
+      scheduleWorkRef.current = { registry, phase: 0 };
+      setPerfDebug((prev) => ({
+        ...prev,
+        schedulePhase: 0,
+        scheduleActive: true,
+        lastScheduleMs: performance.now(),
+        lastScheduleSimTime: stats.simTime
+      }));
     }
-    if (sceneMode === 'outdoor' && selectedNpc && !outdoor.some((record) => record.id === selectedNpc.stats.id)) {
-      setSelectedNpc(null);
+    const work = scheduleWorkRef.current;
+    if (!work) return;
+    if (work.phase === 0) {
+      updateRegistryForSchedule(work.registry);
+      work.phase = 1;
+      setPerfDebug((prev) => ({
+        ...prev,
+        schedulePhase: 1,
+        scheduleActive: true,
+        lastScheduleMs: performance.now(),
+        lastScheduleSimTime: stats.simTime
+      }));
+      return;
+    }
+    if (work.phase === 1) {
+      updateOffscreenHealth(work.registry);
+      work.phase = 2;
+      setPerfDebug((prev) => ({
+        ...prev,
+        schedulePhase: 2,
+        scheduleActive: true,
+        lastScheduleMs: performance.now(),
+        lastScheduleSimTime: stats.simTime
+      }));
+      return;
+    }
+    if (work.phase === 2) {
+      const outdoor = Array.from(work.registry.npcMap.values()).filter((record) => record.location === 'outdoor');
+      const nextIds = outdoor.map((record) => record.id);
+      const prevIds = lastOutdoorIdsRef.current;
+      const sameIds = nextIds.length === prevIds.length && nextIds.every((id, idx) => id === prevIds[idx]);
+      if (!sameIds) {
+        lastOutdoorIdsRef.current = nextIds;
+        setOutdoorNpcPool(outdoor);
+      }
+      if (sceneMode === 'outdoor' && selectedNpc && !outdoor.some((record) => record.id === selectedNpc.stats.id)) {
+        setSelectedNpc(null);
+      }
+      work.phase = 3;
+      setPerfDebug((prev) => ({
+        ...prev,
+        schedulePhase: 3,
+        scheduleActive: true,
+        lastScheduleMs: performance.now(),
+        lastScheduleSimTime: stats.simTime
+      }));
+      return;
     }
     const tileKey = getTileKey(params.mapX, params.mapY);
     const prevInfection = buildingInfectionRef.current.get(tileKey) ?? new Map();
-    const nextInfection = updateBuildingInfections(tileBuildings, registry.npcMap, prevInfection, stats.simTime);
+    const nextInfection = updateBuildingInfections(tileBuildings, work.registry.npcMap, prevInfection, stats.simTime);
     buildingInfectionRef.current.set(tileKey, nextInfection);
     setBuildingInfectionSnapshot(nextInfection);
+    scheduleWorkRef.current = null;
+    setPerfDebug((prev) => ({
+      ...prev,
+      schedulePhase: 4,
+      scheduleActive: false,
+      lastScheduleMs: performance.now(),
+      lastScheduleSimTime: stats.simTime
+    }));
   }, [stats.simTime, tileBuildings, ensureTileRegistry, updateRegistryForSchedule, updateOffscreenHealth, setBuildingInfectionSnapshot, params.mapX, params.mapY, sceneMode, selectedNpc]);
 
   const hashToSeed = useCallback((input: string) => {
@@ -1745,15 +1892,27 @@ function App() {
     });
   }, [stats.simTime]);
 
-  const handleDropItem = useCallback((item: { inventoryId: string; itemId: string; label: string; appearance?: import('./types').ItemAppearance }) => {
-    const position = playerPositionRef.current;
-    const offsetX = 0.4 + Math.random() * 0.2;
-    const offsetZ = 0.2 + Math.random() * 0.2;
+  const handleDropItem = useCallback((item: { inventoryId: string; itemId: string; label: string; appearance?: import('./types').ItemAppearance }, dropPosition?: [number, number, number]) => {
+    const position = dropPosition
+      ? { x: dropPosition[0], y: dropPosition[1], z: dropPosition[2] }
+      : playerPositionRef.current;
+    const offsetX = dropPosition ? 0 : 0.4 + Math.random() * 0.2;
+    const offsetZ = dropPosition ? 0 : 0.2 + Math.random() * 0.2;
     const dropId = `drop-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
     const details = getItemDetailsByItemId(item.itemId);
     const label = details?.name ?? item.label ?? item.itemId;
     const dropLocation = sceneMode === 'interior' ? 'interior' : 'outdoor';
     const interiorId = interiorBuilding?.id ?? interiorSpec?.buildingId ?? undefined;
+    const material = (() => {
+      if (item.appearance?.type === 'robe' || item.appearance?.type === 'headwear') return 'cloth';
+      switch (details?.category) {
+        case 'METALSMITH': return 'metal';
+        case 'TEXTILE': return 'cloth';
+        case 'APOTHECARY': return 'ceramic';
+        case 'TRADER': return 'wood';
+        default: return 'cloth';
+      }
+    })();
 
     setPlayerStats(prev => {
       const existingIndex = prev.inventory.findIndex((entry) => entry.id === item.inventoryId);
@@ -1777,9 +1936,10 @@ function App() {
           id: dropId,
           itemId: item.itemId,
           label,
-          position: [position.x + offsetX, 0.1, position.z + offsetZ],
+          position: [position.x + offsetX, position.y + 0.1, position.z + offsetZ],
           location: dropLocation,
           interiorId,
+          material,
           appearance: item.appearance
         }
       ];
@@ -1788,6 +1948,34 @@ function App() {
 
     setPickupToast({ message: `Dropped ${label}`, id: Date.now() });
   }, [sceneMode, interiorBuilding, interiorSpec]);
+
+  const handleDropItemAtScreen = useCallback((item: { inventoryId: string; itemId: string; label: string; appearance?: import('./types').ItemAppearance }, clientX: number, clientY: number) => {
+    const { camera, gl } = r3fRef.current;
+    if (!camera || !gl) {
+      handleDropItem(item);
+      return;
+    }
+    const rect = gl.domElement.getBoundingClientRect();
+    if (
+      clientX < rect.left ||
+      clientX > rect.right ||
+      clientY < rect.top ||
+      clientY > rect.bottom
+    ) {
+      handleDropItem(item);
+      return;
+    }
+    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    const y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    dropRaycaster.setFromCamera({ x, y }, camera);
+    const hit = new THREE.Vector3();
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    if (dropRaycaster.ray.intersectPlane(plane, hit)) {
+      handleDropItem(item, [hit.x, hit.y, hit.z]);
+      return;
+    }
+    handleDropItem(item);
+  }, [dropRaycaster, handleDropItem]);
 
   const handlePlagueExposure = useCallback((updatedPlague: import('./types').PlagueStatus) => {
     setPlayerStats(prev => ({
@@ -1881,12 +2069,30 @@ function App() {
 
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden select-none">
-      <div 
+      <div
         className={`absolute inset-0 z-50 bg-black transition-opacity duration-500 pointer-events-none ${
           transitioning ? 'opacity-100' : 'opacity-0'
-        }`} 
+        }`}
       />
 
+      {/* Initial loading overlay - fades out after assets load */}
+      <div
+        className={`absolute inset-0 z-[200] bg-stone-950 flex flex-col items-center justify-center transition-opacity duration-1000 ${
+          gameLoading ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        <h1 className="text-5xl md:text-7xl text-amber-100/90 tracking-[0.25em] font-light mb-4"
+            style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
+          DAMASCUS
+        </h1>
+        <p className="text-2xl md:text-3xl text-amber-200/60 tracking-[0.5em] font-light"
+           style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
+          1348
+        </p>
+        <div className="mt-12 w-24 h-[1px] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
+      </div>
+
+      {!observeMode && (
       <UI
         params={params}
         setParams={setParams}
@@ -1914,8 +2120,6 @@ function App() {
         setShowPlayerModal={setShowPlayerModal}
         showEncounterModal={showEncounterModal}
         setShowEncounterModal={setShowEncounterModal}
-        showEncounterModal3={showEncounterModal3}
-        setShowEncounterModal3={setShowEncounterModal3}
         conversationHistories={conversationHistories}
         onConversationResult={handleConversationResult}
         onTriggerConversationEvent={handleTriggerConversationEvent}
@@ -1942,10 +2146,13 @@ function App() {
         infectedHouseholds={infectedHouseholds}
         onNavigateToHousehold={handleNavigateToHousehold}
         onDropItem={handleDropItem}
+        onDropItemAtScreen={handleDropItemAtScreen}
+        perfDebug={perfDebug}
       />
+      )}
 
       {/* Subtle Performance Indicator - only shows when adjusting, click to dismiss */}
-      {performanceDegraded && !indicatorDismissed && (
+      {!observeMode && performanceDegraded && !indicatorDismissed && (
         <div
           className="absolute top-2 right-2 bg-black/60 text-yellow-400 text-xs px-3 py-1.5 rounded-md border border-yellow-600/30 backdrop-blur-sm font-mono z-50 cursor-pointer hover:bg-black/80 transition-colors"
           onClick={() => setIndicatorDismissed(true)}
@@ -1956,7 +2163,7 @@ function App() {
       )}
 
       {/* Building Interaction Modal */}
-      {showEnterModal && nearBuilding && (
+      {!observeMode && showEnterModal && nearBuilding && (
         <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
           <div className="bg-[#f2e7d5] border-4 border-amber-900/50 p-8 rounded-lg shadow-2xl max-w-md w-full text-center historical-font relative overflow-hidden">
             {/* Parchment effect */}
@@ -1996,7 +2203,7 @@ function App() {
       )}
 
       {/* Merchant Modal */}
-      {showMerchantModal && nearMerchant && (
+      {!observeMode && showMerchantModal && nearMerchant && (
         <MerchantModal
           merchant={nearMerchant}
           playerStats={playerStats}
@@ -2007,35 +2214,37 @@ function App() {
       )}
 
       {/* Historical Guide Modal */}
-      <GuideModal
-        isOpen={showGuideModal}
-        onClose={() => {
-          setShowGuideModal(false);
-          setSelectedGuideEntryId(null);
-        }}
-        initialEntryId={selectedGuideEntryId}
-      />
+      {!observeMode && (
+        <GuideModal
+          isOpen={showGuideModal}
+          onClose={() => {
+            setShowGuideModal(false);
+            setSelectedGuideEntryId(null);
+          }}
+          initialEntryId={selectedGuideEntryId}
+        />
+      )}
 
-      {sceneMode === 'interior' && interiorInfo && (
+      {!observeMode && sceneMode === 'interior' && interiorInfo && (
         <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[11px] tracking-wide z-50 pointer-events-none max-w-[88vw] text-center">
           {interiorInfo}
         </div>
       )}
-      {sceneMode === 'interior' && (
+      {!observeMode && sceneMode === 'interior' && (
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[10px] uppercase tracking-widest z-50 pointer-events-none">
           Press Esc to Exit
         </div>
       )}
 
       {/* Merchant Interaction Prompt */}
-      {sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && (
+      {!observeMode && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && (
         <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
           Press <span className="font-bold text-amber-400">E</span> to trade with {nearMerchant.stats.name}
         </div>
       )}
 
       {/* NPC Speak Prompt (only when no merchant nearby) */}
-      {sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal && (
+      {!observeMode && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal && (
         <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
           Press <span className="font-bold text-amber-400">E</span> to speak to {nearSpeakableNpc.stats.name}
         </div>
@@ -2048,11 +2257,12 @@ function App() {
         gl={canvasGl}
         onPointerDownCapture={() => setSelectedNpc(null)}
         onPointerMissed={() => setSelectedNpc(null)}
-        onCreated={({ gl }) => {
+        onCreated={({ gl, camera }) => {
           gl.shadowMap.enabled = true;
           gl.shadowMap.type = THREE.PCFSoftShadowMap;
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.outputColorSpace = THREE.SRGBColorSpace;
+          r3fRef.current = { gl, camera };
         }}
       >
         {/* Adaptive Performance - automatically adjusts resolution based on FPS */}
@@ -2134,6 +2344,8 @@ function App() {
               onPlayerStartMove={handlePlayerStartMove}
               dropRequests={dropRequests}
               onNearSpeakableNpc={setNearSpeakableNpc}
+              observeMode={observeMode}
+              gameLoading={gameLoading}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -2152,29 +2364,39 @@ function App() {
               onPlagueExposure={handlePlagueExposure}
               onPlayerPositionUpdate={(pos) => playerPositionRef.current.copy(pos)}
               dropRequests={dropRequests}
+              observeMode={observeMode}
             />
           )}
         </Suspense>
       </Canvas>
 
-      <PlagueUI
-        plague={playerStats.plague}
-        showPlagueModal={showPlagueModal}
-        plagueNotification={plagueNotification}
-        onCloseModal={() => setShowPlagueModal(false)}
-        onClearNotification={() => setPlagueNotification(null)}
-        onModalPauseToggle={(paused) => {
-          if (paused) {
-            prevSimSpeedRef.current = params.simulationSpeed;
-            setParams(prev => ({ ...prev, simulationSpeed: 0 }));
-          } else {
-            setParams(prev => ({
-              ...prev,
-              simulationSpeed: prev.simulationSpeed === 0 ? prevSimSpeedRef.current : prev.simulationSpeed
-            }));
-          }
-        }}
+      <ObserveController
+        observeMode={observeMode}
+        lines={observeLines}
+        lineCount={observeLineCount}
+        onReturn={stopObserveMode}
       />
+
+      {!observeMode && (
+        <PlagueUI
+          plague={playerStats.plague}
+          showPlagueModal={showPlagueModal}
+          plagueNotification={plagueNotification}
+          onCloseModal={() => setShowPlagueModal(false)}
+          onClearNotification={() => setPlagueNotification(null)}
+          onModalPauseToggle={(paused) => {
+            if (paused) {
+              prevSimSpeedRef.current = params.simulationSpeed;
+              setParams(prev => ({ ...prev, simulationSpeed: 0.01 }));
+            } else {
+              setParams(prev => ({
+                ...prev,
+                simulationSpeed: prev.simulationSpeed === 0.01 ? prevSimSpeedRef.current : prev.simulationSpeed
+              }));
+            }
+          }}
+        />
+      )}
 
       {/* Game Over Screen */}
       {gameOver && (

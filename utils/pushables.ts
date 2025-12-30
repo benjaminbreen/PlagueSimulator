@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem';
-export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth';
+export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth' | 'metal';
 
 export interface PickupInfo {
   type: 'coin' | 'item' | 'produce';
