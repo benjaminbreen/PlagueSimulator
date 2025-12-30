@@ -1,36 +1,30 @@
 
-import React, { useState, Suspense, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { AdaptiveDpr, AdaptiveEvents, PerformanceMonitor } from '@react-three/drei';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { Simulation } from './components/Simulation';
 import { MoraleStats } from './components/Agents';
-import { InteriorScene } from './components/InteriorScene';
-import { UI } from './components/UI';
-import { MerchantModal } from './components/MerchantModal';
-import { GuideModal } from './components/HistoricalGuide';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, EventInstance, EventEffect, EventContextSnapshot, EventDefinition, EventOption, PlagueType, SocialClass } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, PlagueType, SocialClass } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
-import { getItemDetailsByItemId } from './utils/merchantItems';
 import { generateInteriorSpec } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
 import { shouldNpcBeHome } from './utils/npcSchedule';
 import { advanceNpcHealth, applyHouseholdExposure, ensureNpcPlagueMeta, resetNpcPlagueMeta } from './utils/npcHealth';
 import { updateBuildingInfections } from './utils/buildingInfection';
 import { initializePlague, progressPlague, getPlagueTypeLabel, exposePlayerToPlague } from './utils/plague';
-import { ConversationImpact, applyConversationImpact } from './utils/friendliness';
-import { PlagueUI } from './components/PlagueUI';
-import { ObserveController } from './components/observe/ObserveController';
+import { SimulationShell } from './components/SimulationShell';
+import { AppShell } from './components/AppShell';
 import { usePlagueMonitor } from './hooks/usePlagueMonitor';
-import { checkBiomeRandomEvent, checkConversationTrigger, getBiomeForDistrict } from './utils/eventTriggers';
-import { getEventsForBiome, getEventById } from './utils/events/catalog';
-import { evaluateTriggers, TriggerState } from './utils/events/triggerSystem';
-import { TriggerTargetType, TriggerWhen } from './utils/events/triggerCatalog';
-import { Toast, ToastMessage } from './components/Toast';
+import { useSimulationClock } from './hooks/useSimulationClock';
+import { useModalState } from './hooks/useModalState';
+import { useInventoryInteractions } from './hooks/useInventoryInteractions';
+import { useEncounterState } from './hooks/useEncounterState';
+import { checkBiomeRandomEvent, getBiomeForDistrict } from './utils/eventTriggers';
+import { ToastMessage } from './components/Toast';
+import { LootItem } from './components/LootModal';
 import { calculateDirection, formatDistrictName } from './utils/directions';
 import { buildObservePrompt } from './utils/observeContext';
 import { useObserveMode } from './hooks/useObserveMode';
 import { useOverworldPath } from './hooks/useOverworldPath';
+import { useEventSystem } from './hooks/useEventSystem';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -59,12 +53,42 @@ function App() {
   const overworldPath = useOverworldPath(params.mapX, params.mapY, stats.simTime);
   const [gameLoading, setGameLoading] = useState(true); // Initial loading state
   const [nearBuilding, setNearBuilding] = useState<BuildingMetadata | null>(null);
-  const [showEnterModal, setShowEnterModal] = useState(false);
+  const {
+    showEnterModal,
+    setShowEnterModal,
+    showMerchantModal,
+    setShowMerchantModal,
+    showPlayerModal,
+    setShowPlayerModal,
+    showEncounterModal,
+    setShowEncounterModal,
+    showGuideModal,
+    setShowGuideModal,
+    lootModalData,
+    setLootModalData
+  } = useModalState();
   const [sceneMode, setSceneMode] = useState<'outdoor' | 'interior'>('outdoor');
   const [interiorSpec, setInteriorSpec] = useState<InteriorSpec | null>(null);
   const [interiorNarrator, setInteriorNarrator] = useState<InteriorNarratorState | null>(null);
   const [interiorBuilding, setInteriorBuilding] = useState<BuildingMetadata | null>(null);
-  const [selectedNpc, setSelectedNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
+  const {
+    selectedNpc,
+    setSelectedNpc,
+    nearSpeakableNpc,
+    setNearSpeakableNpc,
+    isNPCInitiatedEncounter,
+    setIsNPCInitiatedEncounter,
+    isFollowingAfterDismissal,
+    setIsFollowingAfterDismissal,
+    selectedNpcActivity,
+    setSelectedNpcActivity,
+    selectedNpcNearbyInfected,
+    setSelectedNpcNearbyInfected,
+    selectedNpcNearbyDeceased,
+    setSelectedNpcNearbyDeceased,
+    selectedNpcRumors,
+    setSelectedNpcRumors
+  } = useEncounterState();
   const lastOutdoorIdsRef = useRef<string[]>([]);
   const lastStatsUpdateRef = useRef(0);
   const lastMoraleUpdateRef = useRef(0);
@@ -80,21 +104,8 @@ function App() {
     lastScheduleSimTime: 0
   });
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
-  const [nearSpeakableNpc, setNearSpeakableNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
-  const [showMerchantModal, setShowMerchantModal] = useState(false);
-  const [showPlayerModal, setShowPlayerModal] = useState(false);
-  const [showEncounterModal, setShowEncounterModal] = useState(false);
-  const [isNPCInitiatedEncounter, setIsNPCInitiatedEncounter] = useState(false);
-  const [isFollowingAfterDismissal, setIsFollowingAfterDismissal] = useState(false);
-  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [nearChest, setNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
-  const [selectedNpcActivity, setSelectedNpcActivity] = useState('');
-  const [selectedNpcNearbyInfected, setSelectedNpcNearbyInfected] = useState(0);
-  const [selectedNpcNearbyDeceased, setSelectedNpcNearbyDeceased] = useState(0);
-  const [selectedNpcRumors, setSelectedNpcRumors] = useState<string[]>([]);
-  const [activeEvent, setActiveEvent] = useState<EventInstance | null>(null);
-  const [eventQueue, setEventQueue] = useState<EventInstance[]>([]);
-  const [llmEventsEnabled, setLlmEventsEnabled] = useState(false);
   const [worldFlags, setWorldFlags] = useState<Record<string, boolean | number | string>>(() => {
     try {
       const raw = localStorage.getItem('worldFlags');
@@ -103,21 +114,7 @@ function App() {
       return {};
     }
   });
-  const [lastEventNote, setLastEventNote] = useState<string | null>(null);
-  const eventCooldownsRef = useRef<Record<string, number>>({});
   const npcThreatMemoryRef = useRef<Record<string, { count: number; lastSimTime: number }>>({});
-  const suppressDismissalEventRef = useRef(false);
-  // Track NPC that dismissed player for handling "insist on following" option
-  const dismissedNpcRef = useRef<{ npcId: string; npcName: string } | null>(null);
-  const initialTriggerState = useMemo<TriggerState>(() => {
-    try {
-      const raw = localStorage.getItem('eventTriggerState');
-      return raw ? JSON.parse(raw) : { counts: {}, lastTriggeredDay: {} };
-    } catch {
-      return { counts: {}, lastTriggeredDay: {} };
-    }
-  }, []);
-  const triggerStateRef = useRef<TriggerState>(initialTriggerState);
   const [showDemographicsOverlay, setShowDemographicsOverlay] = useState(false);
   const [npcStateOverride, setNpcStateOverride] = useState<NpcStateOverride | null>(null);
   const [tileBuildings, setTileBuildings] = useState<BuildingMetadata[]>([]);
@@ -132,13 +129,13 @@ function App() {
   const simTimeRef = useRef(0);
   const timeOfDayRef = useRef(12);
   const lastSimCommitRef = useRef(0);
+  const seededInitialInfectionsRef = useRef(false);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [climbablePrompt, setClimbablePrompt] = useState<string | null>(null);
   const [isClimbing, setIsClimbing] = useState(false);
   const climbInputRef = useRef<'up' | 'down' | 'cancel' | null>(null);
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
-  const [dropRequests, setDropRequests] = useState<import('./types').DroppedItemRequest[]>([]);
   const r3fRef = useRef<{ camera: THREE.Camera | null; gl: THREE.WebGLRenderer | null }>({ camera: null, gl: null });
   const dropRaycaster = useMemo(() => new THREE.Raycaster(), []);
   const [pushCharge, setPushCharge] = useState(0);
@@ -152,7 +149,6 @@ function App() {
   const toastIdCounter = useRef(0);
   const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const [cameraViewTarget, setCameraViewTarget] = useState<[number, number, number] | null>(null);
-
   // Handle navigation to infected household
   const handleNavigateToHousehold = useCallback((buildingPosition: [number, number, number]) => {
     // Switch to overhead camera mode
@@ -168,6 +164,41 @@ function App() {
       setCameraViewTarget(null);
     }
   }, [cameraViewTarget]);
+
+  const getDistrictScale = useCallback((district: ReturnType<typeof getDistrictType>) => {
+    if (district === 'WEALTHY') return 1.35;
+    if (district === 'HOVELS') return 0.65;
+    if (district === 'CIVIC') return 1.2;
+    return 1.0;
+  }, []);
+
+  const exitInterior = useCallback(() => {
+    if (!interiorBuilding) {
+      setSceneMode('outdoor');
+      setInteriorSpec(null);
+      setInteriorNarrator(null);
+      setInteriorBuilding(null);
+      return;
+    }
+    const district = interiorBuilding.district ?? getDistrictType(params.mapX, params.mapY);
+    const districtScale = getDistrictScale(district);
+    const half = (CONSTANTS.BUILDING_SIZE * districtScale * (interiorBuilding.sizeScale ?? 1)) / 2;
+    const offset = half + 1.6;
+    const [bx, by, bz] = interiorBuilding.position;
+    const doorSide = interiorBuilding.doorSide;
+    const spawn: [number, number, number] = doorSide === 0
+      ? [bx, by, bz + offset]
+      : doorSide === 1
+        ? [bx, by, bz - offset]
+        : doorSide === 2
+          ? [bx + offset, by, bz]
+          : [bx - offset, by, bz];
+    setMapEntrySpawn({ mapX: params.mapX, mapY: params.mapY, position: spawn });
+    setSceneMode('outdoor');
+    setInteriorSpec(null);
+    setInteriorNarrator(null);
+    setInteriorBuilding(null);
+  }, [getDistrictScale, interiorBuilding, params.mapX, params.mapY]);
 
   // Calculate infected households for epidemic report
   const infectedHouseholds = useMemo(() => {
@@ -243,25 +274,12 @@ function App() {
   const [gameOver, setGameOver] = useState<{ reason: string; description: string } | null>(null);
 
   useEffect(() => {
-    if (!activeEvent) return;
-    setShowEncounterModal(false);
-    setShowMerchantModal(false);
-    setShowEnterModal(false);
-  }, [activeEvent]);
-
-  useEffect(() => {
     try {
       localStorage.setItem('worldFlags', JSON.stringify(worldFlags));
     } catch {
       // Ignore storage errors.
     }
   }, [worldFlags]);
-
-  useEffect(() => {
-    if (!lastEventNote) return;
-    const timeout = window.setTimeout(() => setLastEventNote(null), 4000);
-    return () => window.clearTimeout(timeout);
-  }, [lastEventNote]);
 
   // Initial loading screen - gives assets time to load before revealing game
   useEffect(() => {
@@ -441,6 +459,47 @@ function App() {
     onDeath: (summary) => setGameOver(summary)
   });
 
+  const handlePlagueModalPauseToggle = useCallback((paused: boolean) => {
+    if (paused) {
+      prevSimSpeedRef.current = params.simulationSpeed;
+      setParams(prev => ({ ...prev, simulationSpeed: 0.01 }));
+    } else {
+      setParams(prev => ({
+        ...prev,
+        simulationSpeed: prev.simulationSpeed === 0.01 ? prevSimSpeedRef.current : prev.simulationSpeed
+      }));
+    }
+  }, [params.simulationSpeed, setParams]);
+
+  const handleClearSelectedNpc = useCallback(() => setSelectedNpc(null), []);
+  const handlePlayerPositionUpdate = useCallback((pos: THREE.Vector3) => {
+    playerPositionRef.current.copy(pos);
+  }, []);
+  const handleClimbInput = useCallback((dir: 'up' | 'down' | 'cancel') => {
+    climbInputRef.current = dir;
+  }, []);
+  const handleResetFollowingState = useCallback(() => setIsFollowingAfterDismissal(false), []);
+  const handleDismissToast = useCallback((id: string) => {
+    setToastMessages((prev) => prev.filter((msg) => msg.id !== id));
+  }, []);
+
+  const {
+    dropRequests,
+    handlePickupItem,
+    handleDropItem,
+    handleDropItemAtScreen
+  } = useInventoryInteractions({
+    sceneMode,
+    interiorBuilding,
+    interiorSpec,
+    playerPositionRef,
+    r3fRef,
+    dropRaycaster,
+    setPlayerStats,
+    setPickupToast,
+    simTime: stats.simTime
+  });
+
   const observePrompt = useMemo(() => {
     const district = getDistrictType(params.mapX, params.mapY);
     const biome = getBiomeForDistrict(district);
@@ -471,6 +530,68 @@ function App() {
     setShowEnterModal,
     setShowPlayerModal
   });
+
+  const {
+    activeEvent,
+    llmEventsEnabled,
+    setLlmEventsEnabled,
+    lastEventNote,
+    tryTriggerEvent,
+    resolveEvent,
+    handleConversationResult,
+    handleTriggerConversationEvent,
+    handleDebugEvent
+  } = useEventSystem({
+    params,
+    currentWeather,
+    playerStats,
+    statsSimTime: stats.simTime,
+    outdoorNpcPool,
+    setOutdoorNpcPool,
+    setConversationHistories,
+    setPlayerStats,
+    setSelectedNpc,
+    setShowEncounterModal,
+    setIsNPCInitiatedEncounter,
+    setIsFollowingAfterDismissal,
+    setWorldFlags,
+    npcThreatMemoryRef
+  });
+
+  useEffect(() => {
+    if (!activeEvent) return;
+    setShowEncounterModal(false);
+    setShowMerchantModal(false);
+    setShowEnterModal(false);
+  }, [activeEvent]);
+
+  // Handle NPC-initiated encounters (friendly NPCs approaching the player)
+  const handleNPCInitiatedEncounter = useCallback((npc: { stats: NPCStats; state: AgentState }) => {
+    // Don't trigger if any modal is already open
+    if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || activeEvent) return;
+
+    tryTriggerEvent({
+      when: 'npcApproach',
+      targetType: 'npcProfession',
+      targetId: npc.stats.profession,
+      contextOverrides: {
+        npc: {
+          id: npc.stats.id,
+          name: npc.stats.name,
+          profession: npc.stats.profession,
+          socialClass: npc.stats.socialClass,
+          disposition: npc.stats.disposition,
+          panic: npc.stats.panicLevel,
+          religion: npc.stats.religion
+        }
+      },
+      source: 'conversation'
+    });
+
+    setSelectedNpc(npc);
+    setIsNPCInitiatedEncounter(true);
+    setShowEncounterModal(true);
+  }, [activeEvent, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, tryTriggerEvent]);
 
   useEffect(() => {
     if (forcedPlagueTriggeredRef.current) return;
@@ -524,473 +645,6 @@ function App() {
     showEventDebug: false,
   });
 
-  const enqueueEvent = useCallback((event: EventInstance) => {
-    if (!activeEvent) {
-      setActiveEvent(event);
-    } else {
-      setEventQueue(prev => [...prev, event]);
-    }
-  }, [activeEvent]);
-
-  const buildEventContext = useCallback((overrides?: Partial<EventContextSnapshot>): EventContextSnapshot => {
-    const district = getDistrictType(params.mapX, params.mapY);
-    return {
-      player: {
-        id: playerStats.id,
-        name: playerStats.name,
-        socialClass: playerStats.socialClass,
-        stats: {
-          charisma: playerStats.charisma,
-          piety: playerStats.piety,
-          currency: playerStats.currency,
-          health: playerStats.health,
-          reputation: playerStats.reputation,
-          wealth: playerStats.wealth
-        }
-      },
-      environment: {
-        district,
-        timeOfDay: params.timeOfDay,
-        weather: currentWeather
-      },
-      ...overrides
-    };
-  }, [currentWeather, params.mapX, params.mapY, params.timeOfDay, playerStats]);
-
-  const makeEventInstance = useCallback((def: EventDefinition, source: EventInstance['source'], context: EventContextSnapshot): EventInstance => {
-    return {
-      id: `${def.id}-${Date.now()}`,
-      source,
-      context,
-      content: {
-        title: def.title,
-        body: def.body,
-        options: def.options
-      },
-      definitionId: def.id
-    };
-  }, []);
-
-  const mapEffectKey = useCallback((effectKey: string): EventEffect[] => {
-    switch (effectKey) {
-      case 'end_conversation':
-        return [{ type: 'endConversation' }];
-      case 'bribe_small':
-        return [{ type: 'playerStat', stat: 'currency', delta: -2 }];
-      case 'bribe_large':
-        return [{ type: 'playerStat', stat: 'currency', delta: -5 }];
-      case 'health_up':
-        return [{ type: 'playerStat', stat: 'health', delta: 5 }];
-      case 'health_down':
-        return [{ type: 'playerStat', stat: 'health', delta: -5 }];
-      case 'reputation_up':
-        return [{ type: 'playerStat', stat: 'reputation', delta: 3 }];
-      case 'reputation_down':
-        return [{ type: 'playerStat', stat: 'reputation', delta: -3 }];
-      case 'wealth_up':
-        return [{ type: 'playerStat', stat: 'wealth', delta: 4 }];
-      case 'wealth_down':
-        return [{ type: 'playerStat', stat: 'wealth', delta: -4 }];
-      case 'flee':
-        return [{ type: 'worldFlag', key: 'fled', value: true }];
-      case 'appeal_faith':
-        return [{ type: 'playerStat', stat: 'piety', delta: 1 }];
-      case 'calm_crowd':
-        return [{ type: 'worldFlag', key: 'calmed_crowd', value: true }];
-      case 'escalate':
-        return [{ type: 'worldFlag', key: 'escalated', value: true }];
-      default:
-        return [];
-    }
-  }, []);
-
-  const buildLlmEventInstance = useCallback((baseEvent: EventInstance, payload: {
-    title: string;
-    body: string;
-    options: Array<{
-      id?: string;
-      label: string;
-      effectKey: string;
-      outcomeText?: string;
-      followupEventId?: string;
-      requirements?: { stat?: 'charisma' | 'piety' | 'currency' | 'health' | 'reputation' | 'wealth'; min?: number; max?: number };
-    }>;
-  }): EventInstance => {
-    const options = payload.options
-      .filter(option => typeof option.label === 'string' && option.label.trim().length > 0)
-      .slice(0, 4)
-      .map((option, index) => ({
-        id: option.id || `opt-${index + 1}`,
-        label: option.label.trim(),
-        outcomeText: option.outcomeText,
-        followupEventId: option.followupEventId && getEventById(option.followupEventId)
-          ? option.followupEventId
-          : undefined,
-        requirements: option.requirements?.stat ? {
-          stat: option.requirements.stat,
-          min: option.requirements.min,
-          max: option.requirements.max
-        } : undefined,
-        effects: mapEffectKey(option.effectKey)
-      }));
-
-    return {
-      ...baseEvent,
-      content: {
-        title: payload.title,
-        body: payload.body,
-        options
-      }
-    };
-  }, [mapEffectKey]);
-
-  const enqueueEventWithOptionalLLM = useCallback(async (event: EventInstance) => {
-    if (!llmEventsEnabled) {
-      enqueueEvent(event);
-      return;
-    }
-
-    try {
-      const response = await fetch('/api/event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          context: event.context,
-          eventSeed: event.definitionId
-        })
-      });
-
-      if (!response.ok) {
-        enqueueEvent(event);
-        return;
-      }
-
-      const data = await response.json();
-      const text = data.response;
-      if (!text) {
-        enqueueEvent(event);
-        return;
-      }
-
-      const parsed = JSON.parse(text);
-      const validOptions = Array.isArray(parsed.options) && parsed.options.length >= 2;
-      if (!parsed.title || !parsed.body || !validOptions) {
-        enqueueEvent(event);
-        return;
-      }
-
-      const llmEvent = buildLlmEventInstance(event, parsed);
-      if (llmEvent.content.options.length < 2) {
-        enqueueEvent(event);
-        return;
-      }
-      enqueueEvent(llmEvent);
-    } catch {
-      enqueueEvent(event);
-    }
-  }, [buildLlmEventInstance, enqueueEvent, llmEventsEnabled]);
-
-  const tryTriggerEvent = useCallback((params: {
-    when: TriggerWhen;
-    targetType: TriggerTargetType;
-    targetId: string;
-    contextOverrides?: Partial<EventContextSnapshot>;
-    source: EventInstance['source'];
-  }) => {
-    const dayIndex = Math.floor(stats.simTime);
-    const def = evaluateTriggers({
-      when: params.when,
-      targetType: params.targetType,
-      targetId: params.targetId,
-      dayIndex,
-      state: triggerStateRef.current
-    });
-    if (!def) return;
-
-    const context = buildEventContext(params.contextOverrides);
-    const event = makeEventInstance(def, params.source, context);
-    setLastEventNote(`${params.when}:${params.targetType}:${params.targetId}`);
-    try {
-      localStorage.setItem('eventTriggerState', JSON.stringify(triggerStateRef.current));
-    } catch {
-      // Ignore storage errors.
-    }
-    void enqueueEventWithOptionalLLM(event);
-  }, [buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, stats.simTime]);
-
-  // Handle NPC-initiated encounters (friendly NPCs approaching the player)
-  const handleNPCInitiatedEncounter = useCallback((npc: { stats: NPCStats; state: AgentState }) => {
-    // Don't trigger if any modal is already open
-    if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal || activeEvent) return;
-
-    tryTriggerEvent({
-      when: 'npcApproach',
-      targetType: 'npcProfession',
-      targetId: npc.stats.profession,
-      contextOverrides: {
-        npc: {
-          id: npc.stats.id,
-          name: npc.stats.name,
-          profession: npc.stats.profession,
-          socialClass: npc.stats.socialClass,
-          disposition: npc.stats.disposition,
-          panic: npc.stats.panicLevel,
-          religion: npc.stats.religion
-        }
-      },
-      source: 'conversation'
-    });
-
-    setSelectedNpc(npc);
-    setIsNPCInitiatedEncounter(true);
-    setShowEncounterModal(true);
-  }, [activeEvent, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, tryTriggerEvent]);
-
-  const applyEffects = useCallback((effects: EventEffect[]) => {
-    effects.forEach(effect => {
-      if (effect.type === 'playerStat') {
-        const clampStat = (stat: EventEffect['stat'], value: number) => {
-          if (stat === 'health' || stat === 'reputation' || stat === 'wealth') {
-            return Math.max(0, Math.min(100, value));
-          }
-          return value;
-        };
-        setPlayerStats(prev => ({
-          ...prev,
-          [effect.stat]: clampStat(
-            effect.stat,
-            (prev[effect.stat] as number) + effect.delta
-          )
-        }));
-      } else if (effect.type === 'npcStat') {
-        setOutdoorNpcPool(prev => prev.map(record => {
-          if (record.stats.id !== effect.npcId) return record;
-          return {
-            ...record,
-            stats: {
-              ...record.stats,
-              disposition: effect.stat === 'disposition' ? record.stats.disposition + effect.delta : record.stats.disposition,
-              panicLevel: effect.stat === 'panic' ? record.stats.panicLevel + effect.delta : record.stats.panicLevel
-            }
-          };
-        }));
-      } else if (effect.type === 'worldFlag') {
-        setWorldFlags(prev => ({ ...prev, [effect.key]: effect.value }));
-      } else if (effect.type === 'triggerEvent') {
-        const def = getEventById(effect.eventId);
-        if (!def) return;
-        const context = buildEventContext();
-        void enqueueEventWithOptionalLLM(makeEventInstance(def, 'system', context));
-      } else if (effect.type === 'endConversation') {
-        setShowEncounterModal(false);
-      }
-    });
-  }, [buildEventContext, makeEventInstance, enqueueEventWithOptionalLLM]);
-
-  const resolveEvent = useCallback((option: EventOption) => {
-    applyEffects(option.effects);
-
-    // Handle "insist on following" option for dismissed NPC
-    if (option.id === 'insist_follow' && dismissedNpcRef.current) {
-      const dismissedNpc = dismissedNpcRef.current;
-
-      // Lower NPC disposition significantly (-25) and increase panic (+15)
-      setOutdoorNpcPool(prev => prev.map(record => {
-        if (record.stats.id !== dismissedNpc.npcId) return record;
-        return {
-          ...record,
-          stats: {
-            ...record.stats,
-            disposition: Math.max(0, record.stats.disposition - 25),
-            panicLevel: Math.min(100, record.stats.panicLevel + 15)
-          }
-        };
-      }));
-
-      // Reopen encounter modal with the now-angry NPC after a brief delay
-      const npcRecord = outdoorNpcPool.find(r => r.stats.id === dismissedNpc.npcId);
-      if (npcRecord) {
-        setTimeout(() => {
-          setSelectedNpc(npcRecord);
-          setIsNPCInitiatedEncounter(false);
-          setIsFollowingAfterDismissal(true); // NPC will be angry/fearful
-          setShowEncounterModal(true);
-        }, 500);
-      }
-
-      // Clear the dismissed NPC ref
-      dismissedNpcRef.current = null;
-    }
-
-    if (option.followupEventId) {
-      const def = getEventById(option.followupEventId);
-      if (def) {
-        const context = buildEventContext();
-        const followup = makeEventInstance(def, 'system', context);
-        void enqueueEventWithOptionalLLM(followup);
-      }
-    }
-    setEventQueue(prev => {
-      const [next, ...rest] = prev;
-      setActiveEvent(next || null);
-      return rest;
-    });
-  }, [applyEffects, buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, outdoorNpcPool]);
-
-  // Handle conversation end - save summary and apply impact to NPC disposition
-  const handleConversationResult = useCallback((npcId: string, summary: ConversationSummary, impact: ConversationImpact, meta?: { action?: 'end_conversation' | null }) => {
-    // Save conversation summary to history
-    setConversationHistories(prev => [...prev, summary]);
-
-    // Apply impact to NPC disposition and panic in the pool
-    setOutdoorNpcPool(prev => prev.map(record => {
-      if (record.stats.id !== npcId) return record;
-
-      // Apply the conversation impact to update disposition and panic
-      const { newDisposition, newPanicLevel } = applyConversationImpact(record.stats, impact);
-
-      return {
-        ...record,
-        stats: {
-          ...record.stats,
-          disposition: newDisposition,
-          panicLevel: newPanicLevel
-        }
-      };
-    }));
-
-    const npcRecord = outdoorNpcPool.find(record => record.stats.id === npcId);
-    if (!npcRecord) return;
-
-    const threatEntry = npcThreatMemoryRef.current[npcId];
-    const recentWindow = 1;
-    let threatCount = threatEntry?.count ?? 0;
-    if (impact.threatLevel >= 40 || impact.offenseLevel >= 50) {
-      if (!threatEntry || stats.simTime - threatEntry.lastSimTime > recentWindow) {
-        threatCount = 1;
-      } else {
-        threatCount += 1;
-      }
-      npcThreatMemoryRef.current[npcId] = { count: threatCount, lastSimTime: stats.simTime };
-    }
-
-    const context: EventContextSnapshot = {
-      player: {
-        id: playerStats.id,
-        name: playerStats.name,
-        socialClass: playerStats.socialClass,
-        stats: {
-          charisma: playerStats.charisma,
-          piety: playerStats.piety,
-          currency: playerStats.currency,
-          health: playerStats.health,
-          reputation: playerStats.reputation,
-          wealth: playerStats.wealth
-        }
-      },
-      npc: {
-        id: npcRecord.stats.id,
-        name: npcRecord.stats.name,
-        profession: npcRecord.stats.profession,
-        socialClass: npcRecord.stats.socialClass,
-        disposition: npcRecord.stats.disposition,
-        panic: npcRecord.stats.panicLevel,
-        religion: npcRecord.stats.religion
-      },
-      environment: {
-        district: getDistrictType(params.mapX, params.mapY),
-        timeOfDay: params.timeOfDay,
-        weather: currentWeather
-      },
-      flags: {
-        threatMemory: threatCount
-      }
-    };
-
-    const dayIndex = Math.floor(stats.simTime);
-    const recentIds = Object.keys(eventCooldownsRef.current).filter(id => eventCooldownsRef.current[id] === dayIndex);
-    const convoEvent = checkConversationTrigger(context, impact, recentIds);
-    if (convoEvent) {
-      eventCooldownsRef.current[convoEvent.definitionId || convoEvent.id] = dayIndex;
-      if (meta?.action === 'end_conversation') {
-        suppressDismissalEventRef.current = true;
-      }
-      void enqueueEventWithOptionalLLM(convoEvent);
-    }
-  }, [currentWeather, enqueueEventWithOptionalLLM, outdoorNpcPool, params.mapX, params.mapY, params.timeOfDay, playerStats, stats.simTime]);
-
-  // Handle triggering events from conversation actions (e.g., NPC dismissing player)
-  const handleTriggerConversationEvent = useCallback((eventId: string, npcContext?: { npcId: string; npcName: string }, delayMs = 0) => {
-    if (eventId === 'npc_dismissed_player' && suppressDismissalEventRef.current) {
-      suppressDismissalEventRef.current = false;
-      return;
-    }
-    const def = getEventById(eventId);
-    if (!def) return;
-
-    // Store NPC context for handling "insist on following" option
-    if (npcContext) {
-      dismissedNpcRef.current = npcContext;
-    }
-
-    // Build context with NPC info if available
-    const npcRecord = npcContext ? outdoorNpcPool.find(r => r.stats.id === npcContext.npcId) : undefined;
-    const contextOverrides: Partial<EventContextSnapshot> = npcRecord ? {
-      npc: {
-        id: npcRecord.stats.id,
-        name: npcRecord.stats.name,
-        profession: npcRecord.stats.profession,
-        socialClass: npcRecord.stats.socialClass,
-        religion: npcRecord.stats.religion,
-        disposition: npcRecord.stats.disposition,
-        panic: npcRecord.stats.panicLevel
-      }
-    } : undefined;
-
-    const context = buildEventContext(contextOverrides);
-    const event = makeEventInstance(def, 'system', context);
-    if (delayMs > 0) {
-      window.setTimeout(() => {
-        setShowEncounterModal(false);
-        void enqueueEventWithOptionalLLM(event);
-      }, delayMs);
-    } else {
-      setShowEncounterModal(false);
-      void enqueueEventWithOptionalLLM(event);
-    }
-  }, [buildEventContext, enqueueEventWithOptionalLLM, makeEventInstance, outdoorNpcPool]);
-
-  const handleDebugEvent = useCallback(() => {
-    const district = getDistrictType(params.mapX, params.mapY);
-    const biome = getBiomeForDistrict(district);
-    const candidates = getEventsForBiome(biome);
-    if (candidates.length === 0) return;
-
-    const context: EventContextSnapshot = {
-      player: {
-        id: playerStats.id,
-        name: playerStats.name,
-        socialClass: playerStats.socialClass,
-        stats: {
-          charisma: playerStats.charisma,
-          piety: playerStats.piety,
-          currency: playerStats.currency,
-          health: playerStats.health,
-          reputation: playerStats.reputation,
-          wealth: playerStats.wealth
-        }
-      },
-      environment: {
-        district,
-        timeOfDay: params.timeOfDay,
-        weather: currentWeather
-      }
-    };
-
-    const event = makeEventInstance(candidates[0], 'system', context);
-    void enqueueEventWithOptionalLLM(event);
-  }, [currentWeather, enqueueEventWithOptionalLLM, makeEventInstance, params.mapX, params.mapY, params.timeOfDay, playerStats]);
-
   useEffect(() => {
     if (sceneMode === 'interior') {
       setMinimapData(null);
@@ -1022,49 +676,54 @@ function App() {
   const PERF_DEBOUNCE_MS = 2000; // Debounce performance state changes by 2 seconds
   const LOW_FPS_THRESHOLD = 5; // Disable shadows below this FPS
 
-  // Time tracking
-  useEffect(() => {
-    let lastTime = performance.now();
-    let frameId: number;
+  useSimulationClock({
+    simulationSpeed: params.simulationSpeed,
+    simTimeRef,
+    timeOfDayRef,
+    lastSimCommitRef,
+    setStats,
+    setParams,
+    setPlayerStats
+  });
 
-    const tick = (now: number) => {
-      const dt = (now - lastTime) / 10000;
-      lastTime = now;
+  // Handler for opening chests in interiors
+  const handleOpenChest = useCallback((chest: { id: string; label: string; position: [number, number, number]; locationName: string }) => {
+    // Generate random loot for the chest (1-3 items)
+    const numItems = 1 + Math.floor(Math.random() * 3);
+    const possibleItems = [
+      { itemId: 'chest-silver-coin', itemName: 'Silver Dirham', rarity: 'common' as const, category: 'CURRENCY' },
+      { itemId: 'chest-gold-coin', itemName: 'Gold Dinar', rarity: 'uncommon' as const, category: 'CURRENCY' },
+      { itemId: 'chest-silk-cloth', itemName: 'Silk Fabric', rarity: 'uncommon' as const, category: 'TEXTILE' },
+      { itemId: 'chest-incense', itemName: 'Frankincense', rarity: 'common' as const, category: 'APOTHECARY' },
+      { itemId: 'chest-spice', itemName: 'Precious Spices', rarity: 'uncommon' as const, category: 'TRADER' },
+      { itemId: 'chest-jewelry', itemName: 'Silver Bracelet', rarity: 'rare' as const, category: 'METALSMITH' },
+      { itemId: 'chest-medicine', itemName: 'Medicinal Herbs', rarity: 'common' as const, category: 'APOTHECARY' },
+      { itemId: 'chest-scroll', itemName: 'Parchment Scroll', rarity: 'common' as const, category: 'SCHOLARLY' },
+    ];
 
-      if (params.simulationSpeed > 0) {
-        const simHoursDelta = dt * params.simulationSpeed / CONSTANTS.REAL_SECONDS_PER_SIM_HOUR;
+    const items: Array<{ itemId: string; itemName: string; rarity: 'common' | 'uncommon' | 'rare'; category: string }> = [];
+    for (let i = 0; i < numItems; i++) {
+      // Weight towards common items
+      const roll = Math.random();
+      const targetRarity = roll < 0.6 ? 'common' : roll < 0.9 ? 'uncommon' : 'rare';
+      const eligible = possibleItems.filter(item => item.rarity === targetRarity);
+      const selected = eligible.length > 0
+        ? eligible[Math.floor(Math.random() * eligible.length)]
+        : possibleItems[Math.floor(Math.random() * possibleItems.length)];
+      items.push(selected);
+    }
 
-        simTimeRef.current += simHoursDelta;
-        timeOfDayRef.current += simHoursDelta;
-        if (timeOfDayRef.current >= 24) timeOfDayRef.current -= 24;
+    setLootModalData({
+      type: 'chest',
+      sourceObjectName: chest.label,
+      sourceLocation: chest.locationName,
+      items,
+      isTheft: true,
+    });
 
-        const commitInterval = 0.1;
-        if ((now - lastSimCommitRef.current) / 1000 >= commitInterval) {
-          lastSimCommitRef.current = now;
-          const nextSimTime = simTimeRef.current;
-          const nextTimeOfDay = timeOfDayRef.current;
-          setStats(prev => ({
-            ...prev,
-            simTime: nextSimTime,
-            daysPassed: nextSimTime / 24,
-          }));
-          setParams(prev => ({
-            ...prev,
-            timeOfDay: nextTimeOfDay
-          }));
-          setPlayerStats(prevPlayer => ({
-            ...prevPlayer,
-            plague: progressPlague(prevPlayer.plague, nextSimTime)
-          }));
-        }
-      }
-
-      frameId = requestAnimationFrame(tick);
-    };
-
-    frameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId);
-  }, [params.simulationSpeed]);
+    // Clear near chest after opening
+    setNearChest(null);
+  }, [setLootModalData]);
 
   // Global Key Listener for Interaction
   useEffect(() => {
@@ -1117,6 +776,10 @@ function App() {
       if (e.key === 'Escape' && showMerchantModal) {
         setShowMerchantModal(false);
       }
+      // Open chest with 'O' key when near a chest (works in both interior and outdoor)
+      if (e.key === 'o' && nearChest && !lootModalData && !showMerchantModal && !showEncounterModal) {
+        handleOpenChest(nearChest);
+      }
       if (e.key === '4' && selectedNpc && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
         e.preventDefault();
         setIsNPCInitiatedEncounter(false); // Player-initiated, not NPC
@@ -1153,7 +816,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode]);
+  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, lootModalData, handleOpenChest]);
 
   // Push trigger function
   const triggerPush = useCallback(() => {
@@ -1304,7 +967,7 @@ function App() {
   }, [params.mapX, params.mapY]);
 
   const canvasCamera = useMemo(() => ({ position: [20, 20, 20] as [number, number, number], fov: 45 }), []);
-  const canvasDpr = useMemo(() => [1, 2] as [number, number], []);
+  const canvasDpr = useMemo(() => (performanceDegraded ? [1, 1.35] : [1, 1.7]) as [number, number], [performanceDegraded]);
   const canvasGl = useMemo(() => ({ toneMappingExposure: 1.05 }), []);
 
   const handleFastTravel = useCallback((x: number, y: number) => {
@@ -1385,7 +1048,11 @@ function App() {
     if (!registry) {
       const district = getDistrictType(params.mapX, params.mapY);
       const tileSeed = hashToSeedTile(tileKey);
-      registry = createTileNPCRegistry(buildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT);
+      const seedInitial = !seededInitialInfectionsRef.current;
+      registry = createTileNPCRegistry(buildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, seedInitial);
+      if (seedInitial) {
+        seededInitialInfectionsRef.current = true;
+      }
       tileRegistriesRef.current.set(tileKey, registry);
     }
     return registry;
@@ -1469,6 +1136,9 @@ function App() {
       case BuildingType.COMMERCIAL: return 'Merchant Stall';
       case BuildingType.RELIGIOUS: return 'Holy Sanctuary';
       case BuildingType.CIVIC: return 'Governor\'s Office';
+      case BuildingType.SCHOOL: return 'Madrasa';
+      case BuildingType.MEDICAL: return 'Clinic';
+      case BuildingType.HOSPITALITY: return 'Inn';
       default: return 'Structure';
     }
   }, []);
@@ -1671,7 +1341,19 @@ function App() {
       return;
     }
     if (work.phase === 2) {
-      const outdoor = Array.from(work.registry.npcMap.values()).filter((record) => record.location === 'outdoor');
+      const outdoor = Array.from(work.registry.npcMap.values())
+        .filter((record) => record.location === 'outdoor')
+        .sort((a, b) => {
+          const priority = (state: AgentState) => {
+            if (state === AgentState.INFECTED) return 0;
+            if (state === AgentState.INCUBATING) return 1;
+            if (state === AgentState.HEALTHY) return 2;
+            return 3;
+          };
+          const diff = priority(a.state) - priority(b.state);
+          if (diff !== 0) return diff;
+          return a.id.localeCompare(b.id);
+        });
       const nextIds = outdoor.map((record) => record.id);
       const prevIds = lastOutdoorIdsRef.current;
       const sameIds = nextIds.length === prevIds.length && nextIds.every((id, idx) => id === prevIds[idx]);
@@ -1892,128 +1574,95 @@ function App() {
     });
   }, [nearMerchant, playerStats.inventory]);
 
-  const handlePickupItem = useCallback((pickup: import('./utils/pushables').PickupInfo) => {
+  // Loot modal handlers
+  const handleLootAccept = useCallback((items: LootItem[]) => {
+    if (items.length === 0) {
+      setLootModalData(null);
+      return;
+    }
+
+    // Check inventory space
+    const currentInventorySize = playerStats.inventory.reduce((sum, i) => sum + i.quantity, 0);
+    if (currentInventorySize + items.length > playerStats.maxInventorySlots) {
+      setToastMessages(prev => [...prev, {
+        id: `loot-warning-${toastIdCounter.current++}`,
+        message: 'Not enough inventory space!',
+        duration: 3000
+      }]);
+      return;
+    }
+
+    // Add items to inventory
     setPlayerStats(prev => {
-      if (pickup.type === 'coin' && pickup.value) {
-        setPickupToast({ message: `Picked up ${pickup.label}`, id: Date.now() });
-        return {
-          ...prev,
-          currency: prev.currency + pickup.value
-        };
-      }
-      if (!pickup.itemId) return prev;
-      const currentInventorySize = prev.inventory.reduce((sum, i) => sum + i.quantity, 0);
-      if (currentInventorySize + 1 > prev.maxInventorySlots) {
-        setPickupToast({ message: 'Inventory full', id: Date.now() });
-        return prev;
-      }
-      const existingItemIndex = prev.inventory.findIndex(i => i.itemId === pickup.itemId);
-      let newInventory = [...prev.inventory];
-      if (existingItemIndex >= 0) {
-        newInventory[existingItemIndex] = {
-          ...newInventory[existingItemIndex],
-          quantity: newInventory[existingItemIndex].quantity + 1
-        };
-      } else {
-        newInventory.push({
-          id: `player-item-${Date.now()}`,
-          itemId: pickup.itemId,
-          quantity: 1,
-          acquiredAt: stats.simTime
-        });
-      }
-      setPickupToast({ message: `Picked up ${pickup.label}`, id: Date.now() });
+      const newInventory = [...prev.inventory];
+
+      items.forEach(lootItem => {
+        // Check if this item type already exists in inventory
+        const existingIndex = newInventory.findIndex(i => i.itemId === lootItem.itemId);
+
+        if (existingIndex >= 0) {
+          newInventory[existingIndex] = {
+            ...newInventory[existingIndex],
+            quantity: newInventory[existingIndex].quantity + 1
+          };
+        } else {
+          newInventory.push({
+            id: `player-item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            itemId: lootItem.itemId,
+            quantity: 1,
+            acquiredAt: stats.simTime
+          });
+        }
+      });
+
       return {
         ...prev,
         inventory: newInventory
       };
     });
-  }, [stats.simTime]);
 
-  const handleDropItem = useCallback((item: { inventoryId: string; itemId: string; label: string; appearance?: import('./types').ItemAppearance }, dropPosition?: [number, number, number]) => {
-    const position = dropPosition
-      ? { x: dropPosition[0], y: dropPosition[1], z: dropPosition[2] }
-      : playerPositionRef.current;
-    const offsetX = dropPosition ? 0 : 0.4 + Math.random() * 0.2;
-    const offsetZ = dropPosition ? 0 : 0.2 + Math.random() * 0.2;
-    const dropId = `drop-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
-    const details = getItemDetailsByItemId(item.itemId);
-    const label = details?.name ?? item.label ?? item.itemId;
-    const dropLocation = sceneMode === 'interior' ? 'interior' : 'outdoor';
-    const interiorId = interiorBuilding?.id ?? interiorSpec?.buildingId ?? undefined;
-    const material = (() => {
-      if (item.appearance?.type === 'robe' || item.appearance?.type === 'headwear') return 'cloth';
-      switch (details?.category) {
-        case 'METALSMITH': return 'metal';
-        case 'TEXTILE': return 'cloth';
-        case 'APOTHECARY': return 'ceramic';
-        case 'TRADER': return 'wood';
-        default: return 'cloth';
-      }
-    })();
+    // Show toast
+    const itemNames = items.map(i => i.itemName).join(', ');
+    setToastMessages(prev => [...prev, {
+      id: `loot-pickup-${toastIdCounter.current++}`,
+      message: `Picked up: ${itemNames}`,
+      duration: 3000
+    }]);
 
-    setPlayerStats(prev => {
-      const existingIndex = prev.inventory.findIndex((entry) => entry.id === item.inventoryId);
-      if (existingIndex === -1) {
-        return prev;
-      }
-      const nextInventory = [...prev.inventory];
-      const target = nextInventory[existingIndex];
-      if (target.quantity <= 1) {
-        nextInventory.splice(existingIndex, 1);
-      } else {
-        nextInventory[existingIndex] = { ...target, quantity: target.quantity - 1 };
-      }
-      return { ...prev, inventory: nextInventory };
+    // Close modal
+    setLootModalData(null);
+  }, [playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
+
+  const handleLootDecline = useCallback(() => {
+    setLootModalData(null);
+  }, [setLootModalData]);
+
+  const handleLootClose = useCallback(() => {
+    setLootModalData(null);
+  }, [setLootModalData]);
+
+  // Handler for showing loot modal from Simulation (shattered objects)
+  const handleShowLootModal = useCallback((data: {
+    type: 'shatter';
+    sourceObjectName: string;
+    items: Array<{
+      itemId: string;
+      itemName: string;
+      rarity: 'common' | 'uncommon' | 'rare';
+      category: string;
+    }>;
+  }) => {
+    setLootModalData({
+      type: data.type,
+      sourceObjectName: data.sourceObjectName,
+      items: data.items.map(item => ({
+        itemId: item.itemId,
+        itemName: item.itemName,
+        rarity: item.rarity,
+        category: item.category,
+      })),
     });
-
-    setDropRequests(prev => {
-      const next = [
-        ...prev,
-        {
-          id: dropId,
-          itemId: item.itemId,
-          label,
-          position: [position.x + offsetX, position.y + 0.1, position.z + offsetZ],
-          location: dropLocation,
-          interiorId,
-          material,
-          appearance: item.appearance
-        }
-      ];
-      return next.length > 200 ? next.slice(-200) : next;
-    });
-
-    setPickupToast({ message: `Dropped ${label}`, id: Date.now() });
-  }, [sceneMode, interiorBuilding, interiorSpec]);
-
-  const handleDropItemAtScreen = useCallback((item: { inventoryId: string; itemId: string; label: string; appearance?: import('./types').ItemAppearance }, clientX: number, clientY: number) => {
-    const { camera, gl } = r3fRef.current;
-    if (!camera || !gl) {
-      handleDropItem(item);
-      return;
-    }
-    const rect = gl.domElement.getBoundingClientRect();
-    if (
-      clientX < rect.left ||
-      clientX > rect.right ||
-      clientY < rect.top ||
-      clientY > rect.bottom
-    ) {
-      handleDropItem(item);
-      return;
-    }
-    const x = ((clientX - rect.left) / rect.width) * 2 - 1;
-    const y = -((clientY - rect.top) / rect.height) * 2 + 1;
-    dropRaycaster.setFromCamera({ x, y }, camera);
-    const hit = new THREE.Vector3();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-    if (dropRaycaster.ray.intersectPlane(plane, hit)) {
-      handleDropItem(item, [hit.x, hit.y, hit.z]);
-      return;
-    }
-    handleDropItem(item);
-  }, [dropRaycaster, handleDropItem]);
+  }, [setLootModalData]);
 
   const handlePlagueExposure = useCallback((updatedPlague: import('./types').PlagueStatus) => {
     setPlayerStats(prev => ({
@@ -2105,387 +1754,297 @@ function App() {
     setSelectedNpcRumors(getDistrictRumors(district, stats.simTime));
   }, [getCurrentNpcActivity, getDistrictRumors, getNpcNearbyCounts, params.mapX, params.mapY, selectedNpc, showEncounterModal, stats.simTime]);
 
+  const performanceMonitorConfig = useMemo(() => ({
+    lastPerfChangeRef,
+    shadowsDisabledByPerf,
+    perfDebounceMs: PERF_DEBOUNCE_MS,
+    lowFpsThreshold: LOW_FPS_THRESHOLD,
+    setPerformanceDegraded,
+    setIndicatorDismissed,
+    devSettings,
+    setDevSettings
+  }), [devSettings, setDevSettings]);
+
+  const uiProps = useMemo(() => ({
+    params,
+    setParams,
+    stats,
+    playerStats,
+    devSettings,
+    setDevSettings,
+    nearBuilding,
+    buildingInfection: buildingInfectionState,
+    onFastTravel: handleFastTravel,
+    selectedNpc,
+    minimapData,
+    sceneMode,
+    mapX: params.mapX,
+    mapY: params.mapY,
+    overworldPath,
+    pickupPrompt,
+    climbablePrompt,
+    isClimbing,
+    onClimbInput: handleClimbInput,
+    pickupToast: pickupToast?.message ?? null,
+    currentWeather,
+    pushCharge,
+    moraleStats,
+    actionSlots,
+    onTriggerAction: triggerAction,
+    onTriggerPush: triggerPush,
+    simTime: stats.simTime,
+    showPlayerModal,
+    setShowPlayerModal,
+    showEncounterModal,
+    setShowEncounterModal,
+    conversationHistories,
+    onConversationResult: handleConversationResult,
+    onTriggerConversationEvent: handleTriggerConversationEvent,
+    selectedNpcActivity,
+    selectedNpcNearbyInfected,
+    selectedNpcNearbyDeceased,
+    selectedNpcRumors,
+    activeEvent,
+    onResolveEvent: resolveEvent,
+    onTriggerDebugEvent: handleDebugEvent,
+    llmEventsEnabled,
+    setLlmEventsEnabled,
+    lastEventNote,
+    showDemographicsOverlay,
+    setShowDemographicsOverlay,
+    onForceNpcState: handleForceNpcState,
+    onForceAllNpcState: handleForceAllNpcState,
+    isNPCInitiatedEncounter,
+    isFollowingAfterDismissal,
+    onResetFollowingState: handleResetFollowingState,
+    nearbyNPCs,
+    onOpenGuideModal: handleOpenGuideModal,
+    onSelectGuideEntry: handleOpenGuideEntry,
+    infectedHouseholds,
+    onNavigateToHousehold: handleNavigateToHousehold,
+    onDropItem: handleDropItem,
+    onDropItemAtScreen: handleDropItemAtScreen,
+    perfDebug
+  }), [
+    actionSlots,
+    activeEvent,
+    buildingInfectionState,
+    climbablePrompt,
+    conversationHistories,
+    currentWeather,
+    devSettings,
+    handleClimbInput,
+    handleConversationResult,
+    handleDebugEvent,
+    handleDropItem,
+    handleDropItemAtScreen,
+    handleFastTravel,
+    handleForceAllNpcState,
+    handleForceNpcState,
+    handleNavigateToHousehold,
+    handleOpenGuideEntry,
+    handleOpenGuideModal,
+    handleResetFollowingState,
+    handleTriggerConversationEvent,
+    infectedHouseholds,
+    isClimbing,
+    isFollowingAfterDismissal,
+    isNPCInitiatedEncounter,
+    lastEventNote,
+    llmEventsEnabled,
+    minimapData,
+    moraleStats,
+    nearBuilding,
+    nearbyNPCs,
+    overworldPath,
+    params,
+    perfDebug,
+    pickupPrompt,
+    pickupToast,
+    playerStats,
+    pushCharge,
+    sceneMode,
+    selectedNpc,
+    selectedNpcActivity,
+    selectedNpcNearbyDeceased,
+    selectedNpcNearbyInfected,
+    selectedNpcRumors,
+    setDevSettings,
+    setLlmEventsEnabled,
+    setParams,
+    setShowEncounterModal,
+    setShowPlayerModal,
+    showDemographicsOverlay,
+    showEncounterModal,
+    showPlayerModal,
+    stats.simTime,
+    stats,
+    triggerAction,
+    triggerPush
+  ]);
+
+  const simulationShellProps = useMemo(() => ({
+    transitioning,
+    sceneMode,
+    interiorSpec,
+    params,
+    stats,
+    devSettings,
+    playerStats,
+    canvasCamera,
+    canvasDpr,
+    canvasGl,
+    r3fRef,
+    onClearSelectedNpc: handleClearSelectedNpc,
+    onStatsUpdate: handleStatsUpdate,
+    onMapChange: handleMapChange,
+    onNearBuilding: setNearBuilding,
+    onBuildingsUpdate: handleBuildingsUpdate,
+    onNearMerchant: setNearMerchant,
+    onNearSpeakableNpc: setNearSpeakableNpc,
+    onNpcSelect: setSelectedNpc,
+    onNpcUpdate: handleNpcUpdate,
+    selectedNpcId: selectedNpc?.stats.id ?? null,
+    onMinimapUpdate: setMinimapData,
+    onPickupPrompt: setPickupPrompt,
+    onClimbablePrompt: setClimbablePrompt,
+    onClimbingStateChange: setIsClimbing,
+    climbInputRef,
+    onPickupItem: handlePickupItem,
+    onWeatherUpdate: setCurrentWeather,
+    onPushCharge: setPushCharge,
+    pushTriggerRef,
+    onMoraleUpdate: handleMoraleUpdate,
+    actionEvent,
+    showDemographicsOverlay,
+    npcStateOverride,
+    npcPool: outdoorNpcPool,
+    buildingInfection: buildingInfectionState,
+    onPlayerPositionUpdate: handlePlayerPositionUpdate,
+    dossierMode: showPlayerModal,
+    onPlagueExposure: handlePlagueExposure,
+    onNPCInitiatedEncounter: handleNPCInitiatedEncounter,
+    onFallDamage: handleFallDamage,
+    cameraViewTarget,
+    onPlayerStartMove: handlePlayerStartMove,
+    dropRequests,
+    observeMode,
+    gameLoading,
+    mapEntrySpawn,
+    onExitInterior: exitInterior,
+    onNearChest: setNearChest,
+    onShowLootModal: handleShowLootModal,
+    performanceMonitor: performanceMonitorConfig
+  }), [
+    actionEvent,
+    buildingInfectionState,
+    cameraViewTarget,
+    canvasCamera,
+    canvasDpr,
+    canvasGl,
+    devSettings,
+    dropRequests,
+    gameLoading,
+    handleBuildingsUpdate,
+    handleClearSelectedNpc,
+    handleFallDamage,
+    handleMapChange,
+    handleMoraleUpdate,
+    handleNPCInitiatedEncounter,
+    handleNpcUpdate,
+    handlePickupItem,
+    handlePlayerPositionUpdate,
+    handlePlagueExposure,
+    handlePlayerStartMove,
+    handleShowLootModal,
+    handleStatsUpdate,
+    interiorSpec,
+    mapEntrySpawn,
+    exitInterior,
+    npcStateOverride,
+    observeMode,
+    outdoorNpcPool,
+    params,
+    performanceMonitorConfig,
+    playerStats,
+    sceneMode,
+    selectedNpc?.stats.id,
+    setIsClimbing,
+    setMinimapData,
+    setNearBuilding,
+    setNearChest,
+    setNearMerchant,
+    setNearSpeakableNpc,
+    setPickupPrompt,
+    setClimbablePrompt,
+    setPushCharge,
+    setCurrentWeather,
+    setSelectedNpc,
+    showDemographicsOverlay,
+    showPlayerModal,
+    stats,
+    transitioning
+  ]);
+
   return (
     <div className="relative w-full h-screen bg-black overflow-hidden select-none">
-      <div
-        className={`absolute inset-0 z-50 bg-black transition-opacity duration-500 pointer-events-none ${
-          transitioning ? 'opacity-100' : 'opacity-0'
-        }`}
-      />
-
-      {/* Initial loading overlay - fades out after assets load */}
-      <div
-        className={`absolute inset-0 z-[200] bg-stone-950 flex flex-col items-center justify-center transition-opacity duration-1000 ${
-          gameLoading ? 'opacity-100' : 'opacity-0 pointer-events-none'
-        }`}
-      >
-        <h1 className="text-5xl md:text-7xl text-amber-100/90 tracking-[0.25em] font-light mb-4"
-            style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
-          DAMASCUS
-        </h1>
-        <p className="text-2xl md:text-3xl text-amber-200/60 tracking-[0.5em] font-light"
-           style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
-          1348
-        </p>
-        <div className="mt-12 w-24 h-[1px] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
-      </div>
-
-      {!observeMode && (
-      <UI
-        params={params}
-        setParams={setParams}
-        stats={stats}
-        playerStats={playerStats}
-        devSettings={devSettings}
-        setDevSettings={setDevSettings}
-        nearBuilding={nearBuilding}
-        buildingInfection={buildingInfectionState}
-        onFastTravel={handleFastTravel}
-        selectedNpc={selectedNpc}
-        minimapData={minimapData}
-        sceneMode={sceneMode}
-        mapX={params.mapX}
-        mapY={params.mapY}
-        overworldPath={overworldPath}
-        pickupPrompt={pickupPrompt}
-        climbablePrompt={climbablePrompt}
-        isClimbing={isClimbing}
-        onClimbInput={(dir) => { climbInputRef.current = dir; }}
-        pickupToast={pickupToast?.message ?? null}
-        currentWeather={currentWeather}
-        pushCharge={pushCharge}
-        moraleStats={moraleStats}
-        actionSlots={actionSlots}
-        onTriggerAction={triggerAction}
-        onTriggerPush={triggerPush}
-        simTime={stats.simTime}
-        showPlayerModal={showPlayerModal}
-        setShowPlayerModal={setShowPlayerModal}
-        showEncounterModal={showEncounterModal}
-        setShowEncounterModal={setShowEncounterModal}
-        conversationHistories={conversationHistories}
-        onConversationResult={handleConversationResult}
-        onTriggerConversationEvent={handleTriggerConversationEvent}
-        selectedNpcActivity={selectedNpcActivity}
-        selectedNpcNearbyInfected={selectedNpcNearbyInfected}
-        selectedNpcNearbyDeceased={selectedNpcNearbyDeceased}
-        selectedNpcRumors={selectedNpcRumors}
-        activeEvent={activeEvent}
-        onResolveEvent={resolveEvent}
-        onTriggerDebugEvent={handleDebugEvent}
-        llmEventsEnabled={llmEventsEnabled}
-        setLlmEventsEnabled={setLlmEventsEnabled}
-        lastEventNote={lastEventNote}
-        showDemographicsOverlay={showDemographicsOverlay}
-        setShowDemographicsOverlay={setShowDemographicsOverlay}
-        onForceNpcState={handleForceNpcState}
-        onForceAllNpcState={handleForceAllNpcState}
-        isNPCInitiatedEncounter={isNPCInitiatedEncounter}
-        isFollowingAfterDismissal={isFollowingAfterDismissal}
-        onResetFollowingState={() => setIsFollowingAfterDismissal(false)}
-        nearbyNPCs={nearbyNPCs}
-        onOpenGuideModal={handleOpenGuideModal}
-        onSelectGuideEntry={handleOpenGuideEntry}
-        infectedHouseholds={infectedHouseholds}
-        onNavigateToHousehold={handleNavigateToHousehold}
-        onDropItem={handleDropItem}
-        onDropItemAtScreen={handleDropItemAtScreen}
-        perfDebug={perfDebug}
-      />
-      )}
-
-      {/* Subtle Performance Indicator - only shows when adjusting, click to dismiss */}
-      {!observeMode && performanceDegraded && !indicatorDismissed && (
-        <div
-          className="absolute top-2 right-2 bg-black/60 text-yellow-400 text-xs px-3 py-1.5 rounded-md border border-yellow-600/30 backdrop-blur-sm font-mono z-50 cursor-pointer hover:bg-black/80 transition-colors"
-          onClick={() => setIndicatorDismissed(true)}
-          title="Click to dismiss"
-        >
-          ⚡ Adaptive Quality Active {shadowsDisabledByPerf.current && '(shadows off)'}
-        </div>
-      )}
-
-      {/* Building Interaction Modal */}
-      {!observeMode && showEnterModal && nearBuilding && (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-[#f2e7d5] border-4 border-amber-900/50 p-8 rounded-lg shadow-2xl max-w-md w-full text-center historical-font relative overflow-hidden">
-            {/* Parchment effect */}
-            <div className="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]"></div>
-
-            <h2 className="text-3xl text-amber-900 mb-6 tracking-tighter uppercase font-bold border-b border-amber-900/20 pb-4">
-              Enter {getBuildingLabel(nearBuilding.type)}?
-            </h2>
-
-            <p className="text-amber-950 text-xl mb-8 leading-relaxed">
-              Enter the {getBuildingLabel(nearBuilding.type)} of the {nearBuilding.ownerProfession} <span className="font-bold text-amber-900">{nearBuilding.ownerName}</span>?
-            </p>
-
-            <div className="flex gap-4 justify-center">
-              <button
-                onClick={() => {
-                  setShowEnterModal(false);
-                  enterInterior(nearBuilding);
-                }}
-                className="bg-amber-900 hover:bg-amber-800 text-white px-10 py-3 rounded-full tracking-widest transition-all shadow-lg active:scale-95"
-              >
-                YES
-              </button>
-              <button
-                onClick={() => setShowEnterModal(false)}
-                className="bg-transparent border-2 border-amber-900 text-amber-900 hover:bg-amber-900/10 px-10 py-3 rounded-full tracking-widest transition-all active:scale-95"
-              >
-                NOT NOW
-              </button>
-            </div>
-
-            <div className="mt-8 text-[10px] text-amber-900/40 uppercase tracking-widest">
-              Seek refuge or seek fortune within.
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Merchant Modal */}
-      {!observeMode && showMerchantModal && nearMerchant && (
-        <MerchantModal
-          merchant={nearMerchant}
-          playerStats={playerStats}
-          onClose={() => setShowMerchantModal(false)}
-          onPurchase={handlePurchase}
-          onSell={handleSell}
-        />
-      )}
-
-      {/* Historical Guide Modal */}
-      {!observeMode && (
-        <GuideModal
-          isOpen={showGuideModal}
-          onClose={() => {
-            setShowGuideModal(false);
-            setSelectedGuideEntryId(null);
-          }}
-          initialEntryId={selectedGuideEntryId}
-        />
-      )}
-
-      {!observeMode && sceneMode === 'interior' && interiorInfo && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[11px] tracking-wide z-50 pointer-events-none max-w-[88vw] text-center">
-          {interiorInfo}
-        </div>
-      )}
-      {!observeMode && sceneMode === 'interior' && (
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-amber-600/40 text-amber-200 text-[10px] uppercase tracking-widest z-50 pointer-events-none">
-          Press Esc to Exit
-        </div>
-      )}
-
-      {/* Merchant Interaction Prompt */}
-      {!observeMode && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && (
-        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
-          Press <span className="font-bold text-amber-400">E</span> to trade with {nearMerchant.stats.name}
-        </div>
-      )}
-
-      {/* NPC Speak Prompt (only when no merchant nearby) */}
-      {!observeMode && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal && (
-        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
-          Press <span className="font-bold text-amber-400">E</span> to speak to {nearSpeakableNpc.stats.name}
-        </div>
-      )}
-
-      <Canvas
-        shadows
-        camera={canvasCamera}
-        dpr={canvasDpr}
-        gl={canvasGl}
-        onPointerDownCapture={() => setSelectedNpc(null)}
-        onPointerMissed={() => setSelectedNpc(null)}
-        onCreated={({ gl, camera }) => {
-          gl.shadowMap.enabled = true;
-          gl.shadowMap.type = THREE.PCFSoftShadowMap;
-          gl.toneMapping = THREE.ACESFilmicToneMapping;
-          gl.outputColorSpace = THREE.SRGBColorSpace;
-          r3fRef.current = { gl, camera };
-        }}
-      >
-        {/* Adaptive Performance - automatically adjusts resolution based on FPS */}
-        {/* AdaptiveDpr disabled - can cause resize loops with PerformanceMonitor */}
-        {/* <AdaptiveDpr /> */}
-        <AdaptiveEvents />
-        <PerformanceMonitor
-          onIncline={() => {
-            const now = Date.now();
-            if (now - lastPerfChangeRef.current > PERF_DEBOUNCE_MS) {
-              lastPerfChangeRef.current = now;
-              setPerformanceDegraded(false);
-              setIndicatorDismissed(false); // Reset dismissal when performance recovers
-              // Re-enable shadows if we disabled them due to low FPS
-              if (shadowsDisabledByPerf.current) {
-                shadowsDisabledByPerf.current = false;
-                setDevSettings(prev => ({ ...prev, showShadows: true }));
-              }
-            }
-          }}
-          onDecline={() => {
-            const now = Date.now();
-            if (now - lastPerfChangeRef.current > PERF_DEBOUNCE_MS) {
-              lastPerfChangeRef.current = now;
-              setPerformanceDegraded(true);
-            }
-          }}
-          flipflops={5}
-          onChange={({ factor, fps }) => {
-            // Log performance changes in dev mode
-            if (devSettings.enabled && devSettings.showPerfPanel) {
-              console.log(`Performance: ${fps?.toFixed(1) ?? '?'} FPS, factor: ${factor.toFixed(2)}x`);
-            }
-            // Disable shadows when FPS drops below threshold
-            if (fps !== undefined && fps < LOW_FPS_THRESHOLD && devSettings.showShadows && !shadowsDisabledByPerf.current) {
-              shadowsDisabledByPerf.current = true;
-              setDevSettings(prev => ({ ...prev, showShadows: false }));
-              setPerformanceDegraded(true);
-              console.log(`[Performance] Shadows disabled due to low FPS (${fps.toFixed(1)} < ${LOW_FPS_THRESHOLD})`);
-            }
-          }}
-        />
-
-        <Suspense fallback={null}>
-          {!transitioning && sceneMode === 'outdoor' && (
-            <Simulation
-              params={params}
-              simTime={stats.simTime}
-              devSettings={devSettings}
-              playerStats={playerStats}
-              onStatsUpdate={handleStatsUpdate}
-              onMapChange={handleMapChange}
-              onNearBuilding={setNearBuilding}
-              onBuildingsUpdate={handleBuildingsUpdate}
-              onNearMerchant={setNearMerchant}
-              onNpcSelect={setSelectedNpc}
-              onNpcUpdate={handleNpcUpdate}
-              selectedNpcId={selectedNpc?.stats.id ?? null}
-              onMinimapUpdate={setMinimapData}
-              onPickupPrompt={setPickupPrompt}
-              onClimbablePrompt={setClimbablePrompt}
-              onClimbingStateChange={setIsClimbing}
-              climbInputRef={climbInputRef}
-              onPickupItem={handlePickupItem}
-              onWeatherUpdate={setCurrentWeather}
-              onPushCharge={setPushCharge}
-              pushTriggerRef={pushTriggerRef}
-              onMoraleUpdate={handleMoraleUpdate}
-              actionEvent={actionEvent}
-              showDemographicsOverlay={showDemographicsOverlay}
-              npcStateOverride={npcStateOverride}
-              npcPool={outdoorNpcPool}
-              buildingInfection={buildingInfectionState}
-              onPlayerPositionUpdate={(pos) => playerPositionRef.current.copy(pos)}
-              dossierMode={showPlayerModal}
-              onPlagueExposure={handlePlagueExposure}
-              onNPCInitiatedEncounter={handleNPCInitiatedEncounter}
-              onFallDamage={handleFallDamage}
-              cameraViewTarget={cameraViewTarget}
-              onPlayerStartMove={handlePlayerStartMove}
-              dropRequests={dropRequests}
-              onNearSpeakableNpc={setNearSpeakableNpc}
-              observeMode={observeMode}
-              gameLoading={gameLoading}
-              mapEntrySpawn={mapEntrySpawn}
-            />
-          )}
-          {!transitioning && sceneMode === 'interior' && interiorSpec && (
-            <InteriorScene
-              spec={interiorSpec}
-              params={params}
-              simTime={stats.simTime}
-              playerStats={playerStats}
-              onPickupPrompt={setPickupPrompt}
-              onPickupItem={handlePickupItem}
-              onNpcSelect={setSelectedNpc}
-              onNpcUpdate={handleNpcUpdate}
-              selectedNpcId={selectedNpc?.stats.id ?? null}
-              showDemographicsOverlay={showDemographicsOverlay}
-              npcStateOverride={npcStateOverride}
-              onPlagueExposure={handlePlagueExposure}
-              onPlayerPositionUpdate={(pos) => playerPositionRef.current.copy(pos)}
-              dropRequests={dropRequests}
-              observeMode={observeMode}
-            />
-          )}
-        </Suspense>
-      </Canvas>
-
-      <ObserveController
+      <AppShell
         observeMode={observeMode}
-        lines={observeLines}
-        lineCount={observeLineCount}
-        onReturn={stopObserveMode}
+        transitioning={transitioning}
+        gameLoading={gameLoading}
+        uiProps={uiProps}
+        performanceIndicator={{
+          show: !observeMode && performanceDegraded && !indicatorDismissed,
+          shadowsDisabled: shadowsDisabledByPerf.current,
+          onDismiss: () => setIndicatorDismissed(true)
+        }}
+        showEnterModal={showEnterModal}
+        nearBuilding={nearBuilding}
+        getBuildingLabel={getBuildingLabel}
+        onConfirmEnter={() => {
+          if (!nearBuilding) return;
+          setShowEnterModal(false);
+          enterInterior(nearBuilding);
+        }}
+        onCloseEnterModal={() => setShowEnterModal(false)}
+        showMerchantModal={showMerchantModal}
+        nearMerchant={nearMerchant}
+        onCloseMerchant={() => setShowMerchantModal(false)}
+        onPurchase={handlePurchase}
+        onSell={handleSell}
+        showGuideModal={showGuideModal}
+        selectedGuideEntryId={selectedGuideEntryId}
+        onCloseGuideModal={() => {
+          setShowGuideModal(false);
+          setSelectedGuideEntryId(null);
+        }}
+        interiorInfo={interiorInfo}
+        sceneMode={sceneMode}
+        nearSpeakableNpc={nearSpeakableNpc}
+        nearChest={nearChest}
+        showEncounterModal={showEncounterModal}
+        showPlayerModal={showPlayerModal}
+        showEnterModalActive={showEnterModal}
+        observeLines={observeLines}
+        observeLineCount={observeLineCount}
+        onObserveReturn={stopObserveMode}
+        plague={playerStats.plague}
+        showPlagueModal={showPlagueModal}
+        plagueNotification={plagueNotification}
+        onClosePlagueModal={() => setShowPlagueModal(false)}
+        onClearPlagueNotification={() => setPlagueNotification(null)}
+        onPlaguePauseToggle={handlePlagueModalPauseToggle}
+        gameOver={gameOver}
+        onRestart={() => window.location.reload()}
+        toastMessages={toastMessages}
+        onDismissToast={handleDismissToast}
+        lootModalData={lootModalData}
+        onLootAccept={handleLootAccept}
+        onLootDecline={handleLootDecline}
+        onLootClose={handleLootClose}
       />
 
-      {!observeMode && (
-        <PlagueUI
-          plague={playerStats.plague}
-          showPlagueModal={showPlagueModal}
-          plagueNotification={plagueNotification}
-          onCloseModal={() => setShowPlagueModal(false)}
-          onClearNotification={() => setPlagueNotification(null)}
-          onModalPauseToggle={(paused) => {
-            if (paused) {
-              prevSimSpeedRef.current = params.simulationSpeed;
-              setParams(prev => ({ ...prev, simulationSpeed: 0.01 }));
-            } else {
-              setParams(prev => ({
-                ...prev,
-                simulationSpeed: prev.simulationSpeed === 0.01 ? prevSimSpeedRef.current : prev.simulationSpeed
-              }));
-            }
-          }}
-        />
-      )}
-
-      {/* Game Over Screen */}
-      {gameOver && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-500">
-          <div className="bg-[#1a1209] border-4 border-red-900/60 p-10 rounded-lg shadow-2xl max-w-lg w-full text-center relative overflow-hidden">
-            {/* Dark parchment effect */}
-            <div className="absolute inset-0 opacity-20 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]"></div>
-
-            {/* Skull or death symbol */}
-            <div className="text-6xl mb-4 opacity-80">💀</div>
-
-            <h2 className="text-4xl text-red-700 mb-4 tracking-tight uppercase font-bold">
-              {gameOver.reason}
-            </h2>
-
-            <div className="w-16 h-0.5 bg-red-900/40 mx-auto mb-6"></div>
-
-            <p className="text-amber-200/80 text-lg mb-8 leading-relaxed italic">
-              {gameOver.description}
-            </p>
-
-            <p className="text-amber-400/60 text-sm mb-8">
-              Damascus, 1348
-            </p>
-
-            <button
-              onClick={() => window.location.reload()}
-              className="bg-red-900 hover:bg-red-800 text-amber-100 px-12 py-4 rounded-full tracking-widest transition-all shadow-lg active:scale-95 text-lg uppercase"
-            >
-              Begin Anew
-            </button>
-
-            <div className="mt-8 text-[10px] text-amber-900/50 uppercase tracking-widest">
-              "In the midst of life we are in death"
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Toast Notifications */}
-      <Toast
-        messages={toastMessages}
-        onDismiss={(id) => setToastMessages((prev) => prev.filter((msg) => msg.id !== id))}
-      />
+      <SimulationShell {...simulationShellProps} />
     </div>
   );
 }

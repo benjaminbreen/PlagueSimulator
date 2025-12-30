@@ -112,6 +112,9 @@ export enum BuildingType {
   COMMERCIAL = 'COMMERCIAL',
   RELIGIOUS = 'RELIGIOUS',
   CIVIC = 'CIVIC',
+  MEDICAL = 'MEDICAL',
+  SCHOOL = 'SCHOOL',
+  HOSPITALITY = 'HOSPITALITY',
 }
 
 export interface NPCStats {
@@ -839,41 +842,53 @@ export interface PlayerActionEvent {
 }
 
 export const getLocationLabel = (x: number, y: number) => {
-  // Helper function for radius-based matching (defined below)
+  // Helper function for radius-based matching
   const isNear = (targetX: number, targetY: number, radius: number): boolean => {
     const dx = x - targetX;
     const dy = y - targetY;
     return Math.sqrt(dx * dx + dy * dy) <= radius;
   };
 
-  // Use radius-based matching for main districts (same as getDistrictType)
-  if (isNear(0, 0, 1.2)) return "Al-Buzuriyah (Central Bazaar)";
-  if (isNear(0, 2, 1.1)) return "Umayyad Mosque (Great Mosque)";
-  if (isNear(-2, 1, 1.1)) return "The Mamluk Citadel (Civic Quarter)";
-  if (isNear(-4, 4, 1.1)) return "Al-Salihiyya (Hillside Quarter)";
-  if (isNear(0, -2, 1.1)) return "Al-Yahud (Jewish Quarter)";
-  if (isNear(3, 0, 1.1)) return "Al-Nasara (Christian Quarter)";
-  if (isNear(0, -4, 1.1)) return "Al-Shaghour (Poor Hovels)";
-  if (isNear(-2, 3, 1.1)) return "Al-Qaymariyya (Wealthy Quarter)";
-  if (isNear(4.3, 0.4, 1.1)) return "Bab Sharqi (Eastern Gate)";
-  if (isNear(5, 2, 1.5)) return "Ghouta Farmlands (Rural Fringe)";
-  if (isNear(6, 0, 1.5)) return "Desert Outskirts (Syrian Desert)";
-  if (isNear(-4, -4, 1.0)) return "Caravanserai (Silk Market)";
-  if (isNear(-6, 6, 1.2)) return "Mountain Shrine (Qassioun)";
-  if (isNear(2, -6, 1.2)) return "Southern Road (Hauran Route)";
+  // 7x7 grid with exact tile mapping (radius 0.5 = one tile per district)
+  // Named districts
+  if (isNear(0, 0, 0.5)) return "Al-Buzuriyah (Central Bazaar)";
+  if (isNear(0, 2, 0.5)) return "Umayyad Mosque (Great Mosque)";
+  if (isNear(0, 1, 0.5)) return "Souq Axis (Market Road)";
+  if (isNear(-1, 0, 0.5)) return "The Mamluk Citadel (Civic Quarter)";
+  if (isNear(-1, 2, 0.5)) return "Al-Salihiyya (Hillside Quarter)";
+  if (isNear(-2, 1, 0.5)) return "Al-Salihiyya (Hillside Quarter)";
+  if (isNear(0, -1, 0.5)) return "Al-Yahud (Jewish Quarter)";
+  if (isNear(2, 0, 0.5)) return "Al-Nasara (Christian Quarter)";
+  if (isNear(0, -2, 0.5)) return "Al-Shaghour (Poor Hovels)";
+  if (isNear(-1, 1, 0.5)) return "Al-Qaymariyya (Wealthy Quarter)";
+  if (isNear(2, 1, 0.5)) return "Bab Sharqi (Eastern Gate)";
+  if (isNear(1, 3, 0.5)) return "Ghouta Farmlands (Rural Fringe)";
+  if (isNear(3, 0, 0.5)) return "Desert Outskirts (Syrian Desert)";
+  if (isNear(-2, 0, 0.5)) return "Caravanserai (Silk Market)";
+  if (isNear(-2, -1, 0.5)) return "Caravanserai (Silk Market)";
+  if (isNear(-2, 2, 0.5)) return "Mountain Shrine (Qassioun)";
+  if (isNear(1, -2, 0.5)) return "Southern Road (Hauran Route)";
+  if (isNear(1, 0, 0.5)) return "Straight Street (Via Recta)";
+  if (isNear(2, 2, 0.5)) return "Straight Street (Via Recta)";
+  if (isNear(1, -1, 0.5)) return "Al-Midan (Southern Gate)";
 
-  // Corridor districts
-  if (Math.abs(y) <= 0.6 && x >= 0.8 && x <= 3.8) return "Straight Street (Via Recta)";
-  if (Math.abs(x) <= 0.6 && y >= 0.8 && y <= 2.6) return "Souq Axis (Market Road)";
-  if (Math.abs(x) <= 0.8 && y <= -2.4 && y >= -4.6) return "Al-Midan (Southern Gate)";
+  // Connector districts
+  if (isNear(-1, -1, 0.5)) return "Narrow Alleys";
+  if (isNear(1, 1, 0.5)) return "Residential Quarter";
+  if (isNear(-1, -2, 0.5)) return "Residential Quarter";
+  if (isNear(-2, -2, 0.5)) return "Roadside Settlement";
+  if (isNear(1, 2, 0.5)) return "Roadside Settlement";
+  if (isNear(2, -1, 0.5)) return "Roadside Settlement";
+  if (isNear(2, -2, 0.5)) return "Roadside Settlement";
 
-  // Procedural names for other blocks
-  const prefixes = ["Lower", "Upper", "North", "South", "East", "West"];
-  const districts = ["Souk", "Maidan", "Harah", "Bazaar", "Quarter"];
-  const seed = Math.abs(x * 31 + y * 7);
-  const p = prefixes[seed % prefixes.length];
-  const d = districts[(seed >> 2) % districts.length];
-  return `${p} ${d} Block — ${x}, ${y}`;
+  // Outer perimeter
+  if (Math.abs(x) === 3 || Math.abs(y) === 3) {
+    if (x <= -2 || (y === 3 && x === -2)) return "Scrublands";
+    return "Desert Fringe";
+  }
+
+  // Fallback
+  return `Damascus Quarter — ${x}, ${y}`;
 };
 
 export type DistrictType =
@@ -889,6 +904,8 @@ export type DistrictType =
   | 'SALHIYYA'
   | 'OUTSKIRTS_FARMLAND'
   | 'OUTSKIRTS_DESERT'
+  | 'OUTSKIRTS_SCRUBLAND'
+  | 'ROADSIDE'
   | 'CARAVANSERAI'
   | 'MOUNTAIN_SHRINE'
   | 'SOUTHERN_ROAD'
@@ -908,45 +925,82 @@ const isNearPoint = (x: number, targetX: number, y: number, targetY: number, rad
 
 /**
  * Get district type based on map coordinates
- * 2x scaled grid with radius-based matching to handle fractional coordinates
- * Geography: West = mountains, East = desert, North = Qassioun slopes, South = plains
+ * 7x7 grid with exact tile mapping (radius 0.5 = one tile per district)
+ * Outer perimeter: Desert and Scrubland
+ * Inner 5x5: Historical Damascus districts
+ * Geography: West = mountains/scrubland, East = desert, North = Qassioun slopes, South = plains
  */
 export const getDistrictType = (mapX: number, mapY: number): DistrictType => {
-  // Major landmarks (expanded radius to reduce interstitial tiles)
-  if (isNearPoint(mapX, 0, mapY, 0, 1.2)) return 'MARKET';
-  if (isNearPoint(mapX, 0, mapY, 2, 1.1)) return 'UMAYYAD_MOSQUE';
-  if (isNearPoint(mapX, -2, mapY, 1, 1.1)) return 'CIVIC';
-  if (isNearPoint(mapX, -4, mapY, 4, 1.1)) return 'SALHIYYA';
-  if (isNearPoint(mapX, 0, mapY, -2, 1.1)) return 'JEWISH_QUARTER';
-  if (isNearPoint(mapX, 3, mapY, 0, 1.1)) return 'CHRISTIAN_QUARTER';
-  if (isNearPoint(mapX, 0, mapY, -4, 1.1)) return 'HOVELS';
-  if (isNearPoint(mapX, -2, mapY, 3, 1.1)) return 'WEALTHY';
+  // OUTER PERIMETER (7x7 grid edges) - Desert and Scrubland
+  // West edge (X=-3): Scrubland (mountain foothills)
+  if (isNearPoint(mapX, -3, mapY, 3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -3, mapY, 2, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -3, mapY, 1, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -3, mapY, 0, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -3, mapY, -1, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -3, mapY, -2, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -3, mapY, -3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
 
-  // Named gate / corridors (reduce generic alleys)
-  if (Math.abs(mapY) <= 0.6 && mapX >= 0.8 && mapX <= 3.8) return 'STRAIGHT_STREET';
-  if (Math.abs(mapX) <= 0.6 && mapY >= 0.8 && mapY <= 2.6) return 'SOUQ_AXIS';
-  if (Math.abs(mapX) <= 0.8 && mapY <= -2.4 && mapY >= -4.6) return 'MIDAN';
-  if (isNearPoint(mapX, 4.3, mapY, 0.4, 1.1)) return 'BAB_SHARQI';
+  // East edge (X=3): Desert (Syrian desert approach)
+  if (isNearPoint(mapX, 3, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 3, mapY, 2, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 3, mapY, 1, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 3, mapY, 0, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 3, mapY, -1, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 3, mapY, -2, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 3, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
 
-  // Outskirts - historically accurate geography
-  if (isNearPoint(mapX, 5, mapY, 2, 1.5)) return 'OUTSKIRTS_FARMLAND';
-  if (isNearPoint(mapX, 6, mapY, 0, 1.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, -6, mapY, 3, 1.5)) return 'OUTSKIRTS_FARMLAND';
-  if (isNearPoint(mapX, -4, mapY, -4, 1.0)) return 'CARAVANSERAI';
-  if (isNearPoint(mapX, -6, mapY, 6, 1.2)) return 'MOUNTAIN_SHRINE';
-  if (isNearPoint(mapX, 2, mapY, -6, 1.2)) return 'SOUTHERN_ROAD';
+  // North edge (Y=3): Mix of scrubland, desert, farmland
+  if (isNearPoint(mapX, -2, mapY, 3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -1, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 0, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 1, mapY, 3, 0.5)) return 'OUTSKIRTS_FARMLAND';
+  if (isNearPoint(mapX, 2, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
 
-  // Interstitial districts - narrower and more specific
-  if (mapX >= -2 && mapX <= 0 && mapY >= 1 && mapY <= 2) return 'ALLEYS';
-  if (mapX > 0 && mapX < 3 && mapY >= -2 && mapY <= -0.6) return 'ALLEYS';
-  if (mapX >= -4 && mapX <= -2 && mapY >= 2 && mapY <= 4) return 'RESIDENTIAL';
-  if (Math.abs(mapX) < 2 && mapY >= -4 && mapY <= -2.6) return 'HOVELS';
+  // South edge (Y=-3): Mix of scrubland and desert
+  if (isNearPoint(mapX, -2, mapY, -3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, -1, mapY, -3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  if (isNearPoint(mapX, 0, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 1, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
+  if (isNearPoint(mapX, 2, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
 
-  // Near center but not in specific landmarks = residential fabric
-  const distFromCenter = Math.sqrt(mapX * mapX + mapY * mapY);
-  if (distFromCenter < 3) return 'RESIDENTIAL';
+  // INNER 5x5 GRID - Named districts and connectors
+  // Y=2 row (northern districts)
+  if (isNearPoint(mapX, -2, mapY, 2, 0.5)) return 'MOUNTAIN_SHRINE';
+  if (isNearPoint(mapX, -1, mapY, 2, 0.5)) return 'SALHIYYA';
+  if (isNearPoint(mapX, 0, mapY, 2, 0.5)) return 'UMAYYAD_MOSQUE';
+  if (isNearPoint(mapX, 1, mapY, 2, 0.5)) return 'ROADSIDE';
+  if (isNearPoint(mapX, 2, mapY, 2, 0.5)) return 'STRAIGHT_STREET';
 
-  // Default fallback
+  // Y=1 row
+  if (isNearPoint(mapX, -2, mapY, 1, 0.5)) return 'SALHIYYA';
+  if (isNearPoint(mapX, -1, mapY, 1, 0.5)) return 'WEALTHY';
+  if (isNearPoint(mapX, 0, mapY, 1, 0.5)) return 'SOUQ_AXIS';
+  if (isNearPoint(mapX, 1, mapY, 1, 0.5)) return 'RESIDENTIAL';
+  if (isNearPoint(mapX, 2, mapY, 1, 0.5)) return 'BAB_SHARQI';
+
+  // Y=0 row (central districts)
+  if (isNearPoint(mapX, -2, mapY, 0, 0.5)) return 'CARAVANSERAI';
+  if (isNearPoint(mapX, -1, mapY, 0, 0.5)) return 'CIVIC';
+  if (isNearPoint(mapX, 0, mapY, 0, 0.5)) return 'MARKET';
+  if (isNearPoint(mapX, 1, mapY, 0, 0.5)) return 'STRAIGHT_STREET';
+  if (isNearPoint(mapX, 2, mapY, 0, 0.5)) return 'CHRISTIAN_QUARTER';
+
+  // Y=-1 row
+  if (isNearPoint(mapX, -2, mapY, -1, 0.5)) return 'CARAVANSERAI';
+  if (isNearPoint(mapX, -1, mapY, -1, 0.5)) return 'ALLEYS';
+  if (isNearPoint(mapX, 0, mapY, -1, 0.5)) return 'JEWISH_QUARTER';
+  if (isNearPoint(mapX, 1, mapY, -1, 0.5)) return 'MIDAN';
+  if (isNearPoint(mapX, 2, mapY, -1, 0.5)) return 'ROADSIDE';
+
+  // Y=-2 row (southern districts)
+  if (isNearPoint(mapX, -2, mapY, -2, 0.5)) return 'ROADSIDE';
+  if (isNearPoint(mapX, -1, mapY, -2, 0.5)) return 'RESIDENTIAL';
+  if (isNearPoint(mapX, 0, mapY, -2, 0.5)) return 'HOVELS';
+  if (isNearPoint(mapX, 1, mapY, -2, 0.5)) return 'SOUTHERN_ROAD';
+  if (isNearPoint(mapX, 2, mapY, -2, 0.5)) return 'ROADSIDE';
+
+  // Fallback (should rarely be reached with 0.5 radius)
   return 'RESIDENTIAL';
 };
 

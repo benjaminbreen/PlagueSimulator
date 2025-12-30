@@ -36,11 +36,15 @@ const createBuildingNPCRecords = (
   const seed = hashToSeed(building.id);
   const socialClass = building.type === BuildingType.RELIGIOUS
     ? SocialClass.CLERGY
-    : building.type === BuildingType.CIVIC
-      ? SocialClass.MERCHANT
-      : building.type === BuildingType.COMMERCIAL
+    : building.type === BuildingType.SCHOOL
+      ? SocialClass.CLERGY
+      : building.type === BuildingType.CIVIC
         ? SocialClass.MERCHANT
-        : SocialClass.PEASANT;
+        : building.type === BuildingType.MEDICAL || building.type === BuildingType.HOSPITALITY
+          ? SocialClass.MERCHANT
+          : building.type === BuildingType.COMMERCIAL
+            ? SocialClass.MERCHANT
+            : SocialClass.PEASANT;
   const ownerStats = buildResidentStats(seed + 11, building, socialClass, districtType);
   const baseRecord = (id: string, stats: NPCStats, role: string): NPCRecord => {
     stats.id = id;
@@ -129,7 +133,8 @@ export const createTileNPCRegistry = (
   districtType: DistrictType,
   simTime: number,
   tileSeed: number,
-  streetCount: number
+  streetCount: number,
+  seedInitialInfections = false
 ) => {
   const npcMap = new Map<string, NPCRecord>();
   buildings.forEach((building) => {
@@ -143,7 +148,7 @@ export const createTileNPCRegistry = (
 
   // Seed initial incubating cases once at the start of a playthrough.
   // Uses deterministic seeded RNG for reproducibility
-  if (simTime <= 0.1 && npcMap.size > 0) {
+  if (seedInitialInfections && npcMap.size > 0) {
     const ids = Array.from(npcMap.keys());
     let rngSeed = tileSeed + 99999; // Offset to avoid collision with other seeded values
     const rand = () => seededRandom(rngSeed++);
@@ -198,6 +203,18 @@ export const createTileNPCRegistry = (
       const record = npcMap.get(id);
       if (!record) continue;
       seedNpcInfection(record, simTime);
+    }
+
+    // Ensure at least one outdoor (street) NPC starts incubating so infection is visible in the world.
+    const hasStreetInfected = streetNpcIds.some((id) => {
+      const record = npcMap.get(id);
+      return record && record.state !== AgentState.HEALTHY;
+    });
+    if (!hasStreetInfected && streetNpcIds.length > 0) {
+      const streetRecord = npcMap.get(streetNpcIds[0]);
+      if (streetRecord) {
+        seedNpcInfection(streetRecord, simTime);
+      }
     }
   }
 

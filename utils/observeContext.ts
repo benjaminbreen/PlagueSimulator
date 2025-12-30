@@ -16,10 +16,9 @@ const buildingLabel = (type: BuildingType) => {
     case BuildingType.RESIDENTIAL: return 'residence';
     case BuildingType.COMMERCIAL: return 'shop';
     case BuildingType.RELIGIOUS: return 'mosque';
-    case BuildingType.PUBLIC: return 'public hall';
-    case BuildingType.MARKET: return 'market stall';
-    case BuildingType.MEDICAL: return 'healer';
+    case BuildingType.MEDICAL: return 'clinic';
     case BuildingType.SCHOOL: return 'madrasa';
+    case BuildingType.HOSPITALITY: return 'inn';
     default: return 'building';
   }
 };

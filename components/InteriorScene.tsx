@@ -8,6 +8,7 @@ import { exposePlayerToPlague } from '../utils/plague';
 import { createNpcPlagueMeta } from '../utils/npcHealth';
 import { seededRandom } from '../utils/procedural';
 import { Player } from './Player';
+import { InteriorExitIndicator } from './InteriorExitIndicator';
 import { Humanoid } from './Humanoid';
 import { generateInteriorObstacles } from '../utils/interior';
 import { PushableObject, createPushable } from '../utils/pushables';
@@ -34,12 +35,14 @@ interface InteriorSceneProps {
   onPlayerPositionUpdate?: (pos: THREE.Vector3) => void;
   dropRequests?: DroppedItemRequest[];
   observeMode?: boolean;
+  onExitInterior?: () => void;
+  onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null);
@@ -104,13 +107,79 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     return hash || 1;
   };
   const playerRef = useRef<THREE.Group>(null);
+  const exitTriggeredRef = useRef(false);
   const [pickedUpIds, setPickedUpIds] = useState<Set<string>>(new Set());
   const [hoveredNpcId, setHoveredNpcId] = useState<string | null>(null);
   const npcStatsMap = useMemo(() => new Map(spec.npcs.map((npc) => [npc.id, npc.stats])), [spec.npcs]);
 
+  useEffect(() => {
+    exitTriggeredRef.current = false;
+  }, [spec.id]);
+
   useFrame(() => {
     if (playerRef.current) {
       onPlayerPositionUpdate?.(playerRef.current.position);
+    }
+  });
+
+  useFrame(() => {
+    if (!playerRef.current || !onExitInterior) return;
+    if (exitTriggeredRef.current) return;
+    const pos = playerRef.current.position;
+    const [cx, , cz] = entryRoom.center;
+    const halfW = entryRoom.size[0] / 2;
+    const halfD = entryRoom.size[2] / 2;
+    const threshold = 2.4;
+    const shouldExit = entrySide === 'north'
+      ? pos.z > cz + halfD + threshold
+      : entrySide === 'south'
+        ? pos.z < cz - halfD - threshold
+        : entrySide === 'east'
+          ? pos.x > cx + halfW + threshold
+          : pos.x < cx - halfW - threshold;
+    if (shouldExit) {
+      exitTriggeredRef.current = true;
+      onExitInterior();
+    }
+  });
+
+  // Track nearby chest for interaction
+  const nearChestIdRef = useRef<string | null>(null);
+  useFrame(() => {
+    if (!playerRef.current || !onNearChest) return;
+    const pos = playerRef.current.position;
+    const CHEST_INTERACT_DISTANCE = 1.8;
+
+    // Find all chests in the active props
+    const chestProps = activeProps.filter(prop => prop.type === InteriorPropType.CHEST);
+
+    let nearestChest: InteriorProp | null = null;
+    let nearestDist = Infinity;
+
+    for (const chest of chestProps) {
+      const dx = pos.x - chest.position[0];
+      const dz = pos.z - chest.position[2];
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < CHEST_INTERACT_DISTANCE && dist < nearestDist) {
+        nearestDist = dist;
+        nearestChest = chest;
+      }
+    }
+
+    // Update state only if changed
+    const newChestId = nearestChest?.id ?? null;
+    if (newChestId !== nearChestIdRef.current) {
+      nearChestIdRef.current = newChestId;
+      if (nearestChest) {
+        onNearChest({
+          id: nearestChest.id,
+          label: nearestChest.label || 'Storage Chest',
+          position: nearestChest.position,
+          locationName: `${spec.profession}'s ${spec.buildingType.toLowerCase().replace(/_/g, ' ')}`,
+        });
+      } else {
+        onNearChest(null);
+      }
     }
   });
 
@@ -128,7 +197,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const activeProps = useMemo(() => {
     const roomMap = new Map(spec.rooms.map((room) => [room.id, room]));
     const entrySide = spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : 'west';
-    const openSide: 'north' | 'south' | 'east' | 'west' | null = spec.buildingType === BuildingType.CIVIC || spec.buildingType === BuildingType.RELIGIOUS
+    const openSide: 'north' | 'south' | 'east' | 'west' | null = spec.buildingType === BuildingType.CIVIC
+      || spec.buildingType === BuildingType.RELIGIOUS
+      || spec.buildingType === BuildingType.SCHOOL
+      || spec.buildingType === BuildingType.MEDICAL
       ? null
       : entrySide;
     const keepInsideOpenSide = (room: InteriorRoom, pos: [number, number, number], inset = 1.8): [number, number, number] => {
@@ -193,6 +265,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     const map = new Map<InteriorPropType, { itemId: string; label: string }>();
     map.set(InteriorPropType.CANDLE, { itemId: 'interior-candle', label: 'Tallow Candle' });
     map.set(InteriorPropType.LAMP, { itemId: 'interior-lamp', label: 'Oil Lamp' });
+    map.set(InteriorPropType.FLOOR_LAMP, { itemId: 'interior-floor-lamp', label: 'Standing Oil Lamp' });
+    map.set(InteriorPropType.LANTERN, { itemId: 'interior-lantern', label: 'Brass Lantern' });
     map.set(InteriorPropType.EWER, { itemId: 'interior-ewer', label: 'Water Ewer' });
     map.set(InteriorPropType.WATER_BASIN, { itemId: 'interior-basin', label: 'Water Basin' });
     map.set(InteriorPropType.LEDGER, { itemId: 'interior-ledger', label: 'Ledger' });
@@ -226,6 +300,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       InteriorPropType.EWER,
       InteriorPropType.WATER_BASIN,
       InteriorPropType.LAMP,
+      InteriorPropType.FLOOR_LAMP,
       InteriorPropType.FLOOR_PILLOWS,
       InteriorPropType.CANDLE,
       InteriorPropType.LEDGER,
@@ -237,7 +312,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       InteriorPropType.SPINDLE,
       InteriorPropType.MORTAR,
       InteriorPropType.HERB_RACK,
-      InteriorPropType.TOOL_RACK
+      InteriorPropType.TOOL_RACK,
+      InteriorPropType.LANTERN
     ]);
     const typeOffsets: Partial<Record<InteriorPropType, number>> = {
       [InteriorPropType.BENCH]: 0.25,
@@ -253,7 +329,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       [InteriorPropType.SPINDLE]: 0.08,
       [InteriorPropType.MORTAR]: 0.12,
       [InteriorPropType.HERB_RACK]: 0.2,
-      [InteriorPropType.TOOL_RACK]: 0.2
+      [InteriorPropType.TOOL_RACK]: 0.2,
+      [InteriorPropType.FLOOR_LAMP]: 0.8,
+      [InteriorPropType.LANTERN]: 0.15
     };
     const typeRadius: Partial<Record<InteriorPropType, number>> = {
       [InteriorPropType.BENCH]: 1.0,
@@ -270,6 +348,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       [InteriorPropType.EWER]: 0.35,
       [InteriorPropType.WATER_BASIN]: 0.7,
       [InteriorPropType.LAMP]: 0.3,
+      [InteriorPropType.FLOOR_LAMP]: 0.35,
+      [InteriorPropType.LANTERN]: 0.25,
       [InteriorPropType.FLOOR_PILLOWS]: 0.7,
       [InteriorPropType.CANDLE]: 0.2,
       [InteriorPropType.LEDGER]: 0.25,
@@ -298,6 +378,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       [InteriorPropType.EWER]: 0.5,
       [InteriorPropType.WATER_BASIN]: 1.6,
       [InteriorPropType.LAMP]: 0.5,
+      [InteriorPropType.FLOOR_LAMP]: 0.7,
+      [InteriorPropType.LANTERN]: 0.4,
       [InteriorPropType.FLOOR_PILLOWS]: 0.5,
       [InteriorPropType.CANDLE]: 0.2,
       [InteriorPropType.LEDGER]: 0.2,
@@ -326,6 +408,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       [InteriorPropType.EWER]: 'ceramic',
       [InteriorPropType.WATER_BASIN]: 'stone',
       [InteriorPropType.LAMP]: 'ceramic',
+      [InteriorPropType.FLOOR_LAMP]: 'ceramic',
+      [InteriorPropType.LANTERN]: 'ceramic',
       [InteriorPropType.FLOOR_PILLOWS]: 'cloth',
       [InteriorPropType.CANDLE]: 'cloth',
       [InteriorPropType.LEDGER]: 'wood',
@@ -468,6 +552,12 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     if (entrySide === 'east') return [cx + halfW - inset, 0, cz];
     return [cx - halfW + inset, 0, cz];
   }, [entryRoom, spec.exteriorDoorSide]);
+  const entrySide = useMemo<'north' | 'south' | 'east' | 'west'>(() => (
+    spec.exteriorDoorSide === 0 ? 'north'
+      : spec.exteriorDoorSide === 1 ? 'south'
+        : spec.exteriorDoorSide === 2 ? 'east'
+          : 'west'
+  ), [spec.exteriorDoorSide]);
   const isDay = params.timeOfDay >= 7 && params.timeOfDay <= 17;
   const lampProps = useMemo(
     () => activeProps.filter((prop) => (
@@ -591,11 +681,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     if (room.type === InteriorRoomType.COURTYARD) return 'Courtyard';
     if (room.type === InteriorRoomType.ENTRY) {
       if (spec.buildingType === BuildingType.COMMERCIAL) return 'Shop';
+      if (spec.buildingType === BuildingType.HOSPITALITY) return 'Common Room';
       return 'Courtyard Exit';
     }
     if (room.type === InteriorRoomType.HALL) {
       const hasFire = activeProps.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.FIRE_PIT);
       if (spec.buildingType === BuildingType.COMMERCIAL) return 'Shop';
+      if (spec.buildingType === BuildingType.HOSPITALITY) return 'Common Room';
       return hasFire ? 'Kitchen' : 'Hall';
     }
     return 'Room';
@@ -628,7 +720,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       const roll = seededRandom(styleSeed + index * 23);
       let side: 'north' | 'south' | 'east' | 'west' = roll < 0.25 ? 'north' : roll < 0.5 ? 'south' : roll < 0.75 ? 'east' : 'west';
       if (room.type === InteriorRoomType.ENTRY && exteriorSide !== undefined) {
-        if (spec.buildingType === BuildingType.COMMERCIAL) {
+        if (spec.buildingType === BuildingType.COMMERCIAL || spec.buildingType === BuildingType.HOSPITALITY) {
           side = entrySide;
         } else {
           side = exteriorSide === 0 ? 'south' : exteriorSide === 1 ? 'north' : exteriorSide === 2 ? 'west' : 'east';
@@ -1096,7 +1188,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   }, [spec.socialClass]);
   const floorPalette = useMemo(() => {
     // Civic buildings get marble or polished wood colors
-    if (spec.buildingType === BuildingType.CIVIC) {
+    if (spec.buildingType === BuildingType.CIVIC || spec.buildingType === BuildingType.SCHOOL || spec.buildingType === BuildingType.MEDICAL) {
       const isMarbel = Math.random() > 0.5;
       return isMarbel
         ? ['#e8e4d8', '#ddd9cd', '#f0ece0'] // Cream marble tones
@@ -1120,7 +1212,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       const grout = '#6a5a4a';
 
       // Civic buildings - marble or stone slabs
-      if (spec.buildingType === BuildingType.CIVIC) {
+      if (spec.buildingType === BuildingType.CIVIC || spec.buildingType === BuildingType.SCHOOL || spec.buildingType === BuildingType.MEDICAL) {
         const isMarble = floorPalette[0].startsWith('#e') || floorPalette[0].startsWith('#d') || floorPalette[0].startsWith('#f');
         if (isMarble) {
           // Polished marble - solid color, very smooth
@@ -1145,7 +1237,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       }
 
       // Commercial buildings - stone slabs, brick, or terracotta
-      if (spec.buildingType === BuildingType.COMMERCIAL) {
+      if (spec.buildingType === BuildingType.COMMERCIAL || spec.buildingType === BuildingType.HOSPITALITY) {
         if (floorVariant < 0.4) {
           const tex = createStoneSlabTexture(color, grout);
           return new THREE.MeshStandardMaterial({ map: tex ?? undefined, color, roughness: 0.8 });
@@ -1225,8 +1317,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const wallMaterials = useMemo(() => {
     return wallPalette.map((color, index) => {
       const isReligious = spec.buildingType === BuildingType.RELIGIOUS;
-      const isCivic = spec.buildingType === BuildingType.CIVIC;
-      const isCommercial = spec.buildingType === BuildingType.COMMERCIAL;
+      const isCivic = spec.buildingType === BuildingType.CIVIC
+        || spec.buildingType === BuildingType.SCHOOL
+        || spec.buildingType === BuildingType.MEDICAL;
+      const isCommercial = spec.buildingType === BuildingType.COMMERCIAL
+        || spec.buildingType === BuildingType.HOSPITALITY;
       const isPeasant = spec.socialClass === SocialClass.PEASANT;
       const isWealthy = spec.socialClass === SocialClass.NOBILITY || spec.socialClass === SocialClass.MERCHANT;
       const accent = isPeasant ? '#7b664e' : '#a99474';
@@ -1263,7 +1358,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   // Band/dado material - uses solid texture now (no transparency issues)
   const patchMaterial = useMemo(() => {
     const isReligious = spec.buildingType === BuildingType.RELIGIOUS;
-    const isCivic = spec.buildingType === BuildingType.CIVIC;
+    const isCivic = spec.buildingType === BuildingType.CIVIC
+      || spec.buildingType === BuildingType.SCHOOL
+      || spec.buildingType === BuildingType.MEDICAL;
     const isWealthy = spec.socialClass === SocialClass.NOBILITY || spec.socialClass === SocialClass.MERCHANT;
     const baseColor = isReligious ? '#d4c9b8' : isCivic ? '#c8bba8' : '#b8a890';
     const accent = '#8f7a5c';
@@ -1367,6 +1464,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       )}
       <ImpactPuffs puffsRef={impactPuffsRef} />
       {lampProps.map((prop) => {
+        // Skip light for shattered lamps
+        const pushable = pushables.find((item) => item.sourceId === prop.id);
+        if (pushable?.isShattered) return null;
+
         const baseY = prop.type === InteriorPropType.CANDLE ? prop.position[1] + 0.2
           : prop.type === InteriorPropType.LANTERN ? prop.position[1] - 0.15
             : prop.type === InteriorPropType.FLOOR_LAMP ? 1.6
@@ -1415,7 +1516,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         const entrySide = spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : spec.exteriorDoorSide === 3 ? 'west' : 'north';
         const interiorDoorSide = interiorDoorMap.get(room.id) ?? null;
         const exteriorDoorSide = room.type === InteriorRoomType.ENTRY ? entrySide : null;
-        const cutawaySide = spec.buildingType === BuildingType.CIVIC || spec.buildingType === BuildingType.RELIGIOUS
+        const cutawaySide = spec.buildingType === BuildingType.CIVIC
+          || spec.buildingType === BuildingType.RELIGIOUS
+          || spec.buildingType === BuildingType.SCHOOL
+          || spec.buildingType === BuildingType.MEDICAL
           ? null
           : room.type === InteriorRoomType.ENTRY
             ? entrySide
@@ -1423,7 +1527,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         const variantSeed = seededRandom(styleSeed + index * 19);
         const doorVariant = spec.buildingType === BuildingType.RELIGIOUS
           ? 1
-          : spec.buildingType === BuildingType.CIVIC
+          : spec.buildingType === BuildingType.CIVIC || spec.buildingType === BuildingType.SCHOOL || spec.buildingType === BuildingType.MEDICAL
             ? 2
             : Math.floor(variantSeed * 3);
         const targetRoom = doorTargetMap.get(room.id);
@@ -1521,6 +1625,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             profession={spec.profession}
             positionVector={pushable?.position}
             roomSize={roomForProp?.size}
+            isShattered={pushable?.isShattered}
           />
         );
       })}
@@ -1642,6 +1747,15 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         onPickup={handlePickup}
         setTargetPosition={() => {}}
         observeMode={observeMode}
+        interiorEntrySide={spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : 'west'}
+        interiorEntryToken={spec.buildingId}
+      />
+      <InteriorExitIndicator
+        playerRef={playerRef}
+        entrySide={entrySide}
+        entryRoom={entryRoom}
+        mapX={params.mapX}
+        mapY={params.mapY}
       />
     </group>
   );

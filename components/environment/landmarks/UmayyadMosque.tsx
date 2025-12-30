@@ -26,8 +26,8 @@ interface UmayyadMosqueProps {
 const UmayyadMosque: React.FC<UmayyadMosqueProps> = ({ mapX, mapY, playerPosition }) => {
   const { camera } = useThree();
 
-  // Only show in the UMAYYAD_MOSQUE district (0, 1)
-  if (mapX !== 0 || mapY !== 1) return null;
+  // Only show in the UMAYYAD_MOSQUE district (0, 2)
+  if (mapX !== 0 || mapY !== 2) return null;
 
   // Calculate distance for LOD
   const distanceToPlayer = useMemo(() => {

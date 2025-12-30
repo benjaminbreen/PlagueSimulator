@@ -73,7 +73,8 @@ const InteriorPropMesh: React.FC<{
   profession: string;
   positionVector?: THREE.Vector3;
   roomSize?: [number, number, number];
-}> = ({ prop, rugMaterial, prayerRugMaterial, profession, positionVector, roomSize }) => {
+  isShattered?: boolean;
+}> = ({ prop, rugMaterial, prayerRugMaterial, profession, positionVector, roomSize, isShattered }) => {
   const itemRef = useRef<THREE.Object3D>(null);
   const base = positionVector ?? new THREE.Vector3(prop.position[0], prop.position[1], prop.position[2]);
   const rotation = prop.rotation as [number, number, number];
@@ -1659,6 +1660,78 @@ const InteriorPropMesh: React.FC<{
       const darkBrass = '#8a6409';
       const glassColor = '#d8e8f0';
 
+      // Render shattered debris if broken
+      if (isShattered) {
+        const shardAngles = [0, 0.7, 1.4, 2.1, 2.8, 3.5, 4.2, 4.9, 5.6];
+        return (
+          <group {...common} position={anchoredPos(0)}>
+            <ContactShadow size={[0.8, 0.8]} />
+
+            {/* Oil spill stain on ground */}
+            <mesh position={[0.1, 0.01, 0.05]} rotation={[-Math.PI / 2, 0, 0.3]}>
+              <circleGeometry args={[0.4, 12]} />
+              <meshStandardMaterial color="#2a2218" roughness={0.9} transparent opacity={0.6} />
+            </mesh>
+
+            {/* Fallen/bent main pole */}
+            <mesh position={[0.15, 0.06, 0.1]} rotation={[0.1, 0.4, Math.PI / 2 - 0.2]} castShadow>
+              <cylinderGeometry args={[0.04, 0.05, 0.9, 8]} />
+              <meshStandardMaterial color={brassColor} roughness={0.6} metalness={0.7} />
+            </mesh>
+
+            {/* Crushed base plate */}
+            <mesh position={[-0.1, 0.02, -0.05]} rotation={[0.15, 0.8, 0.1]} castShadow>
+              <cylinderGeometry args={[0.22, 0.28, 0.04, 12]} />
+              <meshStandardMaterial color={brassColor} roughness={0.55} metalness={0.75} />
+            </mesh>
+
+            {/* Dented oil reservoir */}
+            <mesh position={[0.25, 0.08, 0.2]} rotation={[0.3, 1.2, 0.5]} castShadow>
+              <cylinderGeometry args={[0.12, 0.14, 0.08, 10]} />
+              <meshStandardMaterial color={brassColor} roughness={0.5} metalness={0.8} />
+            </mesh>
+
+            {/* Broken glass shards scattered */}
+            {shardAngles.map((angle, i) => {
+              const dist = 0.15 + (i % 3) * 0.12;
+              const x = Math.cos(angle) * dist;
+              const z = Math.sin(angle) * dist;
+              const size = 0.03 + (i % 4) * 0.02;
+              return (
+                <mesh
+                  key={`shard-${i}`}
+                  position={[x, 0.01 + i * 0.003, z]}
+                  rotation={[Math.PI / 2 - 0.3 + i * 0.1, angle, i * 0.4]}
+                  castShadow
+                >
+                  <boxGeometry args={[size, size * 0.1, size * 1.2]} />
+                  <meshStandardMaterial
+                    color={glassColor}
+                    transparent
+                    opacity={0.5}
+                    roughness={0.1}
+                    metalness={0.1}
+                  />
+                </mesh>
+              );
+            })}
+
+            {/* Scattered brass decorative pieces */}
+            {[0, 1, 2].map((i) => (
+              <mesh
+                key={`brass-${i}`}
+                position={[0.2 - i * 0.15, 0.025, 0.1 + i * 0.08]}
+                rotation={[0.1, i * 1.5, 0.3]}
+                castShadow
+              >
+                <torusGeometry args={[0.04, 0.015, 6, 12]} />
+                <meshStandardMaterial color={darkBrass} roughness={0.5} metalness={0.8} />
+              </mesh>
+            ))}
+          </group>
+        );
+      }
+
       return (
         <group {...common} position={anchoredPos(0)}>
           <ContactShadow size={[0.6, 0.6]} />
@@ -1827,6 +1900,87 @@ const InteriorPropMesh: React.FC<{
       // Point light color based on glass
       const lightColor = rand() > 0.5 ? '#ffb347' : '#ffd7a1';
       const lightIntensity = 3.5 + rand() * 2.5; // Much brighter (3.5-6.0)
+
+      // Render shattered debris if broken
+      if (isShattered) {
+        const shardAngles = [0, 0.6, 1.2, 1.8, 2.4, 3.0, 3.6, 4.2, 4.8, 5.4];
+        return (
+          <group {...common} position={anchoredPos(0)}>
+            <ContactShadow size={[0.6, 0.6]} />
+
+            {/* Small oil stain */}
+            <mesh position={[0.05, 0.008, 0.03]} rotation={[-Math.PI / 2, 0, 0.5]}>
+              <circleGeometry args={[0.25, 10]} />
+              <meshStandardMaterial color="#252015" roughness={0.9} transparent opacity={0.5} />
+            </mesh>
+
+            {/* Bent/crushed lantern body frame */}
+            <mesh position={[0.08, 0.06, 0.05]} rotation={[0.4, 0.6, Math.PI / 2]} castShadow>
+              <cylinderGeometry args={[bodyRadius * 0.6, bodyRadius * 0.5, bodyHeight * 0.5, sides, 1, true]} />
+              <meshStandardMaterial color={metalColor} roughness={0.6} metalness={0.75} wireframe />
+            </mesh>
+
+            {/* Fallen lantern top dome/cap */}
+            <mesh position={[-0.12, 0.04, 0.08]} rotation={[0.2, 1.0, 0.6]} castShadow>
+              <coneGeometry args={[bodyRadius * 0.5, 0.15, sides]} />
+              <meshStandardMaterial color={metalColor} roughness={0.5} metalness={0.8} />
+            </mesh>
+
+            {/* Hanging ring (detached) */}
+            <mesh position={[0.15, 0.02, -0.08]} rotation={[0.8, 0.3, 0.4]} castShadow>
+              <torusGeometry args={[0.06, 0.015, 6, 16]} />
+              <meshStandardMaterial color={darkMetal} roughness={0.5} metalness={0.8} />
+            </mesh>
+
+            {/* Broken colored glass shards scattered */}
+            {shardAngles.map((angle, i) => {
+              const dist = 0.1 + (i % 3) * 0.1;
+              const x = Math.cos(angle) * dist;
+              const z = Math.sin(angle) * dist;
+              const size = 0.025 + (i % 3) * 0.015;
+              const glassStyle = i % 2 === 0 ? primaryGlass : secondaryGlass;
+              return (
+                <mesh
+                  key={`glass-shard-${i}`}
+                  position={[x, 0.008 + i * 0.002, z]}
+                  rotation={[Math.PI / 2 - 0.2 + i * 0.08, angle, i * 0.3]}
+                  castShadow
+                >
+                  <boxGeometry args={[size, size * 0.08, size * 0.8]} />
+                  <meshStandardMaterial
+                    color={glassStyle.color}
+                    emissive={glassStyle.emissive}
+                    emissiveIntensity={0.3}
+                    transparent
+                    opacity={0.7}
+                    roughness={0.15}
+                    metalness={0.05}
+                  />
+                </mesh>
+              );
+            })}
+
+            {/* Scattered metal frame pieces */}
+            {[0, 1, 2, 3].map((i) => (
+              <mesh
+                key={`metal-piece-${i}`}
+                position={[0.12 - i * 0.08, 0.015, -0.05 + i * 0.06]}
+                rotation={[0.1, i * 1.2, 0.4 + i * 0.2]}
+                castShadow
+              >
+                <boxGeometry args={[0.08, 0.012, 0.025]} />
+                <meshStandardMaterial color={darkMetal} roughness={0.6} metalness={0.75} />
+              </mesh>
+            ))}
+
+            {/* Finial/drop piece */}
+            <mesh position={[-0.08, 0.03, 0.12]} rotation={[0.3, 0.8, 0.5]} castShadow>
+              <sphereGeometry args={[0.04, 6, 6]} />
+              <meshStandardMaterial color={metalColor} roughness={0.45} metalness={0.85} />
+            </mesh>
+          </group>
+        );
+      }
 
       return (
         <group {...common} position={anchoredPos(prop.position[1] > 0 ? prop.position[1] : 2.2)}>
@@ -2490,7 +2644,8 @@ export const InteriorPropRenderer: React.FC<{
   profession: string;
   roomSize?: [number, number, number];
   positionVector?: THREE.Vector3;
-}> = ({ prop, rugMaterial, prayerRugMaterial, profession, roomSize, positionVector }) => {
+  isShattered?: boolean;
+}> = ({ prop, rugMaterial, prayerRugMaterial, profession, roomSize, positionVector, isShattered }) => {
   const labelOffset = useMemo(() => getPropLabelOffset(prop.type), [prop.type]);
   const zeroVector = useMemo(() => new THREE.Vector3(0, 0, 0), []);
   const displayProp = useMemo(() => ({
@@ -2512,6 +2667,7 @@ export const InteriorPropRenderer: React.FC<{
         profession={profession}
         positionVector={positionVector ? zeroVector : undefined}
         roomSize={roomSize}
+        isShattered={isShattered}
       />
     </InteriorHoverable>
   );

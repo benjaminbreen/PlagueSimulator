@@ -8,11 +8,12 @@ type OverworldMapProps = {
   path: OverworldPathNode[];
   sceneMode: 'outdoor' | 'interior';
   onToggle: () => void;
+  onTravelRequest?: (mapX: number, mapY: number, label: string) => void;
 };
 
-const GRID_RADIUS = 6;
+const GRID_RADIUS = 3;
 
-export const OverworldMap: React.FC<OverworldMapProps> = ({ centerX, centerY, path, sceneMode, onToggle }) => {
+export const OverworldMap: React.FC<OverworldMapProps> = ({ centerX, centerY, path, sceneMode, onToggle, onTravelRequest }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [minimapSize, setMinimapSize] = useState(() => (window.innerWidth < 640 ? 150 : 240));
   const [hoverLabel, setHoverLabel] = useState<{ label: string; biome: string } | null>(null);
@@ -38,7 +39,7 @@ export const OverworldMap: React.FC<OverworldMapProps> = ({ centerX, centerY, pa
     const canvas = canvasRef.current;
     if (!canvas) return;
     const size = minimapSize;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.35);
     canvas.width = size * dpr;
     canvas.height = size * dpr;
     canvas.style.width = `${size}px`;
@@ -94,6 +95,11 @@ export const OverworldMap: React.FC<OverworldMapProps> = ({ centerX, centerY, pa
     tiles.forEach((tile) => {
       const dx = tile.mapX - centerX;
       const dy = tile.mapY - centerY;
+
+      // Skip outer corner tiles to fit circular shape better
+      const isCorner = (Math.abs(dx) === GRID_RADIUS && Math.abs(dy) === GRID_RADIUS);
+      if (isCorner) return;
+
       const col = dx + GRID_RADIUS;
       const row = GRID_RADIUS - dy;
       const x = originX + col * tileSize + 1;
@@ -118,6 +124,47 @@ export const OverworldMap: React.FC<OverworldMapProps> = ({ centerX, centerY, pa
         ctx.arc(x + w / 2, y + h / 2, 2.1, 0, Math.PI * 2);
         ctx.fill();
       }
+    });
+
+    // Draw emoji icons for key landmarks
+    const getEmoji = (label: string): string | null => {
+      if (label.includes('Mosque')) return '🕌';
+      if (label === 'Market') return '🏪';
+      if (label === 'Caravanserai') return '🐫';
+      if (label.includes('Mountain Shrine')) return '⛰️';
+      if (label === 'Civic') return '🏛️';
+      if (label.includes('Bab Sharqi')) return '🚪';
+      if (label.includes('Wealthy')) return '💎';
+      if (label === 'Al-Salihiyya') return '🌳';
+      if (label.includes('Christian')) return '✝️';
+      if (label.includes('Jewish')) return '✡️';
+      if (label.includes('Ghouta')) return '🌾';
+      if (label.includes('Desert')) return '🏜️';
+      return null;
+    };
+
+    tiles.forEach((tile) => {
+      if (!tile.isMajor) return;
+      const emoji = getEmoji(tile.label);
+      if (!emoji) return;
+      const dx = tile.mapX - centerX;
+      const dy = tile.mapY - centerY;
+
+      // Skip outer corner tiles
+      const isCorner = (Math.abs(dx) === GRID_RADIUS && Math.abs(dy) === GRID_RADIUS);
+      if (isCorner) return;
+
+      const col = dx + GRID_RADIUS;
+      const row = GRID_RADIUS - dy;
+      const x = originX + col * tileSize + 1;
+      const y = originY + row * tileSize + 1;
+      const pad = 2;
+      const w = tileSize - pad;
+      const h = tileSize - pad;
+      ctx.font = `${Math.floor(tileSize * 0.45)}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(emoji, x + w / 2, y + h / 2);
     });
 
     const pathPoints = path
@@ -202,15 +249,46 @@ export const OverworldMap: React.FC<OverworldMapProps> = ({ centerX, centerY, pa
     }
   };
 
+  const handleClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (!onTravelRequest) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const size = minimapSize;
+    const padding = 16;
+    const gridCount = GRID_RADIUS * 2 + 1;
+    const gridSize = size - padding * 2;
+    const tileSize = gridSize / gridCount;
+    const localX = event.clientX - rect.left - padding;
+    const localY = event.clientY - rect.top - padding;
+
+    if (localX < 0 || localY < 0 || localX > gridSize || localY > gridSize) return;
+
+    const col = Math.floor(localX / tileSize);
+    const row = Math.floor(localY / tileSize);
+
+    if (col < 0 || row < 0 || col >= gridCount || row >= gridCount) return;
+
+    const mapX = centerX + (col - GRID_RADIUS);
+    const mapY = centerY + (GRID_RADIUS - row);
+
+    // Don't allow travel to current location
+    if (mapX === centerX && mapY === centerY) return;
+
+    const entry = tileIndex.get(`${mapX},${mapY}`);
+    if (entry) {
+      onTravelRequest(mapX, mapY, entry.label);
+    }
+  };
+
   return (
     <div className="absolute top-20 right-6 pointer-events-auto group">
       <button
-        onClick={onToggle}
+        onClick={handleClick}
         onMouseMove={handleHover}
         onMouseLeave={() => setHoverLabel(null)}
-        className="rounded-full p-[3px] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
+        className="rounded-full p-[3px] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60 cursor-pointer"
         style={{ background: 'linear-gradient(135deg, #1a1f28, #4f3b22 45%, #121720)' }}
-        aria-label="Toggle Overworld Map"
+        aria-label="Overworld Map - Click to fast travel"
       >
         <div className="relative rounded-full p-[8px] bg-black/85 border border-amber-900/30 shadow-[0_0_28px_rgba(120,165,210,0.2)]">
           <canvas ref={canvasRef} className="rounded-full block" />
@@ -220,10 +298,17 @@ export const OverworldMap: React.FC<OverworldMapProps> = ({ centerX, centerY, pa
           />
         </div>
       </button>
-      <div className="mt-2 text-[9px] uppercase tracking-[0.3em] text-amber-200/60 text-center">
+      <div
+        onClick={onToggle}
+        className="mt-2 text-[9px] uppercase tracking-[0.3em] text-amber-200/60 text-center cursor-pointer hover:text-amber-100 transition-colors"
+        style={{ textShadow: '0 2px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)' }}
+      >
         Overworld Grid
       </div>
-      <div className="mt-1 text-[10px] text-center text-amber-100/80 tracking-[0.2em] font-semibold">
+      <div
+        className="mt-1 text-[10px] text-center text-amber-100/80 tracking-[0.2em] font-semibold"
+        style={{ textShadow: '0 2px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)' }}
+      >
         {hoverLabel ? `${hoverLabel.label} · ${hoverLabel.biome}` : ' '}
       </div>
     </div>

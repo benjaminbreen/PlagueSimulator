@@ -1,39 +1,20 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, BuildingInfectionState, MiniMapData, getLocationLabel, getDistrictType, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance, DistrictType } from '../types';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, BuildingInfectionState, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance } from '../types';
 import { MoraleStats } from './Agents';
 import { ActionBar } from './ActionBar';
 import { Humanoid } from './Humanoid';
 import { seededRandom } from '../utils/procedural';
 import { getItemDetailsByItemId } from '../utils/merchantItems';
 import {
-  Pause,
-  Play,
-  FastForward,
-  Skull,
-  ShieldAlert,
-  Sun,
-  Moon,
-  Camera,
   Layers,
   Eye,
   Info,
-  MapPin,
   User,
-  Menu,
-  X,
-  Calendar,
-  MousePointer2,
-  Keyboard,
   Map as MapIcon,
-  Navigation,
-  Package,
-  ArrowUpDown,
-  ChevronDown,
-  Volume2,
-  Square,
-  Activity
+  Activity,
+  X
 } from 'lucide-react';
 import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
 import { AdhanSynth, MelodyName } from './audio/synthesis/AdhanSynth';
@@ -42,14 +23,20 @@ import { EncounterModal } from './EncounterModal/EncounterModal';
 import { EventModal } from './EventModal';
 import { ConversationSummary } from '../types';
 import { OverworldMap } from './OverworldMap';
+import { TravelConfirmationModal } from './TravelConfirmationModal';
 import { ConversationImpact } from '../utils/friendliness';
-import { SicknessMeter } from './SicknessMeter';
-import { getHealthStatusLabel, getPlagueTypeLabel, getSymptomLabels } from '../utils/plague';
-import { GuideTab } from './HistoricalGuide';
+import { getHealthStatusLabel, getPlagueTypeLabel } from '../utils/plague';
 import { ItemPreview3D } from './ItemPreview3D';
 import { Compass } from './Compass';
 import { PerspectiveMenu } from './PerspectiveMenu';
 import { MobilePerspectiveMenu } from './MobilePerspectiveMenu';
+import { TopStatusBar } from './TopStatusBar';
+import { WeatherModal } from './WeatherModal';
+import { useNarration } from './useNarration';
+import { MapModal } from './MapModal';
+import { PlayerDossierModal } from './PlayerDossierModal';
+import { SettingsModal } from './SettingsModal';
+import { ReportsPanel } from './ReportsPanel';
 
 interface UIProps {
   params: SimulationParams;
@@ -143,624 +130,6 @@ interface InventoryEntry {
   appearance?: ItemAppearance;
 }
 
-const getNarratorTextForDistrict = (district: DistrictType, timeOfDay: number) => {
-  const bucket = Math.max(0, Math.min(7, Math.floor(timeOfDay / 3)));
-  const timeSlices = [
-    'Before dawn the city is subdued, with only the earliest movements and a cautious quiet.',
-    'In the early morning, activity begins to gather as people start their daily routines.',
-    'By late morning, the streets are active and business moves at a steady pace.',
-    'At midday, the heat slows movement and conversation grows shorter.',
-    'In the early afternoon, activity returns in waves as people resume their tasks.',
-    'Toward evening, work winds down and the streets thin.',
-    'At night, movement is limited and the mood is watchful.',
-    'In the hours before dawn, the city is quiet and expectant.'
-  ];
-  const districtSlices: Record<DistrictType, string[]> = {
-    MARKET: [
-      'Stall owners lift shutters and a few buyers linger near the fountain.',
-      'Merchants call out prices and baskets pass between hands.',
-      'Bargains are struck quickly, with porters weaving through the crowd.',
-      'Shade is scarce and vendors cluster where a breeze can be found.',
-      'Regulars return for essentials while others drift past the spice tables.',
-      'Vendors count coin and sort what remains for tomorrow.',
-      'Watchmen and a few late traders remain near the stalls.',
-      'Carts line up for setup, and the square stays mostly empty.'
-    ],
-    WEALTHY: [
-      'Servants move between houses and guards remain at the gates.',
-      'Courtyard doors open briefly as errands begin.',
-      'Messengers and clerks cross the lanes with sealed notes.',
-      'The streets stay quiet behind shaded walls and screened windows.',
-      'Coaches pass in short bursts, followed by retainers.',
-      'Households close doors and draw in for the night.',
-      'Only guards and lamps mark the edges of the quarter.',
-      'Watchmen patrol the walls while homes remain dark.'
-    ],
-    HOVELS: [
-      'Cookfires are lit and smoke gathers low in the lanes.',
-      'Neighbors share water and small meals at doorways.',
-      'Laborers head out while the sick remain inside.',
-      'The heat presses down and tempers shorten.',
-      'Weary workers return to quiet exchanges and short rest.',
-      'Meals are divided and families gather close.',
-      'Light is scarce and the quarter feels tense.',
-      'Early laborers wait for the day to begin.'
-    ],
-    CIVIC: [
-      'Clerks arrive and the steps are still mostly clear.',
-      'Petitioners form small lines and disputes are prepared.',
-      'Requests move through the halls in steady order.',
-      'Heat and crowding slow the pace inside.',
-      'Fewer petitioners remain and papers are sorted.',
-      'Doors close and guards take their posts.',
-      'The quarter is formal and quiet under watch.',
-      'Only sentries and early clerks move through the square.'
-    ],
-    RESIDENTIAL: [
-      'Neighbors draw water and begin small errands.',
-      'Familiar greetings pass between doorways.',
-      'Laundry and cooking keep households busy.',
-      'Most people keep to shade and stay indoors.',
-      'Children return and voices rise briefly.',
-      'Families gather and the lane settles.',
-      'The street is dim and still.',
-      'Only early risers move along the lane.'
-    ],
-    ALLEYS: [
-      'Only a few footsteps break the quiet.',
-      'Runners pass quickly between corners.',
-      'Traffic increases but the passages stay narrow.',
-      'Doors close and the alleys go quiet in the heat.',
-      'Small groups pass close to the walls.',
-      'Return traffic grows as people head home.',
-      'The alleys feel tense and watchful.',
-      'The passages wait for the first movement.'
-    ],
-    JEWISH_QUARTER: [
-      'Shops are just opening and the lane is calm.',
-      'Familiar neighbors begin trade and greetings.',
-      'Business is steady and voices stay measured.',
-      'The street is active but orderly.',
-      'Shops begin to close and the lane quiets.',
-      'Households prepare for the night in close quarters.',
-      'Lights are low and movement is subdued.',
-      'Only early walkers are visible.'
-    ],
-    CHRISTIAN_QUARTER: [
-      'Doors remain closed and the lane is quiet.',
-      'A few bells sound as shops begin to open.',
-      'Trade is steady and small gatherings form.',
-      'Conversation softens in the heat.',
-      'Activity tapers near the churches.',
-      'Households return and the lanes settle.',
-      'A few lamps light the street.',
-      'The quarter stays still with only early steps.'
-    ],
-    UMAYYAD_MOSQUE: [
-      'The precinct is quiet with only a few passersby.',
-      'Worshippers arrive and foot traffic begins.',
-      'Courtyards fill steadily as visitors pass through.',
-      'Voices carry across stone and the area is busy.',
-      'The flow eases and shade draws people inward.',
-      'The district calms as worshippers depart.',
-      'The precinct is subdued and watched.',
-      'Only the earliest prayers break the quiet.'
-    ],
-    STRAIGHT_STREET: [
-      'Shops open in sequence along the straight road.',
-      'Foot traffic builds as traders arrive from both gates.',
-      'Carts move through the colonnades in steady rhythm.',
-      'Shade gathers under stone arches as the heat rises.',
-      'Errands and gossip flow between merchants.',
-      'Shutters close in turn as the crowd thins.',
-      'A few late walkers move under the gate lamps.',
-      'The road is quiet and the colonnades are empty.'
-    ],
-    SOUQ_AXIS: [
-      'The souq wakes with rustling cloth and clinking scales.',
-      'Vendors call out from shaded stalls.',
-      'The corridor grows dense with shoppers and porters.',
-      'Heat hangs in the narrow passageways.',
-      'Trade continues in bursts as crowds pass through.',
-      'Bundles are packed and the corridor clears.',
-      'A few stallkeepers linger by lamplight.',
-      'The souq is silent, save for a few guards.'
-    ],
-    MIDAN: [
-      'Carters and herders move at the edge of the city.',
-      'Livestock and supplies enter through the southern gate.',
-      'The road fills with caravan traffic and messengers.',
-      'Heat settles over open yards and stables.',
-      'Travelers rest while traders regroup.',
-      'The gate quiets and wagons roll out.',
-      'Watchmen linger at the road markers.',
-      'The route lies still in the pre-dawn hush.'
-    ],
-    BAB_SHARQI: [
-      'Guards take posts at the eastern gate.',
-      'Travelers and petitioners pass through the arch.',
-      'Traffic thickens around the gatehouse.',
-      'Shade pools near the walls in the midday heat.',
-      'The gate quiets as travelers move on.',
-      'Lanterns are lit at the gate as dusk falls.',
-      'The gate stands watch over a quiet road.',
-      'The entryway waits for the first arrivals.'
-    ],
-    SALHIYYA: [
-      'The hillside is cool and lightly traveled.',
-      'Gardeners and pilgrims move along the path.',
-      'Visitors come for quiet air and brief rest.',
-      'Movement slows in the shade.',
-      'Paths thin as people return to the city.',
-      'The hillside grows still again.',
-      'Little movement is seen after dark.',
-      'The hill is quiet except for wind and birds.'
-    ],
-    OUTSKIRTS_FARMLAND: [
-      'Workers are only just arriving at the fields.',
-      'Labor begins along canals and plots.',
-      'Carts move toward the city with produce.',
-      'Work slows under the heat.',
-      'Labor resumes in short bursts.',
-      'Workers head back with their tools.',
-      'Fields are dark and empty.',
-      'Early laborers move along the paths.'
-    ],
-    OUTSKIRTS_DESERT: [
-      'Only distant tracks are visible.',
-      'Morning light reveals a few travelers.',
-      'Heat builds and movement slows.',
-      'The road is harsh and largely empty.',
-      'A small caravan may pass at a measured pace.',
-      'The wind cools and movement returns.',
-      'The edge is still and watchful.',
-      'The road waits for the first caravan.'
-    ],
-    CARAVANSERAI: [
-      'Animals rest and the yard is quiet.',
-      'Arrivals begin and goods are unloaded.',
-      'Merchants compare notes and tally accounts.',
-      'Trade and repair are loud in the yard.',
-      'Activity eases as travelers depart.',
-      'Fires are lit and packs are checked.',
-      'The caravanserai settles into guarded quiet.',
-      'Early travelers prepare to leave.'
-    ],
-    MOUNTAIN_SHRINE: [
-      'The shrine is quiet and nearly empty.',
-      'A few pilgrims arrive with caretakers.',
-      'Visits are brief and prayers are hushed.',
-      'Visitors linger briefly on the warm stone.',
-      'The path clears and the shrine grows still.',
-      'The last visitors descend toward the city.',
-      'The shrine is dark and silent.',
-      'Only wind and distant calls reach this place.'
-    ],
-    SOUTHERN_ROAD: [
-      'Only a few carts are in sight.',
-      'Travelers head toward the city gates.',
-      'Small caravans pass at a measured pace.',
-      'Movement slows in the heat.',
-      'Traffic returns in short intervals.',
-      'Travelers seek shelter and the road empties.',
-      'The road is dark with only watchmen nearby.',
-      'Early travelers gather on the roadside.'
-    ]
-  };
-  const fallback = 'The city holds its breath, uncertain what the next hour will bring.';
-  const timeText = timeSlices[bucket] ?? timeSlices[0];
-  const districtText = districtSlices[district]?.[bucket];
-  return `${timeText} ${districtText ?? fallback}`;
-};
-
-const WeatherModal: React.FC<{
-  timeOfDay: number;
-  currentWeather: string;
-  onClose: () => void;
-}> = ({ timeOfDay, currentWeather, onClose }) => {
-  // Calculate temperature based on time of day (Damascus 1348 climate)
-  const getTemperature = () => {
-    const hour = timeOfDay;
-    // Summer temperatures in Damascus (simplified model)
-    // Peak heat around 2-3 PM, coolest before dawn
-    const baseTemp = 28; // Average
-    const variation = 12; // Temperature swing
-    const tempCurve = Math.sin(((hour - 6) / 24) * Math.PI * 2);
-    return Math.round(baseTemp + tempCurve * variation);
-  };
-
-  const temperature = getTemperature();
-
-  const weatherDescriptions = {
-    CLEAR: {
-      name: 'Clear Skies',
-      desc: 'The sun blazes overhead, casting sharp shadows across the dusty streets.',
-      color: 'text-amber-400',
-      bgColor: 'bg-amber-500/10',
-      borderColor: 'border-amber-500/30',
-      humidity: '15-25%',
-      visibility: 'Excellent'
-    },
-    OVERCAST: {
-      name: 'Overcast',
-      desc: 'Gray clouds blanket the sky, diffusing the harsh sunlight.',
-      color: 'text-slate-400',
-      bgColor: 'bg-slate-500/10',
-      borderColor: 'border-slate-500/30',
-      humidity: '45-60%',
-      visibility: 'Moderate'
-    },
-    SANDSTORM: {
-      name: 'Dust Storm',
-      desc: 'Choking dust sweeps through the alleys, obscuring the distant hills.',
-      color: 'text-orange-400',
-      bgColor: 'bg-orange-500/10',
-      borderColor: 'border-orange-500/30',
-      humidity: '5-10%',
-      visibility: 'Poor'
-    }
-  };
-
-  const weatherInfo = weatherDescriptions[currentWeather as keyof typeof weatherDescriptions] || weatherDescriptions.CLEAR;
-
-  // ESC key to close
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [onClose]);
-
-  return (
-    <div
-      className="absolute inset-0 z-[60] flex items-center justify-center p-4 pointer-events-auto animate-in fade-in duration-200"
-      onClick={onClose}
-    >
-      {/* Modal Content */}
-      <div
-        className="max-w-md w-full bg-black/80 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl relative overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-amber-900/40">
-          <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Weather Report</h4>
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded transition-colors text-amber-100/50 hover:text-amber-100"
-          >
-            <X size={16} />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6 space-y-4">
-          {/* Weather Status */}
-          <div className={`${weatherInfo.bgColor} ${weatherInfo.borderColor} border rounded-lg p-4`}>
-            <div className="flex items-center justify-between mb-2">
-              <div className={`text-2xl font-bold ${weatherInfo.color} uppercase tracking-wide`}>
-                {weatherInfo.name}
-              </div>
-              <div className={`w-3 h-3 rounded-full ${weatherInfo.color.replace('text-', 'bg-')} shadow-lg`}></div>
-            </div>
-            <p className="text-xs text-amber-100/60 leading-relaxed">
-              {weatherInfo.desc}
-            </p>
-          </div>
-
-          {/* Temperature Display */}
-          <div className="bg-black/50 border border-amber-900/40 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-1">Temperature</div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-4xl font-mono font-bold text-white">{temperature}°</span>
-                  <span className="text-sm text-amber-100/40 font-mono">C</span>
-                </div>
-                <div className="text-[10px] text-amber-100/30 font-mono mt-1">
-                  {Math.round(temperature * 9/5 + 32)}°F
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-2">Time</div>
-                <div className="text-sm font-mono text-amber-100/80">
-                  {Math.floor(timeOfDay)}:{String(Math.floor((timeOfDay % 1) * 60)).padStart(2, '0')}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Atmospheric Conditions */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-black/30 border border-amber-900/30 rounded-lg p-3">
-              <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-1.5">Humidity</div>
-              <div className="text-lg font-mono text-white">{weatherInfo.humidity}</div>
-            </div>
-            <div className="bg-black/30 border border-amber-900/30 rounded-lg p-3">
-              <div className="text-[9px] text-amber-500/50 uppercase tracking-widest mb-1.5">Visibility</div>
-              <div className="text-lg font-mono text-white">{weatherInfo.visibility}</div>
-            </div>
-          </div>
-
-          {/* Footer Note */}
-          <div className="text-[10px] text-amber-100/30 italic text-center pt-2 border-t border-white/5">
-            Damascus, Summer 1348
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const MapModal: React.FC<{
-  currentX: number;
-  currentY: number;
-  onClose: () => void;
-  onSelectLocation: (x: number, y: number) => void;
-}> = ({ currentX, currentY, onClose, onSelectLocation }) => {
-  // Historical Damascus locations with accurate positioning
-  // Each location has a descriptive title and historical name
-  // Pre-split titles for performance (memoized)
-  const locations = useMemo(() => [
-    { title: "CENTRAL\nBAZAAR", titleLines: ["CENTRAL", "BAZAAR"], name: "Al-Buzuriyah Souq", hoverName: "City Center", x: 0, y: 0, type: "market", desc: "Central bazaar south of the Great Mosque", color: "amber" },
-    { title: "GREAT\nMOSQUE", titleLines: ["GREAT", "MOSQUE"], name: "Umayyad Mosque", hoverName: "Religious Center", x: 0, y: 2, type: "mosque", desc: "The Great Mosque of Damascus, heart of the city", color: "emerald" },
-    { title: "SOUQ\nAXIS", titleLines: ["SOUQ", "AXIS"], name: "Market Corridor", hoverName: "North-South Souq", x: 0, y: 1, type: "market", desc: "Main souq corridor linking market to the mosque", color: "yellow" },
-    { title: "JEWISH\nQUARTER", titleLines: ["JEWISH", "QUARTER"], name: "Al-Yahud", hoverName: "South-Central District", x: 0, y: -2, type: "jewish", desc: "Jewish quarter with synagogues and kosher markets", color: "indigo" },
-    { title: "AL-MIDAN\nGATE", titleLines: ["AL-MIDAN", "GATE"], name: "Midan", hoverName: "Southern Gate Road", x: 0, y: -3, type: "road", desc: "Southern gate route with stables and caravans", color: "orange" },
-    { title: "CHRISTIAN\nQUARTER", titleLines: ["CHRISTIAN", "QUARTER"], name: "Bab Touma", hoverName: "East on Straight Street", x: 3, y: 0, type: "residential", desc: "Christian district at eastern end of Via Recta", color: "blue" },
-    { title: "STRAIGHT\nSTREET", titleLines: ["STRAIGHT", "STREET"], name: "Via Recta", hoverName: "East-West Artery", x: 2, y: 0, type: "road", desc: "Roman straight street lined with colonnades", color: "yellow" },
-    { title: "BAB\nSHARQI", titleLines: ["BAB", "SHARQI"], name: "Bab Sharqi", hoverName: "Eastern Gate", x: 4, y: 1, type: "gate", desc: "Eastern gate and entry road into the city", color: "slate" },
-    { title: "HILLSIDE\nQUARTER", titleLines: ["HILLSIDE", "QUARTER"], name: "Al-Salihiyya", hoverName: "Mountain Slopes", x: -4, y: 4, type: "hillside", desc: "Hillside quarter on Mount Qassioun's slopes", color: "green" },
-    { title: "WEALTHY\nQUARTER", titleLines: ["WEALTHY", "QUARTER"], name: "Al-Qaymariyya", hoverName: "Northwest Quarter", x: -2, y: 3, type: "wealthy", desc: "Wealthy merchant quarter northwest of center", color: "purple" },
-    { title: "SOUTHERN\nQUARTER", titleLines: ["SOUTHERN", "QUARTER"], name: "Al-Shaghour", hoverName: "Far South", x: 0, y: -4, type: "poor", desc: "Dense southern quarter outside old walls", color: "red" },
-    { title: "RURAL\nFARMLANDS", titleLines: ["RURAL", "FARMLANDS"], name: "The Ghouta", hoverName: "Irrigated Oasis", x: 5, y: 2, type: "outskirts", desc: "Fertile orchards and farmland irrigated by Barada", color: "lime" },
-    { title: "DESERT\nOUTSKIRTS", titleLines: ["DESERT", "OUTSKIRTS"], name: "Eastern Badlands", hoverName: "Syrian Desert Edge", x: 6, y: 0, type: "outskirts", desc: "Arid desert fringe to the east", color: "sand" },
-    { title: "SILK\nMARKET", titleLines: ["SILK", "MARKET"], name: "Khan al-Harir", hoverName: "Silk Caravanserai", x: -4, y: -4, type: "caravanserai", desc: "Silk merchants' caravanserai and lodging", color: "orange" },
-    { title: "MAMLUK\nFORTRESS", titleLines: ["MAMLUK", "FORTRESS"], name: "The Citadel", hoverName: "Northwest Fortress", x: -2, y: 1, type: "civic", desc: "Military fortress in northwestern corner of old city", color: "red" },
-    { title: "MOUNTAIN\nSHRINE", titleLines: ["MOUNTAIN", "SHRINE"], name: "Mount Qassioun", hoverName: "Sacred Peak", x: -6, y: 6, type: "landmark", desc: "Sacred mountain overlooking Damascus from northwest", color: "emerald" },
-    { title: "SOUTHERN\nROAD", titleLines: ["SOUTHERN", "ROAD"], name: "Hauran Highway", hoverName: "Southern Trade Route", x: 2, y: -6, type: "landmark", desc: "Trade route to the fertile Hauran plateau", color: "yellow" },
-  ], []);
-
-  // ESC key to close
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [onClose]);
-
-  return (
-    <div
-      className="absolute inset-0 z-[60] flex items-center justify-center p-4 pointer-events-auto animate-in fade-in duration-200 bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="max-w-6xl w-full bg-black/80 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Left: Map Visualization */}
-        <div className="flex-1 p-6 md:p-8 border-b md:border-b-0 md:border-r border-amber-900/40">
-          <div className="flex items-center justify-between mb-6">
-            <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Damascus Map — 1348</h4>
-            <button
-              onClick={onClose}
-              className="p-1.5 hover:bg-white/10 rounded transition-colors text-amber-100/50 hover:text-amber-100"
-            >
-              <X size={16} />
-            </button>
-          </div>
-
-          {/* SVG Map of Historical Damascus */}
-          <div className="bg-black/30 border border-amber-900/30 rounded-lg p-6 relative overflow-hidden">
-            <svg viewBox="0 0 500 500" className="w-full h-full">
-              {/* Barada River - flows from northwest */}
-              <path d="M0,80 Q120,70 250,90 Q380,110 500,100" fill="none" stroke="#4a7c8a" strokeWidth="8" opacity="0.4" />
-              <path d="M0,80 Q120,70 250,90 Q380,110 500,100" fill="none" stroke="#6aa4b8" strokeWidth="3" opacity="0.6" />
-
-              {/* City Walls (irregular oval) */}
-              <ellipse cx="250" cy="270" rx="160" ry="180" fill="none" stroke="#8b7355" strokeWidth="3" strokeDasharray="8 4" opacity="0.3" />
-
-              {/* Straight Street (Via Recta) - Roman road */}
-              <line x1="120" y1="270" x2="380" y2="270" stroke="#6b5a45" strokeWidth="2.5" strokeDasharray="6 3" opacity="0.5" />
-
-              {/* Umayyad Mosque - central landmark */}
-              <rect x="220" y="200" width="60" height="50" fill="#8a7355" stroke="#d4af37" strokeWidth="1.5" opacity="0.6" />
-              <circle cx="250" cy="225" r="8" fill="#d4af37" opacity="0.7" />
-              <text x="250" y="263" textAnchor="middle" className="text-[8px] fill-amber-300/50 font-bold">UMAYYAD</text>
-
-              {/* Mount Qassioun - northwest, prominent landmark */}
-              <path d="M10,140 L50,80 L90,140 Z" fill="#3a4a3a" opacity="0.4" />
-              <path d="M25,125 L50,95 L75,125 Z" fill="#4a5a4a" opacity="0.5" />
-              <circle cx="50" cy="105" r="3" fill="#6a8a6a" opacity="0.6" />
-              <text x="50" y="158" textAnchor="middle" className="text-[8px] fill-emerald-300/50 font-semibold">Mt. Qassioun</text>
-
-              {/* Ghouta farmlands - indicated by scattered vegetation */}
-              <circle cx="420" cy="350" r="4" fill="#7a9a5a" opacity="0.3" />
-              <circle cx="440" cy="330" r="3" fill="#7a9a5a" opacity="0.25" />
-              <circle cx="460" cy="360" r="5" fill="#7a9a5a" opacity="0.35" />
-              <text x="440" y="390" textAnchor="middle" className="text-[7px] fill-lime-300/40 italic">Ghouta</text>
-
-              {/* Desert outskirts - faint dunes */}
-              <path d="M20,350 Q40,330 60,350" fill="none" stroke="#bca27a" strokeWidth="4" opacity="0.25" />
-              <path d="M30,370 Q55,345 80,370" fill="none" stroke="#c7ad85" strokeWidth="3" opacity="0.2" />
-              <text x="55" y="390" textAnchor="middle" className="text-[7px] fill-amber-300/35 italic">Desert</text>
-
-              {/* Location Markers */}
-              {locations.map((loc) => {
-                const isCurrent = loc.x === currentX && loc.y === currentY;
-                // Halved scaling for 2x coordinate system (was 70/65, now 35/32.5)
-                const svgX = 250 + loc.x * 35;
-                const svgY = 270 - loc.y * 32.5;
-
-                const colorMap = {
-                  amber: { bg: 'fill-amber-500', ring: 'stroke-amber-400', text: 'fill-amber-300', glow: 'rgba(251, 191, 36, 0.4)' },
-                  slate: { bg: 'fill-slate-500', ring: 'stroke-slate-400', text: 'fill-slate-300', glow: 'rgba(148, 163, 184, 0.4)' },
-                  green: { bg: 'fill-green-500', ring: 'stroke-green-400', text: 'fill-green-300', glow: 'rgba(34, 197, 94, 0.4)' },
-                  purple: { bg: 'fill-purple-500', ring: 'stroke-purple-400', text: 'fill-purple-300', glow: 'rgba(168, 85, 247, 0.4)' },
-                  red: { bg: 'fill-red-500', ring: 'stroke-red-400', text: 'fill-red-300', glow: 'rgba(239, 68, 68, 0.4)' },
-                  blue: { bg: 'fill-blue-500', ring: 'stroke-blue-400', text: 'fill-blue-300', glow: 'rgba(59, 130, 246, 0.4)' },
-                  indigo: { bg: 'fill-indigo-500', ring: 'stroke-indigo-400', text: 'fill-indigo-300', glow: 'rgba(99, 102, 241, 0.4)' },
-                  lime: { bg: 'fill-lime-500', ring: 'stroke-lime-400', text: 'fill-lime-300', glow: 'rgba(132, 204, 22, 0.4)' },
-                  sand: { bg: 'fill-amber-400', ring: 'stroke-amber-300', text: 'fill-amber-200', glow: 'rgba(245, 158, 11, 0.35)' },
-                  orange: { bg: 'fill-orange-500', ring: 'stroke-orange-400', text: 'fill-orange-300', glow: 'rgba(249, 115, 22, 0.4)' },
-                  emerald: { bg: 'fill-emerald-500', ring: 'stroke-emerald-400', text: 'fill-emerald-300', glow: 'rgba(16, 185, 129, 0.4)' },
-                  yellow: { bg: 'fill-yellow-500', ring: 'stroke-yellow-400', text: 'fill-yellow-300', glow: 'rgba(234, 179, 8, 0.4)' },
-                };
-
-                const colors = colorMap[loc.color as keyof typeof colorMap];
-
-                return (
-                  <g key={loc.name} className="cursor-pointer group/node" onClick={() => onSelectLocation(loc.x, loc.y)}>
-                    {/* Glassomorphic glow on hover */}
-                    <circle
-                      cx={svgX}
-                      cy={svgY}
-                      r="18"
-                      fill={colors.glow}
-                      className="opacity-0 group-hover/node:opacity-100 transition-opacity duration-300"
-                      style={{ filter: 'blur(8px)' }}
-                    />
-                    <circle
-                      cx={svgX}
-                      cy={svgY}
-                      r="14"
-                      fill={colors.glow}
-                      className="opacity-0 group-hover/node:opacity-100 transition-opacity duration-300"
-                      style={{ filter: 'blur(4px)' }}
-                    />
-
-                    {/* Current location indicator - expanding pulse */}
-                    {isCurrent && (
-                      <>
-                        <circle cx={svgX} cy={svgY} r="16" className={`${colors.ring} animate-ping`} strokeWidth="2" fill="none" opacity="0.3" />
-                        <circle cx={svgX} cy={svgY} r="12" className={colors.ring} strokeWidth="2" fill="none" opacity="0.6" />
-                      </>
-                    )}
-
-                    {/* Main location marker */}
-                    <circle
-                      cx={svgX}
-                      cy={svgY}
-                      r={isCurrent ? "7" : "5"}
-                      className={`${colors.bg} transition-all duration-200`}
-                      opacity={isCurrent ? "1" : "0.8"}
-                    />
-                    <circle
-                      cx={svgX}
-                      cy={svgY}
-                      r="9"
-                      className={`${colors.ring} transition-all duration-200 group-hover/node:opacity-70`}
-                      strokeWidth="1.5"
-                      fill="none"
-                      opacity={isCurrent ? "0.5" : "0.3"}
-                    />
-
-                    {/* Labels - always show title, detailed info on hover */}
-                    <g className="pointer-events-none">
-                      {/* Default label - always visible (stacked multi-line) */}
-                      <text
-                        x={svgX}
-                        y={svgY - 20}
-                        textAnchor="middle"
-                        className={`text-[8px] ${colors.text} font-bold transition-opacity group-hover/node:opacity-0`}
-                        opacity="0.7"
-                      >
-                        {loc.titleLines.map((line, i) => (
-                          <tspan key={i} x={svgX} dy={i === 0 ? 0 : 10}>
-                            {line}
-                          </tspan>
-                        ))}
-                      </text>
-
-                      {/* Hover label - detailed two-line */}
-                      <g className="opacity-0 group-hover/node:opacity-100 transition-opacity">
-                        <text
-                          x={svgX}
-                          y={svgY - 28}
-                          textAnchor="middle"
-                          className={`text-[9px] ${colors.text} font-bold`}
-                        >
-                          {loc.titleLines.map((line, i) => (
-                            <tspan key={i} x={svgX} dy={i === 0 ? 0 : 11}>
-                              {line}
-                            </tspan>
-                          ))}
-                        </text>
-                        <text
-                          x={svgX}
-                          y={svgY - 14}
-                          textAnchor="middle"
-                          className={`text-[8px] ${colors.text} italic`}
-                          opacity="0.8"
-                        >
-                          {loc.hoverName}
-                        </text>
-                      </g>
-                    </g>
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-        </div>
-
-        {/* Right: Location List */}
-        <div className="w-full md:w-96 p-6 flex flex-col gap-4 overflow-hidden">
-          <div className="pb-3 border-b border-amber-900/40">
-            <h3 className="text-lg font-bold text-amber-100 uppercase tracking-wider">Fast Travel</h3>
-            <p className="text-[10px] text-amber-100/40 mt-1">Select a district to visit</p>
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-2 pr-2">
-            {locations.map((loc) => {
-              const isCurrent = loc.x === currentX && loc.y === currentY;
-              return (
-                <button
-                  key={loc.name}
-                  onClick={() => onSelectLocation(loc.x, loc.y)}
-                  disabled={isCurrent}
-                  className={`w-full text-left p-3 rounded-lg border transition-all group ${
-                    isCurrent
-                      ? 'bg-amber-900/40 border-amber-700/60 cursor-default'
-                      : 'bg-black/30 border-amber-900/30 hover:bg-amber-900/20 hover:border-amber-700/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.15)]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex-1">
-                      <div className="font-bold text-[11px] text-amber-100/90 uppercase tracking-widest leading-tight">
-                        {loc.title}
-                      </div>
-                      <div className="text-sm text-amber-200/70 font-serif italic mt-0.5">
-                        {loc.name}
-                      </div>
-                    </div>
-                    {isCurrent && (
-                      <MapPin size={14} className="text-amber-500" />
-                    )}
-                  </div>
-                  <p className="text-[11px] leading-snug text-amber-100/50">
-                    {loc.desc}
-                  </p>
-                  {!isCurrent && (
-                    <div className="mt-2 flex items-center gap-1.5 text-[10px] font-bold opacity-0 group-hover:opacity-100 transition-opacity text-amber-400 uppercase tracking-widest">
-                      <Navigation size={12} /> Travel Here
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="text-[9px] text-amber-100/30 text-center italic border-t border-white/5 pt-3">
-            Damascus, Pearl of the East
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void; onToggle: () => void }> = ({ data, sceneMode, onClose, onToggle }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [minimapSize, setMinimapSize] = useState(() => (window.innerWidth < 640 ? 150 : 220));
@@ -778,7 +147,7 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     const canvas = canvasRef.current;
     if (!canvas) return;
     const size = minimapSize;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.35);
     canvas.width = size * dpr;
     canvas.height = size * dpr;
     canvas.style.width = `${size}px`;
@@ -844,6 +213,9 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       if (b.type === BuildingType.COMMERCIAL) color = '#8a6a3e';
       else if (b.type === BuildingType.RELIGIOUS) color = '#6d8a97';
       else if (b.type === BuildingType.CIVIC) color = '#8b6a5a';
+      else if (b.type === BuildingType.SCHOOL) color = '#7b7aa6';
+      else if (b.type === BuildingType.MEDICAL) color = '#6f8a76';
+      else if (b.type === BuildingType.HOSPITALITY) color = '#8a7a5c';
 
       const size = Math.max(6, Math.min(24, b.size * scale));
 
@@ -1029,17 +401,8 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         style={{ background: 'linear-gradient(135deg, #7a5a2e, #d3a45a 45%, #6b4b22)' }}
       >
         <div
-          role="button"
-          tabIndex={0}
-          onClick={onToggle}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
-              event.preventDefault();
-              onToggle();
-            }
-          }}
-          className="relative rounded-full p-[6px] bg-black/80 border border-amber-900/40 shadow-[0_0_24px_rgba(210,164,90,0.35)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
-          aria-label="Toggle Overworld Map"
+          className="relative rounded-full p-[6px] bg-black/80 border border-amber-900/40 shadow-[0_0_24px_rgba(210,164,90,0.35)]"
+          aria-label="Local Minimap"
         >
           <canvas ref={canvasRef} className="rounded-full block" />
           <div
@@ -1057,7 +420,11 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
           </button>
         </div>
       </div>
-      <div className="mt-2 text-[9px] uppercase tracking-[0.3em] text-amber-200/60 text-center">
+      <div
+        onClick={onToggle}
+        className="mt-2 text-[9px] uppercase tracking-[0.3em] text-amber-200/60 text-center cursor-pointer hover:text-amber-100 transition-colors"
+        style={{ textShadow: '0 2px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)' }}
+      >
         {districtLabel}
       </div>
     </div>
@@ -1179,26 +546,18 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [dossierTab, setDossierTab] = useState<'overview' | 'health' | 'inventory'>('overview');
   const [inventoryView, setInventoryView] = useState<'list' | 'grid'>('list');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryEntry | null>(null);
+  const [travelDestination, setTravelDestination] = useState<{ mapX: number; mapY: number; label: string } | null>(null);
   const [minimapVisible, setMinimapVisible] = useState(true);
   const [minimapMode, setMinimapMode] = useState<'local' | 'overworld'>('local');
   const [showMobilePerspectiveMenu, setShowMobilePerspectiveMenu] = useState(false);
-  const [narratorMessage, setNarratorMessage] = useState<string | null>(null);
-  const [narratorKey, setNarratorKey] = useState(0);
-  const [narratorHistory, setNarratorHistory] = useState<string[]>([]);
-  const [narratorOpen, setNarratorOpen] = useState(false);
-  const skipFirstNarrationRef = useRef(true);
-  const narratorTimeoutRef = useRef<number | null>(null);
+  const {
+    narratorMessage,
+    narratorKey,
+    narratorHistory,
+    narratorOpen,
+    setNarratorOpen
+  } = useNarration(params.mapX, params.mapY, params.timeOfDay);
   const perspectiveTimeoutRef = useRef<number | null>(null);
-
-  const pushNarration = useCallback((text: string) => {
-    setNarratorMessage(text);
-    setNarratorHistory((prev) => [...prev, text]);
-    setNarratorKey((prev) => prev + 1);
-    if (narratorTimeoutRef.current) {
-      window.clearTimeout(narratorTimeoutRef.current);
-    }
-    narratorTimeoutRef.current = window.setTimeout(() => setNarratorMessage(null), 10000);
-  }, []);
 
   // Biome ambience preview for settings
   const { currentPreview, playPreview, stopPreview } = useBiomeAmbiencePreview();
@@ -1466,12 +825,31 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     }
   }, []);
 
+  const handleTravelRequest = (mapX: number, mapY: number, label: string) => {
+    setTravelDestination({ mapX, mapY, label });
+  };
+
+  const handleTravelConfirm = () => {
+    if (travelDestination) {
+      onFastTravel(travelDestination.mapX, travelDestination.mapY);
+      setTravelDestination(null);
+      setMinimapMode('local'); // Switch back to local map after travel
+    }
+  };
+
+  const handleTravelCancel = () => {
+    setTravelDestination(null);
+  };
+
   const getBuildingTypeLabel = (type: BuildingType) => {
     switch (type) {
       case BuildingType.RESIDENTIAL: return 'Private Residence';
       case BuildingType.COMMERCIAL: return 'Merchant Stall';
       case BuildingType.RELIGIOUS: return 'Holy Sanctuary';
       case BuildingType.CIVIC: return 'Governor\'s Office';
+      case BuildingType.SCHOOL: return 'Madrasa';
+      case BuildingType.MEDICAL: return 'Clinic';
+      case BuildingType.HOSPITALITY: return 'Inn';
       default: return 'Structure';
     }
   };
@@ -1575,26 +953,6 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     };
   }, [params.cameraMode]);
 
-  useEffect(() => {
-    const district = getDistrictType(params.mapX, params.mapY);
-    pushNarration(getNarratorTextForDistrict(district, params.timeOfDay));
-    return () => {
-      if (narratorTimeoutRef.current) {
-        window.clearTimeout(narratorTimeoutRef.current);
-        narratorTimeoutRef.current = null;
-      }
-    };
-  }, [params.mapX, params.mapY, params.timeOfDay, pushNarration]);
-
-  useEffect(() => {
-    if (skipFirstNarrationRef.current) {
-      skipFirstNarrationRef.current = false;
-      return;
-    }
-    const district = getDistrictType(params.mapX, params.mapY);
-    pushNarration(getNarratorTextForDistrict(district, params.timeOfDay));
-  }, [params.mapX, params.mapY, params.timeOfDay, pushNarration]);
-
   const formatHeight = (scale: number) => `${Math.round(scale * 170)} cm`;
   const formatWeight = (scale: number) => `${Math.round(scale * 70)} kg`;
 
@@ -1615,100 +973,28 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           path={overworldPath}
           sceneMode={sceneMode}
           onToggle={() => setMinimapMode('local')}
+          onTravelRequest={handleTravelRequest}
         />
       )}
       
-      {/* TOP NAV BAR */}
-      <div 
-        className="w-full h-16 bg-black/80 backdrop-blur-md border-b border-amber-900/30 px-6 flex items-center justify-between pointer-events-auto cursor-pointer shadow-xl"
-        onClick={toggleMinimize}
-      >
-        <div className="flex flex-col" onClick={e => e.stopPropagation()}>
-          <h1 className="text-lg md:text-xl font-bold text-amber-500 historical-font tracking-tighter leading-none">
-            PLAGUE SIMULATOR
-          </h1>
-          <span className="text-[10px] text-amber-200/50 uppercase tracking-[0.3em] font-light">DAMASCUS 1348</span>
-        </div>
-
-        <div 
-          className="flex items-center gap-6 bg-amber-950/20 px-3 md:px-6 py-2 rounded-full border border-amber-800/20"
-          onClick={e => e.stopPropagation()}
-        >
-          <div className="flex items-center gap-2 text-amber-100/90">
-            <Calendar size={14} className="text-amber-500" />
-            <span className="text-xs font-mono tracking-widest uppercase">{getDateStr()}</span>
-          </div>
-          <div className="w-px h-4 bg-amber-800/30" />
-          <div
-            className="flex items-center gap-2 text-amber-100/90 cursor-pointer hover:bg-amber-900/20 px-2 py-1 rounded-lg transition-colors"
-            onClick={() => setShowWeather(true)}
-            title="View Weather Report"
-          >
-            {params.timeOfDay > 6 && params.timeOfDay < 18 ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-400" />}
-            <span className="text-xs font-mono tracking-widest">{getTimeStr()}</span>
-          </div>
-
-          <div className="w-px h-4 bg-amber-800/30 ml-2" />
-          
-          <div className="flex gap-1 bg-white/5 rounded-lg p-1">
-            <button 
-              onClick={() => handleChange('simulationSpeed', 0.01)}
-              className={`p-1.5 rounded transition-all ${params.simulationSpeed === 0.01 ? 'bg-red-700 text-white shadow-[0_0_10px_rgba(185,28,28,0.5)]' : 'hover:bg-white/10 text-gray-400'}`}
-              title="Freeze Simulation"
-            >
-              <Pause size={14} />
-            </button>
-            <button 
-              onClick={() => handleChange('simulationSpeed', 1)}
-              className={`p-1.5 rounded transition-all ${params.simulationSpeed === 1 ? 'bg-amber-700 text-white shadow-[0_0_10px_rgba(185,158,11,0.5)]' : 'hover:bg-white/10 text-gray-400'}`}
-              title="Normal Speed"
-            >
-              <Play size={14} />
-            </button>
-            <button 
-              onClick={() => handleChange('simulationSpeed', 4)}
-              className={`p-1.5 rounded transition-all ${params.simulationSpeed === 4 ? 'bg-amber-700 text-white shadow-[0_0_10px_rgba(185,158,11,0.5)]' : 'hover:bg-white/10 text-gray-400'}`}
-              title="Fast Forward"
-            >
-              <FastForward size={14} />
-            </button>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-4" onClick={e => e.stopPropagation()}>
-          {(!hasPlayerMoved && !showHealthMeter && playerStats.plague.state === AgentState.HEALTHY) ? (
-            <button
-              type="button"
-              onClick={() => setShowHealthMeter(true)}
-              className="hidden lg:flex flex-col items-end mr-4 text-[9px] text-amber-500/50 uppercase tracking-widest font-bold hover:text-amber-300/80 transition-colors"
-            >
-              <div className="flex items-center gap-2"><span>Arrows to Move</span><Keyboard size={10}/></div>
-              <div className="flex items-center gap-2"><span>V to Change Perspective</span><MousePointer2 size={10}/></div>
-            </button>
-          ) : (
-            <div className="hidden lg:block mr-4">
-              <SicknessMeter
-                plague={playerStats.plague}
-                hasPlayerMoved={hasPlayerMoved || showHealthMeter}
-                onClickDossier={() => setShowPlayerModal(true)}
-              />
-            </div>
-          )}
-          <button
-            onClick={() => setShowMobilePerspectiveMenu(prev => !prev)}
-            className="md:hidden p-2 text-amber-500 hover:text-amber-400 transition-colors"
-            title="Change Perspective"
-          >
-            <Camera size={20} />
-          </button>
-          <button 
-            onClick={() => setShowSettings(!showSettings)}
-            className="p-2 text-amber-500 hover:text-amber-400 transition-colors"
-          >
-            {showSettings ? <X size={24} /> : <Menu size={24} />}
-          </button>
-        </div>
-      </div>
+      <TopStatusBar
+        dateStr={getDateStr()}
+        timeStr={getTimeStr()}
+        isDaytime={params.timeOfDay > 6 && params.timeOfDay < 18}
+        simulationSpeed={params.simulationSpeed}
+        onSetSimulationSpeed={(speed) => handleChange('simulationSpeed', speed)}
+        onOpenWeather={() => setShowWeather(true)}
+        onToggleMinimize={toggleMinimize}
+        showMovementHint={!hasPlayerMoved && !showHealthMeter && playerStats.plague.state === AgentState.HEALTHY}
+        onShowHealthMeter={() => setShowHealthMeter(true)}
+        plague={playerStats.plague}
+        hasPlayerMoved={hasPlayerMoved}
+        showHealthMeter={showHealthMeter}
+        onOpenPlayerModal={() => setShowPlayerModal(true)}
+        onToggleMobilePerspectiveMenu={() => setShowMobilePerspectiveMenu(prev => !prev)}
+        showSettings={showSettings}
+        onToggleSettings={() => setShowSettings(!showSettings)}
+      />
 
       <MobilePerspectiveMenu
         visible={showMobilePerspectiveMenu}
@@ -1810,424 +1096,39 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
       {/* FLOATING WINDOWS */}
       <div className={`flex flex-col flex-1 justify-between p-4 md:p-6 transition-all duration-500 ${params.uiMinimized ? 'opacity-0 scale-95 pointer-events-none translate-y-4' : 'opacity-100 scale-100'}`}>
-        
-        {/* Reports Panel */}
-        <div className="self-end md:self-start mt-12 md:mt-0 w-full md:w-[420px]">
-          <div className="bg-black/80 backdrop-blur-md p-4 rounded-lg border border-amber-800/50 shadow-lg pointer-events-auto">
-            <div
-              className={`flex items-center justify-between ${reportsPanelCollapsed ? '' : 'mb-3 border-b border-amber-900/40 pb-2'} cursor-pointer select-none group`}
-              onClick={() => setReportsPanelCollapsed(!reportsPanelCollapsed)}
-            >
-              <div className="flex items-center gap-2">
-                <ChevronDown
-                  size={14}
-                  className={`text-amber-500/60 transition-transform duration-300 ${reportsPanelCollapsed ? '-rotate-90' : ''}`}
-                />
-                <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold group-hover:text-amber-500/80 transition-colors">Reports Panel</h4>
-              </div>
-              <div className="flex gap-1 bg-amber-950/40 p-1 rounded-full border border-amber-900/40" onClick={(e) => e.stopPropagation()}>
-                <button
-                  onClick={() => {
-                    setReportTab('epidemic');
-                    setTabPulse('epidemic');
-                  }}
-                  className={`relative px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all overflow-hidden ${
-                    reportTab === 'epidemic' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/50 hover:text-amber-200'
-                  }`}
-                >
-                  <span className={`absolute inset-0 rounded-full bg-amber-300/30 blur-[2px] transition-all duration-300 ${tabPulse === 'epidemic' ? 'opacity-100 scale-110' : 'opacity-0 scale-95'}`} />
-                  Epidemic
-                </button>
-                <button
-                  onClick={() => {
-                    setReportTab('player');
-                    setTabPulse('player');
-                  }}
-                  className={`relative px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all overflow-hidden ${
-                    reportTab === 'player' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/50 hover:text-amber-200'
-                  }`}
-                >
-                  <span className={`absolute inset-0 rounded-full bg-amber-300/30 blur-[2px] transition-all duration-300 ${tabPulse === 'player' ? 'opacity-100 scale-110' : 'opacity-0 scale-95'}`} />
-                  Player
-                </button>
-                <button
-                  onClick={() => {
-                    setReportTab('guide');
-                    setTabPulse('guide');
-                  }}
-                  className={`relative px-3 py-1 rounded-full text-[9px] uppercase tracking-widest font-bold transition-all overflow-hidden ${
-                    reportTab === 'guide' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/50 hover:text-amber-200'
-                  }`}
-                >
-                  <span className={`absolute inset-0 rounded-full bg-amber-300/30 blur-[2px] transition-all duration-300 ${tabPulse === 'guide' ? 'opacity-100 scale-110' : 'opacity-0 scale-95'}`} />
-                  Guide
-                </button>
-              </div>
-            </div>
+        <ReportsPanel
+          reportTab={reportTab}
+          setReportTab={setReportTab}
+          tabPulse={tabPulse}
+          setTabPulse={setTabPulse}
+          reportsPanelCollapsed={reportsPanelCollapsed}
+          setReportsPanelCollapsed={setReportsPanelCollapsed}
+          stats={stats}
+          infectedHouseholds={infectedHouseholds}
+          onNavigateToHousehold={onNavigateToHousehold}
+          moraleStats={moraleStats}
+          alchemistTableCollapsed={alchemistTableCollapsed}
+          setAlchemistTableCollapsed={setAlchemistTableCollapsed}
+          params={params}
+          onChangeParam={handleChange}
+          showDemographicsOverlay={showDemographicsOverlay}
+          setShowDemographicsOverlay={setShowDemographicsOverlay}
+          playerStats={playerStats}
+          onShowPlayerModal={() => setShowPlayerModal(true)}
+          inventoryEntries={inventoryEntries}
+          onDropItem={onDropItem}
+          inventorySortBy={inventorySortBy}
+          setInventorySortBy={setInventorySortBy}
+          getRarityMeta={getRarityMeta}
+          formatHeight={formatHeight}
+          formatWeight={formatWeight}
+          currentBiomeLabel={getLocationLabel(params.mapX, params.mapY)}
+          nearbyNPCs={nearbyNPCs}
+          onOpenGuideModal={onOpenGuideModal}
+          onSelectGuideEntry={onSelectGuideEntry}
+          playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
+        />
 
-            <div className={`overflow-hidden transition-all duration-300 ease-out ${reportsPanelCollapsed ? 'max-h-0 opacity-0' : 'max-h-[600px] opacity-100'}`}>
-            {reportTab === 'epidemic' ? (
-              <div className="space-y-4">
-                <div>
-                  <h5 className="text-[10px] text-amber-500/50 uppercase tracking-[0.2em] mb-3 font-bold">Epidemic Report</h5>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                    <div className="flex items-center gap-2 text-white">
-                      <div className="w-2.5 h-2.5 rounded-full bg-slate-200"></div>
-                      <span className="font-mono text-lg">{stats.healthy}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-gray-400">Healthy</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-yellow-300">
-                      <div className="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                      <span className="font-mono text-lg">{stats.incubating}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-yellow-300/70">Incubating</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-red-400">
-                      <div className="w-2.5 h-2.5 rounded-full bg-red-600"></div>
-                      <span className="font-mono text-lg">{stats.infected}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-red-400/70">Infected</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-gray-500">
-                      <div className="w-2.5 h-2.5 rounded-full bg-gray-600"></div>
-                      <span className="font-mono text-lg">{stats.deceased}</span>
-                      <span className="text-[10px] uppercase tracking-wider text-gray-600">Deceased</span>
-                    </div>
-                  </div>
-
-                  {/* Infected Households */}
-                  {infectedHouseholds.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-amber-900/30">
-                      <div className="text-[9px] uppercase tracking-widest text-amber-500/60 mb-2">Infected Households</div>
-                      <div className="space-y-1.5 max-h-32 overflow-y-auto">
-                        {infectedHouseholds.map((household) => (
-                          <div
-                            key={household.buildingId}
-                            onClick={() => onNavigateToHousehold?.(household.buildingPosition)}
-                            className={`text-[10px] leading-relaxed cursor-pointer hover:bg-amber-900/20 px-2 py-1 rounded transition-colors ${
-                              household.status === 'deceased' ? 'text-gray-400 hover:text-gray-300' : 'text-red-400/90 hover:text-red-300'
-                            }`}
-                          >
-                            <span className="font-mono">
-                              {household.infectedCount + household.deceasedCount}
-                            </span>
-                            {' '}person{household.infectedCount + household.deceasedCount > 1 ? 's' : ''} in the home of{' '}
-                            <span className="text-amber-200/90">{household.npcName}</span>
-                            {' '}to the{' '}
-                            <span className="text-amber-300/80">{household.direction}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Civic Morale Section */}
-                <div className="bg-black/50 p-3 rounded-lg border border-amber-900/40 shadow-inner">
-                  <div className="flex items-center justify-between mb-3 border-b border-white/10 pb-2">
-                    <span className="historical-font text-amber-500 text-xs uppercase tracking-widest">Civic Morale</span>
-                    <span className={`text-[9px] uppercase tracking-widest font-bold ${
-                      moraleStats.avgPanic < 16 ? 'text-emerald-400' :
-                      moraleStats.avgPanic < 36 ? 'text-yellow-400' :
-                      moraleStats.avgPanic < 56 ? 'text-orange-400' :
-                      moraleStats.avgPanic < 76 ? 'text-red-400' : 'text-red-600'
-                    }`}>
-                      {moraleStats.avgPanic < 16 ? 'Calm' :
-                       moraleStats.avgPanic < 36 ? 'Uneasy' :
-                       moraleStats.avgPanic < 56 ? 'Anxious' :
-                       moraleStats.avgPanic < 76 ? 'Fearful' : 'Panicked'}
-                    </span>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div>
-                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                        <span className="font-bold">Plague Awareness</span>
-                        <span className="font-mono">{Math.round(moraleStats.avgAwareness)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-amber-600 to-amber-400"
-                          style={{ width: `${Math.min(100, moraleStats.avgAwareness)}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                        <span className="font-bold">Public Panic</span>
-                        <span className="font-mono">{Math.round(moraleStats.avgPanic)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-500 ${
-                            moraleStats.avgPanic < 36 ? 'bg-gradient-to-r from-emerald-600 to-emerald-400' :
-                            moraleStats.avgPanic < 56 ? 'bg-gradient-to-r from-yellow-600 to-yellow-400' :
-                            moraleStats.avgPanic < 76 ? 'bg-gradient-to-r from-orange-600 to-orange-400' :
-                            'bg-gradient-to-r from-red-700 to-red-500'
-                          }`}
-                          style={{ width: `${Math.min(100, moraleStats.avgPanic)}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="text-[9px] text-amber-100/40 italic mt-2">
-                      {moraleStats.avgPanic < 16 ? '"The streets feel peaceful today."' :
-                       moraleStats.avgPanic < 36 ? '"Whispers of sickness in the souq..."' :
-                       moraleStats.avgPanic < 56 ? '"People hurry past, avoiding eye contact."' :
-                       moraleStats.avgPanic < 76 ? '"Fear spreads faster than the plague itself."' :
-                       '"The city trembles on the edge of chaos."'}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Alchemist's Table - Collapsible */}
-                <div className="bg-black/50 p-3 rounded-lg border border-amber-900/40 shadow-inner">
-                  <div
-                    className="flex items-center justify-between cursor-pointer select-none group"
-                    onClick={() => setAlchemistTableCollapsed(!alchemistTableCollapsed)}
-                  >
-                    <span className="historical-font text-amber-500 text-xs uppercase tracking-widest">Alchemist's Table</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[9px] text-amber-100/30 italic group-hover:text-amber-100/50 transition-colors">
-                        {alchemistTableCollapsed ? 'Click to expand' : 'Click to collapse'}
-                      </span>
-                      <ChevronDown
-                        size={12}
-                        className={`text-amber-500/50 transition-transform duration-300 ${alchemistTableCollapsed ? '-rotate-90' : ''}`}
-                      />
-                    </div>
-                  </div>
-
-                  <div className={`overflow-hidden transition-all duration-300 ease-out ${alchemistTableCollapsed ? 'max-h-0 opacity-0' : 'max-h-[300px] opacity-100 mt-3 pt-3 border-t border-white/10'}`}>
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                          <span className="flex items-center gap-1 font-bold"><Skull size={10}/> Contact Virulence</span>
-                          <span className="font-mono">{Math.round(params.infectionRate * 100)}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0" max="1" step="0.01"
-                          value={params.infectionRate}
-                          onChange={(e) => handleChange('infectionRate', parseFloat(e.target.value))}
-                          className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-red-500"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                          <span className="flex items-center gap-1 font-bold">Sanitation Protocol</span>
-                          <span className="font-mono">{Math.round(params.hygieneLevel * 100)}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0" max="1" step="0.05"
-                          value={params.hygieneLevel}
-                          onChange={(e) => handleChange('hygieneLevel', parseFloat(e.target.value))}
-                          className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                        />
-                      </div>
-
-                      <div className="pt-2">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleChange('quarantine', !params.quarantine); }}
-                          className={`w-full py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-all font-bold text-[10px] tracking-widest uppercase border ${
-                            params.quarantine
-                              ? 'bg-amber-600 border-amber-500 text-white shadow-[0_0_15px_rgba(245,158,11,0.5)]'
-                              : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
-                          }`}
-                        >
-                          <ShieldAlert size={14} />
-                          {params.quarantine ? 'QUARANTINE ENFORCED' : 'Enable Quarantine'}
-                        </button>
-                      </div>
-
-                      <div className="pt-2 border-t border-white/10">
-                        <label className="flex items-center justify-between text-[10px] uppercase tracking-widest text-amber-200/70">
-                          <span>Demographics Overlay</span>
-                          <input
-                            type="checkbox"
-                            checked={showDemographicsOverlay}
-                            onChange={(e) => setShowDemographicsOverlay(e.target.checked)}
-                            className="accent-amber-600"
-                          />
-                        </label>
-                        <div className="text-[9px] text-amber-100/40 mt-1 italic">
-                          Floating tags follow nearby NPCs.
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : reportTab === 'player' ? (
-              <div className="space-y-3 text-[12px] text-amber-50/90">
-                <div className="flex items-center justify-between">
-                  <div className="historical-font text-amber-400 text-sm uppercase tracking-widest">Player Report</div>
-                  <button
-                    onClick={() => setShowPlayerModal(true)}
-                    className="text-[10px] text-amber-100/40 uppercase tracking-[0.2em] hover:text-amber-100/70 transition-colors"
-                  >
-                    More Info
-                  </button>
-                </div>
-                <div className="bg-black/50 p-3 rounded-lg border border-amber-900/40 shadow-inner">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[10px] uppercase tracking-widest text-amber-500/70">Wealth</span>
-                    <span className="inline-flex items-center gap-2 rounded-full border border-amber-700/40 bg-amber-900/30 px-2 py-0.5 text-[10px] uppercase tracking-widest text-amber-200/90">
-                      {Math.max(0, Math.round(playerStats.currency))} Dirhams
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                        <span className="font-bold">Health</span>
-                        <span className="font-mono">{Math.round(playerStats.health)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-emerald-600 to-emerald-400"
-                          style={{ width: `${Math.min(100, Math.max(0, playerStats.health))}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                        <span className="font-bold">Reputation</span>
-                        <span className="font-mono">{Math.round(playerStats.reputation)}%</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all duration-500 bg-gradient-to-r from-sky-600 to-sky-400"
-                          style={{ width: `${Math.min(100, Math.max(0, playerStats.reputation))}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Name</div>
-                    <div className="font-bold">{playerStats.name}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Profession</div>
-                    <div className="font-bold">{playerStats.profession}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Class</div>
-                    <div className="font-bold">{playerStats.socialClass}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Age</div>
-                    <div className="font-bold">{playerStats.age} Years</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Gender</div>
-                    <div className="font-bold">{playerStats.gender}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Health</div>
-                    <div className="font-bold text-emerald-300">{playerStats.healthStatus}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Height</div>
-                    <div className="font-bold">{formatHeight(playerStats.height)}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Weight</div>
-                    <div className="font-bold">{formatWeight(playerStats.weight)}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Robe</div>
-                    <div className="font-bold">{playerStats.robeDescription}</div>
-                  </div>
-                  <div>
-                    <div className="text-[10px] uppercase tracking-widest text-amber-500/60">Headwear</div>
-                    <div className="font-bold">{playerStats.headwearDescription}</div>
-                  </div>
-                </div>
-                <div className="border-t border-amber-900/40 pt-3 text-[11px] text-amber-100/70">
-                  <span className="uppercase tracking-widest text-amber-500/60">Family</span>
-                  <div className="mt-1">{playerStats.family}</div>
-                </div>
-                <div className="border-t border-amber-900/40 pt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-amber-500/70">
-                      <Package size={12} className="text-amber-500/70" />
-                      Inventory
-                      <span className="text-amber-100/40">{playerStats.inventory.length}/{playerStats.maxInventorySlots}</span>
-                    </div>
-                    <div className="flex items-center gap-1 text-[9px] text-amber-100/50">
-                      <ArrowUpDown size={12} className="text-amber-500/60" />
-                      <button
-                        onClick={() => setInventorySortBy('name')}
-                        className={inventorySortBy === 'name' ? 'text-amber-200' : 'hover:text-amber-200'}
-                      >
-                        Name
-                      </button>
-                      <span className="text-amber-500/40">·</span>
-                      <button
-                        onClick={() => setInventorySortBy('rarity')}
-                        className={inventorySortBy === 'rarity' ? 'text-amber-200' : 'hover:text-amber-200'}
-                      >
-                        Rarity
-                      </button>
-                      <span className="text-amber-500/40">·</span>
-                      <button
-                        onClick={() => setInventorySortBy('quantity')}
-                        className={inventorySortBy === 'quantity' ? 'text-amber-200' : 'hover:text-amber-200'}
-                      >
-                        Qty
-                      </button>
-                    </div>
-                  </div>
-                  <div className="max-h-40 overflow-auto pr-1 space-y-2 text-[11px]">
-                    {inventoryEntries.length === 0 ? (
-                      <div className="text-amber-100/50 italic">No items carried.</div>
-                    ) : (
-                      inventoryEntries.map((item) => (
-                        <div key={item.id} className="flex items-start justify-between gap-2">
-                          <div>
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="font-semibold text-amber-100">{item.name}</div>
-                              {onDropItem && (
-                                <button
-                                  onClick={() => onDropItem({ inventoryId: item.id, itemId: item.itemId, label: item.name, appearance: item.appearance })}
-                                  className="text-[9px] uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
-                                >
-                                  Drop
-                                </button>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-amber-100/50">{item.description}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className={`text-[9px] uppercase tracking-widest ${getRarityMeta(item.rarity).color}`}>
-                              {getRarityMeta(item.rarity).label}
-                            </div>
-                            <div className="text-[11px] font-mono text-amber-200/80">x{item.quantity}</div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* Guide Tab Content */
-              <div>
-                <GuideTab
-                  currentBiome={getLocationLabel(params.mapX, params.mapY)}
-                  nearbyNPCs={nearbyNPCs}
-                  onOpenEncyclopedia={onOpenGuideModal ?? (() => {})}
-                  onSelectEntry={onSelectGuideEntry ?? (() => {})}
-                  playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
-                />
-              </div>
-            )}
-            </div>
-          </div>
-        </div>
         {selectedNpc && (
           <div className="self-end md:self-start mt-4 w-full md:w-[420px]">
             <div className="bg-black/80 backdrop-blur-md p-4 rounded-lg border border-amber-800/50 shadow-lg pointer-events-auto">
@@ -2427,594 +1328,6 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         </div>
       </div>
 
-      {/* SETTINGS MENU OVERLAY */}
-      {showSettings && (
-        <div className="absolute inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center pointer-events-auto p-6 md:p-10 animate-in fade-in zoom-in-95">
-          <button 
-            onClick={() => setShowSettings(false)}
-            className="absolute top-6 right-6 p-4 text-amber-500 hover:text-amber-400"
-          >
-            <X size={32} />
-          </button>
-          
-          <div className="max-w-3xl w-full bg-black/60 border border-amber-900/40 rounded-xl shadow-2xl p-6 md:p-10">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-amber-900/30 pb-4">
-              <div>
-                <h2 className="historical-font text-3xl md:text-4xl text-amber-500 tracking-tighter">DAMASCUS 1348</h2>
-                <p className="text-amber-100/50 uppercase tracking-[0.35em] text-xs mt-2">Simulated Reality Engine</p>
-              </div>
-              <div className="flex gap-2 bg-amber-950/40 p-1 rounded-full border border-amber-900/40">
-                <button
-                  onClick={() => setSettingsTab('about')}
-                  className={`px-4 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all ${
-                    settingsTab === 'about' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/60 hover:text-amber-200'
-                  }`}
-                >
-                  About
-                </button>
-                <button
-                  onClick={() => { stopPreview(); setSettingsTab('music'); }}
-                  className={`px-4 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all flex items-center gap-1.5 ${
-                    settingsTab === 'music' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/60 hover:text-amber-200'
-                  }`}
-                >
-                  <Volume2 size={12} />
-                  Ambience
-                </button>
-                <button
-                  onClick={() => setSettingsTab('dev')}
-                  className={`px-4 py-2 rounded-full text-[10px] uppercase tracking-widest font-bold transition-all ${
-                    settingsTab === 'dev' ? 'bg-amber-700 text-white shadow-md' : 'text-amber-200/60 hover:text-amber-200'
-                  }`}
-                >
-                  Dev Panel
-                </button>
-              </div>
-            </div>
-
-            {settingsTab === 'about' ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6 text-sm text-amber-50/80 leading-relaxed">
-                <div>
-                  <h3 className="historical-font text-amber-400 text-lg mb-4">About</h3>
-                  <p>In 1348, the Black Death reached Damascus from Gaza. This simulation explores infection dynamics across the city's marketplaces and quarters. Observe, intervene, and learn the patterns of spread.</p>
-                  <div className="mt-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg">
-                    <h4 className="text-xs font-bold text-amber-500 uppercase mb-2">Controls</h4>
-                    <ul className="text-[11px] space-y-1">
-                      <li><span className="text-amber-200">ARROWS:</span> Move character</li>
-                      <li><span className="text-amber-200">WASD:</span> Adjust camera / look</li>
-                      <li><span className="text-amber-200">SHIFT:</span> Sprint</li>
-                      <li><span className="text-amber-200">PAUSE:</span> Stop time & movement</li>
-                    </ul>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="historical-font text-amber-400 text-lg mb-4">Simulation</h3>
-                  <ul className="space-y-2 list-disc pl-4">
-                    <li>Pathogens spread via proximity (2m contact).</li>
-                    <li>Incubation period: 1 simulation hour.</li>
-                    <li>Symptoms emerge after 2 hours.</li>
-                    <li>Mortality peaks at 24 hours.</li>
-                    <li>Rats appear when sanitation falls below 40%.</li>
-                  </ul>
-                  <div className="mt-6 p-4 bg-amber-950/30 border border-amber-900/40 rounded-lg">
-                    <h4 className="text-xs font-bold text-amber-500 uppercase mb-2">Event Generation</h4>
-                    <label className="flex items-center justify-between text-[11px] uppercase tracking-widest text-amber-200/70">
-                      <span>LLM Events</span>
-                      <input
-                        type="checkbox"
-                        checked={llmEventsEnabled}
-                        onChange={(e) => setLlmEventsEnabled(e.target.checked)}
-                        className="accent-amber-600"
-                      />
-                    </label>
-                    <p className="text-[10px] text-amber-100/40 mt-2">
-                      When off, events are fully deterministic and prewritten.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            ) : settingsTab === 'music' ? (
-              <div className="mt-6 space-y-6 text-amber-50/80">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-amber-400 uppercase tracking-widest text-xs font-bold">Ambient Sounds Preview</div>
-                    <p className="text-[11px] text-amber-100/50 mt-1">
-                      Environmental soundscapes for each district of Damascus
-                    </p>
-                  </div>
-                  {currentPreview && (
-                    <button
-                      onClick={stopPreview}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-red-900/40 border border-red-700/50 rounded-lg text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-900/60 transition-colors"
-                    >
-                      <Square size={10} fill="currentColor" />
-                      Stop
-                    </button>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 gap-3">
-                  {(Object.keys(AMBIENCE_INFO) as BiomeType[]).map((biome) => {
-                    const info = AMBIENCE_INFO[biome];
-                    const isPlaying = currentPreview === biome;
-                    return (
-                      <div
-                        key={biome}
-                        className={`p-4 rounded-lg border transition-all ${
-                          isPlaying
-                            ? 'bg-amber-900/30 border-amber-600/60 shadow-lg shadow-amber-900/20'
-                            : 'bg-black/30 border-amber-900/30 hover:border-amber-700/50'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className={`font-bold uppercase tracking-wide text-sm ${
-                                isPlaying ? 'text-amber-400' : 'text-amber-200'
-                              }`}>
-                                {info.name}
-                              </h4>
-                              {isPlaying && (
-                                <div className="flex gap-0.5">
-                                  {[0, 1, 2].map((i) => (
-                                    <div
-                                      key={i}
-                                      className="w-1 bg-amber-500 rounded-full animate-pulse"
-                                      style={{
-                                        height: `${8 + Math.sin(Date.now() / 200 + i) * 4}px`,
-                                        animationDelay: `${i * 0.15}s`,
-                                      }}
-                                    />
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-amber-100/50 mt-1">{info.description}</p>
-                          </div>
-                          <button
-                            onClick={() => isPlaying ? stopPreview() : playPreview(biome)}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] uppercase tracking-widest font-bold transition-all ${
-                              isPlaying
-                                ? 'bg-amber-600 text-white hover:bg-amber-500'
-                                : 'bg-amber-900/40 border border-amber-700/50 text-amber-200 hover:bg-amber-800/50'
-                            }`}
-                          >
-                            {isPlaying ? (
-                              <>
-                                <Square size={10} fill="currentColor" />
-                                Stop
-                              </>
-                            ) : (
-                              <>
-                                <Play size={10} fill="currentColor" />
-                                Preview
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="text-[10px] text-amber-100/30 italic text-center pt-4 border-t border-white/5">
-                  Ambient sounds synthesized in real-time using Web Audio API
-                </div>
-
-                {/* Render the actual BiomeAmbience component when previewing */}
-                {currentPreview && (
-                  <BiomeAmbience biome={currentPreview} enabled={true} volume={0.6} />
-                )}
-
-                {/* Sacred Tunes (Adhan) Preview Section */}
-                <div className="mt-8 pt-8 border-t border-white/10">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="text-amber-400 uppercase tracking-widest text-xs font-bold">
-                        Sacred Instrumental Themes
-                      </h3>
-                      <p className="text-[10px] text-amber-100/40 mt-1">
-                        Haunting melodies using authentic 14th century Middle Eastern instruments and maqam scales
-                      </p>
-                    </div>
-                    {currentAdhanPreview && (
-                      <button
-                        onClick={stopAdhanPreview}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-red-900/40 border border-red-700/50 rounded-lg text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-900/60 transition-colors"
-                      >
-                        <Square size={10} fill="currentColor" />
-                        Stop
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3">
-                    {[
-                      { melody: 'ney' as MelodyName, name: 'Ney (Reed Flute)', description: 'Breathy, mournful descent - traditional Saba maqam lament', maqam: 'Saba', instrument: 'Reed with breath noise' },
-                      { melody: 'flute' as MelodyName, name: 'Smooth Flute', description: 'Joyful ascending melody with gentle ornaments - bright and flowing', maqam: 'Rast', instrument: 'Pure tone with harmonics' },
-                    ].map(({ melody, name, description, maqam, instrument }) => {
-                      const isPlaying = currentAdhanPreview === melody;
-                      return (
-                        <div
-                          key={melody}
-                          className={`p-4 rounded-lg border transition-all ${
-                            isPlaying
-                              ? 'bg-emerald-900/30 border-emerald-600/60 shadow-lg shadow-emerald-900/20'
-                              : 'bg-black/30 border-amber-900/30 hover:border-amber-700/50'
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <div className="flex items-center gap-2">
-                                <h4 className={`font-bold uppercase tracking-wide text-sm ${
-                                  isPlaying ? 'text-emerald-400' : 'text-amber-200'
-                                }`}>
-                                  {name}
-                                </h4>
-                                {isPlaying && (
-                                  <div className="flex gap-0.5">
-                                    {[0, 1, 2].map((i) => (
-                                      <div
-                                        key={i}
-                                        className="w-1 bg-emerald-500 rounded-full animate-pulse"
-                                        style={{
-                                          height: `${8 + Math.sin(Date.now() / 200 + i) * 4}px`,
-                                          animationDelay: `${i * 0.15}s`,
-                                        }}
-                                      />
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                              <p className="text-[11px] text-amber-100/50 mt-1">{description}</p>
-                              <div className="flex gap-3 mt-1">
-                                <p className="text-[9px] text-emerald-400/60 italic">Maqam: {maqam}</p>
-                                <p className="text-[9px] text-amber-400/40 italic">{instrument}</p>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => isPlaying ? stopAdhanPreview() : playAdhanPreview(melody)}
-                              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] uppercase tracking-widest font-bold transition-all ${
-                                isPlaying
-                                  ? 'bg-emerald-600 text-white hover:bg-emerald-500'
-                                  : 'bg-amber-900/40 border border-amber-700/50 text-amber-200 hover:bg-amber-800/50'
-                              }`}
-                            >
-                              {isPlaying ? (
-                                <>
-                                  <Square size={10} fill="currentColor" />
-                                  Stop
-                                </>
-                              ) : (
-                                <>
-                                  <Play size={10} fill="currentColor" />
-                                  Preview
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="text-[10px] text-amber-100/30 italic text-center pt-4 border-t border-white/5 mt-4">
-                    Procedural synthesis of 14th century Middle Eastern instruments using authentic maqam scales
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-6 space-y-6 text-amber-50/80">
-                <div className="flex items-center justify-between">
-                  <div className="text-amber-400 uppercase tracking-widest text-xs font-bold">Developer Controls</div>
-                  <label className="flex items-center gap-2 text-[10px] uppercase tracking-widest">
-                    <input
-                      type="checkbox"
-                      checked={devSettings.enabled}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, enabled: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                    Enable
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Weather Override</label>
-                    <select
-                      value={devSettings.weatherOverride}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, weatherOverride: e.target.value as DevSettings['weatherOverride'] }))}
-                      className="mt-2 w-full bg-black/50 border border-amber-900/40 rounded-lg px-3 py-2 text-sm"
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="CLEAR">Clear</option>
-                      <option value="OVERCAST">Overcast</option>
-                      <option value="SANDSTORM">Sandstorm</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Fog Density Scale</label>
-                    <input
-                      type="range"
-                      min="0.4"
-                      max="2"
-                      step="0.05"
-                      value={devSettings.fogDensityScale}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, fogDensityScale: parseFloat(e.target.value) }))}
-                      className="mt-3 w-full accent-amber-600"
-                    />
-                    <div className="text-[10px] mt-1 text-amber-200/60">{devSettings.fogDensityScale.toFixed(2)}x</div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Cloud Cover Override</label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={devSettings.cloudCoverOverride ?? 0}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, cloudCoverOverride: parseFloat(e.target.value) }))}
-                      className="mt-3 w-full accent-amber-600"
-                    />
-                    <div className="mt-2 flex items-center justify-between text-[10px]">
-                      <span className="text-amber-200/60">{(devSettings.cloudCoverOverride ?? 0).toFixed(2)}</span>
-                      <button
-                        onClick={() => setDevSettings(prev => ({ ...prev, cloudCoverOverride: null }))}
-                        className="uppercase tracking-widest text-amber-300/70 hover:text-amber-300"
-                      >
-                        Reset to Auto
-                      </button>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] uppercase tracking-widest text-amber-400/80">Humidity Override</label>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={devSettings.humidityOverride ?? 0}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, humidityOverride: parseFloat(e.target.value) }))}
-                      className="mt-3 w-full accent-amber-600"
-                    />
-                    <div className="mt-2 flex items-center justify-between text-[10px]">
-                      <span className="text-amber-200/60">{(devSettings.humidityOverride ?? 0).toFixed(2)}</span>
-                      <button
-                        onClick={() => setDevSettings(prev => ({ ...prev, humidityOverride: null }))}
-                        className="uppercase tracking-widest text-amber-300/70 hover:text-amber-300"
-                      >
-                        Reset to Auto
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-6 text-[10px] uppercase tracking-widest">
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Perf Panel</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showPerfPanel}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showPerfPanel: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Hover Wireframe</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showHoverWireframe}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showHoverWireframe: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Shadows</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showShadows}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showShadows: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Clouds</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showClouds}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showClouds: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Fog</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showFog}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showFog: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Torches</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showTorches}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showTorches: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">NPCs</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showNPCs}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showNPCs: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Rats</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showRats}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showRats: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Miasma</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showMiasma}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showMiasma: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">City walls</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showCityWalls}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showCityWalls: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Sound Debug Panel</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showSoundDebug}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showSoundDebug: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                  <label className="flex items-center justify-between">
-                    <span className="text-amber-300/80">Event Debug</span>
-                    <input
-                      type="checkbox"
-                      checked={devSettings.showEventDebug}
-                      onChange={(e) => setDevSettings(prev => ({ ...prev, showEventDebug: e.target.checked }))}
-                      className="accent-amber-600"
-                    />
-                  </label>
-                </div>
-
-                {devSettings.showEventDebug && (
-                  <div className="bg-black/40 border border-amber-900/40 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/80 font-bold">Event Debug</div>
-                      <button
-                        onClick={onTriggerDebugEvent}
-                        className="px-3 py-2 rounded-md border border-amber-500/40 text-amber-200 hover:bg-amber-600/20 text-[10px] uppercase tracking-widest"
-                      >
-                        Trigger Event
-                      </button>
-                    </div>
-                    <div className="text-[10px] text-amber-100/40 mt-2">
-                      Last trigger: {lastEventNote || '—'}
-                    </div>
-                  </div>
-                )}
-
-                <div className="bg-black/40 border border-amber-900/40 rounded-lg p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-[10px] uppercase tracking-[0.25em] text-amber-400/80 font-bold">Infection Debug</div>
-                    <div className="text-[9px] text-amber-100/50 text-right">
-                      <div>Global: {spreadRate === null ? '—' : spreadRate.toFixed(1)} / hr</div>
-                      <div className="text-amber-200/40">
-                        {getLocationLabel(params.mapX, params.mapY)}: {spreadRate === null ? '—' : spreadRate.toFixed(1)} / hr
-                      </div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-[10px] text-amber-100/70 mb-3">
-                    <div className="flex items-center justify-between bg-black/40 border border-amber-900/30 rounded px-2 py-1">
-                      <span className="uppercase tracking-widest text-amber-400/60">Incubating</span>
-                      <span className="font-mono text-amber-200">{stats.incubating}</span>
-                    </div>
-                    <div className="flex items-center justify-between bg-black/40 border border-amber-900/30 rounded px-2 py-1">
-                      <span className="uppercase tracking-widest text-amber-400/60">Infected</span>
-                      <span className="font-mono text-amber-200">{stats.infected}</span>
-                    </div>
-                  </div>
-                  <div className="text-[9px] text-amber-100/40 italic mb-2">
-                    {selectedNpc ? `Selected: ${selectedNpc.stats.name}` : 'Select an NPC to force state.'}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest">
-                    <button
-                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.HEALTHY)}
-                      disabled={!selectedNpc}
-                      className="px-3 py-2 rounded-md border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40"
-                    >
-                      Healthy
-                    </button>
-                    <button
-                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.INCUBATING)}
-                      disabled={!selectedNpc}
-                      className="px-3 py-2 rounded-md border border-yellow-500/40 text-yellow-200 hover:bg-yellow-500/10 disabled:opacity-40"
-                    >
-                      Incubating
-                    </button>
-                    <button
-                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.INFECTED)}
-                      disabled={!selectedNpc}
-                      className="px-3 py-2 rounded-md border border-red-500/40 text-red-200 hover:bg-red-500/10 disabled:opacity-40"
-                    >
-                      Infected
-                    </button>
-                    <button
-                      onClick={() => selectedNpc && onForceNpcState(selectedNpc.stats.id, AgentState.DECEASED)}
-                      disabled={!selectedNpc}
-                      className="px-3 py-2 rounded-md border border-gray-500/40 text-gray-200 hover:bg-gray-500/10 disabled:opacity-40"
-                    >
-                      Deceased
-                    </button>
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-[10px] uppercase tracking-widest">
-                    <button
-                      onClick={() => onForceAllNpcState(AgentState.HEALTHY)}
-                      className="px-3 py-2 rounded-md border border-emerald-500/30 text-emerald-200/90 hover:bg-emerald-500/10"
-                    >
-                      All Healthy
-                    </button>
-                    <button
-                      onClick={() => onForceAllNpcState(AgentState.INCUBATING)}
-                      className="px-3 py-2 rounded-md border border-yellow-500/30 text-yellow-200/90 hover:bg-yellow-500/10"
-                    >
-                      All Incubating
-                    </button>
-                    <button
-                      onClick={() => onForceAllNpcState(AgentState.INFECTED)}
-                      className="px-3 py-2 rounded-md border border-red-500/30 text-red-200/90 hover:bg-red-500/10"
-                    >
-                      All Infected
-                    </button>
-                    <button
-                      onClick={() => onForceAllNpcState(AgentState.DECEASED)}
-                      className="px-3 py-2 rounded-md border border-gray-500/30 text-gray-200/90 hover:bg-gray-500/10"
-                    >
-                      All Deceased
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="flex justify-center mt-10">
-              <button 
-                onClick={() => setShowSettings(false)}
-                className="bg-amber-600 hover:bg-amber-500 text-white px-10 py-3 rounded-full historical-font tracking-widest text-lg transition-all shadow-[0_0_30px_rgba(217,119,6,0.2)]"
-              >
-                RETURN TO OBSERVATION
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <div className={`absolute bottom-4 left-1/2 -translate-x-1/2 text-[9px] uppercase tracking-[0.5em] text-amber-100/20 pointer-events-none transition-opacity duration-700 ${params.uiMinimized ? 'opacity-100' : 'opacity-0'}`}>
         Click Top Bar to Restore Interface
       </div>
@@ -3107,438 +1420,47 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         />
       )}
 
-      {showPlayerModal && (
-        <div className="absolute inset-0 z-[70] flex items-center justify-start p-6 md:p-10 pointer-events-auto">
-          {/* Selective blur backdrop - blurs everything except spotlight around player */}
-          <div
-            className="absolute inset-0 backdrop-blur-md -z-10"
-            style={{
-              WebkitMaskImage: 'radial-gradient(ellipse 35% 50% at 75% 50%, transparent 20%, black 65%)',
-              maskImage: 'radial-gradient(ellipse 35% 50% at 75% 50%, transparent 20%, black 65%)'
-            }}
-          />
-          {/* Dark overlay for readability */}
-          <div
-            className="absolute inset-0 bg-black/60 -z-20"
-          />
-          <div className="w-full max-w-4xl h-[88vh] bg-slate-950/70 border border-amber-900/40 rounded-2xl shadow-2xl p-6 md:p-10 animate-in slide-in-from-left-8 fade-in overflow-hidden">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-amber-900/30 pb-4">
-              <div>
-                <h3 className="historical-font text-amber-400 text-2xl tracking-widest">Player Dossier</h3>
-                <div className="text-[10px] uppercase tracking-[0.3em] text-amber-200/40 mt-1">Civic & Medical Record</div>
-              </div>
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="inline-flex items-center gap-2 rounded-full bg-black/50 border border-amber-600/40 p-1.5 text-[10px] uppercase tracking-[0.35em] shadow-[0_0_18px_rgba(245,158,11,0.2)]">
-                  {(['overview', 'health', 'inventory'] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setDossierTab(tab)}
-                      className={`px-4 py-1.5 rounded-full transition-all font-semibold ${
-                        dossierTab === tab
-                          ? 'bg-amber-500/90 text-black shadow-[0_0_16px_rgba(245,158,11,0.45)]'
-                          : 'text-amber-200/60 hover:text-amber-200 hover:bg-amber-900/25'
-                      }`}
-                    >
-                      {tab.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-                <button onClick={() => setShowPlayerModal(false)} className="text-amber-400 hover:text-amber-300">
-                  <X size={24} />
-                </button>
-              </div>
-            </div>
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+        settingsTab={settingsTab}
+        setSettingsTab={setSettingsTab}
+        llmEventsEnabled={llmEventsEnabled}
+        setLlmEventsEnabled={setLlmEventsEnabled}
+        currentPreview={currentPreview}
+        playPreview={playPreview}
+        stopPreview={stopPreview}
+        currentAdhanPreview={currentAdhanPreview}
+        playAdhanPreview={playAdhanPreview}
+        stopAdhanPreview={stopAdhanPreview}
+        devSettings={devSettings}
+        setDevSettings={setDevSettings}
+        onTriggerDebugEvent={onTriggerDebugEvent}
+        lastEventNote={lastEventNote}
+        spreadRate={spreadRate}
+        mapX={params.mapX}
+        mapY={params.mapY}
+        stats={stats}
+        selectedNpc={selectedNpc}
+        onForceNpcState={onForceNpcState}
+        onForceAllNpcState={onForceAllNpcState}
+      />
 
-            <div className="mt-6 h-[calc(85vh-140px)] overflow-y-auto pr-2">
-              {dossierTab === 'overview' && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-amber-50/85 text-[12px]">
-                  <div className="lg:col-span-2 space-y-5">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Identity</div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between"><span>Name</span><span className="font-bold">{playerStats.name}</span></div>
-                          <div className="flex justify-between"><span>Age</span><span>{playerStats.age}</span></div>
-                          <div className="flex justify-between"><span>Profession</span><span>{playerStats.profession}</span></div>
-                          <div className="flex justify-between"><span>Social Class</span><span>{playerStats.socialClass}</span></div>
-                          <div className="flex justify-between"><span>Family</span><span>{playerStats.family}</span></div>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Appearance</div>
-                        <div className="space-y-2">
-                          <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Skin</span><div>{playerStats.skinDescription}</div></div>
-                          <div><span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Hair</span><div>{playerStats.hairDescription}</div></div>
-                          <button
-                            onClick={() => setSelectedInventoryItem(buildApparelEntry('robe'))}
-                            className="text-left group"
-                          >
-                            <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Robe</span>
-                            <div className="text-amber-100 group-hover:text-amber-200 transition-colors">
-                              {playerStats.robeDescription}
-                            </div>
-                          </button>
-                          <button
-                            onClick={() => setSelectedInventoryItem(buildApparelEntry('headwear'))}
-                            className="text-left group"
-                          >
-                            <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Headwear</span>
-                            <div className="text-amber-100 group-hover:text-amber-200 transition-colors">
-                              {playerStats.headwearDescription}
-                            </div>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Attributes</div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>Strength: <span className="font-bold">{playerStats.strength}</span></div>
-                          <div>Piety: <span className="font-bold">{playerStats.piety}</span></div>
-                          <div>Perceptiveness: <span className="font-bold">{playerStats.perceptiveness}</span></div>
-                          <div>Neuroticism: <span className="font-bold">{playerStats.neuroticism}</span></div>
-                          <div>Charisma: <span className="font-bold">{playerStats.charisma}</span></div>
-                          <div>Humoral Balance: <span className="font-bold">{playerStats.humoralBalance}</span></div>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur">
-                        <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Four Humors</div>
-                        <div className="space-y-2">
-                          <div className="flex justify-between"><span>Blood</span><span className="font-bold">{playerStats.humors.blood}</span></div>
-                          <div className="flex justify-between"><span>Phlegm</span><span className="font-bold">{playerStats.humors.phlegm}</span></div>
-                          <div className="flex justify-between"><span>Yellow Bile</span><span className="font-bold">{playerStats.humors.yellowBile}</span></div>
-                          <div className="flex justify-between"><span>Black Bile</span><span className="font-bold">{playerStats.humors.blackBile}</span></div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="rounded-xl border border-white/10 bg-gradient-to-br from-amber-500/15 via-transparent to-amber-500/10 p-4">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Current Health</div>
-                      <div className="text-lg font-semibold text-amber-100">{getHealthStatusLabel(playerStats.plague)}</div>
-                      <div className="mt-2 text-[11px] text-amber-200/60">
-                        {playerStats.healthHistory}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Wardrobe</div>
-                      <div className="text-[11px] text-amber-100/80">{playerStats.clothing.join(', ')}</div>
-                    </div>
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2">Accessories</div>
-                      <div className="text-[11px] text-amber-100/80">{playerStats.accessories.length ? playerStats.accessories.join(', ') : 'None noted'}</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {dossierTab === 'health' && (
-                <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 text-amber-50/85 text-[12px]">
-                  <div className="space-y-6">
-                    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-slate-900/60 to-slate-950/80 p-5">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-4">Vital Map</div>
-                      <div
-                        className="relative mx-auto h-[420px] w-[220px] rounded-[28px] border border-white/5"
-                        style={{
-                          backgroundImage: 'linear-gradient(120deg, rgba(255,255,255,0.05), transparent 40%), radial-gradient(circle at 40% 30%, rgba(245,158,11,0.12), transparent 60%)',
-                        }}
-                      >
-                        <div className="absolute inset-0 rounded-[28px] bg-[radial-gradient(circle_at_50%_30%,rgba(148,163,184,0.08),transparent_55%)]" />
-                        <div className={`absolute left-[86px] top-[6px] h-12 w-12 rounded-full border border-amber-400/40 bg-amber-400/10 ${playerStats.plague.delirium > 0 ? 'shadow-[0_0_22px_rgba(124,58,237,0.5)] border-purple-400/70' : ''}`} />
-                        <div className={`absolute left-[60px] top-[52px] h-5 w-5 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'ears') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute right-[60px] top-[52px] h-5 w-5 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'ears') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[98px] top-[52px] h-10 w-8 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'neck' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
-                        <div className={`absolute left-[80px] top-[60px] h-6 w-6 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'eyes') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[116px] top-[60px] h-6 w-6 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'eyes') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[95px] top-[80px] h-5 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'mouth') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[100px] top-[92px] h-4 w-8 rounded-full border border-amber-400/20 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'throat') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[78px] top-[96px] h-[136px] w-20 rounded-[22px] border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.coughingBlood > 0 ? 'shadow-[0_0_22px_rgba(239,68,68,0.55)] border-red-400/70' : ''}`} />
-                        <div className={`absolute left-[70px] top-[110px] h-12 w-16 rounded-[18px] border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.weakness > 0 ? 'shadow-[0_0_18px_rgba(245,158,11,0.45)]' : ''}`} />
-                        <div className={`absolute left-[78px] top-[120px] h-10 w-12 rounded-[18px] border border-amber-400/20 bg-amber-500/10 ${playerStats.plague.coughingBlood > 0 || playerStats.baselineAilments.some(a => a.zone === 'lungs') ? 'shadow-[0_0_18px_rgba(239,68,68,0.45)] border-red-400/70' : ''}`} />
-                        <div className={`absolute right-[78px] top-[120px] h-10 w-12 rounded-[18px] border border-amber-400/20 bg-amber-500/10 ${playerStats.plague.coughingBlood > 0 || playerStats.baselineAilments.some(a => a.zone === 'lungs') ? 'shadow-[0_0_18px_rgba(239,68,68,0.45)] border-red-400/70' : ''}`} />
-                        <div className={`absolute left-[26px] top-[112px] h-24 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'armpit' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
-                        <div className={`absolute right-[26px] top-[112px] h-24 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'armpit' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
-                        <div className={`absolute left-[18px] top-[150px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute right-[18px] top-[150px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[18px] top-[200px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute right-[18px] top-[200px] h-16 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower arms') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[14px] top-[255px] h-10 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'hands') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute right-[14px] top-[255px] h-10 w-10 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'hands') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[64px] top-[180px] h-[72px] w-24 rounded-[20px] border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'groin' ? 'shadow-[0_0_22px_rgba(168,85,247,0.55)] border-purple-400/70' : ''}`} />
-                        <div className={`absolute left-[68px] top-[210px] h-[104px] w-[72px] rounded-[18px] border border-amber-400/20 bg-amber-500/5 ${playerStats.baselineAilments.some(a => a.zone === 'abdomen') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[70px] top-[130px] h-16 w-16 rounded-[20px] border border-amber-400/20 bg-amber-500/5 ${playerStats.baselineAilments.some(a => a.zone === 'heart') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[80px] top-[230px] h-24 w-[72px] rounded-[18px] border border-amber-400/20 bg-amber-500/5 ${playerStats.baselineAilments.some(a => a.zone === 'digestive system') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[58px] top-[260px] h-64 w-28 rounded-[30px] border border-amber-400/20 bg-amber-500/5 ${playerStats.plague.skinBleeding > 0 ? 'shadow-[0_0_20px_rgba(239,68,68,0.35)] border-red-400/60' : ''}`} />
-                        <div className={`absolute left-[46px] top-[320px] h-24 w-16 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute right-[46px] top-[320px] h-24 w-16 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'upper legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[46px] top-[360px] h-[72px] w-14 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute right-[46px] top-[360px] h-[72px] w-14 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'lower legs') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
-                        <div className={`absolute left-[50px] top-[395px] h-10 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.gangrene > 0 || playerStats.baselineAilments.some(a => a.zone === 'feet') ? 'shadow-[0_0_20px_rgba(107,114,128,0.6)] border-gray-400/70' : ''}`} />
-                        <div className={`absolute right-[50px] top-[395px] h-10 w-12 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.plague.gangrene > 0 || playerStats.baselineAilments.some(a => a.zone === 'feet') ? 'shadow-[0_0_20px_rgba(107,114,128,0.6)] border-gray-400/70' : ''}`} />
-                        <div className="absolute inset-0 rounded-[32px] border border-white/10" />
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-slate-900/50 to-slate-950/80 p-5">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Humoral Balance</div>
-                      <div className="space-y-3 text-[11px]">
-                        {[
-                          { label: 'Blood', value: playerStats.humors.blood, tone: 'from-red-500 to-rose-400' },
-                          { label: 'Phlegm', value: playerStats.humors.phlegm, tone: 'from-slate-300 to-cyan-300' },
-                          { label: 'Yellow Bile', value: playerStats.humors.yellowBile, tone: 'from-amber-400 to-yellow-300' },
-                          { label: 'Black Bile', value: playerStats.humors.blackBile, tone: 'from-violet-500 to-indigo-400' }
-                        ].map((humor) => (
-                          <div key={humor.label}>
-                            <div className="flex justify-between mb-1 text-amber-200/70">
-                              <span>{humor.label}</span>
-                              <span>{humor.value}</span>
-                            </div>
-                            <div className="h-2 rounded-full bg-black/40 overflow-hidden">
-                              <div className={`h-full bg-gradient-to-r ${humor.tone}`} style={{ width: `${Math.min(100, Math.max(0, humor.value))}%` }} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="space-y-5">
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-                      <div className="flex flex-wrap items-center justify-between gap-4">
-                        <div>
-                          <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">Status</div>
-                          <div className="text-lg font-semibold text-amber-100">
-                            {playerStats.plague.state === AgentState.INFECTED
-                              ? `${getPlagueTypeLabel(playerStats.plague.plagueType)} plague`
-                              : playerStats.plague.state === AgentState.INCUBATING
-                                ? 'Incubating plague'
-                                : getHealthStatusLabel(playerStats.plague)
-                            }
-                          </div>
-                        </div>
-                        <div className="text-right text-[11px] text-amber-300/70">
-                          <div>Day {playerStats.plague.daysInfected}</div>
-                          <div>Survival {playerStats.plague.survivalChance}%</div>
-                        </div>
-                      </div>
-                      <div className="mt-4 h-2 rounded-full bg-black/40 overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-red-500 transition-all"
-                          style={{ width: `${playerStats.plague.state === AgentState.HEALTHY ? 100 : Math.max(30, playerStats.plague.overallSeverity)}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Symptoms</div>
-                      <div className="flex flex-wrap gap-2">
-                        {(() => {
-                          const symptomEntries = [
-                            ...(playerStats.plague.fever > 0 ? [{ label: 'Fever', zone: 'systemic', systemic: true }] : []),
-                            ...(playerStats.plague.weakness > 0 ? [{ label: 'Weakness', zone: 'systemic', systemic: true }] : []),
-                            ...(playerStats.plague.buboes > 0 ? [{ label: 'Buboes', zone: playerStats.plague.buboLocation }] : []),
-                            ...(playerStats.plague.coughingBlood > 0 ? [{ label: 'Coughing blood', zone: 'lungs' }] : []),
-                            ...(playerStats.plague.skinBleeding > 0 ? [{ label: 'Skin bleeding', zone: 'systemic', systemic: true }] : []),
-                            ...(playerStats.plague.delirium > 0 ? [{ label: 'Delirium', zone: 'head' }] : []),
-                            ...(playerStats.plague.gangrene > 0 ? [{ label: 'Gangrene', zone: 'feet' }] : []),
-                            ...playerStats.baselineAilments.map((ailment) => ({
-                              label: ailment.label,
-                              zone: ailment.zone,
-                              systemic: ailment.systemic
-                            }))
-                          ];
-
-                          if (symptomEntries.length === 0) {
-                            return <span className="text-emerald-300/80 text-sm">No reported symptoms.</span>;
-                          }
-
-                          return symptomEntries.map((entry, index) => (
-                            <span key={`${entry.label}-${index}`} className="px-3 py-1 rounded-full border border-amber-500/30 bg-amber-500/10 text-[11px] text-amber-200/80">
-                              {entry.label}
-                              <span className="ml-2 text-[10px] uppercase tracking-widest text-amber-200/50">
-                                {entry.systemic ? 'systemic' : entry.zone}
-                              </span>
-                            </span>
-                          ));
-                        })()}
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Baseline Ailments</div>
-                      {playerStats.baselineAilments.length === 0 ? (
-                        <div className="text-emerald-300/80 text-sm">No chronic ailments noted.</div>
-                      ) : (
-                        <div className="space-y-2 text-[11px] text-amber-200/80">
-                          {playerStats.baselineAilments.map((ailment) => (
-                            <div key={ailment.id} className="flex items-center justify-between">
-                              <span>{ailment.label}</span>
-                              <span className="text-[10px] uppercase tracking-widest text-amber-200/50">
-                                {ailment.systemic ? 'systemic' : ailment.zone}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Symptom Intensity</div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
-                        {[
-                          { label: 'Fever', value: playerStats.plague.fever, tone: 'from-orange-500 to-red-500' },
-                          { label: 'Weakness', value: playerStats.plague.weakness, tone: 'from-amber-500 to-orange-400' },
-                          { label: 'Buboes', value: playerStats.plague.buboes, tone: 'from-purple-500 to-fuchsia-400' },
-                          { label: 'Coughing Blood', value: playerStats.plague.coughingBlood, tone: 'from-red-500 to-rose-400' },
-                          { label: 'Skin Bleeding', value: playerStats.plague.skinBleeding, tone: 'from-red-600 to-red-400' },
-                          { label: 'Delirium', value: playerStats.plague.delirium, tone: 'from-purple-500 to-indigo-400' },
-                          { label: 'Gangrene', value: playerStats.plague.gangrene, tone: 'from-slate-500 to-gray-400' }
-                        ].filter((entry) => entry.value > 0).map((entry) => (
-                          <div key={entry.label} className="rounded-lg border border-white/10 bg-black/30 p-3">
-                            <div className="flex justify-between mb-2">
-                              <span className="text-amber-200/70">{entry.label}</span>
-                              <span className="text-amber-300">{Math.round(entry.value)}%</span>
-                            </div>
-                            <div className="h-2 rounded-full bg-black/40 overflow-hidden">
-                              <div className={`h-full bg-gradient-to-r ${entry.tone}`} style={{ width: `${entry.value}%` }} />
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {dossierTab === 'inventory' && (
-                <div className="space-y-5 text-amber-50/85 text-[12px]">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-1">Inventory</div>
-                      <div className="text-amber-200/80 text-sm">Items carried: {playerStats.inventory.length} / {playerStats.maxInventorySlots}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setInventoryView('list')}
-                        className={`px-3 py-1.5 rounded-full text-[10px] uppercase tracking-widest border ${
-                          inventoryView === 'list' ? 'bg-amber-600/80 text-black border-amber-400/70' : 'border-white/10 text-amber-200/60 hover:text-amber-200'
-                        }`}
-                      >
-                        List
-                      </button>
-                      <button
-                        onClick={() => setInventoryView('grid')}
-                        className={`px-3 py-1.5 rounded-full text-[10px] uppercase tracking-widest border ${
-                          inventoryView === 'grid' ? 'bg-amber-600/80 text-black border-amber-400/70' : 'border-white/10 text-amber-200/60 hover:text-amber-200'
-                        }`}
-                      >
-                        Grid
-                      </button>
-                    </div>
-                  </div>
-
-                  {inventoryView === 'list' ? (
-                    <div className="space-y-3">
-                      {inventoryEntries.map((entry) => {
-                        const name = entry.name.toLowerCase();
-                        const icon = name.includes('dagger') || name.includes('sword') ? '🗡️'
-                          : name.includes('bread') || name.includes('fig') || name.includes('olive') || name.includes('apricot') ? '🥖'
-                          : name.includes('satchel') || name.includes('bag') ? '🧺'
-                          : name.includes('water') || name.includes('waterskin') ? '🪣'
-                          : name.includes('herb') || name.includes('spice') ? '🧪'
-                          : '📦';
-                        return (
-                          <button
-                            key={entry.id}
-                            onClick={() => setSelectedInventoryItem(entry)}
-                            className="w-full text-left rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all"
-                          >
-                            <div className="flex items-center gap-4">
-                              <div className="h-10 w-10 rounded-full bg-black/40 border border-amber-500/40 flex items-center justify-center text-lg">
-                                {icon}
-                              </div>
-                              <div className="flex-1">
-                                <div className="flex items-center justify-between">
-                                  <div className="font-semibold text-amber-100">{entry.name}</div>
-                                  <div className="text-[10px] text-amber-200/50">x{entry.quantity}</div>
-                                </div>
-                                <div className="text-[10px] text-amber-200/50 mt-1">{entry.description}</div>
-                              </div>
-                              <div className="flex flex-col items-end gap-2">
-                                <span className="text-[9px] uppercase tracking-widest px-2 py-1 rounded-full border border-amber-400/30 text-amber-300/70">
-                                  {entry.rarity}
-                                </span>
-                                {onDropItem && (
-                                  <button
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      onDropItem({ inventoryId: entry.id, itemId: entry.itemId, label: entry.name, appearance: entry.appearance });
-                                    }}
-                                    className="text-[9px] uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
-                                  >
-                                    Drop
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {inventoryEntries.map((entry) => {
-                        const name = entry.name.toLowerCase();
-                        const icon = name.includes('dagger') || name.includes('sword') ? '🗡️'
-                          : name.includes('bread') || name.includes('fig') || name.includes('olive') || name.includes('apricot') ? '🥖'
-                          : name.includes('satchel') || name.includes('bag') ? '🧺'
-                          : name.includes('water') || name.includes('waterskin') ? '🪣'
-                          : name.includes('herb') || name.includes('spice') ? '🧪'
-                          : '📦';
-                        return (
-                          <button
-                            key={entry.id}
-                            onClick={() => setSelectedInventoryItem(entry)}
-                            className="rounded-2xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all"
-                          >
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="h-10 w-10 rounded-full bg-black/40 border border-amber-500/40 flex items-center justify-center text-lg">
-                                {icon}
-                              </div>
-                              <span className="text-[9px] uppercase tracking-widest px-2 py-1 rounded-full border border-amber-400/30 text-amber-300/70">
-                                {entry.rarity}
-                              </span>
-                            </div>
-                            <div className="text-sm font-semibold text-amber-100">{entry.name}</div>
-                            <div className="text-[10px] text-amber-200/50 mt-1">{entry.description}</div>
-                            <div className="mt-3 flex items-center justify-between text-[10px] text-amber-200/70">
-                              <span>Qty: {entry.quantity}</span>
-                              {onDropItem && (
-                                <button
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onDropItem({ inventoryId: entry.id, itemId: entry.itemId, label: entry.name, appearance: entry.appearance });
-                                  }}
-                                  className="uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
-                                >
-                                  Drop
-                                </button>
-                              )}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <PlayerDossierModal
+        open={showPlayerModal}
+        playerStats={playerStats}
+        dossierTab={dossierTab}
+        onChangeTab={setDossierTab}
+        inventoryView={inventoryView}
+        onChangeInventoryView={setInventoryView}
+        inventoryEntries={inventoryEntries}
+        onSelectInventoryItem={setSelectedInventoryItem}
+        onDropItem={onDropItem}
+        buildApparelEntry={buildApparelEntry}
+        onClose={() => setShowPlayerModal(false)}
+        getHealthStatusLabel={getHealthStatusLabel}
+        getPlagueTypeLabel={getPlagueTypeLabel}
+      />
 
       {selectedInventoryItem && (
         <div
@@ -3652,6 +1574,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           onTriggerEvent={onTriggerConversationEvent}
           isNPCInitiated={isNPCInitiatedEncounter}
           isFollowingAfterDismissal={isFollowingAfterDismissal}
+        />
+      )}
+
+      {travelDestination && (
+        <TravelConfirmationModal
+          destinationName={travelDestination.label}
+          onConfirm={handleTravelConfirm}
+          onCancel={handleTravelCancel}
         />
       )}
 

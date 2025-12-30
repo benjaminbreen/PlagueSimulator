@@ -8,7 +8,7 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { HoverableGroup } from '../shared/HoverSystem';
 import { HOVER_WIREFRAME_COLORS } from '../constants';
-import { PlazaCat } from '../../Environment';
+import { PlazaCat } from '../fauna/PlazaCat';
 
 export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: number; catPositionRef?: React.MutableRefObject<THREE.Vector3>; ratPositions?: THREE.Vector3[]; npcPositions?: THREE.Vector3[]; playerPosition?: THREE.Vector3; isSprinting?: boolean }> = ({ mapX, mapY, timeOfDay, catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting }) => {
   if (mapX !== 0 || mapY !== 0) return null;
@@ -20,6 +20,10 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
   const splashRef = useRef<THREE.Points>(null);
   const spoutGeometry = useRef<THREE.BufferGeometry | null>(null);
   const splashGeometry = useRef<THREE.BufferGeometry | null>(null);
+  const lastUpdateRef = useRef(0);
+  const centerPos = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const FAR_SQ = 80 * 80;
+  const VERY_FAR_SQ = 120 * 120;
   const time = timeOfDay ?? 12;
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
 
@@ -83,6 +87,14 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
   useFrame((state) => {
     if (!waterRef.current) return;
     const t = state.clock.elapsedTime;
+    const dx = state.camera.position.x - centerPos.x;
+    const dy = state.camera.position.y - centerPos.y;
+    const dz = state.camera.position.z - centerPos.z;
+    const distSq = dx * dx + dy * dy + dz * dz;
+    const lastUpdate = lastUpdateRef.current;
+    if (distSq > VERY_FAR_SQ && t - lastUpdate < 0.6) return;
+    if (distSq > FAR_SQ && t - lastUpdate < 0.2) return;
+    lastUpdateRef.current = t;
 
     // Animate water texture rotation and offset
     if (waterTexture) {
@@ -464,4 +476,3 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
     </HoverableGroup>
   );
 };
-

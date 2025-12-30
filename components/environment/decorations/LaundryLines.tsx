@@ -71,12 +71,23 @@ const ClothItem: React.FC<{
   windPhase: number;
 }> = ({ cloth, position, windPhase }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+  const lastUpdateRef = useRef(0);
+  const FAR_SQ = 60 * 60;
+  const VERY_FAR_SQ = 90 * 90;
 
   // Animate cloth with wind
-  useFrame(({ clock }) => {
+  useFrame(({ clock, camera }) => {
     if (!meshRef.current) return;
 
     const time = clock.getElapsedTime();
+    const dx = camera.position.x - position[0];
+    const dy = camera.position.y - position[1];
+    const dz = camera.position.z - position[2];
+    const distSq = dx * dx + dy * dy + dz * dz;
+    const lastUpdate = lastUpdateRef.current;
+    if (distSq > VERY_FAR_SQ && time - lastUpdate < 0.5) return;
+    if (distSq > FAR_SQ && time - lastUpdate < 0.18) return;
+    lastUpdateRef.current = time;
     const totalPhase = time + cloth.swayPhase + windPhase;
 
     // Horizontal sway

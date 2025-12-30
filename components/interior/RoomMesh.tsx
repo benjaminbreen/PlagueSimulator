@@ -97,7 +97,7 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
     }
 
     // Civic buildings get grand archways
-    if (buildingType === BuildingType.CIVIC) {
+    if (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL) {
       const archType = doorVariant % 4; // 0=horseshoe, 1=pointed, 2=multifoil, 3=ogee
       return (
         <primitive
@@ -265,7 +265,7 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
           ? [w / 2, height / 2, 0]
           : [-w / 2, height / 2, 0];
     const hasDoor = side === interiorDoorSide || side === exteriorDoorSide;
-    const isCivicDoor = hasDoor && buildingType === BuildingType.CIVIC;
+    const isCivicDoor = hasDoor && (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL);
 
     return (
       <group key={`wall-${side}`} position={position} rotation={rotation}>
@@ -328,7 +328,7 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
 
   const floorTint = buildingType === BuildingType.RELIGIOUS
     ? darkenHex('#c8b396', 1.05)
-    : buildingType === BuildingType.CIVIC
+    : buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL
       ? '#b7a287'
       : floorMaterial.color?.getStyle?.() ?? '#b59f84';
   const decorSeed = Math.abs(Math.sin(roomSeed * 0.137));
@@ -344,7 +344,7 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
 
   // Civic building floor decorations
   const renderCivicFloorInlays = () => {
-    if (buildingType !== BuildingType.CIVIC) return null;
+    if (buildingType !== BuildingType.CIVIC && buildingType !== BuildingType.SCHOOL && buildingType !== BuildingType.MEDICAL) return null;
 
     const inlayColor = '#1a1a1a'; // Dark black/charcoal for inlays
     const borderWidth = 0.12; // Width of border strips

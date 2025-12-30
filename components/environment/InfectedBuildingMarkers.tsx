@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BuildingMetadata, BuildingInfectionState, CONSTANTS } from '../../types';
@@ -17,6 +17,7 @@ interface InfectedBuildingMarkersProps {
 export const InfectedBuildingMarkers: React.FC<InfectedBuildingMarkersProps> = ({
   buildings,
   buildingInfection,
+  playerPosition
 }) => {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -34,18 +35,20 @@ export const InfectedBuildingMarkers: React.FC<InfectedBuildingMarkersProps> = (
       .map((building) => ({
         building,
         state: buildingInfection[building.id]!,
+        playerPosition
       }));
-  }, [buildings, buildingInfection]);
+  }, [buildings, buildingInfection, playerPosition]);
 
   if (infectedBuildings.length === 0) return null;
 
   return (
     <group ref={groupRef}>
-      {infectedBuildings.map(({ building, state }) => (
+      {infectedBuildings.map(({ building, state, playerPosition: localPlayerPosition }) => (
         <InfectedBuildingMarker
           key={building.id}
           building={building}
           status={state.status as 'infected' | 'deceased'}
+          playerPosition={localPlayerPosition}
         />
       ))}
     </group>
@@ -56,10 +59,20 @@ export const InfectedBuildingMarkers: React.FC<InfectedBuildingMarkersProps> = (
 interface InfectedBuildingMarkerProps {
   building: BuildingMetadata;
   status: 'infected' | 'deceased';
+  playerPosition?: [number, number, number];
 }
 
-const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ building, status }) => {
+const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ building, status, playerPosition }) => {
   const [isHovered, setIsHovered] = useState(false);
+  const distanceSq = useMemo(() => {
+    if (!playerPosition) return 0;
+    const dx = building.position[0] - playerPosition[0];
+    const dz = building.position[2] - playerPosition[2];
+    return dx * dx + dz * dz;
+  }, [building.position, playerPosition]);
+  const skipAnimation = distanceSq > 140 * 140;
+  const disableLight = distanceSq > 90 * 90;
+  const disableLabel = distanceSq > 120 * 120;
 
   return (
     <group>
@@ -67,23 +80,27 @@ const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ buildin
       <InfectedDiamond
         position={building.position}
         status={status}
+        skipAnimation={skipAnimation}
         onHoverChange={setIsHovered}
       />
       {/* Red light to illuminate building walls */}
-      <BuildingLight
-        position={building.position}
-        storyCount={building.storyCount ?? 1}
-        status={status}
-      />
+      {!disableLight && (
+        <BuildingLight
+          position={building.position}
+          storyCount={building.storyCount ?? 1}
+          status={status}
+        />
+      )}
       {/* Glowing ground circle marker - also detects hover */}
       <GroundMarker
         position={building.position}
         sizeScale={building.sizeScale ?? 1}
         status={status}
+        skipAnimation={skipAnimation}
         onHoverChange={setIsHovered}
       />
       {/* Floating text label - shows on hover */}
-      {isHovered && (
+      {isHovered && !disableLabel && (
         <PlagueHouseLabel
           position={building.position}
           status={status}
@@ -96,16 +113,26 @@ const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ buildin
 interface InfectedDiamondProps {
   position: [number, number, number];
   status: 'infected' | 'deceased';
+  skipAnimation?: boolean;
   onHoverChange?: (hovered: boolean) => void;
 }
 
 // Big red diamond floating above infected building
-const InfectedDiamond: React.FC<InfectedDiamondProps> = ({ position, status, onHoverChange }) => {
+const InfectedDiamond: React.FC<InfectedDiamondProps> = ({ position, status, skipAnimation, onHoverChange }) => {
   const meshRef = useRef<THREE.Mesh>(null);
+
+  useEffect(() => {
+    if (!skipAnimation || !meshRef.current) return;
+    meshRef.current.position.y = 12;
+    meshRef.current.rotation.y = 0;
+    const material = meshRef.current.material as THREE.MeshStandardMaterial;
+    material.emissiveIntensity = 1.2;
+  }, [skipAnimation]);
 
   // Pulsing glow and bobbing animation
   useFrame((state) => {
     if (!meshRef.current) return;
+    if (skipAnimation) return;
 
     const time = state.clock.elapsedTime;
 
@@ -201,11 +228,12 @@ interface GroundMarkerProps {
   position: [number, number, number];
   sizeScale: number;
   status: 'infected' | 'deceased';
+  skipAnimation?: boolean;
   onHoverChange?: (hovered: boolean) => void;
 }
 
 // Glowing circular marker on the ground around the building with radial gradient
-const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status, onHoverChange }) => {
+const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status, skipAnimation, onHoverChange }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   const buildingSize = CONSTANTS.BUILDING_SIZE * sizeScale;
@@ -239,9 +267,16 @@ const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status
     return texture;
   }, [markerColor]);
 
+  useEffect(() => {
+    if (!skipAnimation || !meshRef.current) return;
+    const material = meshRef.current.material as THREE.MeshBasicMaterial;
+    material.opacity = 0.65;
+  }, [skipAnimation]);
+
   // Pulsing glow animation
   useFrame((state) => {
     if (!meshRef.current) return;
+    if (skipAnimation) return;
 
     const time = state.clock.elapsedTime;
     const pulseSpeed = status === 'deceased' ? 0.8 : 1.5;

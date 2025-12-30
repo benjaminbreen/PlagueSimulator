@@ -356,10 +356,22 @@ export const OrnateFountain: React.FC<OrnateFountainProps> = ({
   hasWaterAnimation = true,
 }) => {
   const waterRef = useRef<THREE.Mesh>(null);
+  const lastUpdateRef = useRef(0);
+  const centerPos = useMemo(() => new THREE.Vector3(position[0], position[1], position[2]), [position]);
+  const FAR_SQ = 70 * 70;
+  const VERY_FAR_SQ = 100 * 100;
 
   useFrame((state) => {
     if (waterRef.current && hasWaterAnimation) {
       const time = state.clock.elapsedTime;
+      const dx = state.camera.position.x - centerPos.x;
+      const dy = state.camera.position.y - centerPos.y;
+      const dz = state.camera.position.z - centerPos.z;
+      const distSq = dx * dx + dy * dy + dz * dz;
+      const lastUpdate = lastUpdateRef.current;
+      if (distSq > VERY_FAR_SQ && time - lastUpdate < 0.5) return;
+      if (distSq > FAR_SQ && time - lastUpdate < 0.2) return;
+      lastUpdateRef.current = time;
       // Gentle ripple effect
       waterRef.current.position.y = 0.02 + Math.sin(time * 2) * 0.01;
     }

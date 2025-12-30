@@ -12,8 +12,8 @@ const decayHoursForStatus = (status: BuildingInfectionState['status'], buildingT
   if (status === 'infected') base = 8;
   if (status === 'incubating') base = 6;
   if (base === 0) return 0;
-  if (buildingType === BuildingType.RELIGIOUS || buildingType === BuildingType.CIVIC) return base * 2;
-  if (buildingType === BuildingType.COMMERCIAL) return base * 1.5;
+  if (buildingType === BuildingType.RELIGIOUS || buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL) return base * 2;
+  if (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY) return base * 1.5;
   return base;
 };
 

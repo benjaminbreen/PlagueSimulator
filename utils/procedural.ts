@@ -223,6 +223,26 @@ const COMMERCIAL_PROFESSIONS = [
   'Fishmonger',           // Sammak - Barada River trade
   'Glazier',              // Zajjaj - window glass specialist
 ];
+const HOSPITALITY_PROFESSIONS = [
+  'Innkeeper',
+  'Funduq Keeper',
+  'Khan Warden',
+  'Caravanserai Keeper',
+  'Sherbet House Keeper'
+];
+const MEDICAL_PROFESSIONS = [
+  'Hakim',
+  'Physician',
+  'Apothecary',
+  'Barber-Surgeon',
+  'Pharmacist'
+];
+const SCHOOL_PROFESSIONS = [
+  'Madrasa Teacher',
+  'Qur\'an Teacher',
+  'Copyist Teacher',
+  'Madrasa Administrator'
+];
 const RESIDENTIAL_PROFESSIONS = [
   // Unskilled Labor
   'Day-Laborer',
@@ -2003,16 +2023,23 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
 
   // WEALTHY district: heavily favor residential (wealthy private homes)
   if (district === 'WEALTHY') {
-    // 75% residential, 15% commercial (upscale shops), 8% civic, 2% religious
+    // 66% residential, 14% commercial, 4% civic, 2% religious, 6% school, 4% medical, 4% hospitality
     if (typeRand < 0.02) type = BuildingType.RELIGIOUS;
-    else if (typeRand < 0.10) type = BuildingType.CIVIC;
-    else if (typeRand < 0.25) type = BuildingType.COMMERCIAL;
-    // else remains RESIDENTIAL (75%)
+    else if (typeRand < 0.06) type = BuildingType.CIVIC;
+    else if (typeRand < 0.12) type = BuildingType.SCHOOL;
+    else if (typeRand < 0.16) type = BuildingType.MEDICAL;
+    else if (typeRand < 0.20) type = BuildingType.HOSPITALITY;
+    else if (typeRand < 0.34) type = BuildingType.COMMERCIAL;
+    // else remains RESIDENTIAL (66%)
   } else {
     // Default distribution for other districts
-    if (typeRand < 0.1) type = BuildingType.RELIGIOUS;
-    else if (typeRand < 0.2) type = BuildingType.CIVIC;
-    else if (typeRand < 0.6) type = BuildingType.COMMERCIAL;
+    // 40% residential, 30% commercial, 6% civic, 6% religious, 6% school, 6% medical, 6% hospitality
+    if (typeRand < 0.06) type = BuildingType.RELIGIOUS;
+    else if (typeRand < 0.12) type = BuildingType.CIVIC;
+    else if (typeRand < 0.18) type = BuildingType.SCHOOL;
+    else if (typeRand < 0.24) type = BuildingType.MEDICAL;
+    else if (typeRand < 0.30) type = BuildingType.HOSPITALITY;
+    else if (typeRand < 0.60) type = BuildingType.COMMERCIAL;
   }
 
   let ownerName = '';
@@ -2059,6 +2086,21 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
       ownerAge = Math.floor(rand() * 35) + 30; // 30-65 years old
     }
     ownerGender = 'Male';
+  } else if (type === BuildingType.SCHOOL) {
+    ownerProfession = SCHOOL_PROFESSIONS[Math.floor(rand() * SCHOOL_PROFESSIONS.length)];
+    ownerName = `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
+    ownerAge = Math.floor(rand() * 35) + 30;
+    ownerGender = 'Male';
+  } else if (type === BuildingType.MEDICAL) {
+    ownerProfession = MEDICAL_PROFESSIONS[Math.floor(rand() * MEDICAL_PROFESSIONS.length)];
+    ownerName = `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
+    ownerAge = Math.floor(rand() * 35) + 30;
+    ownerGender = 'Male';
+  } else if (type === BuildingType.HOSPITALITY) {
+    ownerProfession = HOSPITALITY_PROFESSIONS[Math.floor(rand() * HOSPITALITY_PROFESSIONS.length)];
+    ownerName = ownerGender === 'Male'
+      ? `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`
+      : `${FIRST_NAMES_FEMALE[Math.floor(rand() * FIRST_NAMES_FEMALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
   } else {
     ownerName = ownerGender === 'Male'
       ? `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`
@@ -2126,6 +2168,12 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
     } else if (ownerProfession === 'Fountain Keeper') {
       footprintScale = sizeScale * 0.6; // Small sabil
     }
+  } else if (type === BuildingType.SCHOOL) {
+    footprintScale = sizeScale * 1.05;
+  } else if (type === BuildingType.MEDICAL) {
+    footprintScale = sizeScale * 1.05;
+  } else if (type === BuildingType.HOSPITALITY) {
+    footprintScale = sizeScale * 1.1;
   }
 
   return {
@@ -2140,7 +2188,7 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
     storyCount,
     doorSide: Math.floor(rand() * 4),
     hasSymmetricalWindows: rand() > 0.5,
-    isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || rand() > 0.985,
+    isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || type === BuildingType.SCHOOL || type === BuildingType.MEDICAL || rand() > 0.985,
     isQuarantined: type === BuildingType.RESIDENTIAL && rand() > 0.965,
     isOpen: type !== BuildingType.RESIDENTIAL ? true : rand() > 0.25,
     district, // Include district for styling

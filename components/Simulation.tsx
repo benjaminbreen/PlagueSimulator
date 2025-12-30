@@ -11,7 +11,7 @@ import { Player } from './Player';
 import { MarketStall } from './MarketStall';
 import { MerchantNPC } from './MerchantNPC';
 import { AgentSnapshot, SpatialHash, buildBuildingHash, buildObstacleHash, queryNearbyAgents } from '../utils/spatial';
-import { PushableObject, PickupInfo, createPushable, ShatterLootItem } from '../utils/pushables';
+import { PushableObject, PickupInfo, createPushable, ShatterLootItem, PushableKind, getPushableDisplayName } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
@@ -78,6 +78,19 @@ interface SimulationProps {
   /** Initial game loading state - delays camera animations */
   gameLoading?: boolean;
   mapEntrySpawn?: { mapX: number; mapY: number; position: [number, number, number] } | null;
+  /** Callback to show loot modal when objects are shattered */
+  onShowLootModal?: (data: {
+    type: 'shatter';
+    sourceObjectName: string;
+    items: Array<{
+      itemId: string;
+      itemName: string;
+      rarity: 'common' | 'uncommon' | 'rare';
+      category: string;
+    }>;
+  }) => void;
+  /** Callback when player is near a storage chest in outdoor mode */
+  onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -1206,7 +1219,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1245,6 +1258,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const impactPuffIndexRef = useRef(0);
   const atmosphereTickRef = useRef(0);
   const minimapTickRef = useRef(0);
+  const MINIMAP_UPDATE_INTERVAL = 0.75;
   const lastMinimapPosRef = useRef<THREE.Vector3 | null>(null);
   const lastMinimapYawRef = useRef(0);
   const heightmapRef = useRef<import('../utils/terrain').TerrainHeightmap | null>(null);
@@ -1263,6 +1277,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [currentNearBuilding, setCurrentNearBuilding] = useState<BuildingMetadata | null>(null);
   const [currentNearMerchant, setCurrentNearMerchant] = useState<MerchantNPCType | null>(null);
   const [currentNearSpeakableNpc, setCurrentNearSpeakableNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
+  const [currentNearChest, setCurrentNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const nearSpeakableNpcTickRef = useRef(0);
 
   // Ambient audio state
@@ -1431,6 +1446,48 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       addCoin('coin-civic-1', [0.8, 0.05, 1.4]);
       return items;
     }
+    // CARAVANSERAI district - merchant storage area with chests
+    if (district === 'CARAVANSERAI') {
+      // Storage chests near merchant areas
+      items.push(
+        createPushable('chest-caravan-1', 'storageChest', [-18, 0.3, 12], 0.7, 12.0, 0.1, 'wood'),
+        createPushable('chest-caravan-2', 'storageChest', [22, 0.3, -8], 0.7, 12.0, -0.2, 'wood'),
+        createPushable('chest-caravan-3', 'storageChest', [-15, 0.3, -18], 0.7, 12.0, 0.3, 'wood')
+      );
+      // Crates and amphorae
+      items.push(
+        createPushable('crate-caravan-1', 'crate', [-20, 0.4, 10], 0.5, 8.0, 0.1, 'wood'),
+        createPushable('crate-caravan-2', 'crate', [20, 0.4, -10], 0.5, 8.0, -0.1, 'wood'),
+        createPushable('amphora-caravan-1', 'amphora', [-16, 0.15, 14], 0.4, 6.5, 0, 'ceramic'),
+        createPushable('amphora-caravan-2', 'amphora', [18, 0.15, -12], 0.4, 6.5, 0.2, 'ceramic')
+      );
+      addVariedPot('pot-caravan-1', [12, 0.2, 8], pushableSeed + 401);
+      addVariedPot('pot-caravan-2', [-8, 0.2, -14], pushableSeed + 402);
+      addCoin('coin-caravan-1', [5, 0.05, 3]);
+      addCoin('coin-caravan-2', [-10, 0.05, -5]);
+      return items;
+    }
+    // SOUTHERN_ROAD district - roadside storage and abandoned goods
+    if (district === 'SOUTHERN_ROAD') {
+      // Abandoned storage chests along the road
+      items.push(
+        createPushable('chest-road-1', 'storageChest', [-12, 0.3, 8], 0.7, 12.0, 0.4, 'wood'),
+        createPushable('chest-road-2', 'storageChest', [15, 0.3, -6], 0.7, 12.0, -0.3, 'wood')
+      );
+      // Trade goods left by caravans
+      items.push(
+        createPushable('crate-road-1', 'crate', [-10, 0.4, 6], 0.5, 8.0, 0.2, 'wood'),
+        createPushable('crate-road-2', 'crate', [12, 0.4, -4], 0.5, 8.0, -0.15, 'wood'),
+        createPushable('amphora-road-1', 'amphora', [-8, 0.15, 10], 0.4, 6.5, 0.1, 'ceramic')
+      );
+      items.push(
+        createPushable('basket-road-1', 'basket', [8, 0.2, -8], 0.6, 0.6, 0.3, 'wood'),
+        createPushable('jar-road-1', 'clayJar', [-6, 0.3, 4], 0.6, 0.8, 0, 'ceramic')
+      );
+      addCoin('coin-road-1', [2, 0.05, 0]);
+      addPickupItem('shard-road-1', 'potteryShard', [-4, 0.05, 2], 'Pottery Shard', 'ground-pottery');
+      return items;
+    }
     items.push(
       createPushable('jar-res-1', 'clayJar', [-2.2, 0.3, -1.8], 0.6, 0.8, 0, 'ceramic')
     );
@@ -1540,32 +1597,24 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     onPickupItem?.(pickup);
   }, [onPickupItem]);
 
-  // Shatter loot handler - spawns dropped items when objects break
-  const handleShatterLoot = useCallback((loot: ShatterLootItem[]) => {
+  // Shatter loot handler - shows loot modal when objects break
+  const handleShatterLoot = useCallback((loot: ShatterLootItem[], sourceObjectKind: PushableKind) => {
     if (loot.length === 0) return;
-    setPushables(prev => {
-      const newItems: PushableObject[] = loot.map(lootItem => {
-        const item = createPushable(
-          lootItem.itemId,
-          'droppedItem',
-          lootItem.position,
-          0.25,
-          0.4,
-          Math.random() * Math.PI * 2,
-          lootItem.material
-        );
-        // Give a small upward and outward velocity for visual effect
-        item.velocity.set(
-          (Math.random() - 0.5) * 2,
-          2 + Math.random() * 1.5,
-          (Math.random() - 0.5) * 2
-        );
-        item.pickup = { type: 'item', label: lootItem.itemName, itemId: lootItem.itemId };
-        return item;
+
+    // Show loot modal instead of dropping items
+    if (onShowLootModal) {
+      onShowLootModal({
+        type: 'shatter',
+        sourceObjectName: getPushableDisplayName(sourceObjectKind),
+        items: loot.map(item => ({
+          itemId: item.itemId,
+          itemName: item.itemName,
+          rarity: item.rarity,
+          category: item.category,
+        })),
       });
-      return [...prev, ...newItems];
-    });
-  }, []);
+    }
+  }, [onShowLootModal]);
 
   // Plague exposure handler - called when player is exposed to plague
   const handlePlagueExposure = useCallback((
@@ -2585,6 +2634,34 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
       }
 
+      // Check proximity to outdoor storage chests
+      let closestChest: { id: string; label: string; position: [number, number, number]; locationName: string } | null = null;
+      let minChestDist = 2.5; // 2.5 unit interaction range for chests
+
+      pushablesRef.current.forEach(p => {
+        if (p.kind !== 'storageChest') return;
+        const dx = p.position.x - pos.x;
+        const dz = p.position.z - pos.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < minChestDist) {
+          minChestDist = dist;
+          const districtLabel = getDistrictType(params.mapX, params.mapY).replace(/_/g, ' ').toLowerCase();
+          closestChest = {
+            id: p.id,
+            label: 'Storage Chest',
+            position: [p.position.x, p.position.y, p.position.z],
+            locationName: districtLabel
+          };
+        }
+      });
+
+      if (closestChest?.id !== currentNearChest?.id) {
+        setCurrentNearChest(closestChest);
+        if (onNearChest) {
+          onNearChest(closestChest);
+        }
+      }
+
       // Check for nearby speakable NPCs (throttled for performance - every ~150ms)
       const npcCheckTime = state.clock.elapsedTime;
       if (npcCheckTime - nearSpeakableNpcTickRef.current > 0.15 && agentHashRef.current && npcPool.length > 0) {
@@ -2622,7 +2699,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
       if (onMinimapUpdate) {
         const now = state.clock.elapsedTime;
-        if (now - minimapTickRef.current > 0.5) {
+        if (now - minimapTickRef.current > MINIMAP_UPDATE_INTERVAL) {
           minimapTickRef.current = now;
           const lastPos = lastMinimapPosRef.current;
           const posX = pos.x;

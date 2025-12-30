@@ -6,12 +6,12 @@ export const getBuildingHeight = (building: BuildingMetadata, districtOverride?:
   const localSeed = building.position[0] * 1000 + building.position[2];
 
   let baseHeight: number;
-  if (district === 'WEALTHY' && (building.type === BuildingType.RESIDENTIAL || building.type === BuildingType.COMMERCIAL)) {
+  if (district === 'WEALTHY' && (building.type === BuildingType.RESIDENTIAL || building.type === BuildingType.COMMERCIAL || building.type === BuildingType.HOSPITALITY)) {
     // Wealthy residences are large 2-3 story mansions - 50% taller than before
     baseHeight = 9.0 + seededRandom(localSeed + 9) * 1.5;
-  } else if (district === 'HOVELS' && building.type !== BuildingType.RELIGIOUS && building.type !== BuildingType.CIVIC) {
+  } else if (district === 'HOVELS' && building.type !== BuildingType.RELIGIOUS && building.type !== BuildingType.CIVIC && building.type !== BuildingType.SCHOOL && building.type !== BuildingType.MEDICAL) {
     baseHeight = (3 + seededRandom(localSeed + 1) * 1.6) * 1.2;
-  } else if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC) {
+  } else if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL) {
     baseHeight = 12;
   } else {
     baseHeight = 4 + seededRandom(localSeed + 1) * 6;

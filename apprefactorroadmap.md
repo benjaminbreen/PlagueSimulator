@@ -127,10 +127,24 @@ This roadmap refactors `App.tsx` for maintainability **and** measurable performa
 
 ---
 
-## Tracking / TODO
-- [ ] Phase 1 complete
-- [ ] Phase 2 complete
-- [ ] Phase 3 complete
-- [ ] Phase 4 complete
-- [ ] Phase 5 complete
+## Phase 6 — Event system extraction
+**Purpose:** move event orchestration and LLM event handling out of `App.tsx`.
 
+**Actions:**
+- Extract event queue + LLM event builder to `useEventSystem`.
+- Move conversation-triggered event logic into the hook.
+- Keep `App.tsx` using `tryTriggerEvent`/`resolveEvent` from the hook.
+
+**Exit criteria:**
+- Event modals still trigger correctly.
+- No behavioral changes in event outcomes.
+
+---
+
+## Tracking / TODO
+- [x] Phase 1 complete
+- [x] Phase 2 complete (hooks extracted: `useSimulationClock`, `useModalState`, `useInventoryInteractions`, `useEncounterState`)
+- [x] Phase 3 complete (SimulationShell + AppShell split, memoized)
+- [x] Phase 4 complete (stable prop bundles, hot-path callbacks memoized)
+- [ ] Phase 5 complete
+- [x] Phase 6 complete (event system moved to hook)

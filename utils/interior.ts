@@ -14,7 +14,9 @@ const inferSocialClass = (building: BuildingMetadata): SocialClass => {
   for (const hint of professionClassHints) {
     if (hint.keywords.some((kw) => prof.includes(kw.toLowerCase()))) return hint.class;
   }
-  if (building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS) return SocialClass.NOBILITY;
+  if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC) return SocialClass.NOBILITY;
+  if (building.type === BuildingType.SCHOOL) return SocialClass.CLERGY;
+  if (building.type === BuildingType.MEDICAL || building.type === BuildingType.HOSPITALITY) return SocialClass.MERCHANT;
   return SocialClass.PEASANT;
 };
 
@@ -28,7 +30,11 @@ const roomSizeForClass = (socialClass: SocialClass): number => {
 const resolveRoomSize = (socialClass: SocialClass, sizeScale: number, buildingType: BuildingType, storyCount?: 1 | 2 | 3, profession?: string): number => {
   const base = roomSizeForClass(socialClass) * sizeScale;
   // Civic buildings are 30% smaller (0.72), religious buildings stay larger
-  const typeBoost = buildingType === BuildingType.CIVIC ? 0.72 : buildingType === BuildingType.RELIGIOUS ? 1.1 : 1;
+  const typeBoost = (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL)
+    ? 0.72
+    : buildingType === BuildingType.RELIGIOUS
+      ? 1.1
+      : 1;
   // Apply profession category size scaling for residential buildings
   const profCategory = profession ? getProfessionCategory(profession) : 'LABORER';
   const profScale = buildingType === BuildingType.RESIDENTIAL ? PROFESSION_SIZE_SCALE[profCategory] : 1.0;
@@ -49,13 +55,13 @@ const defaultRoomTypes = (socialClass: SocialClass, profession: string, building
   const types: InteriorRoomType[] = [InteriorRoomType.ENTRY];
   const prof = profession.toLowerCase();
 
-  // Civic buildings: always 2 rooms (ENTRY + HALL for main office)
-  if (buildingType === BuildingType.CIVIC) {
+  // Civic/school/medical buildings: always 2 rooms (ENTRY + HALL for main office)
+  if (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL) {
     types.push(InteriorRoomType.HALL);
     return types;
   }
 
-  if (buildingType === BuildingType.COMMERCIAL) {
+  if (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY) {
     if (prof.includes('inn') || prof.includes('sherbet')) {
       types.push(InteriorRoomType.HALL, InteriorRoomType.PRIVATE);
     } else if (prof.includes('khan') || prof.includes('caravanserai')) {
@@ -613,7 +619,7 @@ const pickProps = (
     InteriorPropType.HOOKAH,
   ]);
 
-  if (buildingType === BuildingType.COMMERCIAL) {
+  if (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY) {
     addCommercialLayout(props, rooms, profession, seed + 17, entrySide);
   }
 
@@ -638,14 +644,14 @@ const pickProps = (
       { room: [InteriorRoomType.WORKSHOP, InteriorRoomType.HALL], type: InteriorPropType.BOOKS, label: 'Manuscripts' },
     );
   }
-  if (buildingType === BuildingType.CIVIC || profLower.includes('scribe')) {
+  if (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL || profLower.includes('scribe')) {
     extraTemplates.push(
       { room: [InteriorRoomType.HALL, InteriorRoomType.WORKSHOP], type: InteriorPropType.DESK, label: 'Writing desk' },
       { room: [InteriorRoomType.HALL, InteriorRoomType.WORKSHOP], type: InteriorPropType.BOOKS, label: 'Ledgers' },
       { room: [InteriorRoomType.HALL], type: InteriorPropType.CHAIR, label: 'Carved chair', minClass: SocialClass.MERCHANT },
     );
   }
-  if (buildingType === BuildingType.COMMERCIAL) {
+  if (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY) {
     if (profLower.includes('inn') || profLower.includes('sherbet')) {
       extraTemplates.push(
         { room: [InteriorRoomType.HALL], type: InteriorPropType.FLOOR_PILLOWS, label: 'Floor pillows' },
@@ -898,6 +904,8 @@ const pickProps = (
     const useDamascusLanterns = (
       buildingType === BuildingType.RELIGIOUS ||
       buildingType === BuildingType.CIVIC ||
+      buildingType === BuildingType.SCHOOL ||
+      buildingType === BuildingType.MEDICAL ||
       socialClass === SocialClass.NOBILITY ||
       socialClass === SocialClass.CLERGY
     );
@@ -905,10 +913,11 @@ const pickProps = (
     if (useDamascusLanterns) {
       // Wealthy and religious/civic buildings get ornate Damascus lanterns
       let lanternCount = 2;
-      if (buildingType === BuildingType.RELIGIOUS || buildingType === BuildingType.CIVIC) {
+      if (buildingType === BuildingType.RELIGIOUS || buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL) {
         // Reduced lantern count for civic buildings to avoid GPU texture limit
-        lanternCount = buildingType === BuildingType.CIVIC ? 3 : 4;
-        if (roomArea > 100) lanternCount = buildingType === BuildingType.CIVIC ? 3 : 5;
+        const isCivicLike = buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL;
+        lanternCount = isCivicLike ? 3 : 4;
+        if (roomArea > 100) lanternCount = isCivicLike ? 3 : 5;
       } else if (socialClass === SocialClass.NOBILITY && roomArea > 80) {
         lanternCount = 3;
       }
@@ -1116,7 +1125,7 @@ const applyRoomLayouts = (
   let s = seed;
   const rand = () => seededRandom(s++);
   const profLower = profession.toLowerCase();
-  const isCommercial = buildingType === BuildingType.COMMERCIAL || profLower.includes('merchant') || profLower.includes('shop');
+  const isCommercial = buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY || profLower.includes('merchant') || profLower.includes('shop');
   const isInnLike = profLower.includes('inn') || profLower.includes('sherbet');
   const oppositeSide = (side: 'north' | 'south' | 'east' | 'west') => {
     if (side === 'north') return 'south';
@@ -1437,22 +1446,33 @@ const applyRoomLayouts = (
         upsertProp(props, room, InteriorPropType.BASKET, 'Market baskets', clampToRoom(room, wallAnchor(room, 'west', 0.8, 1.2)));
         return;
       }
-      // Civic buildings get office furniture, not cooking equipment
-      if (buildingType === BuildingType.CIVIC) {
+      // Civic/school/medical buildings get office furnishings, not cooking equipment
+      if (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL) {
         const [rcx, , rcz] = room.center;
         const halfW = room.size[0] / 2;
         const halfD = room.size[2] / 2;
+        const deskLabel = buildingType === BuildingType.SCHOOL
+          ? 'Teacher\'s desk'
+          : buildingType === BuildingType.MEDICAL
+            ? 'Physician\'s desk'
+            : 'Governor\'s desk';
+        const docsLabel = buildingType === BuildingType.SCHOOL
+          ? 'Lesson scrolls'
+          : buildingType === BuildingType.MEDICAL
+            ? 'Medical notes'
+            : 'Official documents';
+        const shelfLabel = buildingType === BuildingType.MEDICAL ? 'Remedy shelf' : 'Document shelf';
         // Large desk against back wall
-        upsertProp(props, room, InteriorPropType.DESK, 'Governor\'s desk', clampToRoom(room, [rcx, 0, rcz + halfD * 0.5]), faceIntoRoom('north'));
+        upsertProp(props, room, InteriorPropType.DESK, deskLabel, clampToRoom(room, [rcx, 0, rcz + halfD * 0.5]), faceIntoRoom('north'));
         // Chair behind desk
         upsertProp(props, room, InteriorPropType.CHAIR, 'Carved chair', clampToRoom(room, [rcx, 0, rcz + halfD * 0.7]), faceIntoRoom('north'));
         // Books/ledgers on desk
-        upsertProp(props, room, InteriorPropType.BOOKS, 'Official documents', clampToRoom(room, [rcx - 0.3, 0.85, rcz + halfD * 0.5]));
+        upsertProp(props, room, InteriorPropType.BOOKS, docsLabel, clampToRoom(room, [rcx - 0.3, 0.85, rcz + halfD * 0.5]));
         upsertProp(props, room, InteriorPropType.INK_SET, 'Ink set', clampToRoom(room, [rcx + 0.4, 0.85, rcz + halfD * 0.5]));
         // Rug in front of desk
         upsertProp(props, room, InteriorPropType.RUG, 'Persian rug', clampToRoom(room, [rcx, 0, rcz - halfD * 0.2]));
         // Shelf on side wall
-        upsertProp(props, room, InteriorPropType.SHELF, 'Document shelf', clampToRoom(room, wallAnchor(room, 'west', 0.6, 0)), faceIntoRoom('west'));
+        upsertProp(props, room, InteriorPropType.SHELF, shelfLabel, clampToRoom(room, wallAnchor(room, 'west', 0.6, 0)), faceIntoRoom('west'));
         // Brazier for warmth (not cooking) in corner
         upsertProp(props, room, InteriorPropType.BRAZIER, 'Warming brazier', clampToRoom(room, [rcx + halfW * 0.6, 0, rcz - halfD * 0.5]));
         return;
@@ -1542,7 +1562,7 @@ const createNPCs = (
   ownerStats.socialClass = socialClass;
   let ownerPosition: [number, number, number] = placeInRoom(otherRoom, 3);
   let ownerRotation: [number, number, number] = [0, rand() * Math.PI * 2, 0];
-  if (building.type === BuildingType.COMMERCIAL) {
+  if (building.type === BuildingType.COMMERCIAL || building.type === BuildingType.HOSPITALITY) {
     const counter = props.find((prop) => prop.type === InteriorPropType.COUNTER);
     if (counter) {
       const room = rooms.find((candidate) => candidate.id === counter.roomId) ?? entryRoom;
@@ -1635,12 +1655,14 @@ export const generateInteriorSpec = (
   const profession = building.ownerProfession;
   const sizeScale = building.sizeScale ?? 1;
   const profLower = profession.toLowerCase();
-  const isCommercial = building.type === BuildingType.COMMERCIAL;
+  const isCommercial = building.type === BuildingType.COMMERCIAL || building.type === BuildingType.HOSPITALITY;
   const isInnLike = isCommercial && (profLower.includes('inn') || profLower.includes('sherbet'));
   const isCaravan = isCommercial && (profLower.includes('khan') || profLower.includes('caravanserai'));
   const isShopStall = isCommercial && !isInnLike && !isCaravan;
   const allowMultiRoom = building.type === BuildingType.CIVIC
     || building.type === BuildingType.RELIGIOUS
+    || building.type === BuildingType.SCHOOL
+    || building.type === BuildingType.MEDICAL
     || isInnLike
     || isCaravan
     || socialClass === SocialClass.NOBILITY
@@ -1654,8 +1676,8 @@ export const generateInteriorSpec = (
   } else if (sizeScale < 1.05) {
     baseRoomTypes = baseRoomTypes.slice(0, Math.min(2, baseRoomTypes.length));
   }
-  // Civic buildings: strictly limit to max 2 rooms
-  if (building.type === BuildingType.CIVIC) {
+  // Civic/school/medical buildings: strictly limit to max 2 rooms
+  if (building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL) {
     baseRoomTypes = baseRoomTypes.slice(0, 2);
   }
   const roomCount = overrides?.roomCount ?? baseRoomTypes.length;
@@ -1665,7 +1687,10 @@ export const generateInteriorSpec = (
   }
 
   const entrySide = building.doorSide === 0 ? 'north' : building.doorSide === 1 ? 'south' : building.doorSide === 2 ? 'east' : 'west';
-  const openSide: 'north' | 'south' | 'east' | 'west' | null = building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS
+  const openSide: 'north' | 'south' | 'east' | 'west' | null = building.type === BuildingType.CIVIC
+    || building.type === BuildingType.RELIGIOUS
+    || building.type === BuildingType.SCHOOL
+    || building.type === BuildingType.MEDICAL
     ? null
     : entrySide;
   const rooms = placeRooms(s, baseRoomTypes.slice(0, roomCount), size);
@@ -1675,13 +1700,24 @@ export const generateInteriorSpec = (
   s += 80;
   const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? rooms[0];
   const hasLightSource = props.some((prop) => prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.LANTERN);
-  const wallHeight = Math.max(3.0, Math.min(5.2, 3.1 + sizeScale * 0.9 + (building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS ? 0.4 : 0)));
+  const wallHeight = Math.max(3.0, Math.min(5.2, 3.1 + sizeScale * 0.9 + (
+    building.type === BuildingType.CIVIC
+    || building.type === BuildingType.RELIGIOUS
+    || building.type === BuildingType.SCHOOL
+    || building.type === BuildingType.MEDICAL
+      ? 0.4
+      : 0
+  )));
   // Place ladder on perpendicular wall to entry (so all 4 directions are possible)
   const ladderSide: 'north' | 'south' | 'east' | 'west' =
     entrySide === 'north' ? 'east' :
     entrySide === 'south' ? 'west' :
     entrySide === 'east' ? 'north' : 'south';
-  const isMultiStory = (building.sizeScale ?? 1) > 1.15 || building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS;
+  const isMultiStory = (building.sizeScale ?? 1) > 1.15
+    || building.type === BuildingType.CIVIC
+    || building.type === BuildingType.RELIGIOUS
+    || building.type === BuildingType.SCHOOL
+    || building.type === BuildingType.MEDICAL;
   const orientOffset = (offset: [number, number, number]): [number, number, number] => {
     if (entrySide === 'north') return [offset[0], offset[1], -Math.abs(offset[2])];
     if (entrySide === 'south') return [offset[0], offset[1], Math.abs(offset[2])];
@@ -1736,7 +1772,10 @@ export const generateInteriorSpec = (
   ensureEntryProp(InteriorPropType.LAMP, 'Oil lamp', [-0.8, 0, -0.8]);
 
   const addLantern = () => {
-    const lanternRoom = building.type === BuildingType.CIVIC || building.type === BuildingType.RELIGIOUS
+    const lanternRoom = building.type === BuildingType.CIVIC
+      || building.type === BuildingType.RELIGIOUS
+      || building.type === BuildingType.SCHOOL
+      || building.type === BuildingType.MEDICAL
       ? rooms.find((room) => room.type === InteriorRoomType.HALL || room.type === InteriorRoomType.ENTRY)
       : rooms.find((room) => room.type === InteriorRoomType.PRIVATE || room.type === InteriorRoomType.ENTRY);
     if (!lanternRoom) return;
@@ -1763,7 +1802,7 @@ export const generateInteriorSpec = (
     });
   };
 
-  if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.RESIDENTIAL) {
+  if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL || building.type === BuildingType.RESIDENTIAL) {
     addLantern();
   }
   if (!hasLightSource) {

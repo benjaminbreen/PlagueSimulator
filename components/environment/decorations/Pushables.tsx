@@ -458,3 +458,81 @@ export const PushableAmphora: React.FC<{ item: PushableObject }> = ({ item }) =>
     </HoverableGroup>
   );
 };
+
+// ==================== STORAGE CHEST ====================
+
+export const PushableStorageChest: React.FC<{ item: PushableObject }> = ({ item }) => {
+  const chestWood = '#6a4a32';
+  const darkWood = '#5a3d28';
+  const ironHardware = '#3a3a3a';
+  const brass = '#b8860b';
+
+  return (
+    <HoverableGroup
+      position={[item.position.x, item.position.y + 0.28, item.position.z]}
+      positionVector={item.position}
+      boxSize={[1.4, 0.8, 0.9]}
+      labelTitle="Storage Chest"
+      labelLines={['Locked chest', 'Press O to open', 'Merchant goods']}
+      labelOffset={[0, 0.7, 0]}
+    >
+      <group rotation={[0, item.rotation ?? 0, 0]}>
+        {/* Main chest body */}
+        <mesh position={[0, 0, 0]} receiveShadow castShadow>
+          <boxGeometry args={[1.2, 0.55, 0.65]} />
+          <meshStandardMaterial color={chestWood} roughness={0.9} />
+        </mesh>
+
+        {/* Lid (slightly curved top) */}
+        <mesh position={[0, 0.3, 0]} receiveShadow castShadow>
+          <boxGeometry args={[1.22, 0.12, 0.67]} />
+          <meshStandardMaterial color={darkWood} roughness={0.88} />
+        </mesh>
+
+        {/* Base/feet */}
+        {[
+          [-0.5, -0.3, -0.28],
+          [0.5, -0.3, -0.28],
+          [-0.5, -0.3, 0.28],
+          [0.5, -0.3, 0.28],
+        ].map((pos, i) => (
+          <mesh key={`foot-${i}`} position={pos as [number, number, number]} receiveShadow castShadow>
+            <boxGeometry args={[0.1, 0.08, 0.1]} />
+            <meshStandardMaterial color={darkWood} roughness={0.92} />
+          </mesh>
+        ))}
+
+        {/* Iron corner reinforcements */}
+        {[
+          [-0.58, 0, -0.31],
+          [0.58, 0, -0.31],
+          [-0.58, 0, 0.31],
+          [0.58, 0, 0.31],
+        ].map((pos, i) => (
+          <mesh key={`corner-${i}`} position={pos as [number, number, number]} receiveShadow castShadow>
+            <boxGeometry args={[0.04, 0.6, 0.04]} />
+            <meshStandardMaterial color={ironHardware} roughness={0.5} metalness={0.8} />
+          </mesh>
+        ))}
+
+        {/* Horizontal metal band */}
+        <mesh position={[0, 0.12, 0.335]} receiveShadow castShadow>
+          <boxGeometry args={[1.25, 0.05, 0.02]} />
+          <meshStandardMaterial color={ironHardware} roughness={0.55} metalness={0.75} />
+        </mesh>
+
+        {/* Lock plate */}
+        <mesh position={[0, 0.1, 0.34]} receiveShadow castShadow>
+          <boxGeometry args={[0.15, 0.15, 0.02]} />
+          <meshStandardMaterial color={brass} roughness={0.3} metalness={0.9} />
+        </mesh>
+
+        {/* Keyhole */}
+        <mesh position={[0, 0.08, 0.36]} castShadow>
+          <cylinderGeometry args={[0.02, 0.02, 0.02, 6]} />
+          <meshStandardMaterial color="#1a1a1a" roughness={0.9} />
+        </mesh>
+      </group>
+    </HoverableGroup>
+  );
+};

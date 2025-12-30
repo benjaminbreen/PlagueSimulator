@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem';
+export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem' | 'storageChest';
 export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth' | 'metal';
 
 // Break chances when pushed with force (shift + release)
@@ -16,13 +16,48 @@ export const BREAK_CHANCES: Partial<Record<PushableKind, number>> = {
 };
 
 // Check if an object can break
-export const canBreak = (kind: PushableKind): boolean => {
-  return kind in BREAK_CHANCES;
+export const canBreak = (kind: PushableKind, material?: PushableMaterial): boolean => {
+  if (kind in BREAK_CHANCES) return true;
+  // Interior ceramic items (oil lamps, lanterns, etc.) can also break
+  if (kind === 'interior' && material === 'ceramic') return true;
+  return false;
 };
 
 // Get break chance for an object (0-1)
-export const getBreakChance = (kind: PushableKind): number => {
-  return BREAK_CHANCES[kind] ?? 0;
+export const getBreakChance = (kind: PushableKind, material?: PushableMaterial): number => {
+  if (kind in BREAK_CHANCES) return BREAK_CHANCES[kind] ?? 0;
+  // Interior ceramic items have 75% break chance
+  if (kind === 'interior' && material === 'ceramic') return 0.75;
+  return 0;
+};
+
+// Display names for pushable kinds (for UI)
+export const PUSHABLE_DISPLAY_NAMES: Record<PushableKind, string> = {
+  bench: 'Stone Bench',
+  clayJar: 'Clay Jar',
+  geranium: 'Potted Geranium',
+  basket: 'Wicker Basket',
+  olivePot: 'Olive Tree Pot',
+  lemonPot: 'Lemon Tree Pot',
+  palmPot: 'Palm Pot',
+  bougainvilleaPot: 'Bougainvillea Pot',
+  coin: 'Coin',
+  olive: 'Olive',
+  lemon: 'Lemon',
+  potteryShard: 'Pottery Shard',
+  linenScrap: 'Linen Scrap',
+  candleStub: 'Candle Stub',
+  twine: 'Twine',
+  interior: 'Object',
+  boulder: 'Boulder',
+  crate: 'Wooden Crate',
+  amphora: 'Amphora',
+  droppedItem: 'Item',
+  storageChest: 'Storage Chest',
+};
+
+export const getPushableDisplayName = (kind: PushableKind): string => {
+  return PUSHABLE_DISPLAY_NAMES[kind] || 'Object';
 };
 
 export interface PickupInfo {
@@ -58,8 +93,8 @@ export const CLIMBABLE_PUSHABLE_HEIGHTS: Partial<Record<PushableKind, number>> =
   crate: 0.9,      // Wooden crate
   bench: 0.5,      // Stone bench
   boulder: 0.8,    // Large boulder (variable, but average)
-  barrel: 0.9,     // Barrel (same as crate)
   amphora: 0.7,    // Large amphora
+  storageChest: 0.6, // Storage chest
 };
 
 // Check if a pushable object can be climbed onto
@@ -116,6 +151,8 @@ export interface ShatterLootItem {
   itemName: string;
   position: [number, number, number];
   material: PushableMaterial;
+  category: string;
+  rarity: 'common' | 'uncommon' | 'rare';
 }
 
 /**
@@ -170,6 +207,8 @@ export const generateShatterLoot = (
         position.z + offsetZ
       ],
       material: ITEM_MATERIALS[item.category] || 'wood',
+      category: item.category,
+      rarity: item.rarity as 'common' | 'uncommon' | 'rare',
     });
   }
 

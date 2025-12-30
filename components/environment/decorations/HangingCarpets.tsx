@@ -119,6 +119,15 @@ const createCarpetTexture = (
 const SingleCarpet: React.FC<{ carpet: HangingCarpet }> = ({ carpet }) => {
   const carpetRef = useRef<THREE.Mesh>(null);
   const ropeRef = useRef<THREE.Line>(null);
+  const lastUpdateRef = useRef(0);
+  const centerPos = useMemo(() => {
+    const midX = (carpet.start[0] + carpet.end[0]) * 0.5;
+    const midY = (carpet.start[1] + carpet.end[1]) * 0.5;
+    const midZ = (carpet.start[2] + carpet.end[2]) * 0.5;
+    return new THREE.Vector3(midX, midY, midZ);
+  }, [carpet.end, carpet.start]);
+  const FAR_SQ = 70 * 70;
+  const VERY_FAR_SQ = 100 * 100;
 
   // Store original positions separately (NOT a reference)
   const originalPositionsRef = useRef<Float32Array | null>(null);
@@ -204,6 +213,14 @@ const SingleCarpet: React.FC<{ carpet: HangingCarpet }> = ({ carpet }) => {
     if (!carpetRef.current || !originalPositionsRef.current) return;
 
     const time = state.clock.elapsedTime;
+    const camDx = state.camera.position.x - centerPos.x;
+    const camDy = state.camera.position.y - centerPos.y;
+    const camDz = state.camera.position.z - centerPos.z;
+    const distSq = camDx * camDx + camDy * camDy + camDz * camDz;
+    const lastUpdate = lastUpdateRef.current;
+    if (distSq > VERY_FAR_SQ && time - lastUpdate < 0.5) return;
+    if (distSq > FAR_SQ && time - lastUpdate < 0.18) return;
+    lastUpdateRef.current = time;
     const windSpeed = 0.4;
     const windStrength = 0.08;
 

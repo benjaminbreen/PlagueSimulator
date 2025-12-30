@@ -86,7 +86,9 @@ interface PlayerProps {
   onPlayerStartMove?: () => void;
   observeMode?: boolean;
   gameLoading?: boolean;
-  onShatterLoot?: (loot: ShatterLootItem[]) => void;
+  onShatterLoot?: (loot: ShatterLootItem[], sourceObjectKind: import('../utils/pushables').PushableKind) => void;
+  interiorEntrySide?: 'north' | 'south' | 'east' | 'west' | null;
+  interiorEntryToken?: string | null;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -126,12 +128,25 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onPlayerStartMove,
   observeMode = false,
   gameLoading = true,
-  onShatterLoot
+  onShatterLoot,
+  interiorEntrySide = null,
+  interiorEntryToken = null
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
   const markerRef = useRef<THREE.Mesh>(null);
   const markerGlowRef = useRef<THREE.Mesh>(null);
+  const interiorPanRef = useRef<{
+    active: boolean;
+    startTime: number;
+    duration: number;
+    startAngle: number;
+    targetAngle: number;
+    startDistance: number;
+    targetDistance: number;
+  } | null>(null);
+  const pendingInteriorPanRef = useRef<{ side: 'north' | 'south' | 'east' | 'west'; duration: number } | null>(null);
+  const interiorPanTokenRef = useRef<string | null>(null);
 
   // Spatial hash for fast climbable lookup (O(1) instead of O(n))
   const climbableSpatialHash = useMemo(() => {
@@ -233,6 +248,15 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const occludedMeshesRef = useRef<Set<THREE.Mesh>>(new Set());
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const occlusionCheckFrameRef = useRef(0);
+  const orbitOcclusionFrameRef = useRef(0);
+  const orbitOcclusionTurnRef = useRef(1);
+  const orbitOcclusionTempsRef = useRef({
+    offset: new THREE.Vector3(),
+    candidate: new THREE.Vector3(),
+    direction: new THREE.Vector3(),
+    position: new THREE.Vector3()
+  });
+  const orbitOcclusionAxisRef = useRef(new THREE.Vector3(0, 1, 0));
   const ACTION_DURATION = 1.5; // seconds for full animation
 
   // Sprint camera pullback (over-shoulder mode)
@@ -728,8 +752,30 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
   }, [cameraMode, camera]);
 
+  useEffect(() => {
+    if (!interiorEntryToken) {
+      interiorPanTokenRef.current = null;
+      return;
+    }
+    if (!interiorEntrySide) return;
+    if (interiorPanTokenRef.current === interiorEntryToken) return;
+    interiorPanTokenRef.current = interiorEntryToken;
+    pendingInteriorPanRef.current = { side: interiorEntrySide, duration: 0.9 };
+  }, [interiorEntrySide, interiorEntryToken]);
+
   useFrame((state, delta) => {
     if (!group.current) return;
+
+    const getEntryAzimuth = (side: 'north' | 'south' | 'east' | 'west') => {
+      if (side === 'north') return 0;
+      if (side === 'south') return Math.PI;
+      if (side === 'east') return Math.PI / 2;
+      return -Math.PI / 2;
+    };
+    const shortestAngleDiff = (from: number, to: number) => {
+      const diff = ((to - from + Math.PI) % (Math.PI * 2)) - Math.PI;
+      return diff;
+    };
 
     // Camera mode transition - advance transition progress
     if (modeTransitionProgressRef.current < 1) {
@@ -1284,7 +1330,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             }
 
             // PHYSICS: Shatter breakable objects on hard wall impact
-            if (!item.isShattered && canBreak(item.kind)) {
+            if (!item.isShattered && canBreak(item.kind, item.material)) {
               // Shatter threshold: medium speed or higher (0.7+)
               // Power move with full charge can easily exceed this
               const shatterThreshold = 0.65;
@@ -1302,7 +1348,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
                 // Generate loot from shattered object
                 const loot = generateShatterLoot(item.position, getAllItems);
                 if (loot.length > 0 && onShatterLoot) {
-                  onShatterLoot(loot);
+                  onShatterLoot(loot, item.kind);
                 }
               }
             }
@@ -1924,8 +1970,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           playObjectImpact(hitItem.material, 0.5 + strength * 0.3);
 
           // Check for shattering on push (only if not already shattered)
-          if (!hitItem.isShattered && canBreak(hitItem.kind)) {
-            const breakChance = getBreakChance(hitItem.kind);
+          if (!hitItem.isShattered && canBreak(hitItem.kind, hitItem.material)) {
+            const breakChance = getBreakChance(hitItem.kind, hitItem.material);
             // Higher strength = slightly higher break chance
             const adjustedChance = breakChance * (0.8 + strength * 0.4);
             if (Math.random() < adjustedChance) {
@@ -1942,7 +1988,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
               // Generate loot from shattered object (50% chance, 1-2 items)
               const loot = generateShatterLoot(hitItem.position, getAllItems);
               if (loot.length > 0 && onShatterLoot) {
-                onShatterLoot(loot);
+                onShatterLoot(loot, hitItem.kind);
               }
             }
           }
@@ -2250,6 +2296,135 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
+    if ((cameraMode === CameraMode.THIRD_PERSON || cameraMode === CameraMode.OVERHEAD) && orbitRef.current) {
+      if (pendingInteriorPanRef.current) {
+        const { side, duration } = pendingInteriorPanRef.current;
+        const startAngle = orbitRef.current.getAzimuthalAngle();
+        const targetAngle = getEntryAzimuth(side);
+        const startDistance = camera.position.clone().sub(orbitRef.current.target).length();
+        const targetDistance = Math.max(4, startDistance * 0.68);
+        interiorPanRef.current = {
+          active: true,
+          startTime: state.clock.elapsedTime,
+          duration,
+          startAngle,
+          targetAngle,
+          startDistance,
+          targetDistance
+        };
+        pendingInteriorPanRef.current = null;
+      }
+      if (interiorPanRef.current?.active) {
+        const { startTime, duration, startAngle, targetAngle, startDistance, targetDistance } = interiorPanRef.current;
+        const elapsed = state.clock.elapsedTime - startTime;
+        const t = Math.min(1, Math.max(0, elapsed / duration));
+        const eased = t * t * (3 - 2 * t);
+        const diff = shortestAngleDiff(startAngle, targetAngle);
+        orbitRef.current.setAzimuthalAngle(startAngle + diff * eased);
+        if (t > 0.6) {
+          const zoomT = (t - 0.6) / 0.4;
+          const zoomEase = 1 - Math.pow(1 - zoomT, 3);
+          const currentDistance = camera.position.clone().sub(orbitRef.current.target).length();
+          const desiredDistance = THREE.MathUtils.lerp(startDistance, targetDistance, zoomEase);
+          const direction = camera.position.clone().sub(orbitRef.current.target).normalize();
+          const nextPos = orbitRef.current.target.clone().add(direction.multiplyScalar(desiredDistance));
+          camera.position.lerp(nextPos, 0.08);
+        }
+        orbitRef.current.update();
+        if (t >= 1) {
+          interiorPanRef.current.active = false;
+        }
+      }
+    }
+
+    // Orbit occlusion assist (third-person): rotate slightly and fade walls if player is blocked.
+    if (cameraMode === CameraMode.THIRD_PERSON && orbitRef.current && group.current) {
+      orbitOcclusionFrameRef.current += 1;
+      if (orbitOcclusionFrameRef.current >= 4) {
+        orbitOcclusionFrameRef.current = 0;
+
+        const playerPos = group.current.position;
+        const cameraPos = camera.position;
+        const toPlayer = orbitOcclusionTempsRef.current.direction.copy(playerPos).sub(cameraPos);
+        const distance = toPlayer.length();
+        if (distance > 0.01) {
+          raycasterRef.current.set(cameraPos, toPlayer.normalize());
+          raycasterRef.current.far = distance;
+          const hits = raycasterRef.current.intersectObjects(camera.parent?.children || [], true);
+          const blockingHits = hits.filter((hit) => hit.distance < distance && hit.object.userData?.isBuildingWall);
+          const isBlocked = blockingHits.length > 0;
+
+          const currentlyOccluded = new Set<THREE.Mesh>();
+          if (isBlocked) {
+            for (const hit of blockingHits) {
+              const mesh = hit.object as THREE.Mesh;
+              currentlyOccluded.add(mesh);
+              if (!occludedMeshesRef.current.has(mesh)) {
+                occludedMeshesRef.current.add(mesh);
+                if (mesh.material) {
+                  const mat = mesh.material as THREE.MeshStandardMaterial;
+                  mat.transparent = true;
+                  mat.depthWrite = false;
+                }
+              }
+              if (mesh.material) {
+                const mat = mesh.material as THREE.MeshStandardMaterial;
+                mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.18, 0.18);
+              }
+            }
+          }
+
+          occludedMeshesRef.current.forEach((mesh) => {
+            if (!currentlyOccluded.has(mesh) && mesh.material) {
+              const mat = mesh.material as THREE.MeshStandardMaterial;
+              mat.opacity = THREE.MathUtils.lerp(mat.opacity, 1.0, 0.08);
+              if (mat.opacity > 0.98) {
+                mat.opacity = 1.0;
+                mat.transparent = false;
+                mat.depthWrite = true;
+                occludedMeshesRef.current.delete(mesh);
+              }
+            }
+          });
+
+          if (isBlocked && !(keys.a || keys.d)) {
+            const target = orbitRef.current.target;
+            const offset = orbitOcclusionTempsRef.current.offset.copy(cameraPos).sub(target);
+            const angleStep = 0.42;
+            const attemptAngles = [
+              orbitOcclusionTurnRef.current * angleStep,
+              -orbitOcclusionTurnRef.current * angleStep,
+              orbitOcclusionTurnRef.current * angleStep * 2,
+              -orbitOcclusionTurnRef.current * angleStep * 2
+            ];
+            let chosenStep: number | null = null;
+
+            for (const step of attemptAngles) {
+              orbitOcclusionTempsRef.current.candidate.copy(offset).applyAxisAngle(orbitOcclusionAxisRef.current, step);
+              orbitOcclusionTempsRef.current.position.copy(target).add(orbitOcclusionTempsRef.current.candidate);
+              const candidateDir = orbitOcclusionTempsRef.current.direction.copy(playerPos).sub(orbitOcclusionTempsRef.current.position);
+              const candidateDistance = candidateDir.length();
+              if (candidateDistance < 0.01) continue;
+              raycasterRef.current.set(orbitOcclusionTempsRef.current.position, candidateDir.normalize());
+              raycasterRef.current.far = candidateDistance;
+              const candidateHits = raycasterRef.current.intersectObjects(camera.parent?.children || [], true);
+              const candidateBlocked = candidateHits.some((hit) => hit.distance < candidateDistance && hit.object.userData?.isBuildingWall);
+              if (!candidateBlocked) {
+                chosenStep = step;
+                break;
+              }
+            }
+
+            const appliedStep = chosenStep ?? orbitOcclusionTurnRef.current * angleStep;
+            orbitOcclusionTurnRef.current = Math.sign(appliedStep) || 1;
+            const currentAzimuth = orbitRef.current.getAzimuthalAngle();
+            orbitRef.current.setAzimuthalAngle(currentAzimuth + appliedStep * 0.7);
+            orbitRef.current.update();
+          }
+        }
+      }
+    }
+
     // PHASE 2: Wall Occlusion System - Make walls transparent when blocking camera view
     // Only active in over-shoulder mode for cinematic camera
     if (cameraMode === CameraMode.OVER_SHOULDER && group.current) {
@@ -2313,8 +2488,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           }
         });
       }
-    } else {
-      // Restore all occluded meshes when not in over-shoulder mode
+    } else if (cameraMode !== CameraMode.THIRD_PERSON) {
+      // Restore all occluded meshes when not using any occlusion mode.
       occludedMeshesRef.current.forEach((mesh) => {
         if (mesh.material) {
           const mat = mesh.material as THREE.MeshStandardMaterial;

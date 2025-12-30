@@ -16,25 +16,36 @@ const SOCIAL_RANK: Record<SocialClass, number> = {
   [SocialClass.PEASANT]: 1
 };
 
-export function getBiomeForDistrict(district: DistrictType): 'marketplace' | 'wealthy' | 'hovels' | 'desert' | 'civic' {
+export function getBiomeForDistrict(district: DistrictType): 'marketplace' | 'religious' | 'wealthy' | 'hovels' | 'desert' | 'scrubland' | 'farmland' | 'civic' | 'road' | 'gate' {
   switch (district) {
     case 'MARKET':
     case 'CARAVANSERAI':
-    case 'STRAIGHT_STREET':
     case 'SOUQ_AXIS':
-    case 'MIDAN':
-    case 'BAB_SHARQI':
       return 'marketplace';
+    case 'UMAYYAD_MOSQUE':
+    case 'MOUNTAIN_SHRINE':
+      return 'religious';
     case 'WEALTHY':
+    case 'SALHIYYA':
       return 'wealthy';
     case 'HOVELS':
+    case 'JEWISH_QUARTER':
+    case 'CHRISTIAN_QUARTER':
       return 'hovels';
     case 'OUTSKIRTS_DESERT':
-    case 'SOUTHERN_ROAD':
       return 'desert';
+    case 'OUTSKIRTS_SCRUBLAND':
+      return 'scrubland';
+    case 'OUTSKIRTS_FARMLAND':
+      return 'farmland';
     case 'CIVIC':
-    case 'UMAYYAD_MOSQUE':
       return 'civic';
+    case 'STRAIGHT_STREET':
+    case 'MIDAN':
+    case 'SOUTHERN_ROAD':
+      return 'road';
+    case 'BAB_SHARQI':
+      return 'gate';
     default:
       return 'marketplace';
   }

@@ -539,9 +539,11 @@ export const NPC: React.FC<NPCProps> = memo(({
     if (Math.random() < 0.2) {
       const eligibleBuildings = buildings.filter(b => {
         // Clergy prefer religious buildings
-        if (stats.socialClass === SocialClass.CLERGY && b.type === BuildingType.RELIGIOUS) return true;
-        // Merchants prefer commercial
-        if (stats.socialClass === SocialClass.MERCHANT && b.type === BuildingType.COMMERCIAL) return true;
+        if (stats.socialClass === SocialClass.CLERGY && (b.type === BuildingType.RELIGIOUS || b.type === BuildingType.SCHOOL)) return true;
+        // Merchants prefer commercial/hospitality
+        if (stats.socialClass === SocialClass.MERCHANT && (b.type === BuildingType.COMMERCIAL || b.type === BuildingType.HOSPITALITY)) return true;
+        // Medical buildings are open to all
+        if (b.type === BuildingType.MEDICAL) return true;
         // Everyone can enter residential
         if (b.type === BuildingType.RESIDENTIAL) return true;
         return false;
