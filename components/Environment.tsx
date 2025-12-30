@@ -5,6 +5,7 @@ import { Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { CONSTANTS, BuildingMetadata, BuildingType, DistrictType, getDistrictType } from '../types';
 import { generateBuildingMetadata, seededRandom } from '../utils/procedural';
+import { getBuildingHeight } from '../utils/buildingHeights';
 import { getProfessionSign, ProfessionSign } from '../utils/professionSignData';
 import { getTerrainHeight, buildHeightmapFromGeometry, TerrainHeightmap, sampleTerrainHeight } from '../utils/terrain';
 import { PushableObject } from '../utils/pushables';
@@ -68,6 +69,7 @@ import { OutskirtsDesertDecor } from './environment/districts/OutskirtsDesertDec
 import { SouthernRoadDecor } from './environment/districts/SouthernRoadDecor';
 import { ChristianQuarterDecor } from './environment/districts/ChristianQuarterDecor';
 import JewishQuarterDecor from './environment/districts/JewishQuarterDecor';
+import { BabSharqiGate } from './environment/districts/BabSharqiGate';
 import UmayyadMosqueDistrict from './environment/districts/UmayyadMosqueDistrict';
 import { MosqueBackground } from './environment/landmarks/MosqueBackground';
 import { HorizonBackdrop } from './environment/landmarks/HorizonBackdrop';
@@ -77,6 +79,16 @@ import { WealthyGarden } from './environment/landmarks/WealthyGarden';
 import { CitadelComplex } from './environment/landmarks/CitadelComplex';
 import { ClimbableAccessory } from './environment/climbables';
 import { generateClimbablesForBuilding } from '../utils/climbables';
+import {
+  Muqarnas,
+  GeometricTile,
+  OrnateFountain,
+  LionSculpture,
+  ArcadeColumn,
+  Mashrabiya,
+  DecorativeUrn,
+  ISLAMIC_COLORS
+} from './environment/decorations/IslamicOrnaments';
 
 // Texture generators, constants, and hover system now imported from environment/
 
@@ -115,6 +127,189 @@ const CACHED_STRIPE_TEXTURES = [
 ];
 
 const CACHED_LINEN_TEXTURE = createLinenTexture(256);
+
+// Wood color presets: [R, G, B] base values - all lightened for visibility
+type WoodColor = 'walnut' | 'oak' | 'maple' | 'bleached';
+const WOOD_COLORS: Record<WoodColor, [number, number, number]> = {
+  walnut: [110, 75, 50],     // Dark walnut - warm brown (lightened)
+  oak: [150, 115, 80],       // Medium oak - warm tan
+  maple: [185, 155, 115],    // Light maple - golden honey
+  bleached: [215, 200, 180], // Pale sunbleached - whitewashed
+};
+
+// Create wood texture with specific color
+const createColoredWoodTexture = (color: WoodColor) => {
+  const [baseR, baseG, baseB] = WOOD_COLORS[color];
+  const canvas = document.createElement('canvas');
+  const width = 256, height = 256;
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  // First pass: mottled noise base
+  const imageData = ctx.createImageData(width, height);
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    const x = (i / 4) % width;
+    const y = Math.floor((i / 4) / width);
+
+    const lowFreq = Math.sin(x * 0.02) * Math.cos(y * 0.015) * 0.3;
+    const medFreq = Math.sin(x * 0.1 + y * 0.02) * 0.2;
+    const highFreq = (Math.random() - 0.5) * 0.25;
+    const variation = 1 + lowFreq + medFreq + highFreq;
+
+    imageData.data[i] = Math.min(255, Math.max(0, baseR * variation));
+    imageData.data[i + 1] = Math.min(255, Math.max(0, baseG * variation));
+    imageData.data[i + 2] = Math.min(255, Math.max(0, baseB * variation));
+    imageData.data[i + 3] = 255;
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  // Second pass: vertical grain lines
+  ctx.globalCompositeOperation = 'multiply';
+  for (let x = 0; x < width; x += 3) {
+    const grainStrength = 0.85 + Math.sin(x * 0.5) * 0.1 + Math.random() * 0.05;
+    ctx.strokeStyle = `rgba(${Math.floor(baseR * grainStrength)}, ${Math.floor(baseG * grainStrength)}, ${Math.floor(baseB * grainStrength)}, 0.4)`;
+    ctx.lineWidth = 1 + Math.random() * 2;
+    ctx.beginPath();
+    let y = 0;
+    const waveOffset = Math.random() * Math.PI * 2;
+    ctx.moveTo(x, y);
+    while (y < height) {
+      ctx.lineTo(x + Math.sin(y * 0.03 + waveOffset) * 2, y);
+      y += 3;
+    }
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  // Third pass: wood knots
+  const knotCount = 1 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < knotCount; i++) {
+    const kx = 30 + Math.random() * (width - 60);
+    const ky = 40 + Math.random() * (height - 80);
+    const knotSize = 8 + Math.random() * 12;
+
+    const gradient = ctx.createRadialGradient(kx, ky, 0, kx, ky, knotSize);
+    gradient.addColorStop(0, `rgba(${baseR * 0.4}, ${baseG * 0.4}, ${baseB * 0.4}, 0.9)`);
+    gradient.addColorStop(0.4, `rgba(${baseR * 0.6}, ${baseG * 0.6}, ${baseB * 0.6}, 0.6)`);
+    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.ellipse(kx, ky, knotSize, knotSize * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    for (let ring = 1; ring < 5; ring++) {
+      ctx.strokeStyle = `rgba(${baseR * 0.7}, ${baseG * 0.7}, ${baseB * 0.7}, ${0.2 / ring})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(kx, ky, knotSize + ring * 5, (knotSize + ring * 5) * 0.5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
+  // Fourth pass: weathering
+  const weatherGradient = ctx.createLinearGradient(0, height * 0.75, 0, height);
+  weatherGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  weatherGradient.addColorStop(1, 'rgba(20, 15, 10, 0.35)');
+  ctx.fillStyle = weatherGradient;
+  ctx.fillRect(0, height * 0.75, width, height * 0.25);
+
+  const edgeGradientL = ctx.createLinearGradient(0, 0, width * 0.1, 0);
+  edgeGradientL.addColorStop(0, 'rgba(20, 15, 10, 0.2)');
+  edgeGradientL.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = edgeGradientL;
+  ctx.fillRect(0, 0, width * 0.1, height);
+
+  const edgeGradientR = ctx.createLinearGradient(width * 0.9, 0, width, 0);
+  edgeGradientR.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  edgeGradientR.addColorStop(1, 'rgba(20, 15, 10, 0.2)');
+  ctx.fillStyle = edgeGradientR;
+  ctx.fillRect(width * 0.9, 0, width * 0.1, height);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+};
+
+// Cached wood textures - four color variants
+const CACHED_WOOD_TEXTURES = {
+  walnut: createColoredWoodTexture('walnut'),    // Dark
+  oak: createColoredWoodTexture('oak'),          // Medium
+  maple: createColoredWoodTexture('maple'),      // Light golden
+  bleached: createColoredWoodTexture('bleached'), // Pale sunbleached
+};
+
+// Get wood texture based on building characteristics and seed
+const getWoodTexture = (district: string, buildingType: number, seed: number) => {
+  const roll = seededRandom(seed + 500);
+
+  // Wealthy areas - mix of dark prestigious woods AND pale bleached (sunbleached is fashionable)
+  if (district === 'WEALTHY' || district === 'SALHIYYA') {
+    if (roll > 0.7) return CACHED_WOOD_TEXTURES.walnut;
+    if (roll > 0.4) return CACHED_WOOD_TEXTURES.bleached; // Pale is prestigious too
+    return CACHED_WOOD_TEXTURES.oak;
+  }
+
+  // Religious buildings - darker, more somber
+  if (buildingType === 3) { // RELIGIOUS
+    if (roll > 0.5) return CACHED_WOOD_TEXTURES.walnut;
+    return CACHED_WOOD_TEXTURES.oak;
+  }
+
+  // Poor areas - weathered lighter woods
+  if (district === 'HOVELS') {
+    if (roll > 0.6) return CACHED_WOOD_TEXTURES.bleached; // Sun-damaged
+    if (roll > 0.3) return CACHED_WOOD_TEXTURES.maple;
+    return CACHED_WOOD_TEXTURES.oak;
+  }
+
+  // Default: full variety
+  if (roll > 0.75) return CACHED_WOOD_TEXTURES.walnut;
+  if (roll > 0.5) return CACHED_WOOD_TEXTURES.oak;
+  if (roll > 0.25) return CACHED_WOOD_TEXTURES.maple;
+  return CACHED_WOOD_TEXTURES.bleached;
+};
+
+// Door type based on building characteristics
+type DoorStyle = 'plank' | 'paneled' | 'studded' | 'carved' | 'arched' | 'double';
+
+const getDoorStyle = (
+  buildingType: number, // BuildingType enum
+  district: string,
+  sizeScale: number,
+  seed: number
+): DoorStyle => {
+  const roll = seededRandom(seed);
+
+  // Religious buildings - ornate arched or double doors
+  if (buildingType === 3) { // RELIGIOUS
+    return roll > 0.4 ? 'arched' : 'double';
+  }
+
+  // Civic buildings - studded or double doors
+  if (buildingType === 2) { // CIVIC
+    return roll > 0.5 ? 'studded' : 'double';
+  }
+
+  // Wealthy district - carved or studded
+  if (district === 'WEALTHY' || district === 'SALHIYYA') {
+    return roll > 0.5 ? 'carved' : 'studded';
+  }
+
+  // Poor areas - simple plank doors
+  if (district === 'HOVELS') {
+    return 'plank';
+  }
+
+  // Large commercial buildings
+  if (buildingType === 1 && sizeScale > 1.05) { // COMMERCIAL
+    return roll > 0.6 ? 'studded' : 'paneled';
+  }
+
+  // Default residential - paneled or plank
+  return roll > 0.4 ? 'paneled' : 'plank';
+};
 
 const useNightTintedMaterial = (
   baseMaterial: THREE.Material,
@@ -2128,11 +2323,8 @@ const Building: React.FC<{
   const groupRef = useRef<THREE.Group>(null);
   const { camera } = useThree();
   const localSeed = data.position[0] * 1000 + data.position[2];
-  const baseHeight = district === 'HOVELS' && data.type !== BuildingType.RELIGIOUS && data.type !== BuildingType.CIVIC
-    ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
-    : data.type === BuildingType.RELIGIOUS || data.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
   const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
-  const baseHeightScaled = baseHeight * districtScale;
+  const baseHeightScaled = getBuildingHeight(data, district);
   const baseBuildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (data.sizeScale ?? 1);
 
   // Architectural features based on profession (historically authentic)
@@ -2200,7 +2392,7 @@ const Building: React.FC<{
     } else if (data.ownerProfession === 'Hammam Keeper') {
       // Public bath - distinctive multiple domes
       arch.hasDome = true;
-      arch.domeCount = 3;
+      arch.domeCount = 2;
       arch.domeScale = 0.6;
       arch.hasSteamVents = true;
       arch.footprintScale = 1.2;
@@ -2377,7 +2569,15 @@ const Building: React.FC<{
   const doorRotation = data.doorSide * (Math.PI / 2);
   const doorOffset = finalBuildingSize / 2 + 0.1;
   const doorPos: [number, number, number] = [0, -finalHeight / 2 + 1.25, 0];
-  const doorVariant = Math.floor(seededRandom(localSeed + 21) * 3);
+  const doorStyle = getDoorStyle(data.type, district, data.sizeScale ?? 1, localSeed + 21);
+  const woodTexture = getWoodTexture(district, data.type, localSeed);
+  const hasCourtyard = data.hasCourtyard && district === 'WEALTHY' && (data.type === BuildingType.RESIDENTIAL || data.type === BuildingType.COMMERCIAL);
+  const courtyardScale = data.courtyardScale ?? 0.55;
+  const courtyardSize = finalBuildingSize * courtyardScale;
+  const wallThickness = Math.max(0.35, finalBuildingSize * 0.08);
+  const gateWidth = Math.min(finalBuildingSize * 0.35, finalBuildingSize - wallThickness * 2);
+  const gateHeight = finalHeight * 0.55;
+  const halfSize = finalBuildingSize / 2;
   
   if (data.doorSide === 0) doorPos[2] = doorOffset; // N
   else if (data.doorSide === 1) doorPos[0] = doorOffset; // E
@@ -2390,11 +2590,12 @@ const Building: React.FC<{
   // PERFORMANCE: Torches disabled (user reported 10 FPS)
   const torchCount = 0;
   const torchOffsets: [number, number, number][] = [];
-  const hasMarketOrnaments = district === 'MARKET' && seededRandom(localSeed + 81) > 0.6;
-  const hasResidentialClutter = district !== 'MARKET' && seededRandom(localSeed + 83) > 0.5;
+  const marketDistrict = district === 'MARKET' || district === 'STRAIGHT_STREET' || district === 'SOUQ_AXIS' || district === 'MIDAN';
+  const hasMarketOrnaments = marketDistrict && seededRandom(localSeed + 81) > 0.6;
+  const hasResidentialClutter = !marketDistrict && seededRandom(localSeed + 83) > 0.5;
   const clutterType = Math.floor(seededRandom(localSeed + 84) * 3);
   const ornamentType = Math.floor(seededRandom(localSeed + 82) * 3);
-  const hasTurret = district === 'MARKET' && seededRandom(localSeed + 91) > 0.85;
+  const hasTurret = marketDistrict && seededRandom(localSeed + 91) > 0.85;
   const hasWealthyDoorOrnaments = district === 'WEALTHY' && seededRandom(localSeed + 121) > 0.35;
   const hasWealthyWindowTrim = district === 'WEALTHY' && seededRandom(localSeed + 123) > 0.4;
   const isOrnateBuilding = allowOrnate;
@@ -2450,6 +2651,549 @@ const Building: React.FC<{
     : [-0.6, 0, 0];
   const doorSideOffset: [number, number, number] =
     data.doorSide === 0 || data.doorSide === 2 ? [1.4, 0, 0] : [0, 0, 1.4];
+
+  // Courtyard wall colors - rich warm sandstone (moved outside conditional for hooks compliance)
+  const courtyardWallColor = useMemo(() => {
+    const colors = ['#c9b89a', '#d4c4a8', '#c0a880', '#b8a070', '#d0c090'];
+    return colors[Math.floor(seededRandom(localSeed + 500) * colors.length)];
+  }, [localSeed]);
+
+  if (hasCourtyard) {
+    const gateSegment = (finalBuildingSize - gateWidth) / 2;
+    const gateOffset = gateWidth / 2 + gateSegment / 2;
+    const courtyardFloorY = -finalHeight / 2 + 0.03;
+    const treeOffset = courtyardSize * 0.22;
+    const potOffset = courtyardSize * 0.32;
+    const vineHeight = finalHeight * 0.7;
+    const wingHeight = finalHeight * 0.9;
+    const wingDepth = Math.max(finalBuildingSize * 0.24, 2.0);
+    const wingInset = courtyardSize / 2 - wingDepth / 2;
+    const wingWidth = courtyardSize - wallThickness * 2;
+    const wingVariant = Math.floor(seededRandom(localSeed + 402) * 3);
+    const fountainVariant = Math.floor(seededRandom(localSeed + 406) * 3);
+    const hasMashrabiya = seededRandom(localSeed + 411) > 0.45;
+    const hasAblaqBand = seededRandom(localSeed + 413) > 0.35;
+    const hasLintel = seededRandom(localSeed + 415) > 0.3;
+
+    const floorMat = otherMaterials?.courtyardFloor ?? new THREE.MeshStandardMaterial({ color: '#d7cfbf', roughness: 0.95, metalness: 0 });
+    const vineMat = otherMaterials?.vine ?? new THREE.MeshStandardMaterial({ color: '#3a5a3c', roughness: 0.9, metalness: 0 });
+    const potMat = otherMaterials?.pottery ?? new THREE.MeshStandardMaterial({ color: '#b08a63', roughness: 0.85, metalness: 0 });
+    const waterMat = new THREE.MeshStandardMaterial({ color: '#4b6f7a', roughness: 0.2, metalness: 0 });
+    const ablaqLight = new THREE.MeshStandardMaterial({ color: '#d8ccb8', roughness: 0.9, metalness: 0 });
+    const ablaqDark = new THREE.MeshStandardMaterial({ color: '#9b7d55', roughness: 0.9, metalness: 0 });
+    const mashMat = new THREE.MeshStandardMaterial({ color: '#c8b08a', roughness: 0.8, metalness: 0 });
+    const tileMat = new THREE.MeshStandardMaterial({ color: '#caa77b', roughness: 0.85, metalness: 0 });
+    const tileAccentMat = new THREE.MeshStandardMaterial({ color: '#7a5a3a', roughness: 0.85, metalness: 0 });
+    const gateFrameWidth = gateWidth * 0.6;
+    const gateFrameHeight = gateHeight * 0.65;
+    const gateFrameY = -finalHeight / 2 + gateFrameHeight / 2 + 0.15;
+    // Move gate frame further from wall to prevent z-fighting
+    const gatePlaneOffset = halfSize + 0.15;
+    const gateFrameZ = data.doorSide === 0 ? gatePlaneOffset : data.doorSide === 2 ? -gatePlaneOffset : 0;
+    const gateFrameX = data.doorSide === 1 ? gatePlaneOffset : data.doorSide === 3 ? -gatePlaneOffset : 0;
+    const gateFrameRot: [number, number, number] =
+      data.doorSide === 0 ? [0, 0, 0]
+      : data.doorSide === 2 ? [0, Math.PI, 0]
+      : data.doorSide === 1 ? [0, -Math.PI / 2, 0]
+      : [0, Math.PI / 2, 0];
+
+    return (
+      <group
+        ref={groupRef}
+        position={[data.position[0], finalHeight / 2, data.position[2]]}
+        onPointerOver={(e) => {
+          e.stopPropagation();
+          setHovered(true);
+        }}
+        onPointerOut={(e) => {
+          e.stopPropagation();
+          setHovered(false);
+        }}
+      >
+        {labelEnabled && hovered && (
+          <HoverLabel
+            title={data.type === BuildingType.COMMERCIAL ? 'Merchant Residence' : 'Courtyard House'}
+            lines={[
+              data.ownerName,
+              data.ownerProfession,
+              `Age ${data.ownerAge}`,
+              data.isQuarantined ? 'Quarantined' : 'Open'
+            ]}
+            offset={[0, finalHeight / 2 + 1.4, 0]}
+          />
+        )}
+        {wireframeEnabled && hovered && (
+          <>
+            <HoverOutlineBox size={[finalBuildingSize * 1.02, finalHeight * 1.02, finalBuildingSize * 1.02]} color={wireColor} />
+            <HoverOutlineBox size={[finalBuildingSize * 1.06, finalHeight * 1.06, finalBuildingSize * 1.06]} color={wireColor} opacity={0.35} />
+          </>
+        )}
+
+        {/* Courtyard walls with open gate - using proper sandstone color */}
+        {data.doorSide === 0 ? (
+          <>
+            <mesh position={[gateOffset, 0, halfSize - wallThickness / 2]} castShadow receiveShadow>
+              <boxGeometry args={[gateSegment, finalHeight, wallThickness]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+            <mesh position={[-gateOffset, 0, halfSize - wallThickness / 2]} castShadow receiveShadow>
+              <boxGeometry args={[gateSegment, finalHeight, wallThickness]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+          </>
+        ) : data.doorSide === 2 ? (
+          <>
+            <mesh position={[gateOffset, 0, -halfSize + wallThickness / 2]} castShadow receiveShadow>
+              <boxGeometry args={[gateSegment, finalHeight, wallThickness]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+            <mesh position={[-gateOffset, 0, -halfSize + wallThickness / 2]} castShadow receiveShadow>
+              <boxGeometry args={[gateSegment, finalHeight, wallThickness]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+          </>
+        ) : data.doorSide === 1 ? (
+          <>
+            <mesh position={[halfSize - wallThickness / 2, 0, gateOffset]} castShadow receiveShadow>
+              <boxGeometry args={[wallThickness, finalHeight, gateSegment]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+            <mesh position={[halfSize - wallThickness / 2, 0, -gateOffset]} castShadow receiveShadow>
+              <boxGeometry args={[wallThickness, finalHeight, gateSegment]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+          </>
+        ) : (
+          <>
+            <mesh position={[-halfSize + wallThickness / 2, 0, gateOffset]} castShadow receiveShadow>
+              <boxGeometry args={[wallThickness, finalHeight, gateSegment]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+            <mesh position={[-halfSize + wallThickness / 2, 0, -gateOffset]} castShadow receiveShadow>
+              <boxGeometry args={[wallThickness, finalHeight, gateSegment]} />
+              <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+            </mesh>
+          </>
+        )}
+
+        {/* Remaining walls */}
+        {data.doorSide !== 0 && (
+          <mesh position={[0, 0, halfSize - wallThickness / 2]} castShadow receiveShadow>
+            <boxGeometry args={[finalBuildingSize, finalHeight, wallThickness]} />
+            <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+        {data.doorSide !== 2 && (
+          <mesh position={[0, 0, -halfSize + wallThickness / 2]} castShadow receiveShadow>
+            <boxGeometry args={[finalBuildingSize, finalHeight, wallThickness]} />
+            <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+        {data.doorSide !== 1 && (
+          <mesh position={[halfSize - wallThickness / 2, 0, 0]} castShadow receiveShadow>
+            <boxGeometry args={[wallThickness, finalHeight, finalBuildingSize]} />
+            <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+        {data.doorSide !== 3 && (
+          <mesh position={[-halfSize + wallThickness / 2, 0, 0]} castShadow receiveShadow>
+            <boxGeometry args={[wallThickness, finalHeight, finalBuildingSize]} />
+            <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+
+        {/* Gate lintel */}
+        <mesh position={[
+          data.doorSide === 1 ? halfSize - wallThickness / 2 : data.doorSide === 3 ? -halfSize + wallThickness / 2 : 0,
+          -finalHeight / 2 + gateHeight,
+          data.doorSide === 0 ? halfSize - wallThickness / 2 : data.doorSide === 2 ? -halfSize + wallThickness / 2 : 0
+        ]} castShadow receiveShadow>
+          <boxGeometry args={[
+            data.doorSide === 0 || data.doorSide === 2 ? gateWidth : wallThickness,
+            wallThickness * 0.8,
+            data.doorSide === 1 || data.doorSide === 3 ? gateWidth : wallThickness
+          ]} />
+          <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+        </mesh>
+
+        {/* Courtyard floor */}
+        <mesh position={[0, courtyardFloorY, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+          <planeGeometry args={[courtyardSize, courtyardSize]} />
+          <primitive object={floorMat} />
+        </mesh>
+
+        {/* Courtyard wings - interior residence buildings */}
+        {wingVariant !== 2 && (
+          <mesh position={[0, -finalHeight / 2 + wingHeight / 2, wingInset]} castShadow receiveShadow>
+            <boxGeometry args={[wingWidth, wingHeight, wingDepth]} />
+            <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+        {wingVariant !== 1 && (
+          <mesh position={[0, -finalHeight / 2 + wingHeight / 2, -wingInset]} castShadow receiveShadow>
+            <boxGeometry args={[wingWidth, wingHeight, wingDepth]} />
+            <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+        {wingVariant !== 0 && (
+          <mesh position={[wingInset, -finalHeight / 2 + wingHeight / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[wingDepth, wingHeight, wingWidth]} />
+            <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+        <mesh position={[-wingInset, -finalHeight / 2 + wingHeight / 2, 0]} castShadow receiveShadow>
+          <boxGeometry args={[wingDepth, wingHeight, wingWidth]} />
+          <meshStandardMaterial color={courtyardWallColor} roughness={0.85} metalness={0} />
+        </mesh>
+
+        {/* Ablaq banding - offset slightly from wall to prevent z-fighting */}
+        {hasAblaqBand && (
+          <>
+            <mesh position={[0, -finalHeight / 2 + wingHeight * 0.35, halfSize + 0.08]} castShadow>
+              <boxGeometry args={[finalBuildingSize * 0.88, 0.22, 0.12]} />
+              <meshStandardMaterial color="#9b7d55" roughness={0.9} metalness={0} />
+            </mesh>
+            <mesh position={[0, -finalHeight / 2 + wingHeight * 0.42, halfSize + 0.08]} castShadow>
+              <boxGeometry args={[finalBuildingSize * 0.88, 0.22, 0.12]} />
+              <meshStandardMaterial color="#d8ccb8" roughness={0.9} metalness={0} />
+            </mesh>
+          </>
+        )}
+
+        {/* Proper Mashrabiya lattice screen */}
+        {hasMashrabiya && (
+          <Mashrabiya
+            position={[halfSize - wallThickness * 0.55, -finalHeight / 2 + wingHeight * 0.55, 0]}
+            rotation={[0, Math.PI / 2, 0]}
+            width={finalBuildingSize * 0.35}
+            height={wingHeight * 0.35}
+            pattern={seededRandom(localSeed + 412) > 0.5 ? 'diamond' : seededRandom(localSeed + 413) > 0.5 ? 'star' : 'hexagonal'}
+          />
+        )}
+
+        {/* Muqarnas (honeycomb vaulting) above gate arch */}
+        {seededRandom(localSeed + 460) > 0.4 && (
+          <Muqarnas
+            position={[
+              data.doorSide === 1 ? halfSize - wallThickness * 0.4 : data.doorSide === 3 ? -halfSize + wallThickness * 0.4 : 0,
+              -finalHeight / 2 + gateHeight + 0.4,
+              data.doorSide === 0 ? halfSize - wallThickness * 0.4 : data.doorSide === 2 ? -halfSize + wallThickness * 0.4 : 0
+            ]}
+            width={gateWidth * 0.8}
+            depth={wallThickness * 1.2}
+            tiers={3}
+            color={ISLAMIC_COLORS.limestone}
+            accentColor={ISLAMIC_COLORS.cobaltBlue}
+          />
+        )}
+
+        {/* Grand arched entry with flanking columns - for grander mansions */}
+        {seededRandom(localSeed + 465) > 0.55 && (
+          <group position={[
+            data.doorSide === 1 ? halfSize + 0.8 : data.doorSide === 3 ? -halfSize - 0.8 : 0,
+            -finalHeight / 2,
+            data.doorSide === 0 ? halfSize + 0.8 : data.doorSide === 2 ? -halfSize - 0.8 : 0
+          ]} rotation={[0, data.doorSide === 0 ? 0 : data.doorSide === 1 ? -Math.PI / 2 : data.doorSide === 2 ? Math.PI : Math.PI / 2, 0]}>
+            {/* Left column */}
+            <group position={[-gateWidth / 2 - 0.3, 0, 0]}>
+              {/* Column base */}
+              <mesh position={[0, 0.15, 0]} castShadow>
+                <boxGeometry args={[0.55, 0.3, 0.55]} />
+                <meshStandardMaterial color="#c9b99a" roughness={0.85} />
+              </mesh>
+              {/* Column shaft */}
+              <mesh position={[0, gateHeight / 2, 0]} castShadow>
+                <cylinderGeometry args={[0.18, 0.22, gateHeight - 0.5, 12]} />
+                <meshStandardMaterial color="#d4c4a8" roughness={0.8} />
+              </mesh>
+              {/* Column capital */}
+              <mesh position={[0, gateHeight - 0.15, 0]} castShadow>
+                <boxGeometry args={[0.5, 0.35, 0.5]} />
+                <meshStandardMaterial color="#c9b99a" roughness={0.85} />
+              </mesh>
+            </group>
+            {/* Right column */}
+            <group position={[gateWidth / 2 + 0.3, 0, 0]}>
+              <mesh position={[0, 0.15, 0]} castShadow>
+                <boxGeometry args={[0.55, 0.3, 0.55]} />
+                <meshStandardMaterial color="#c9b99a" roughness={0.85} />
+              </mesh>
+              <mesh position={[0, gateHeight / 2, 0]} castShadow>
+                <cylinderGeometry args={[0.18, 0.22, gateHeight - 0.5, 12]} />
+                <meshStandardMaterial color="#d4c4a8" roughness={0.8} />
+              </mesh>
+              <mesh position={[0, gateHeight - 0.15, 0]} castShadow>
+                <boxGeometry args={[0.5, 0.35, 0.5]} />
+                <meshStandardMaterial color="#c9b99a" roughness={0.85} />
+              </mesh>
+            </group>
+            {/* Arch spanning between columns */}
+            <mesh position={[0, gateHeight + 0.35, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+              <cylinderGeometry args={[gateWidth / 2 + 0.5, gateWidth / 2 + 0.5, 0.4, 16, 1, false, 0, Math.PI]} />
+              <meshStandardMaterial color="#c4b496" roughness={0.85} />
+            </mesh>
+            {/* Arch keystone */}
+            <mesh position={[0, gateHeight + 0.55, 0]} castShadow>
+              <boxGeometry args={[0.35, 0.5, 0.45]} />
+              <meshStandardMaterial color="#b5a080" roughness={0.8} />
+            </mesh>
+            {/* Optional small dome above entry */}
+            {seededRandom(localSeed + 466) > 0.6 && (
+              <>
+                <mesh position={[0, gateHeight + 0.9, 0]} castShadow>
+                  <cylinderGeometry args={[gateWidth / 3, gateWidth / 2.5, 0.25, 12]} />
+                  <meshStandardMaterial color="#c9b99a" roughness={0.85} />
+                </mesh>
+                <mesh position={[0, gateHeight + 1.2, 0]} castShadow>
+                  <sphereGeometry args={[gateWidth / 3.5, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                  <meshStandardMaterial color="#bda88b" roughness={0.8} />
+                </mesh>
+                <mesh position={[0, gateHeight + 1.2 + gateWidth / 4, 0]} castShadow>
+                  <sphereGeometry args={[0.12, 8, 6]} />
+                  <meshStandardMaterial color="#d8c8a0" roughness={0.6} metalness={0.2} />
+                </mesh>
+              </>
+            )}
+          </group>
+        )}
+
+        {/* Ornate lintel at gate - offset to prevent z-fighting */}
+        {hasLintel && (
+          <mesh position={[
+            data.doorSide === 1 ? halfSize + 0.1 : data.doorSide === 3 ? -halfSize - 0.1 : 0,
+            -finalHeight / 2 + gateHeight + 0.25,
+            data.doorSide === 0 ? halfSize + 0.1 : data.doorSide === 2 ? -halfSize - 0.1 : 0
+          ]} castShadow receiveShadow>
+            <boxGeometry args={[
+              data.doorSide === 0 || data.doorSide === 2 ? gateWidth * 1.08 : 0.25,
+              0.3,
+              data.doorSide === 1 || data.doorSide === 3 ? gateWidth * 1.08 : 0.25
+            ]} />
+            <meshStandardMaterial color="#9b7d55" roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+
+        {/* Decorative Islamic tile gate frame - positioned outside the wall */}
+        <mesh
+          position={[gateFrameX, gateFrameY, gateFrameZ]}
+          rotation={gateFrameRot}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[gateFrameWidth, gateFrameHeight, 0.2]} />
+          <meshStandardMaterial color="#caa77b" roughness={0.85} metalness={0} />
+        </mesh>
+
+        {/* Geometric tile panel above gate - positioned clearly in front */}
+        <GeometricTile
+          position={[
+            gateFrameX + (data.doorSide === 0 ? 0 : data.doorSide === 2 ? 0 : (data.doorSide === 1 ? 0.25 : -0.25)),
+            gateFrameY + gateFrameHeight * 0.4,
+            gateFrameZ + (data.doorSide === 0 ? 0.25 : data.doorSide === 2 ? -0.25 : 0)
+          ]}
+          rotation={[
+            0,
+            data.doorSide === 0 ? 0 : data.doorSide === 2 ? Math.PI : data.doorSide === 1 ? -Math.PI / 2 : Math.PI / 2,
+            0
+          ]}
+          size={gateFrameWidth * 0.65}
+          pattern="star8"
+          primaryColor={ISLAMIC_COLORS.cobaltBlue}
+          secondaryColor={ISLAMIC_COLORS.cream}
+          accentColor={ISLAMIC_COLORS.gold}
+        />
+
+        {/* Decorative tile band along top of gate - offset to prevent z-fighting */}
+        <mesh
+          position={[
+            gateFrameX + (data.doorSide === 0 ? 0 : data.doorSide === 2 ? 0 : (data.doorSide === 1 ? 0.15 : -0.15)),
+            gateFrameY + gateFrameHeight * 0.28,
+            gateFrameZ + (data.doorSide === 0 ? 0.15 : data.doorSide === 2 ? -0.15 : 0)
+          ]}
+          rotation={gateFrameRot}
+          castShadow
+        >
+          <boxGeometry args={[gateFrameWidth * 0.88, gateFrameHeight * 0.1, 0.15]} />
+          <meshStandardMaterial color="#7a5a3a" roughness={0.85} metalness={0} />
+        </mesh>
+
+        {/* Wall tile panels - Islamic geometric patterns on courtyard interior walls */}
+        {seededRandom(localSeed + 470) > 0.35 && (
+          <>
+            {/* Back wall tile panel - positioned on interior wing wall */}
+            <GeometricTile
+              position={[0, -finalHeight / 2 + wingHeight * 0.4, -wingInset + wingDepth / 2 + 0.05]}
+              rotation={[0, 0, 0]}
+              size={courtyardSize * 0.28}
+              pattern={seededRandom(localSeed + 471) > 0.5 ? 'arabesque' : 'star6'}
+              primaryColor={ISLAMIC_COLORS.turquoise}
+              secondaryColor={ISLAMIC_COLORS.cream}
+              accentColor={ISLAMIC_COLORS.gold}
+            />
+            {/* Side wall tile panel - positioned on interior wing wall */}
+            <GeometricTile
+              position={[-wingInset + wingDepth / 2 + 0.05, -finalHeight / 2 + wingHeight * 0.4, 0]}
+              rotation={[0, Math.PI / 2, 0]}
+              size={courtyardSize * 0.24}
+              pattern="hexagonal"
+              primaryColor={ISLAMIC_COLORS.deepGreen}
+              secondaryColor={ISLAMIC_COLORS.cream}
+              accentColor={ISLAMIC_COLORS.gold}
+            />
+          </>
+        )}
+
+        {/* Window tile frame accents - offset from wall */}
+        {hasMashrabiya && (
+          <mesh
+            position={[halfSize + 0.08, -finalHeight / 2 + wingHeight * 0.55, 0]}
+            rotation={[0, Math.PI / 2, 0]}
+            castShadow
+          >
+            <boxGeometry args={[finalBuildingSize * 0.32, wingHeight * 0.32, 0.15]} />
+            <meshStandardMaterial color="#caa77b" roughness={0.85} metalness={0} />
+          </mesh>
+        )}
+
+        {/* Ornate Islamic courtyard fountain */}
+        <OrnateFountain
+          position={[0, courtyardFloorY, 0]}
+          scale={courtyardSize * 0.18}
+          variant={fountainVariant === 0 ? 'tiered' : fountainVariant === 1 ? 'octagonal' : 'tiered'}
+          hasWaterAnimation={true}
+        />
+
+        {/* Geometric tile pattern on courtyard floor - placed around fountain */}
+        {seededRandom(localSeed + 420) > 0.3 && (
+          <>
+            {/* Four corner tiles */}
+            {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([dx, dz], i) => (
+              <GeometricTile
+                key={`floor-tile-${i}`}
+                position={[
+                  dx * courtyardSize * 0.28,
+                  courtyardFloorY + 0.01,
+                  dz * courtyardSize * 0.28
+                ]}
+                rotation={[-Math.PI / 2, 0, seededRandom(localSeed + 425 + i) * Math.PI * 2]}
+                size={courtyardSize * 0.22}
+                pattern={['star8', 'star6', 'hexagonal', 'arabesque'][i % 4] as 'star8' | 'star6' | 'hexagonal' | 'arabesque'}
+                primaryColor={ISLAMIC_COLORS.cobaltBlue}
+                secondaryColor={ISLAMIC_COLORS.cream}
+                accentColor={ISLAMIC_COLORS.gold}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Arcade columns at courtyard corners */}
+        {seededRandom(localSeed + 430) > 0.4 && (
+          <>
+            {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([dx, dz], i) => (
+              <ArcadeColumn
+                key={`arcade-col-${i}`}
+                position={[
+                  dx * (courtyardSize * 0.4 - wingDepth * 0.3),
+                  courtyardFloorY,
+                  dz * (courtyardSize * 0.4 - wingDepth * 0.3)
+                ]}
+                height={wingHeight * 0.7}
+                columnStyle={seededRandom(localSeed + 435 + i) > 0.5 ? 'ornate' : 'simple'}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Lion sculptures flanking gate entrance */}
+        {seededRandom(localSeed + 440) > 0.6 && (
+          <>
+            <LionSculpture
+              position={[
+                data.doorSide === 0 || data.doorSide === 2 ? gateWidth * 0.6 : (data.doorSide === 1 ? halfSize - 1.5 : -halfSize + 1.5),
+                courtyardFloorY,
+                data.doorSide === 1 || data.doorSide === 3 ? gateWidth * 0.6 : (data.doorSide === 0 ? halfSize - 1.5 : -halfSize + 1.5)
+              ]}
+              rotation={data.doorSide === 0 ? Math.PI : data.doorSide === 2 ? 0 : data.doorSide === 1 ? Math.PI / 2 : -Math.PI / 2}
+              scale={0.6}
+              material={seededRandom(localSeed + 445) > 0.7 ? 'bronze' : 'stone'}
+            />
+            <LionSculpture
+              position={[
+                data.doorSide === 0 || data.doorSide === 2 ? -gateWidth * 0.6 : (data.doorSide === 1 ? halfSize - 1.5 : -halfSize + 1.5),
+                courtyardFloorY,
+                data.doorSide === 1 || data.doorSide === 3 ? -gateWidth * 0.6 : (data.doorSide === 0 ? halfSize - 1.5 : -halfSize + 1.5)
+              ]}
+              rotation={data.doorSide === 0 ? Math.PI : data.doorSide === 2 ? 0 : data.doorSide === 1 ? Math.PI / 2 : -Math.PI / 2}
+              scale={0.6}
+              material={seededRandom(localSeed + 445) > 0.7 ? 'bronze' : 'stone'}
+            />
+          </>
+        )}
+
+        {/* Decorative urns along courtyard edges */}
+        {seededRandom(localSeed + 450) > 0.35 && (
+          <>
+            {[0, 1, 2, 3].map((corner) => {
+              if (seededRandom(localSeed + 455 + corner) < 0.5) return null;
+              const cx = corner < 2 ? -1 : 1;
+              const cz = corner % 2 === 0 ? -1 : 1;
+              return (
+                <DecorativeUrn
+                  key={`urn-${corner}`}
+                  position={[
+                    cx * courtyardSize * 0.38,
+                    courtyardFloorY,
+                    cz * courtyardSize * 0.38
+                  ]}
+                  scale={0.55}
+                  variant={['amphora', 'vase', 'jar'][corner % 3] as 'amphora' | 'vase' | 'jar'}
+                  color={[ISLAMIC_COLORS.terracotta, ISLAMIC_COLORS.cobaltBlue, ISLAMIC_COLORS.turquoise][corner % 3]}
+                />
+              );
+            })}
+          </>
+        )}
+
+        {/* Courtyard tree */}
+        <mesh position={[-treeOffset, courtyardFloorY + 0.6, treeOffset]} castShadow>
+          <cylinderGeometry args={[0.12, 0.18, 1.2, 8]} />
+          <meshStandardMaterial color="#6b4a2e" roughness={0.95} metalness={0} />
+        </mesh>
+        <mesh position={[-treeOffset, courtyardFloorY + 1.5, treeOffset]} castShadow>
+          <sphereGeometry args={[0.9, 10, 10]} />
+          <meshStandardMaterial color="#5b7a46" roughness={0.9} metalness={0} />
+        </mesh>
+
+        {/* Pots */}
+        <mesh position={[potOffset, courtyardFloorY + 0.18, -potOffset]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.28, 0.36, 0.35, 10]} />
+          <primitive object={potMat} />
+        </mesh>
+        <mesh position={[potOffset + 0.5, courtyardFloorY + 0.16, -potOffset + 0.4]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.22, 0.3, 0.3, 10]} />
+          <primitive object={potMat} />
+        </mesh>
+        <mesh position={[-potOffset + 0.4, courtyardFloorY + 0.16, potOffset]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.2, 0.28, 0.28, 10]} />
+          <primitive object={potMat} />
+        </mesh>
+        <mesh position={[-potOffset + 0.4, courtyardFloorY + 0.42, potOffset]} castShadow>
+          <sphereGeometry args={[0.22, 8, 8]} />
+          <meshStandardMaterial color="#5c8a4f" roughness={0.9} />
+        </mesh>
+
+        {/* Vines */}
+        <mesh position={[0, -finalHeight / 2 + vineHeight / 2, -courtyardSize / 2]} rotation={[0, Math.PI, 0]}>
+          <planeGeometry args={[courtyardSize * 0.7, vineHeight]} />
+          <primitive object={vineMat} />
+        </mesh>
+        <mesh position={[courtyardSize / 2, -finalHeight / 2 + vineHeight / 2, 0]} rotation={[0, -Math.PI / 2, 0]}>
+          <planeGeometry args={[courtyardSize * 0.6, vineHeight * 0.9]} />
+          <primitive object={vineMat} />
+        </mesh>
+      </group>
+    );
+  }
 
   return (
     <group
@@ -2685,17 +3429,6 @@ const Building: React.FC<{
                 nightFactor={nightFactor}
                 material={otherMaterials.dome[Math.floor(seededRandom(localSeed + 74) * 3)]} // Sandstone for hammam
               />
-              {/* Drum base for dome 3 */}
-              <mesh position={[0, finalHeight / 2 + 0.1, finalBuildingSize * 0.25]} castShadow receiveShadow>
-                <cylinderGeometry args={[finalBuildingSize * 0.22, finalBuildingSize * 0.24, 0.35, 8]} />
-                <meshStandardMaterial color="#c4b196" roughness={0.85} />
-              </mesh>
-              <Dome
-                position={[0, finalHeight / 2 + 0.3, finalBuildingSize * 0.25]}
-                radius={(finalBuildingSize / 2.2) * professionArchitecture.domeScale}
-                nightFactor={nightFactor}
-                material={otherMaterials.dome[Math.floor(seededRandom(localSeed + 75) * 3)]} // Sandstone for hammam
-              />
             </>
           )}
         </>
@@ -2782,104 +3515,242 @@ const Building: React.FC<{
         </instancedMesh>
       )}
 
-      {/* DETAILED DOORWAY */}
+      {/* DETAILED DOORWAY - Style-based rendering */}
       <group position={doorPos} rotation={[0, doorRotation, 0]}>
-      {isOrnateBuilding && (
-        <>
-            {/* Ornate door frame with ablaq pattern */}
-            <mesh position={[0, 0.1, -0.05]} castShadow>
-              <boxGeometry args={[3.1, 3.2, 0.12]} />
-              <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
-            </mesh>
-            {/* Alternating ablaq bands on door frame */}
-            <mesh position={[0, 1.2, -0.03]} castShadow>
-              <boxGeometry args={[3.0, 0.15, 0.1]} />
-              <meshStandardMaterial color="#2a2420" roughness={0.85} />
-            </mesh>
-            <mesh position={[0, 0.9, -0.03]} castShadow>
-              <boxGeometry args={[3.0, 0.12, 0.1]} />
-              <meshStandardMaterial color="#e8dcc8" roughness={0.85} />
-            </mesh>
-            {/* Carved stone lintel with geometric pattern */}
-            <mesh position={[0, 1.7, 0.12]} castShadow>
-              <boxGeometry args={[2.8, 0.35, 0.22]} />
-              <meshStandardMaterial color="#c9b99a" roughness={0.85} />
-            </mesh>
-            {/* Central carved medallion on lintel */}
-            <mesh position={[0, 1.7, 0.25]} rotation={[0, 0, 0]} castShadow>
-              <cylinderGeometry args={[0.22, 0.22, 0.08, 8]} />
-              <meshStandardMaterial color="#8b7355" roughness={0.9} />
-            </mesh>
-            {/* Corner decorative bosses */}
-            <mesh position={[-1.2, 1.7, 0.22]} castShadow>
-              <sphereGeometry args={[0.1, 6, 4]} />
-              <meshStandardMaterial color="#a08060" roughness={0.85} />
-            </mesh>
-            <mesh position={[1.2, 1.7, 0.22]} castShadow>
-              <sphereGeometry args={[0.1, 6, 4]} />
-              <meshStandardMaterial color="#a08060" roughness={0.85} />
-            </mesh>
-            {/* Pointed arch above door (Mamluk style) */}
-            <mesh position={[0, 2.1, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-              <cylinderGeometry args={[1.3, 1.3, 0.15, 12, 1, false, 0, Math.PI]} />
-              <meshStandardMaterial color="#c4b196" roughness={0.88} />
-            </mesh>
-            {/* Inner arch shadow line */}
-            <mesh position={[0, 2.0, 0.08]} rotation={[Math.PI / 2, 0, 0]}>
-              <cylinderGeometry args={[1.1, 1.1, 0.08, 12, 1, false, 0, Math.PI]} />
-              <meshStandardMaterial color="#5a4a3a" roughness={0.95} />
-            </mesh>
-          </>
-        )}
-        {doorVariant === 0 && (
-          <mesh castShadow>
-            <boxGeometry args={[2.5, 2.5, 0.2]} />
-            <meshStandardMaterial color="#4a3b2b" />
-          </mesh>
-        )}
-        {doorVariant === 1 && (
-          <>
-            <mesh castShadow>
-              <boxGeometry args={[2.4, 2.2, 0.2]} />
-              <meshStandardMaterial color="#4a3b2b" />
-            </mesh>
-            <mesh position={[0, 1.05, 0.1]} rotation={[Math.PI / 2, 0, Math.PI / 2]}>
-              <cylinderGeometry args={[1.0, 1.0, 0.2, 16, 1, false, 0, Math.PI]} />
-              <meshStandardMaterial color="#4a3b2b" />
-            </mesh>
-          </>
-        )}
-        {doorVariant === 2 && (
-          <>
-            <mesh castShadow>
-              <boxGeometry args={[2.8, 2.8, 0.2]} />
-              <meshStandardMaterial color="#5b4634" />
-            </mesh>
-            <mesh position={[0, 0, 0.12]} castShadow>
-              <boxGeometry args={[2.3, 2.3, 0.15]} />
-              <meshStandardMaterial color="#3d2e21" />
-            </mesh>
-          </>
-        )}
+        {/* Door threshold/step */}
         <mesh position={[0, -1.35, 0.25]} receiveShadow>
           <boxGeometry args={[2.8, 0.2, 0.6]} />
           <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
         </mesh>
-        {/* Door Panels */}
-        <mesh position={[0, 0, 0.1]} castShadow>
-           <boxGeometry args={[1.8, 2.3, 0.1]} />
-           <meshStandardMaterial 
-             color={activeGlow ? "#8b4513" : "#3d2817"} 
-             emissive={activeGlow ? "#fbbf24" : "black"}
-             emissiveIntensity={activeGlow ? 0.3 : 0}
-             roughness={0.8}
-           />
-        </mesh>
-        {doorVariant === 1 && (
-          <mesh position={[0, 1.15, 0.1]} rotation={[Math.PI / 2, 0, Math.PI / 2]}>
-            <cylinderGeometry args={[0.9, 0.9, 0.1, 16, 1, false, 0, Math.PI]} />
-            <meshStandardMaterial color={activeGlow ? "#fbbf24" : "#3d2817"} emissive={activeGlow ? "#fbbf24" : "black"} emissiveIntensity={activeGlow ? 0.2 : 0} />
-          </mesh>
+
+        {/* PLANK DOOR - Simple rough planks for poor areas */}
+        {doorStyle === 'plank' && (
+          <group>
+            {/* Rough plank door with visible gaps */}
+            <mesh castShadow>
+              <boxGeometry args={[2.2, 2.4, 0.15]} />
+              <meshStandardMaterial
+                map={woodTexture}
+                color="#5a4535"
+                roughness={0.95}
+                emissive={activeGlow ? "#fbbf24" : "black"}
+                emissiveIntensity={activeGlow ? 0.2 : 0}
+              />
+            </mesh>
+            {/* Vertical plank lines */}
+            {[-0.7, 0, 0.7].map((x, i) => (
+              <mesh key={i} position={[x, 0, 0.08]}>
+                <boxGeometry args={[0.04, 2.3, 0.02]} />
+                <meshStandardMaterial color="#2a1a10" roughness={1} />
+              </mesh>
+            ))}
+            {/* Iron strap hinges */}
+            <mesh position={[-0.95, 0.7, 0.1]} castShadow>
+              <boxGeometry args={[0.4, 0.08, 0.03]} />
+              <meshStandardMaterial color="#3a3530" roughness={0.7} metalness={0.3} />
+            </mesh>
+            <mesh position={[-0.95, -0.5, 0.1]} castShadow>
+              <boxGeometry args={[0.35, 0.08, 0.03]} />
+              <meshStandardMaterial color="#3a3530" roughness={0.7} metalness={0.3} />
+            </mesh>
+          </group>
+        )}
+
+        {/* PANELED DOOR - Standard residential with recessed panels */}
+        {doorStyle === 'paneled' && (
+          <group>
+            {/* Door frame */}
+            <mesh castShadow>
+              <boxGeometry args={[2.4, 2.5, 0.18]} />
+              <meshStandardMaterial
+                map={woodTexture}
+                color="#4a3828"
+                roughness={0.85}
+                emissive={activeGlow ? "#fbbf24" : "black"}
+                emissiveIntensity={activeGlow ? 0.25 : 0}
+              />
+            </mesh>
+            {/* Recessed panels (2x2 grid) */}
+            {[[-0.45, 0.5], [0.45, 0.5], [-0.45, -0.5], [0.45, -0.5]].map(([x, y], i) => (
+              <mesh key={i} position={[x, y, 0.1]} castShadow>
+                <boxGeometry args={[0.7, 0.8, 0.06]} />
+                <meshStandardMaterial map={woodTexture} color="#3d2817" roughness={0.9} />
+              </mesh>
+            ))}
+            {/* Simple ring pull */}
+            <mesh position={[0.7, 0, 0.12]} rotation={[Math.PI/2, 0, 0]}>
+              <torusGeometry args={[0.12, 0.025, 8, 16]} />
+              <meshStandardMaterial color="#6a5a4a" roughness={0.6} metalness={0.4} />
+            </mesh>
+          </group>
+        )}
+
+        {/* STUDDED DOOR - Heavy door with iron studs for civic/wealthy */}
+        {doorStyle === 'studded' && (
+          <group>
+            {/* Heavy door base */}
+            <mesh castShadow>
+              <boxGeometry args={[2.6, 2.7, 0.22]} />
+              <meshStandardMaterial
+                map={woodTexture}
+                color="#3d2817"
+                roughness={0.8}
+                emissive={activeGlow ? "#fbbf24" : "black"}
+                emissiveIntensity={activeGlow ? 0.3 : 0}
+              />
+            </mesh>
+            {/* Grid of iron studs */}
+            {[-0.8, -0.4, 0, 0.4, 0.8].map((x) =>
+              [-0.9, -0.45, 0, 0.45, 0.9].map((y) => (
+                <mesh key={`${x}-${y}`} position={[x, y, 0.13]} castShadow>
+                  <sphereGeometry args={[0.06, 6, 4]} />
+                  <meshStandardMaterial color="#4a4540" roughness={0.5} metalness={0.5} />
+                </mesh>
+              ))
+            )}
+            {/* Large iron ring pull */}
+            <mesh position={[0.85, 0, 0.15]} rotation={[Math.PI/2, 0, 0]}>
+              <torusGeometry args={[0.18, 0.035, 8, 16]} />
+              <meshStandardMaterial color="#5a5045" roughness={0.5} metalness={0.6} />
+            </mesh>
+            {/* Iron plate behind ring */}
+            <mesh position={[0.85, 0, 0.12]}>
+              <circleGeometry args={[0.12, 8]} />
+              <meshStandardMaterial color="#4a4035" roughness={0.6} metalness={0.4} />
+            </mesh>
+          </group>
+        )}
+
+        {/* CARVED DOOR - Ornate geometric patterns for wealthy areas */}
+        {doorStyle === 'carved' && (
+          <group>
+            {/* Door base with carved appearance */}
+            <mesh castShadow>
+              <boxGeometry args={[2.5, 2.6, 0.2]} />
+              <meshStandardMaterial
+                map={woodTexture}
+                color="#5a4030"
+                roughness={0.75}
+                emissive={activeGlow ? "#fbbf24" : "black"}
+                emissiveIntensity={activeGlow ? 0.35 : 0}
+              />
+            </mesh>
+            {/* Central geometric star pattern (8-pointed) */}
+            <mesh position={[0, 0.2, 0.12]} rotation={[0, 0, Math.PI/8]}>
+              <circleGeometry args={[0.5, 8]} />
+              <meshStandardMaterial color="#4a3525" roughness={0.85} />
+            </mesh>
+            <mesh position={[0, 0.2, 0.14]} rotation={[0, 0, 0]}>
+              <circleGeometry args={[0.35, 8]} />
+              <meshStandardMaterial color="#3d2817" roughness={0.85} />
+            </mesh>
+            {/* Decorative border frame */}
+            <mesh position={[0, 0, 0.11]}>
+              <boxGeometry args={[2.2, 2.3, 0.04]} />
+              <meshStandardMaterial color="#4a3525" roughness={0.85} />
+            </mesh>
+            <mesh position={[0, 0, 0.115]}>
+              <boxGeometry args={[2.0, 2.1, 0.04]} />
+              <meshStandardMaterial map={woodTexture} color="#3d2817" roughness={0.8} />
+            </mesh>
+            {/* Brass door knocker (hand shape) */}
+            <mesh position={[0, 0.8, 0.15]}>
+              <boxGeometry args={[0.15, 0.25, 0.04]} />
+              <meshStandardMaterial color="#b8954a" roughness={0.4} metalness={0.6} />
+            </mesh>
+          </group>
+        )}
+
+        {/* ARCHED DOOR - Pointed Islamic arch for religious buildings */}
+        {doorStyle === 'arched' && (
+          <group>
+            {/* Main door body */}
+            <mesh castShadow>
+              <boxGeometry args={[2.4, 2.2, 0.2]} />
+              <meshStandardMaterial
+                map={woodTexture}
+                color="#3d2817"
+                roughness={0.8}
+                emissive={activeGlow ? "#fbbf24" : "black"}
+                emissiveIntensity={activeGlow ? 0.3 : 0}
+              />
+            </mesh>
+            {/* Pointed arch top */}
+            <mesh position={[0, 1.15, 0.1]}>
+              <circleGeometry args={[1.2, 16, 0, Math.PI]} />
+              <meshStandardMaterial map={woodTexture} color="#3d2817" roughness={0.8} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Stone arch frame */}
+            <mesh position={[0, 1.25, -0.02]} castShadow>
+              <circleGeometry args={[1.4, 16, 0, Math.PI]} />
+              <meshStandardMaterial color="#c4b196" roughness={0.88} side={THREE.DoubleSide} />
+            </mesh>
+            {/* Decorative radiating pattern on arch */}
+            {[0.2, 0.5, 0.8].map((t, i) => {
+              const angle = Math.PI * t;
+              const x = Math.cos(angle) * 0.9;
+              const y = 1.15 + Math.sin(angle) * 0.9;
+              return (
+                <mesh key={i} position={[x, y, 0.12]} rotation={[0, 0, angle - Math.PI/2]}>
+                  <boxGeometry args={[0.08, 0.4, 0.03]} />
+                  <meshStandardMaterial color="#5a4535" roughness={0.9} />
+                </mesh>
+              );
+            })}
+          </group>
+        )}
+
+        {/* DOUBLE DOOR - Grand entrance for mosques and large civic buildings */}
+        {doorStyle === 'double' && (
+          <group>
+            {/* Left door */}
+            <mesh position={[-0.75, 0, 0]} castShadow>
+              <boxGeometry args={[1.3, 2.5, 0.2]} />
+              <meshStandardMaterial
+                map={woodTexture}
+                color="#3d2817"
+                roughness={0.8}
+                emissive={activeGlow ? "#fbbf24" : "black"}
+                emissiveIntensity={activeGlow ? 0.25 : 0}
+              />
+            </mesh>
+            {/* Right door */}
+            <mesh position={[0.75, 0, 0]} castShadow>
+              <boxGeometry args={[1.3, 2.5, 0.2]} />
+              <meshStandardMaterial
+                map={woodTexture}
+                color="#3d2817"
+                roughness={0.8}
+                emissive={activeGlow ? "#fbbf24" : "black"}
+                emissiveIntensity={activeGlow ? 0.25 : 0}
+              />
+            </mesh>
+            {/* Central seam/meeting rail */}
+            <mesh position={[0, 0, 0.12]}>
+              <boxGeometry args={[0.08, 2.4, 0.04]} />
+              <meshStandardMaterial color="#2a1a10" roughness={0.9} />
+            </mesh>
+            {/* Decorative panels on each door */}
+            {[-0.75, 0.75].map((dx) => (
+              <group key={dx}>
+                <mesh position={[dx, 0.5, 0.12]} castShadow>
+                  <boxGeometry args={[0.9, 0.8, 0.05]} />
+                  <meshStandardMaterial map={woodTexture} color="#4a3525" roughness={0.85} />
+                </mesh>
+                <mesh position={[dx, -0.5, 0.12]} castShadow>
+                  <boxGeometry args={[0.9, 0.8, 0.05]} />
+                  <meshStandardMaterial map={woodTexture} color="#4a3525" roughness={0.85} />
+                </mesh>
+              </group>
+            ))}
+            {/* Matching ring pulls on each door */}
+            {[-0.4, 0.4].map((x) => (
+              <mesh key={x} position={[x, 0, 0.15]} rotation={[Math.PI/2, 0, 0]}>
+                <torusGeometry args={[0.12, 0.025, 8, 16]} />
+                <meshStandardMaterial color="#6a5a4a" roughness={0.5} metalness={0.5} />
+              </mesh>
+            ))}
+          </group>
         )}
       </group>
 
@@ -3318,9 +4189,10 @@ const Building: React.FC<{
         );
       })()}
 
-      {/* Roof Parapet / Cap for Wealthy */}
-      {district === 'WEALTHY' && seededRandom(localSeed + 31) > 0.6 && (
+      {/* Roof Parapet / Cap for Wealthy - Enhanced with turrets, crenellations, and decorative elements */}
+      {district === 'WEALTHY' && (
         <>
+          {/* Base parapet band */}
           <mesh position={[0, finalHeight / 2 + 0.15, 0]} castShadow>
             <boxGeometry args={[finalBuildingSize + 0.6, 0.3, finalBuildingSize + 0.6]} />
             <meshStandardMaterial color="#c9b79d" roughness={0.9} />
@@ -3329,11 +4201,149 @@ const Building: React.FC<{
             <boxGeometry args={[finalBuildingSize + 0.4, 0.08, finalBuildingSize + 0.4]} />
             <meshStandardMaterial color="#bfae96" roughness={0.85} />
           </mesh>
-          {seededRandom(localSeed + 37) > 0.7 && (
-            <mesh position={[0, finalHeight / 2 + 0.6, 0]} castShadow>
-              <sphereGeometry args={[finalBuildingSize / 4, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-              <meshStandardMaterial color="#bda88b" roughness={0.8} />
-            </mesh>
+
+          {/* Decorative crenellations/merlons along roofline */}
+          {seededRandom(localSeed + 32) > 0.3 && (
+            <group position={[0, finalHeight / 2 + 0.5, 0]}>
+              {[0, 1, 2, 3].map((side) => {
+                const halfSize = (finalBuildingSize + 0.5) / 2;
+                const numMerlons = Math.floor(finalBuildingSize / 0.9);
+                return Array.from({ length: numMerlons }).map((_, mi) => {
+                  const offset = (mi - (numMerlons - 1) / 2) * 0.9;
+                  const x = side === 1 ? halfSize : side === 3 ? -halfSize : offset;
+                  const z = side === 0 ? halfSize : side === 2 ? -halfSize : offset;
+                  if (side === 1 || side === 3) {
+                    return (
+                      <mesh key={`merlon-${side}-${mi}`} position={[x, 0.15, offset]} castShadow>
+                        <boxGeometry args={[0.25, 0.35, 0.4]} />
+                        <meshStandardMaterial color="#c4b08a" roughness={0.88} />
+                      </mesh>
+                    );
+                  }
+                  return (
+                    <mesh key={`merlon-${side}-${mi}`} position={[offset, 0.15, z]} castShadow>
+                      <boxGeometry args={[0.4, 0.35, 0.25]} />
+                      <meshStandardMaterial color="#c4b08a" roughness={0.88} />
+                    </mesh>
+                  );
+                });
+              })}
+            </group>
+          )}
+
+          {/* Corner turrets - small decorative towers at corners */}
+          {seededRandom(localSeed + 35) > 0.55 && (
+            <group>
+              {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([cx, cz], ti) => {
+                if (seededRandom(localSeed + 36 + ti) > 0.6) return null;
+                const halfSize = (finalBuildingSize + 0.3) / 2;
+                return (
+                  <group key={`turret-${ti}`} position={[cx * halfSize, finalHeight / 2 + 0.6, cz * halfSize]}>
+                    {/* Turret base */}
+                    <mesh castShadow>
+                      <cylinderGeometry args={[0.5, 0.55, 0.8, 8]} />
+                      <meshStandardMaterial color="#c9b79d" roughness={0.85} />
+                    </mesh>
+                    {/* Turret cap - conical or domed */}
+                    {seededRandom(localSeed + 38 + ti) > 0.5 ? (
+                      <mesh position={[0, 0.55, 0]} castShadow>
+                        <coneGeometry args={[0.45, 0.6, 8]} />
+                        <meshStandardMaterial color="#9a8570" roughness={0.8} />
+                      </mesh>
+                    ) : (
+                      <mesh position={[0, 0.45, 0]} castShadow>
+                        <sphereGeometry args={[0.42, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                        <meshStandardMaterial color="#b5a58a" roughness={0.8} />
+                      </mesh>
+                    )}
+                    {/* Finial on top */}
+                    <mesh position={[0, 0.95, 0]} castShadow>
+                      <sphereGeometry args={[0.12, 6, 5]} />
+                      <meshStandardMaterial color="#d4c4a0" roughness={0.7} metalness={0.15} />
+                    </mesh>
+                  </group>
+                );
+              })}
+            </group>
+          )}
+
+          {/* Central dome or lantern - for larger mansions */}
+          {seededRandom(localSeed + 37) > 0.6 && (
+            <group position={[0, finalHeight / 2 + 0.4, 0]}>
+              {seededRandom(localSeed + 39) > 0.5 ? (
+                // Small dome
+                <>
+                  <mesh position={[0, 0.15, 0]} castShadow>
+                    <cylinderGeometry args={[finalBuildingSize / 3.5, finalBuildingSize / 3, 0.35, 12]} />
+                    <meshStandardMaterial color="#c9b99a" roughness={0.85} />
+                  </mesh>
+                  <mesh position={[0, 0.5, 0]} castShadow>
+                    <sphereGeometry args={[finalBuildingSize / 4, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+                    <meshStandardMaterial color="#bda88b" roughness={0.8} />
+                  </mesh>
+                  {/* Finial */}
+                  <mesh position={[0, 0.5 + finalBuildingSize / 4.5, 0]} castShadow>
+                    <sphereGeometry args={[0.15, 8, 6]} />
+                    <meshStandardMaterial color="#d8c8a0" roughness={0.6} metalness={0.2} />
+                  </mesh>
+                </>
+              ) : (
+                // Decorative lantern/pavilion
+                <>
+                  <mesh position={[0, 0.3, 0]} castShadow>
+                    <boxGeometry args={[finalBuildingSize / 3, 0.6, finalBuildingSize / 3]} />
+                    <meshStandardMaterial color="#c4b496" roughness={0.85} />
+                  </mesh>
+                  {/* Small arched openings on lantern */}
+                  {[0, 1, 2, 3].map((side) => {
+                    const lOff = finalBuildingSize / 6 + 0.02;
+                    const lx = side === 1 ? lOff : side === 3 ? -lOff : 0;
+                    const lz = side === 0 ? lOff : side === 2 ? -lOff : 0;
+                    return (
+                      <mesh key={`lantern-arch-${side}`} position={[lx, 0.3, lz]} castShadow>
+                        <boxGeometry args={[side % 2 === 0 ? 0.35 : 0.08, 0.4, side % 2 === 0 ? 0.08 : 0.35]} />
+                        <meshStandardMaterial color="#2a2420" roughness={0.95} />
+                      </mesh>
+                    );
+                  })}
+                  {/* Pyramid roof on lantern */}
+                  <mesh position={[0, 0.75, 0]} castShadow>
+                    <coneGeometry args={[finalBuildingSize / 4, 0.5, 4]} />
+                    <meshStandardMaterial color="#9a8a70" roughness={0.8} />
+                  </mesh>
+                  <mesh position={[0, 1.05, 0]} castShadow>
+                    <sphereGeometry args={[0.1, 6, 5]} />
+                    <meshStandardMaterial color="#d4c4a0" roughness={0.6} metalness={0.2} />
+                  </mesh>
+                </>
+              )}
+            </group>
+          )}
+
+          {/* Decorative roof finials/pinnacles at roof edges */}
+          {seededRandom(localSeed + 40) > 0.5 && (
+            <group position={[0, finalHeight / 2 + 0.45, 0]}>
+              {[
+                [0, (finalBuildingSize + 0.5) / 2],
+                [0, -(finalBuildingSize + 0.5) / 2],
+                [(finalBuildingSize + 0.5) / 2, 0],
+                [-(finalBuildingSize + 0.5) / 2, 0]
+              ].map(([fx, fz], fi) => {
+                if (seededRandom(localSeed + 41 + fi) > 0.65) return null;
+                return (
+                  <group key={`finial-${fi}`} position={[fx, 0, fz]}>
+                    <mesh castShadow>
+                      <cylinderGeometry args={[0.08, 0.12, 0.25, 6]} />
+                      <meshStandardMaterial color="#c4b496" roughness={0.85} />
+                    </mesh>
+                    <mesh position={[0, 0.2, 0]} castShadow>
+                      <sphereGeometry args={[0.1, 6, 5]} />
+                      <meshStandardMaterial color="#d8c8a8" roughness={0.7} metalness={0.1} />
+                    </mesh>
+                  </group>
+                );
+              })}
+            </group>
           )}
         </>
       )}
@@ -3583,16 +4593,90 @@ const Building: React.FC<{
       )}
       {hasWealthyDoorOrnaments && (
         <group position={[0, -finalHeight / 2, 0]}>
-          <PotTree position={[
-            doorPos[0] + doorOutwardOffset[0] + doorSideOffset[0],
-            0.2,
-            doorPos[2] + doorOutwardOffset[2] + doorSideOffset[2]
-          ]} />
-          <PotTree position={[
-            doorPos[0] + doorOutwardOffset[0] - doorSideOffset[0],
-            0.2,
-            doorPos[2] + doorOutwardOffset[2] - doorSideOffset[2]
-          ]} />
+          {/* Decorative urns flanking door */}
+          <DecorativeUrn
+            position={[
+              doorPos[0] + doorOutwardOffset[0] + doorSideOffset[0],
+              0,
+              doorPos[2] + doorOutwardOffset[2] + doorSideOffset[2]
+            ]}
+            scale={0.5}
+            variant={seededRandom(localSeed + 125) > 0.5 ? 'amphora' : 'vase'}
+            color={ISLAMIC_COLORS.terracotta}
+          />
+          <DecorativeUrn
+            position={[
+              doorPos[0] + doorOutwardOffset[0] - doorSideOffset[0],
+              0,
+              doorPos[2] + doorOutwardOffset[2] - doorSideOffset[2]
+            ]}
+            scale={0.5}
+            variant={seededRandom(localSeed + 126) > 0.5 ? 'amphora' : 'vase'}
+            color={ISLAMIC_COLORS.terracotta}
+          />
+
+          {/* Muqarnas above doorway */}
+          {seededRandom(localSeed + 127) > 0.45 && (
+            <Muqarnas
+              position={[
+                doorPos[0],
+                2.6,
+                doorPos[2] + (data.doorSide === 0 ? 0.2 : data.doorSide === 2 ? -0.2 : 0)
+              ]}
+              width={1.8}
+              depth={0.4}
+              tiers={2}
+              color={ISLAMIC_COLORS.limestone}
+              accentColor={seededRandom(localSeed + 128) > 0.5 ? ISLAMIC_COLORS.cobaltBlue : ISLAMIC_COLORS.turquoise}
+            />
+          )}
+
+          {/* Geometric tile panel above door */}
+          {seededRandom(localSeed + 129) > 0.5 && (
+            <GeometricTile
+              position={[
+                doorPos[0] + (data.doorSide === 1 ? 0.15 : data.doorSide === 3 ? -0.15 : 0),
+                3.2,
+                doorPos[2] + (data.doorSide === 0 ? 0.15 : data.doorSide === 2 ? -0.15 : 0)
+              ]}
+              rotation={[
+                0,
+                data.doorSide === 0 ? 0 : data.doorSide === 2 ? Math.PI : data.doorSide === 1 ? -Math.PI / 2 : Math.PI / 2,
+                0
+              ]}
+              size={1.2}
+              pattern={['star8', 'star6', 'hexagonal'][Math.floor(seededRandom(localSeed + 130) * 3)] as 'star8' | 'star6' | 'hexagonal'}
+              primaryColor={ISLAMIC_COLORS.cobaltBlue}
+              secondaryColor={ISLAMIC_COLORS.cream}
+              accentColor={ISLAMIC_COLORS.gold}
+            />
+          )}
+
+          {/* Lion sculptures for grander wealthy buildings */}
+          {seededRandom(localSeed + 131) > 0.75 && (
+            <>
+              <LionSculpture
+                position={[
+                  doorPos[0] + doorOutwardOffset[0] * 1.5 + doorSideOffset[0] * 1.3,
+                  0,
+                  doorPos[2] + doorOutwardOffset[2] * 1.5 + doorSideOffset[2] * 1.3
+                ]}
+                rotation={data.doorSide === 0 ? Math.PI : data.doorSide === 2 ? 0 : data.doorSide === 1 ? Math.PI / 2 : -Math.PI / 2}
+                scale={0.45}
+                material={seededRandom(localSeed + 132) > 0.6 ? 'bronze' : 'stone'}
+              />
+              <LionSculpture
+                position={[
+                  doorPos[0] + doorOutwardOffset[0] * 1.5 - doorSideOffset[0] * 1.3,
+                  0,
+                  doorPos[2] + doorOutwardOffset[2] * 1.5 - doorSideOffset[2] * 1.3
+                ]}
+                rotation={data.doorSide === 0 ? Math.PI : data.doorSide === 2 ? 0 : data.doorSide === 1 ? Math.PI / 2 : -Math.PI / 2}
+                scale={0.45}
+                material={seededRandom(localSeed + 132) > 0.6 ? 'bronze' : 'stone'}
+              />
+            </>
+          )}
         </group>
       )}
 
@@ -3639,8 +4723,9 @@ const InstancedDecorations: React.FC<{
         : building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
       const height = baseHeight * districtScale;
 
-      const hasMarketOrnaments = district === 'MARKET' && seededRandom(localSeed + 81) > 0.6;
-      const hasResidentialClutter = district !== 'MARKET' && seededRandom(localSeed + 83) > (district === 'HOVELS' ? 0.25 : 0.5);
+      const marketDistrict = district === 'MARKET' || district === 'STRAIGHT_STREET' || district === 'SOUQ_AXIS' || district === 'MIDAN';
+      const hasMarketOrnaments = marketDistrict && seededRandom(localSeed + 81) > 0.6;
+      const hasResidentialClutter = !marketDistrict && seededRandom(localSeed + 83) > (district === 'HOVELS' ? 0.25 : 0.5);
       const clutterType = Math.floor(seededRandom(localSeed + 84) * 3);
       const ornamentType = Math.floor(seededRandom(localSeed + 82) * 3);
 
@@ -3755,19 +4840,877 @@ const InstancedDecorations: React.FC<{
   );
 };
 
+// ==================== INSTANCED GROUND CLUTTER ====================
+// Bread ovens, firewood stacks, rolled carpets - placed near buildings
+
+const InstancedGroundClutter: React.FC<{
+  buildings: BuildingMetadata[];
+  district: DistrictType;
+}> = ({ buildings, district }) => {
+  // Refs for each prop type
+  const ovenDomeRef = useRef<THREE.InstancedMesh>(null);
+  const ovenOpeningRef = useRef<THREE.InstancedMesh>(null);
+  const ovenBaseRef = useRef<THREE.InstancedMesh>(null);
+  const firewoodLogRef = useRef<THREE.InstancedMesh>(null);
+  const carpetRef = useRef<THREE.InstancedMesh>(null);
+  const carpetTasselRef = useRef<THREE.InstancedMesh>(null);
+  // Biome-specific refs
+  const cartWheelRef = useRef<THREE.InstancedMesh>(null);
+  const strawPileRef = useRef<THREE.InstancedMesh>(null);
+  const luggageRef = useRef<THREE.InstancedMesh>(null);
+  const sandalRackRef = useRef<THREE.InstancedMesh>(null);
+  const sandalRackShelfRef = useRef<THREE.InstancedMesh>(null);
+  const basinRef = useRef<THREE.InstancedMesh>(null);
+  const basinWaterRef = useRef<THREE.InstancedMesh>(null);
+  const birdbathBaseRef = useRef<THREE.InstancedMesh>(null);
+  const birdbathBowlRef = useRef<THREE.InstancedMesh>(null);
+  const decorTileRef = useRef<THREE.InstancedMesh>(null);
+  const tempObj = useMemo(() => new THREE.Object3D(), []);
+
+  // Carpet color palette - rich Damascus textile colors
+  const CARPET_COLORS = useMemo(() => [
+    '#8B2323', // Deep crimson
+    '#6B3A3A', // Burgundy
+    '#4A3728', // Chocolate brown
+    '#2B4B6F', // Indigo blue
+    '#3D5A3D', // Forest green
+    '#6B4423', // Rust
+    '#483D8B', // Slate blue
+    '#8B4513', // Saddle brown
+  ], []);
+
+  // Wood colors for firewood variation
+  const WOOD_COLORS = useMemo(() => [
+    '#5a4030', // Dark brown
+    '#6b4a35', // Medium brown
+    '#7a5a45', // Light brown
+    '#4a3525', // Very dark
+    '#8b6b50', // Pale wood
+  ], []);
+
+  // Decorative tile colors - Islamic geometric tile palette
+  const TILE_COLORS = useMemo(() => [
+    '#2a5a8a', // Cobalt blue
+    '#1a7a6a', // Teal/turquoise
+    '#4a3a6a', // Deep purple
+    '#8a6a3a', // Golden ochre
+    '#3a6a4a', // Emerald green
+    '#6a3a4a', // Burgundy
+    '#5a7a8a', // Grey-blue
+  ], []);
+
+  const clutterData = useMemo(() => {
+    const ovens: { dome: THREE.Matrix4; opening: THREE.Matrix4; base: THREE.Matrix4 }[] = [];
+    const firewood: { matrix: THREE.Matrix4; colorIndex: number }[] = [];
+    const carpets: { roll: THREE.Matrix4; tassel: THREE.Matrix4; colorIndex: number }[] = [];
+    // Biome-specific data
+    const cartWheels: THREE.Matrix4[] = [];
+    const strawPiles: THREE.Matrix4[] = [];
+    const luggage: THREE.Matrix4[] = [];
+    const sandalRacks: { frame: THREE.Matrix4; shelf: THREE.Matrix4 }[] = [];
+    const basins: { base: THREE.Matrix4; water: THREE.Matrix4 }[] = [];
+    const birdbaths: { base: THREE.Matrix4; bowl: THREE.Matrix4 }[] = [];
+    const decorTiles: { matrix: THREE.Matrix4; colorIndex: number }[] = [];
+
+    const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
+
+    buildings.forEach((building) => {
+      const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
+      const localSeed = building.position[0] * 1000 + building.position[2];
+      const bx = building.position[0];
+      const by = building.position[1];
+      const bz = building.position[2];
+
+      // BREAD OVENS - more common in residential areas (hovels, residential)
+      // ~12% chance, not in market or wealthy
+      if (district !== 'MARKET' && district !== 'WEALTHY' && seededRandom(localSeed + 500) > 0.88) {
+        const side = Math.floor(seededRandom(localSeed + 501) * 4);
+        if (side !== building.doorSide) {
+          const ovenSize = 0.6 + seededRandom(localSeed + 502) * 0.3;
+          let ox = bx, oz = bz;
+          let ovenRot = 0;
+
+          if (side === 0) { oz += buildingSize / 2 + 1.0; ovenRot = 0; }
+          else if (side === 1) { ox += buildingSize / 2 + 1.0; ovenRot = Math.PI / 2; }
+          else if (side === 2) { oz -= buildingSize / 2 + 1.0; ovenRot = Math.PI; }
+          else { ox -= buildingSize / 2 + 1.0; ovenRot = -Math.PI / 2; }
+
+          // Dome
+          tempObj.position.set(ox, by + ovenSize * 0.4, oz);
+          tempObj.rotation.set(0, ovenRot, 0);
+          tempObj.scale.set(ovenSize, ovenSize, ovenSize);
+          tempObj.updateMatrix();
+          const domeMatrix = tempObj.matrix.clone();
+
+          // Base rim (cylinder around bottom of dome)
+          tempObj.position.set(ox, by + 0.08, oz);
+          tempObj.rotation.set(0, 0, 0);
+          tempObj.scale.set(ovenSize * 1.1, 1, ovenSize * 1.1);
+          tempObj.updateMatrix();
+          const baseMatrix = tempObj.matrix.clone();
+
+          // Opening (dark hole at front)
+          const openingOffset = new THREE.Vector3(0, -0.1, 0.45 * ovenSize);
+          openingOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), ovenRot);
+          tempObj.position.set(ox + openingOffset.x, by + ovenSize * 0.25, oz + openingOffset.z);
+          tempObj.scale.set(ovenSize * 0.5, ovenSize * 0.6, 0.1);
+          tempObj.updateMatrix();
+          const openingMatrix = tempObj.matrix.clone();
+
+          ovens.push({ dome: domeMatrix, opening: openingMatrix, base: baseMatrix });
+        }
+      }
+
+      // FIREWOOD STACKS - common everywhere, ~18% chance
+      if (seededRandom(localSeed + 510) > 0.82) {
+        const side = Math.floor(seededRandom(localSeed + 511) * 4);
+        if (side !== building.doorSide) {
+          let fx = bx, fz = bz;
+          const stackRot = seededRandom(localSeed + 512) * 0.3 - 0.15;
+
+          if (side === 0) { fz += buildingSize / 2 + 0.6; }
+          else if (side === 1) { fx += buildingSize / 2 + 0.6; }
+          else if (side === 2) { fz -= buildingSize / 2 + 0.6; }
+          else { fx -= buildingSize / 2 + 0.6; }
+
+          // Create a stack of 4-6 logs
+          const logCount = 4 + Math.floor(seededRandom(localSeed + 513) * 3);
+          for (let i = 0; i < logCount; i++) {
+            const layer = Math.floor(i / 2);
+            const xOff = (i % 2) * 0.25 - 0.125 + seededRandom(localSeed + 514 + i) * 0.1;
+            const yOff = layer * 0.18;
+            const zOff = seededRandom(localSeed + 515 + i) * 0.15 - 0.075;
+            const logRot = stackRot + (side === 1 || side === 3 ? Math.PI / 2 : 0);
+            const colorIndex = Math.floor(seededRandom(localSeed + 516 + i) * WOOD_COLORS.length);
+
+            tempObj.position.set(fx + xOff, by + 0.1 + yOff, fz + zOff);
+            tempObj.rotation.set(0, logRot, Math.PI / 2);
+            tempObj.scale.set(1, 1, 1);
+            tempObj.updateMatrix();
+            firewood.push({ matrix: tempObj.matrix.clone(), colorIndex });
+          }
+        }
+      }
+
+      // ROLLED CARPETS - more common in market/wealthy, ~10% overall
+      const carpetChance = (district === 'MARKET' || district === 'STRAIGHT_STREET' || district === 'SOUQ_AXIS' || district === 'MIDAN')
+        ? 0.82
+        : district === 'WEALTHY' ? 0.85 : 0.92;
+      if (seededRandom(localSeed + 520) > carpetChance) {
+        const side = Math.floor(seededRandom(localSeed + 521) * 4);
+        if (side !== building.doorSide) {
+          let cx = bx, cz = bz;
+          let carpetRot = 0;
+          const lean = 0.25 + seededRandom(localSeed + 522) * 0.15; // Lean angle against wall
+
+          if (side === 0) { cz += buildingSize / 2 + 0.3; carpetRot = 0; }
+          else if (side === 1) { cx += buildingSize / 2 + 0.3; carpetRot = Math.PI / 2; }
+          else if (side === 2) { cz -= buildingSize / 2 + 0.3; carpetRot = Math.PI; }
+          else { cx -= buildingSize / 2 + 0.3; carpetRot = -Math.PI / 2; }
+
+          const carpetLength = 1.2 + seededRandom(localSeed + 523) * 0.6;
+          const colorIndex = Math.floor(seededRandom(localSeed + 524) * CARPET_COLORS.length);
+
+          // Rolled carpet cylinder - leaning against wall
+          tempObj.position.set(cx, by + carpetLength * 0.45, cz);
+          tempObj.rotation.set(lean, carpetRot, 0);
+          tempObj.scale.set(1, carpetLength, 1);
+          tempObj.updateMatrix();
+          const rollMatrix = tempObj.matrix.clone();
+
+          // Tassel at bottom
+          const tasselOffset = new THREE.Vector3(0, -carpetLength * 0.5, 0.15);
+          tasselOffset.applyAxisAngle(new THREE.Vector3(1, 0, 0), lean);
+          tasselOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), carpetRot);
+          tempObj.position.set(cx + tasselOffset.x, by + 0.1, cz + tasselOffset.z);
+          tempObj.rotation.set(0, carpetRot, 0);
+          tempObj.scale.set(1, 1, 1);
+          tempObj.updateMatrix();
+          const tasselMatrix = tempObj.matrix.clone();
+
+          carpets.push({ roll: rollMatrix, tassel: tasselMatrix, colorIndex });
+        }
+      }
+
+      // ========== BIOME-SPECIFIC ITEMS ==========
+
+      // HOVELS: Broken cart wheels (~15% chance)
+      if (district === 'HOVELS' && seededRandom(localSeed + 700) > 0.85) {
+        const side = Math.floor(seededRandom(localSeed + 701) * 4);
+        if (side !== building.doorSide) {
+          let wx = bx, wz = bz;
+          if (side === 0) wz += buildingSize / 2 + 0.5;
+          else if (side === 1) wx += buildingSize / 2 + 0.5;
+          else if (side === 2) wz -= buildingSize / 2 + 0.5;
+          else wx -= buildingSize / 2 + 0.5;
+
+          const wheelLean = 0.3 + seededRandom(localSeed + 702) * 0.4;
+          const wheelRot = seededRandom(localSeed + 703) * Math.PI * 2;
+
+          tempObj.position.set(wx, by + 0.4, wz);
+          tempObj.rotation.set(wheelLean, wheelRot, Math.PI / 2);
+          tempObj.scale.set(1, 1, 1);
+          tempObj.updateMatrix();
+          cartWheels.push(tempObj.matrix.clone());
+        }
+      }
+
+      // HOVELS: Straw piles (~20% chance)
+      if (district === 'HOVELS' && seededRandom(localSeed + 710) > 0.8) {
+        const side = Math.floor(seededRandom(localSeed + 711) * 4);
+        if (side !== building.doorSide) {
+          let sx = bx, sz = bz;
+          if (side === 0) sz += buildingSize / 2 + 0.8;
+          else if (side === 1) sx += buildingSize / 2 + 0.8;
+          else if (side === 2) sz -= buildingSize / 2 + 0.8;
+          else sx -= buildingSize / 2 + 0.8;
+
+          const pileScale = 0.6 + seededRandom(localSeed + 712) * 0.5;
+          tempObj.position.set(sx, by + 0.15 * pileScale, sz);
+          tempObj.rotation.set(0, seededRandom(localSeed + 713) * Math.PI, 0);
+          tempObj.scale.set(pileScale, pileScale * 0.6, pileScale);
+          tempObj.updateMatrix();
+          strawPiles.push(tempObj.matrix.clone());
+        }
+      }
+
+      // CARAVANSERAI: Luggage boxes (~25% chance)
+      if ((district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT') && seededRandom(localSeed + 720) > 0.75) {
+        const side = Math.floor(seededRandom(localSeed + 721) * 4);
+        if (side !== building.doorSide) {
+          let lx = bx, lz = bz;
+          if (side === 0) lz += buildingSize / 2 + 0.7;
+          else if (side === 1) lx += buildingSize / 2 + 0.7;
+          else if (side === 2) lz -= buildingSize / 2 + 0.7;
+          else lx -= buildingSize / 2 + 0.7;
+
+          tempObj.position.set(lx, by + 0.25, lz);
+          tempObj.rotation.set(0, seededRandom(localSeed + 722) * 0.3 - 0.15, 0);
+          tempObj.scale.set(1, 1, 1);
+          tempObj.updateMatrix();
+          luggage.push(tempObj.matrix.clone());
+        }
+      }
+
+      // RELIGIOUS: Sandal racks (~20% chance, near doors)
+      if (district === 'RELIGIOUS' && seededRandom(localSeed + 730) > 0.8) {
+        // Place near door
+        let rx = bx, rz = bz;
+        const doorSide = building.doorSide;
+        if (doorSide === 0) { rz += buildingSize / 2 + 0.3; rx += 1.5; }
+        else if (doorSide === 1) { rx += buildingSize / 2 + 0.3; rz += 1.5; }
+        else if (doorSide === 2) { rz -= buildingSize / 2 + 0.3; rx -= 1.5; }
+        else { rx -= buildingSize / 2 + 0.3; rz -= 1.5; }
+
+        const rackRot = doorSide * (Math.PI / 2);
+        tempObj.position.set(rx, by + 0.4, rz);
+        tempObj.rotation.set(0, rackRot, 0);
+        tempObj.scale.set(1, 1, 1);
+        tempObj.updateMatrix();
+        const frameMatrix = tempObj.matrix.clone();
+
+        tempObj.position.set(rx, by + 0.25, rz);
+        tempObj.updateMatrix();
+        const shelfMatrix = tempObj.matrix.clone();
+
+        sandalRacks.push({ frame: frameMatrix, shelf: shelfMatrix });
+      }
+
+      // RELIGIOUS: Ablution basins (rare - max 2 per map, tracked separately)
+      if (district === 'RELIGIOUS' && basins.length < 2 && seededRandom(localSeed + 740) > 0.92) {
+        let abx = bx, abz = bz;
+        const abSide = Math.floor(seededRandom(localSeed + 741) * 4);
+        if (abSide === 0) abz += buildingSize / 2 + 1.5;
+        else if (abSide === 1) abx += buildingSize / 2 + 1.5;
+        else if (abSide === 2) abz -= buildingSize / 2 + 1.5;
+        else abx -= buildingSize / 2 + 1.5;
+
+        tempObj.position.set(abx, by + 0.35, abz);
+        tempObj.rotation.set(0, 0, 0);
+        tempObj.scale.set(1, 1, 1);
+        tempObj.updateMatrix();
+        const baseMatrix = tempObj.matrix.clone();
+
+        tempObj.position.set(abx, by + 0.5, abz);
+        tempObj.updateMatrix();
+        const waterMatrix = tempObj.matrix.clone();
+
+        basins.push({ base: baseMatrix, water: waterMatrix });
+      }
+
+      // WEALTHY: Bird baths (~12% chance)
+      if ((district === 'WEALTHY' || district === 'SALHIYYA') && seededRandom(localSeed + 750) > 0.88) {
+        const side = Math.floor(seededRandom(localSeed + 751) * 4);
+        if (side !== building.doorSide) {
+          let bbx = bx, bbz = bz;
+          if (side === 0) bbz += buildingSize / 2 + 1.2;
+          else if (side === 1) bbx += buildingSize / 2 + 1.2;
+          else if (side === 2) bbz -= buildingSize / 2 + 1.2;
+          else bbx -= buildingSize / 2 + 1.2;
+
+          tempObj.position.set(bbx, by + 0.4, bbz);
+          tempObj.rotation.set(0, 0, 0);
+          tempObj.scale.set(1, 1, 1);
+          tempObj.updateMatrix();
+          const baseMatrix = tempObj.matrix.clone();
+
+          tempObj.position.set(bbx, by + 0.75, bbz);
+          tempObj.updateMatrix();
+          const bowlMatrix = tempObj.matrix.clone();
+
+          birdbaths.push({ base: baseMatrix, bowl: bowlMatrix });
+        }
+      }
+
+      // WEALTHY: Decorative tiles near doorways (~30% chance)
+      if ((district === 'WEALTHY' || district === 'SALHIYYA') && seededRandom(localSeed + 760) > 0.7) {
+        let tx = bx, tz = bz;
+        const doorSide = building.doorSide;
+        if (doorSide === 0) tz += buildingSize / 2 + 0.6;
+        else if (doorSide === 1) tx += buildingSize / 2 + 0.6;
+        else if (doorSide === 2) tz -= buildingSize / 2 + 0.6;
+        else tx -= buildingSize / 2 + 0.6;
+
+        const colorIndex = Math.floor(seededRandom(localSeed + 761) * TILE_COLORS.length);
+        tempObj.position.set(tx, by + 0.02, tz);
+        tempObj.rotation.set(-Math.PI / 2, 0, doorSide * (Math.PI / 2));
+        tempObj.scale.set(1.5, 1.5, 1);
+        tempObj.updateMatrix();
+        decorTiles.push({ matrix: tempObj.matrix.clone(), colorIndex });
+      }
+    });
+
+    return { ovens, firewood, carpets, cartWheels, strawPiles, luggage, sandalRacks, basins, birdbaths, decorTiles };
+  }, [buildings, district, CARPET_COLORS, WOOD_COLORS, TILE_COLORS]);
+
+  useEffect(() => {
+    // Set oven matrices
+    if (ovenDomeRef.current && clutterData.ovens.length > 0) {
+      clutterData.ovens.forEach((data, i) => {
+        ovenDomeRef.current!.setMatrixAt(i, data.dome);
+        if (ovenOpeningRef.current) ovenOpeningRef.current.setMatrixAt(i, data.opening);
+        if (ovenBaseRef.current) ovenBaseRef.current.setMatrixAt(i, data.base);
+      });
+      ovenDomeRef.current.instanceMatrix.needsUpdate = true;
+      if (ovenOpeningRef.current) ovenOpeningRef.current.instanceMatrix.needsUpdate = true;
+      if (ovenBaseRef.current) ovenBaseRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Set firewood matrices and colors
+    if (firewoodLogRef.current && clutterData.firewood.length > 0) {
+      const tempColor = new THREE.Color();
+
+      clutterData.firewood.forEach((data, i) => {
+        firewoodLogRef.current!.setMatrixAt(i, data.matrix);
+        tempColor.set(WOOD_COLORS[data.colorIndex]);
+        firewoodLogRef.current!.setColorAt(i, tempColor);
+      });
+      firewoodLogRef.current.instanceMatrix.needsUpdate = true;
+      if (firewoodLogRef.current.instanceColor) firewoodLogRef.current.instanceColor.needsUpdate = true;
+    }
+
+    // Set carpet matrices and colors
+    if (carpetRef.current && clutterData.carpets.length > 0) {
+      const tempColor = new THREE.Color();
+
+      clutterData.carpets.forEach((data, i) => {
+        carpetRef.current!.setMatrixAt(i, data.roll);
+        if (carpetTasselRef.current) carpetTasselRef.current.setMatrixAt(i, data.tassel);
+
+        // Set per-instance color using Three.js built-in method
+        tempColor.set(CARPET_COLORS[data.colorIndex]);
+        carpetRef.current!.setColorAt(i, tempColor);
+      });
+
+      carpetRef.current.instanceMatrix.needsUpdate = true;
+      if (carpetRef.current.instanceColor) carpetRef.current.instanceColor.needsUpdate = true;
+      if (carpetTasselRef.current) carpetTasselRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // ========== BIOME-SPECIFIC MATRIX UPDATES ==========
+
+    // Cart wheels (HOVELS)
+    if (cartWheelRef.current && clutterData.cartWheels.length > 0) {
+      clutterData.cartWheels.forEach((matrix, i) => {
+        cartWheelRef.current!.setMatrixAt(i, matrix);
+      });
+      cartWheelRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Straw piles (HOVELS)
+    if (strawPileRef.current && clutterData.strawPiles.length > 0) {
+      clutterData.strawPiles.forEach((matrix, i) => {
+        strawPileRef.current!.setMatrixAt(i, matrix);
+      });
+      strawPileRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Luggage (CARAVANSERAI)
+    if (luggageRef.current && clutterData.luggage.length > 0) {
+      clutterData.luggage.forEach((matrix, i) => {
+        luggageRef.current!.setMatrixAt(i, matrix);
+      });
+      luggageRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Sandal racks (RELIGIOUS)
+    if (sandalRackRef.current && clutterData.sandalRacks.length > 0) {
+      clutterData.sandalRacks.forEach((data, i) => {
+        sandalRackRef.current!.setMatrixAt(i, data.frame);
+        if (sandalRackShelfRef.current) sandalRackShelfRef.current.setMatrixAt(i, data.shelf);
+      });
+      sandalRackRef.current.instanceMatrix.needsUpdate = true;
+      if (sandalRackShelfRef.current) sandalRackShelfRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Ablution basins (RELIGIOUS)
+    if (basinRef.current && clutterData.basins.length > 0) {
+      clutterData.basins.forEach((data, i) => {
+        basinRef.current!.setMatrixAt(i, data.base);
+        if (basinWaterRef.current) basinWaterRef.current.setMatrixAt(i, data.water);
+      });
+      basinRef.current.instanceMatrix.needsUpdate = true;
+      if (basinWaterRef.current) basinWaterRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Bird baths (WEALTHY)
+    if (birdbathBaseRef.current && clutterData.birdbaths.length > 0) {
+      clutterData.birdbaths.forEach((data, i) => {
+        birdbathBaseRef.current!.setMatrixAt(i, data.base);
+        if (birdbathBowlRef.current) birdbathBowlRef.current.setMatrixAt(i, data.bowl);
+      });
+      birdbathBaseRef.current.instanceMatrix.needsUpdate = true;
+      if (birdbathBowlRef.current) birdbathBowlRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Decorative tiles (WEALTHY) - with per-instance colors
+    if (decorTileRef.current && clutterData.decorTiles.length > 0) {
+      const tempColor = new THREE.Color();
+
+      clutterData.decorTiles.forEach((data, i) => {
+        decorTileRef.current!.setMatrixAt(i, data.matrix);
+        tempColor.set(TILE_COLORS[data.colorIndex]);
+        decorTileRef.current!.setColorAt(i, tempColor);
+      });
+      decorTileRef.current.instanceMatrix.needsUpdate = true;
+      if (decorTileRef.current.instanceColor) decorTileRef.current.instanceColor.needsUpdate = true;
+    }
+  }, [clutterData, CARPET_COLORS, WOOD_COLORS, TILE_COLORS]);
+
+  return (
+    <>
+      {/* Bread Oven - terracotta clay dome with base */}
+      {clutterData.ovens.length > 0 && (
+        <>
+          {/* Dome */}
+          <instancedMesh ref={ovenDomeRef} args={[undefined, undefined, clutterData.ovens.length]} castShadow receiveShadow>
+            <sphereGeometry args={[0.5, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+            <meshStandardMaterial color="#a86840" roughness={0.9} />
+          </instancedMesh>
+          {/* Base rim - darker clay */}
+          <instancedMesh ref={ovenBaseRef} args={[undefined, undefined, clutterData.ovens.length]} castShadow>
+            <cylinderGeometry args={[0.52, 0.55, 0.16, 12]} />
+            <meshStandardMaterial color="#8a5530" roughness={0.95} />
+          </instancedMesh>
+          {/* Oven opening - dark interior */}
+          <instancedMesh ref={ovenOpeningRef} args={[undefined, undefined, clutterData.ovens.length]}>
+            <circleGeometry args={[0.2, 8]} />
+            <meshStandardMaterial color="#1a1008" roughness={1} />
+          </instancedMesh>
+        </>
+      )}
+
+      {/* Firewood Logs - rough brown wood with per-instance colors */}
+      {clutterData.firewood.length > 0 && (
+        <instancedMesh ref={firewoodLogRef} args={[undefined, undefined, clutterData.firewood.length]} castShadow>
+          <cylinderGeometry args={[0.06, 0.07, 0.5, 6]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.95} />
+        </instancedMesh>
+      )}
+
+      {/* Rolled Carpets - colorful rolled cylinders with per-instance colors */}
+      {clutterData.carpets.length > 0 && (
+        <>
+          <instancedMesh ref={carpetRef} args={[undefined, undefined, clutterData.carpets.length]} castShadow>
+            <cylinderGeometry args={[0.15, 0.15, 1, 12]} />
+            <meshStandardMaterial color="#ffffff" roughness={0.85} />
+          </instancedMesh>
+          {/* Tassels at carpet ends - golden fringe */}
+          <instancedMesh ref={carpetTasselRef} args={[undefined, undefined, clutterData.carpets.length]}>
+            <cylinderGeometry args={[0.12, 0.08, 0.15, 8]} />
+            <meshStandardMaterial color="#c9a86c" roughness={0.9} />
+          </instancedMesh>
+        </>
+      )}
+
+      {/* ========== BIOME-SPECIFIC PROPS ========== */}
+
+      {/* HOVELS: Broken Cart Wheels */}
+      {clutterData.cartWheels.length > 0 && (
+        <instancedMesh ref={cartWheelRef} args={[undefined, undefined, clutterData.cartWheels.length]} castShadow>
+          <torusGeometry args={[0.4, 0.05, 6, 16]} />
+          <meshStandardMaterial color="#5a4530" roughness={0.95} />
+        </instancedMesh>
+      )}
+
+      {/* HOVELS: Straw Piles */}
+      {clutterData.strawPiles.length > 0 && (
+        <instancedMesh ref={strawPileRef} args={[undefined, undefined, clutterData.strawPiles.length]} castShadow>
+          <sphereGeometry args={[0.5, 8, 6]} />
+          <meshStandardMaterial color="#c4a55a" roughness={1} />
+        </instancedMesh>
+      )}
+
+      {/* CARAVANSERAI: Luggage Boxes / Travel Chests */}
+      {clutterData.luggage.length > 0 && (
+        <instancedMesh ref={luggageRef} args={[undefined, undefined, clutterData.luggage.length]} castShadow>
+          <boxGeometry args={[0.7, 0.45, 0.45]} />
+          <meshStandardMaterial color="#6a4a30" roughness={0.9} />
+        </instancedMesh>
+      )}
+
+      {/* RELIGIOUS: Sandal Racks */}
+      {clutterData.sandalRacks.length > 0 && (
+        <>
+          {/* Rack frame (vertical posts) */}
+          <instancedMesh ref={sandalRackRef} args={[undefined, undefined, clutterData.sandalRacks.length]} castShadow>
+            <boxGeometry args={[0.8, 0.6, 0.08]} />
+            <meshStandardMaterial color="#7a5a3a" roughness={0.9} />
+          </instancedMesh>
+          {/* Shelf */}
+          <instancedMesh ref={sandalRackShelfRef} args={[undefined, undefined, clutterData.sandalRacks.length]}>
+            <boxGeometry args={[0.75, 0.04, 0.25]} />
+            <meshStandardMaterial color="#6a4a2a" roughness={0.95} />
+          </instancedMesh>
+        </>
+      )}
+
+      {/* RELIGIOUS: Ablution Basins */}
+      {clutterData.basins.length > 0 && (
+        <>
+          {/* Stone basin base */}
+          <instancedMesh ref={basinRef} args={[undefined, undefined, clutterData.basins.length]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.6, 0.7, 0.5, 12]} />
+            <meshStandardMaterial color="#9a8a7a" roughness={0.85} />
+          </instancedMesh>
+          {/* Water surface */}
+          <instancedMesh ref={basinWaterRef} args={[undefined, undefined, clutterData.basins.length]}>
+            <circleGeometry args={[0.55, 16]} />
+            <meshStandardMaterial color="#4a7a9a" roughness={0.2} metalness={0.1} transparent opacity={0.8} />
+          </instancedMesh>
+        </>
+      )}
+
+      {/* WEALTHY: Bird Baths */}
+      {clutterData.birdbaths.length > 0 && (
+        <>
+          {/* Pedestal base */}
+          <instancedMesh ref={birdbathBaseRef} args={[undefined, undefined, clutterData.birdbaths.length]} castShadow>
+            <cylinderGeometry args={[0.15, 0.25, 0.7, 10]} />
+            <meshStandardMaterial color="#c8b8a8" roughness={0.7} />
+          </instancedMesh>
+          {/* Bowl */}
+          <instancedMesh ref={birdbathBowlRef} args={[undefined, undefined, clutterData.birdbaths.length]} castShadow>
+            <cylinderGeometry args={[0.4, 0.35, 0.15, 12]} />
+            <meshStandardMaterial color="#d8c8b8" roughness={0.6} />
+          </instancedMesh>
+        </>
+      )}
+
+      {/* WEALTHY: Decorative Tiles - Islamic geometric tiles with varied colors */}
+      {clutterData.decorTiles.length > 0 && (
+        <instancedMesh ref={decorTileRef} args={[undefined, undefined, clutterData.decorTiles.length]} receiveShadow>
+          <planeGeometry args={[1.2, 1.2]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.4} metalness={0.15} />
+        </instancedMesh>
+      )}
+    </>
+  );
+};
+
+// ==================== HANGING BIRDCAGE ====================
+// Rare decorative element with animated bird - max 2 per map
+// Cage hangs from a metal bracket extending from the wall
+
+const HangingBirdcage: React.FC<{
+  position: [number, number, number];
+  wallSide: number; // 0-3 for N/E/S/W
+  birdColor: string;
+  birdSize: number;
+  seed: number;
+}> = ({ position, wallSide, birdColor, birdSize, seed }) => {
+  const birdRef = useRef<THREE.Group>(null);
+  const cageRef = useRef<THREE.Group>(null);
+  const rotation = wallSide * (Math.PI / 2);
+
+  // Animate bird - gentle hopping and head movement, plus subtle cage sway
+  useFrame(({ clock }) => {
+    if (!birdRef.current) return;
+    const t = clock.getElapsedTime() + seed;
+
+    // Hopping motion
+    const hop = Math.abs(Math.sin(t * 3)) * 0.03;
+    birdRef.current.position.y = hop;
+
+    // Head tilt
+    birdRef.current.rotation.z = Math.sin(t * 2) * 0.1;
+    birdRef.current.rotation.y = Math.sin(t * 1.5) * 0.2;
+
+    // Subtle cage sway
+    if (cageRef.current) {
+      cageRef.current.rotation.z = Math.sin(t * 0.8) * 0.02;
+      cageRef.current.rotation.x = Math.sin(t * 0.6 + 1) * 0.015;
+    }
+  });
+
+  const bracketLength = 0.5; // How far bracket extends from wall
+  const cageRadius = 0.18;
+  const cageHeight = 0.4;
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* Metal wall bracket - extends outward from wall */}
+      <mesh position={[0, 0, bracketLength / 2]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <cylinderGeometry args={[0.025, 0.02, bracketLength, 6]} />
+        <meshStandardMaterial color="#3a3530" roughness={0.6} metalness={0.4} />
+      </mesh>
+
+      {/* Wall mounting plate */}
+      <mesh position={[0, 0, 0.02]}>
+        <boxGeometry args={[0.12, 0.12, 0.02]} />
+        <meshStandardMaterial color="#4a4540" roughness={0.7} metalness={0.3} />
+      </mesh>
+
+      {/* Hook at end of bracket - small loop */}
+      <mesh position={[0, -0.04, bracketLength]} rotation={[0, Math.PI / 2, 0]}>
+        <torusGeometry args={[0.04, 0.012, 6, 12, Math.PI]} />
+        <meshStandardMaterial color="#3a3530" roughness={0.6} metalness={0.4} />
+      </mesh>
+
+      {/* Chain/hanging wire from hook to cage */}
+      <mesh position={[0, -0.12, bracketLength]} castShadow>
+        <cylinderGeometry args={[0.008, 0.008, 0.12, 4]} />
+        <meshStandardMaterial color="#5a5550" roughness={0.5} metalness={0.5} />
+      </mesh>
+
+      {/* The cage group - positioned hanging from bracket end */}
+      <group ref={cageRef} position={[0, -0.18, bracketLength]}>
+        {/* Cage ring (top) - horizontal torus */}
+        <mesh position={[0, 0, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[cageRadius, 0.015, 6, 16]} />
+          <meshStandardMaterial color="#4a4540" roughness={0.5} metalness={0.5} />
+        </mesh>
+
+        {/* Cage ring (middle) - horizontal torus */}
+        <mesh position={[0, -cageHeight / 2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[cageRadius * 0.9, 0.012, 6, 16]} />
+          <meshStandardMaterial color="#4a4540" roughness={0.5} metalness={0.5} />
+        </mesh>
+
+        {/* Cage ring (bottom) - horizontal torus */}
+        <mesh position={[0, -cageHeight, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[cageRadius, 0.015, 6, 16]} />
+          <meshStandardMaterial color="#4a4540" roughness={0.5} metalness={0.5} />
+        </mesh>
+
+        {/* Cage bars (vertical) - connect top and bottom rings */}
+        {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => {
+          const angle = (i / 8) * Math.PI * 2;
+          const x = Math.cos(angle) * (cageRadius - 0.01);
+          const z = Math.sin(angle) * (cageRadius - 0.01);
+          return (
+            <mesh
+              key={i}
+              position={[x, -cageHeight / 2, z]}
+            >
+              <cylinderGeometry args={[0.008, 0.008, cageHeight, 4]} />
+              <meshStandardMaterial color="#4a4540" roughness={0.5} metalness={0.5} />
+            </mesh>
+          );
+        })}
+
+        {/* Dome top - curved bars meeting at center */}
+        {[0, 1, 2, 3].map((i) => {
+          const angle = (i / 4) * Math.PI * 2;
+          return (
+            <mesh
+              key={`dome-${i}`}
+              position={[0, 0.08, 0]}
+              rotation={[0.6, angle, 0]}
+            >
+              <cylinderGeometry args={[0.006, 0.006, cageRadius * 1.1, 4]} />
+              <meshStandardMaterial color="#4a4540" roughness={0.5} metalness={0.5} />
+            </mesh>
+          );
+        })}
+
+        {/* Top finial */}
+        <mesh position={[0, 0.14, 0]}>
+          <sphereGeometry args={[0.025, 6, 6]} />
+          <meshStandardMaterial color="#5a5550" roughness={0.4} metalness={0.6} />
+        </mesh>
+
+        {/* Cage floor */}
+        <mesh position={[0, -cageHeight + 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[cageRadius - 0.02, 12]} />
+          <meshStandardMaterial color="#6a5a4a" roughness={0.9} side={THREE.DoubleSide} />
+        </mesh>
+
+        {/* Bird perch */}
+        <mesh position={[0, -cageHeight * 0.6, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.012, 0.012, cageRadius * 1.4, 6]} />
+          <meshStandardMaterial color="#7a6a5a" roughness={0.9} />
+        </mesh>
+
+        {/* Bird - sitting on perch */}
+        <group ref={birdRef} position={[0, -cageHeight * 0.55, 0]} scale={[birdSize, birdSize, birdSize]}>
+          {/* Body */}
+          <mesh>
+            <sphereGeometry args={[0.05, 8, 6]} />
+            <meshStandardMaterial color={birdColor} roughness={0.7} />
+          </mesh>
+          {/* Head */}
+          <mesh position={[0.04, 0.03, 0]}>
+            <sphereGeometry args={[0.03, 8, 6]} />
+            <meshStandardMaterial color={birdColor} roughness={0.7} />
+          </mesh>
+          {/* Eye */}
+          <mesh position={[0.055, 0.04, 0.015]}>
+            <sphereGeometry args={[0.008, 4, 4]} />
+            <meshStandardMaterial color="#101010" roughness={0.3} />
+          </mesh>
+          {/* Beak */}
+          <mesh position={[0.07, 0.03, 0]} rotation={[0, 0, -Math.PI / 2]}>
+            <coneGeometry args={[0.012, 0.03, 4]} />
+            <meshStandardMaterial color="#d4a020" roughness={0.6} />
+          </mesh>
+          {/* Tail */}
+          <mesh position={[-0.06, -0.01, 0]} rotation={[0, 0, 0.4]}>
+            <boxGeometry args={[0.05, 0.015, 0.025]} />
+            <meshStandardMaterial color={birdColor} roughness={0.7} />
+          </mesh>
+          {/* Wing */}
+          <mesh position={[0, 0, 0.035]} rotation={[0.2, 0, 0]}>
+            <sphereGeometry args={[0.035, 6, 4]} />
+            <meshStandardMaterial color={birdColor} roughness={0.7} />
+          </mesh>
+        </group>
+      </group>
+    </group>
+  );
+};
+
+// Birdcage placement component - handles finding valid positions
+const BirdcageSystem: React.FC<{
+  buildings: BuildingMetadata[];
+  district: DistrictType;
+  mapSeed: number;
+}> = ({ buildings, district, mapSeed }) => {
+  // Only show in MARKET or ALLEYS
+  if (district !== 'MARKET' && district !== 'ALLEYS') return null;
+
+  // Find up to 2 valid birdcage positions
+  const birdcages = useMemo(() => {
+    const cages: Array<{
+      position: [number, number, number];
+      wallSide: number;
+      birdColor: string;
+      birdSize: number;
+      seed: number;
+    }> = [];
+
+    const BIRD_COLORS = [
+      '#e6c832', // Canary yellow
+      '#4a9e4a', // Green
+      '#d45a30', // Orange
+      '#6a8fc0', // Blue-grey
+      '#c44040', // Red
+      '#f0e0a0', // Cream
+    ];
+
+    // Shuffle buildings deterministically and pick first 2 valid ones
+    const shuffled = [...buildings].sort((a, b) =>
+      seededRandom(a.position[0] * 100 + a.position[2] + mapSeed) -
+      seededRandom(b.position[0] * 100 + b.position[2] + mapSeed + 1)
+    );
+
+    for (const building of shuffled) {
+      if (cages.length >= 2) break;
+
+      const localSeed = building.position[0] * 1000 + building.position[2] + mapSeed;
+
+      // Only 15% of eligible buildings get a cage
+      if (seededRandom(localSeed + 600) > 0.15) continue;
+
+      // Pick a wall side (not door side)
+      const side = Math.floor(seededRandom(localSeed + 601) * 4);
+      if (side === building.doorSide) continue;
+
+      const buildingSize = CONSTANTS.BUILDING_SIZE * (building.sizeScale ?? 1);
+      const bx = building.position[0];
+      const by = building.position[1];
+      const bz = building.position[2];
+
+      let cx = bx, cz = bz;
+      const height = 2.5 + seededRandom(localSeed + 602) * 1.5; // 2.5-4 units high
+
+      if (side === 0) cz += buildingSize / 2 + 0.05;
+      else if (side === 1) cx += buildingSize / 2 + 0.05;
+      else if (side === 2) cz -= buildingSize / 2 + 0.05;
+      else cx -= buildingSize / 2 + 0.05;
+
+      const birdColor = BIRD_COLORS[Math.floor(seededRandom(localSeed + 603) * BIRD_COLORS.length)];
+      const birdSize = 0.8 + seededRandom(localSeed + 604) * 0.4;
+
+      cages.push({
+        position: [cx, by + height, cz],
+        wallSide: side,
+        birdColor,
+        birdSize,
+        seed: localSeed
+      });
+    }
+
+    return cages;
+  }, [buildings, district, mapSeed]);
+
+  return (
+    <>
+      {birdcages.map((cage, i) => (
+        <HangingBirdcage key={`birdcage-${i}`} {...cage} />
+      ))}
+    </>
+  );
+};
+
 // Instanced Window System - renders all windows with a single draw call
 const InstancedWindows: React.FC<{
   buildings: BuildingMetadata[];
   district: DistrictType;
   nightFactor: number;
 }> = ({ buildings, district, nightFactor }) => {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const frameRef = useRef<THREE.InstancedMesh>(null);
+  const interiorRef = useRef<THREE.InstancedMesh>(null);
+  const hBarRef = useRef<THREE.InstancedMesh>(null);
+  const vBarRef = useRef<THREE.InstancedMesh>(null);
   const glowMeshRef = useRef<THREE.InstancedMesh>(null);
   const glowMaterialRef = useRef<THREE.MeshStandardMaterial | null>(null);
   const tempObj = useMemo(() => new THREE.Object3D(), []);
 
+  // Window styles: 'simple' (50%), 'lattice' (30%), 'shuttered' (20%)
+  type WindowStyle = 'simple' | 'lattice' | 'shuttered';
+
   const windowData = useMemo(() => {
-    const data: Array<{ matrix: THREE.Matrix4; hasGlow: boolean; glowIntensity: number; colorIndex: number }> = [];
+    const data: Array<{
+      frameMatrix: THREE.Matrix4;
+      topFrameMatrix: THREE.Matrix4;
+      barMatrix: THREE.Matrix4;
+      shutterMatrix: THREE.Matrix4;
+      style: WindowStyle;
+      hasGlow: boolean;
+      glowIntensity: number;
+      colorIndex: number
+    }>= [];
     const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
 
     buildings.forEach((building) => {
@@ -3776,40 +5719,77 @@ const InstancedWindows: React.FC<{
         ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
         : building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
       const height = baseHeight * districtScale;
-    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
+      const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
 
       // Create windows for each side
       [0, 1, 2, 3].forEach((side) => {
-        if (side === building.doorSide && seededRandom(localSeed + side) < 0.8) return;
+        // Always skip windows on door side
+        if (side === building.doorSide) return;
         const sideRand = seededRandom(localSeed + side + 10);
         if (sideRand < 0.3) return;
 
         const rot = side * (Math.PI / 2);
-        const off = buildingSize / 2 + 0.12; // Increased from 0.05 to prevent z-fighting with walls
-        const wPos = new THREE.Vector3(building.position[0], height / 2 - 2 + building.position[1], building.position[2]);
+        const off = buildingSize / 2 + 0.05;
+
+        // Window Y position: ensure it's well above ground (min 2.5 units) and scaled to building height
+        // Place window at roughly 60% up the building, but minimum 2.5 units above ground
+        const windowY = Math.max(2.5, height * 0.55) + building.position[1];
+
+        const wPos = new THREE.Vector3(building.position[0], windowY, building.position[2]);
         if (side === 0) wPos.z += off;
         else if (side === 1) wPos.x += off;
         else if (side === 2) wPos.z -= off;
         else if (side === 3) wPos.x -= off;
 
-        tempObj.position.copy(wPos);
+        // Determine window style: 50% simple, 30% lattice, 20% shuttered
+        const styleRoll = seededRandom(localSeed + side + 300);
+        const style: WindowStyle = styleRoll < 0.5 ? 'simple' : styleRoll < 0.8 ? 'lattice' : 'shuttered';
+
+        // Dark recess position (slightly into wall)
+        const recessOffset = new THREE.Vector3(0, 0, -0.02);
+        recessOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+        tempObj.position.copy(wPos).add(recessOffset);
         tempObj.rotation.set(0, rot, 0);
         tempObj.scale.set(1, 1, 1);
         tempObj.updateMatrix();
+        const frameMatrix = tempObj.matrix.clone();
+
+        // Top frame border position (at top of window, on wall surface)
+        const topOffset = new THREE.Vector3(0, 0.9, 0.06);
+        topOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+        tempObj.position.copy(wPos).add(topOffset);
+        tempObj.updateMatrix();
+        const topFrameMatrix = tempObj.matrix.clone();
+
+        // Bar position (in front of recess) - only used for lattice style
+        const barOffset = new THREE.Vector3(0, 0, 0.06);
+        barOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+        tempObj.position.copy(wPos).add(barOffset);
+        tempObj.updateMatrix();
+        const barMatrix = tempObj.matrix.clone();
+
+        // Shutter position (on left side of window, angled open) - only for shuttered style
+        const shutterOffset = new THREE.Vector3(-0.55, 0, 0.15);
+        shutterOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rot);
+        tempObj.position.copy(wPos).add(shutterOffset);
+        // Angle the shutter slightly open (rotated around Y by additional 25 degrees)
+        tempObj.rotation.set(0, rot + 0.4, 0);
+        tempObj.updateMatrix();
+        const shutterMatrix = tempObj.matrix.clone();
 
         const windowGlowRoll = seededRandom(localSeed + side + 120);
         const hasGlow = windowGlowRoll > 0.5 && nightFactor > 0.2;
-        // GRAPHICS: Randomized brightness - wide range from dim candles to bright lanterns
-        // Range from 0.3 (very dim) to 2.3 (very bright) for realistic variation
         const glowIntensity = 0.3 + windowGlowRoll * 2.0;
 
-        // Three color variations weighted by historical accuracy:
-        // 60% dim candles (cheap), 30% medium lanterns, 10% bright lanterns (expensive)
         const colorRoll = seededRandom(localSeed + side + 200);
         const colorIndex = colorRoll < 0.60 ? 0 : colorRoll < 0.90 ? 1 : 2;
 
         data.push({
-          matrix: tempObj.matrix.clone(),
+          frameMatrix,
+          topFrameMatrix,
+          barMatrix,
+          shutterMatrix,
+          style,
           hasGlow,
           glowIntensity,
           colorIndex
@@ -3820,13 +5800,41 @@ const InstancedWindows: React.FC<{
     return data;
   }, [buildings, district, nightFactor]);
 
-  useEffect(() => {
-    if (!meshRef.current) return;
+  // Count windows by style for instanced mesh sizing
+  const latticeWindows = useMemo(() => windowData.filter(d => d.style === 'lattice'), [windowData]);
+  const shutteredWindows = useMemo(() => windowData.filter(d => d.style === 'shuttered'), [windowData]);
 
+  // Refs for style-specific meshes
+  const shutterRef = useRef<THREE.InstancedMesh>(null);
+
+  useEffect(() => {
+    if (!frameRef.current) return;
+
+    // Set matrices for all windows (dark recess and top frame)
     windowData.forEach((data, i) => {
-      meshRef.current!.setMatrixAt(i, data.matrix);
+      frameRef.current!.setMatrixAt(i, data.frameMatrix);
+      if (interiorRef.current) interiorRef.current.setMatrixAt(i, data.topFrameMatrix);
     });
-    meshRef.current.instanceMatrix.needsUpdate = true;
+    frameRef.current.instanceMatrix.needsUpdate = true;
+    if (interiorRef.current) interiorRef.current.instanceMatrix.needsUpdate = true;
+
+    // Set matrices only for lattice-style windows (crossbars)
+    if (hBarRef.current && vBarRef.current) {
+      latticeWindows.forEach((data, i) => {
+        hBarRef.current!.setMatrixAt(i, data.barMatrix);
+        vBarRef.current!.setMatrixAt(i, data.barMatrix);
+      });
+      hBarRef.current.instanceMatrix.needsUpdate = true;
+      vBarRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Set matrices only for shuttered windows
+    if (shutterRef.current) {
+      shutteredWindows.forEach((data, i) => {
+        shutterRef.current!.setMatrixAt(i, data.shutterMatrix);
+      });
+      shutterRef.current.instanceMatrix.needsUpdate = true;
+    }
 
     if (glowMeshRef.current) {
       let glowIndex = 0;
@@ -3840,8 +5848,8 @@ const InstancedWindows: React.FC<{
 
       windowData.forEach((data) => {
         if (data.hasGlow) {
-          // Decompose the original matrix
-          data.matrix.decompose(tempPosition, tempQuaternion, tempScale);
+          // Decompose the frame matrix for glow positioning
+          data.frameMatrix.decompose(tempPosition, tempQuaternion, tempScale);
 
           // Apply forward offset in local space (perpendicular to wall)
           const offsetWorld = forwardOffset.clone().applyQuaternion(tempQuaternion);
@@ -3876,7 +5884,7 @@ const InstancedWindows: React.FC<{
         );
       }
     }
-  }, [windowData]);
+  }, [windowData, latticeWindows, shutteredWindows]);
 
   // BUGFIX: Dynamically update emissiveIntensity when nightFactor changes
   useEffect(() => {
@@ -3953,17 +5961,44 @@ const InstancedWindows: React.FC<{
 
   return (
     <>
-      {/* Window frames */}
-      <instancedMesh ref={meshRef} args={[undefined, undefined, windowData.length]} receiveShadow>
-        <boxGeometry args={[1.4, 2.1, 0.08]} />
+      {/* Window dark interior recess - all windows have this */}
+      <instancedMesh ref={frameRef} args={[undefined, undefined, windowData.length]}>
+        <boxGeometry args={[1.2, 1.8, 0.08]} />
         <meshStandardMaterial
-          color="#1f140a"
-          roughness={1}
-          polygonOffset={true}
-          polygonOffsetFactor={-1}
-          polygonOffsetUnits={-1}
+          color={nightFactor > 0.3 ? "#1a1208" : "#2a1a10"}
+          roughness={0.95}
         />
       </instancedMesh>
+
+      {/* Top wooden frame border - all windows have this */}
+      <instancedMesh ref={interiorRef} args={[undefined, undefined, windowData.length]}>
+        <boxGeometry args={[1.4, 0.1, 0.1]} />
+        <meshStandardMaterial color="#8a7458" roughness={0.85} />
+      </instancedMesh>
+
+      {/* Horizontal divider bar - only lattice style (30%) */}
+      {latticeWindows.length > 0 && (
+        <instancedMesh ref={hBarRef} args={[undefined, undefined, latticeWindows.length]}>
+          <boxGeometry args={[1.2, 0.08, 0.12]} />
+          <meshStandardMaterial color="#7a6450" roughness={0.8} />
+        </instancedMesh>
+      )}
+
+      {/* Vertical divider bar - only lattice style (30%) */}
+      {latticeWindows.length > 0 && (
+        <instancedMesh ref={vBarRef} args={[undefined, undefined, latticeWindows.length]}>
+          <boxGeometry args={[0.08, 1.6, 0.12]} />
+          <meshStandardMaterial color="#7a6450" roughness={0.8} />
+        </instancedMesh>
+      )}
+
+      {/* Wooden shutter - only shuttered style (20%) */}
+      {shutteredWindows.length > 0 && (
+        <instancedMesh ref={shutterRef} args={[undefined, undefined, shutteredWindows.length]} castShadow>
+          <boxGeometry args={[0.6, 1.7, 0.06]} />
+          <meshStandardMaterial color="#6a5440" roughness={0.75} />
+        </instancedMesh>
+      )}
 
       {/* Window glow for lit windows at night */}
       {glowCount > 0 && (
@@ -4107,7 +6142,7 @@ export const Buildings: React.FC<{
           const jitterZ = (seededRandom(localSeed + 2) - 0.5) * 1.5;
           const worldX = x * cellSize + jitterX;
           const worldZ = z * cellSize + jitterZ;
-          const data = generateBuildingMetadata(localSeed, worldX, worldZ);
+          const data = generateBuildingMetadata(localSeed, worldX, worldZ, district);
           bldMetadata.push(data);
         }
       }
@@ -4134,7 +6169,7 @@ export const Buildings: React.FC<{
       positions.forEach((pos, idx) => {
         const [x, y, z] = pos;
         const localSeed = seed + idx * 1337;
-        const data = generateBuildingMetadata(localSeed, x, z);
+        const data = generateBuildingMetadata(localSeed, x, z, district);
         if (idx === 0) {
           data.type = BuildingType.COMMERCIAL;
           data.ownerProfession = district === 'OUTSKIRTS_FARMLAND' ? 'Farmer' : 'Trader';
@@ -4156,8 +6191,8 @@ export const Buildings: React.FC<{
         const z = i * spacing;
         const localSeedLeft = seed + i * 1337 + 11;
         const localSeedRight = seed + i * 1337 + 47;
-        const left = generateBuildingMetadata(localSeedLeft, -roadOffset, z);
-        const right = generateBuildingMetadata(localSeedRight, roadOffset, z);
+        const left = generateBuildingMetadata(localSeedLeft, -roadOffset, z, district);
+        const right = generateBuildingMetadata(localSeedRight, roadOffset, z, district);
         left.sizeScale = 0.9;
         right.sizeScale = 0.9;
         if (seededRandom(localSeedLeft) > 0.7) {
@@ -4172,6 +6207,37 @@ export const Buildings: React.FC<{
       }
       return bldMetadata.filter((b) => {
         const keep = seededRandom(seed + b.position[0] * 17 + b.position[2] * 23) > 0.25;
+        return keep;
+      });
+    }
+    if (district === 'BAB_SHARQI') {
+      const roadOffset = 14;
+      const spacing = 14;
+      const span = 4;
+      const gateBuffer = 12;
+      for (let i = -span; i <= span; i++) {
+        const z = i * spacing;
+        if (z > CONSTANTS.BOUNDARY - gateBuffer) continue;
+        const localSeedLeft = seed + i * 1337 + 19;
+        const localSeedRight = seed + i * 1337 + 59;
+        const jitterXLeft = (seededRandom(localSeedLeft + 3) - 0.5) * 1.2;
+        const jitterXRight = (seededRandom(localSeedRight + 5) - 0.5) * 1.2;
+        const left = generateBuildingMetadata(localSeedLeft, -roadOffset + jitterXLeft, z, district);
+        const right = generateBuildingMetadata(localSeedRight, roadOffset + jitterXRight, z, district);
+        left.sizeScale = 0.95;
+        right.sizeScale = 0.95;
+        if (seededRandom(localSeedLeft) > 0.65) {
+          left.type = BuildingType.COMMERCIAL;
+          left.ownerProfession = 'Textile Merchant';
+        }
+        if (seededRandom(localSeedRight) > 0.65) {
+          right.type = BuildingType.COMMERCIAL;
+          right.ownerProfession = 'Spice Trader';
+        }
+        bldMetadata.push(left, right);
+      }
+      return bldMetadata.filter((b) => {
+        const keep = seededRandom(seed + b.position[0] * 17 + b.position[2] * 23) > 0.2;
         return keep;
       });
     }
@@ -4197,7 +6263,7 @@ export const Buildings: React.FC<{
               : 1.0
     );
     const street = CONSTANTS.STREET_WIDTH * (
-      district === 'WEALTHY' ? 2.2
+      district === 'WEALTHY' ? 3.5  // Increased from 2.2 to 3.5 for more spacious wealthy district
         : district === 'HOVELS' ? 1.3  // Increased from 0.85 to 1.3 for better movement (was 4.25 units, now 6.5 units)
           : district === 'CIVIC' ? 2.6
             : district === 'SALHIYYA' ? 1.8
@@ -4205,19 +6271,26 @@ export const Buildings: React.FC<{
     );
     const gap = baseBuilding + street;
 
+    // Buffer zone around central garden/plaza in WEALTHY district
+    const gardenBufferRadius = district === 'WEALTHY' ? 35 : gap * 1.5;
+    const marketPlazaBufferRadius = (district === 'MARKET' && mapX === 0 && mapY === 0) ? 20 : 0;
+
     for (let x = -size; x <= size; x += gap) {
       for (let z = -size; z <= size; z += gap) {
         const localSeed = seed + Math.abs(x) * 1000 + Math.abs(z);
         const chance = seededRandom(localSeed);
-        const skipChance = district === 'WEALTHY' ? 0.55
+        const skipChance = district === 'WEALTHY' ? 0.30  // Lower skip chance to ensure 4-5+ residences
           : district === 'HOVELS' ? 0.35  // Increased from 0.2 to 0.35 for better movement (was 80% density, now 65%)
             : district === 'CIVIC' ? 0.7
               : district === 'SALHIYYA' ? 0.2
                 : 0.3;
         if (chance < skipChance) continue;
         if (district === 'CIVIC' && (x * x + z * z) < (gap * 2.2) * (gap * 2.2)) continue;
-        if (mapX === 0 && mapY === 0 && Math.abs(x) < gap * 1.5 && Math.abs(z) < gap * 1.5) continue;
-        const data = generateBuildingMetadata(localSeed, x, z);
+        // WEALTHY district: larger buffer around the central garden/plaza
+        if (district === 'WEALTHY' && (x * x + z * z) < gardenBufferRadius * gardenBufferRadius) continue;
+        // MARKET central plaza: keep clear around fountain and columns
+        if (marketPlazaBufferRadius > 0 && (x * x + z * z) < marketPlazaBufferRadius * marketPlazaBufferRadius) continue;
+        const data = generateBuildingMetadata(localSeed, x, z, district);
         if (district === 'SALHIYYA') {
           const h = heightmap ? sampleTerrainHeight(heightmap, x, z) : getTerrainHeight(district, x, z, terrainSeed);
           data.position = [x, h, z];
@@ -4237,6 +6310,24 @@ export const Buildings: React.FC<{
 
       // Keep only the first 3 civic buildings (best positioned)
       const keepCivic = new Set(civic.slice(0, 3).map(b => b.id));
+
+      limitedMetadata = bldMetadata.filter(b => {
+        if (b.type === BuildingType.RELIGIOUS) return keepReligious.has(b.id);
+        if (b.type === BuildingType.CIVIC) return keepCivic.has(b.id);
+        return true; // Keep all commercial and residential
+      });
+    }
+
+    // WEALTHY DISTRICT LIMITS: Max 1 civic and 1 religious - this is a residential area
+    if (district === 'WEALTHY') {
+      const religious = bldMetadata.filter(b => b.type === BuildingType.RELIGIOUS);
+      const civic = bldMetadata.filter(b => b.type === BuildingType.CIVIC);
+
+      // Keep at most 1 religious building (small neighborhood mosque)
+      const keepReligious = new Set(religious.slice(0, 1).map(b => b.id));
+
+      // Keep at most 1 civic building
+      const keepCivic = new Set(civic.slice(0, 1).map(b => b.id));
 
       limitedMetadata = bldMetadata.filter(b => {
         if (b.type === BuildingType.RELIGIOUS) return keepReligious.has(b.id);
@@ -4356,8 +6447,11 @@ export const Buildings: React.FC<{
   return (
     <group>
       {/* Instanced rendering for performance - reduces draw calls by ~10x */}
-      <InstancedWindows buildings={visibleBuildings} district={district} nightFactor={nightFactor} />
+      {/* Windows use ALL buildings (not visibleBuildings) to prevent flicker from mesh recreation during frustum culling */}
+      <InstancedWindows buildings={metadata} district={district} nightFactor={nightFactor} />
       <InstancedDecorations buildings={visibleBuildings} district={district} />
+      <InstancedGroundClutter buildings={visibleBuildings} district={district} />
+      <BirdcageSystem buildings={visibleBuildings} district={district} mapSeed={sessionSeed} />
 
       {/* Individual buildings (now without windows and some decorations, which are instanced above) */}
       {/* FRUSTUM CULLED - only renders buildings visible to camera (30-40% performance gain) */}
@@ -4394,6 +6488,9 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
   const sunAngle = (time / 24) * Math.PI * 2;
   const sunElevation = Math.sin(sunAngle - Math.PI / 2);
   const dayFactor = Math.max(0, Math.min(1, (sunElevation + 0.1) / 0.45)); // 0-1, peaks at noon
+  const mapScale = CONSTANTS.MAP_RADIUS / 55;
+  const scaleSize = (size: number) => size * mapScale;
+  const scaleSegments = (segments: number) => Math.max(8, Math.round(segments * mapScale));
   const buildTerrain = (size: number, segments: number) => {
     const geom = new THREE.PlaneGeometry(size, size, segments, segments);
     const pos = geom.attributes.position as THREE.BufferAttribute;
@@ -4408,22 +6505,22 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
   };
   const terrainGeometry = useMemo(() => {
     if (district !== 'SALHIYYA' && district !== 'MOUNTAIN_SHRINE') return null;
-    const gridSize = district === 'SALHIYYA' ? 80 : 250;
-    const segments = district === 'SALHIYYA' ? 60 : 120;
+    const gridSize = district === 'SALHIYYA' ? scaleSize(80) : scaleSize(250);
+    const segments = district === 'SALHIYYA' ? scaleSegments(60) : scaleSegments(120);
     return buildTerrain(gridSize, segments);
   }, [district, terrainSeed]);
   const innerTerrainGeometry = useMemo(() => {
     if (district !== 'SALHIYYA' && district !== 'MOUNTAIN_SHRINE') return null;
-    const gridSize = district === 'SALHIYYA' ? 30 : 60;
-    const segments = district === 'SALHIYYA' ? 30 : 40;
+    const gridSize = district === 'SALHIYYA' ? scaleSize(30) : scaleSize(60);
+    const segments = district === 'SALHIYYA' ? scaleSegments(30) : scaleSegments(40);
     return buildTerrain(gridSize, segments);
   }, [district, terrainSeed]);
 
   // BUGFIX: Build heightmap from main terrain geometry for accurate character positioning
   const heightmap = useMemo(() => {
     if (!terrainGeometry) return null;
-    const gridSize = district === 'SALHIYYA' ? 80 : 250;
-    const segments = district === 'SALHIYYA' ? 60 : 120;
+    const gridSize = district === 'SALHIYYA' ? scaleSize(80) : scaleSize(250);
+    const segments = district === 'SALHIYYA' ? scaleSegments(60) : scaleSegments(120);
     return buildHeightmapFromGeometry(terrainGeometry, gridSize, segments);
   }, [terrainGeometry, district]);
 
@@ -4433,15 +6530,15 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
       onHeightmapBuilt(heightmap);
     }
   }, [heightmap, onHeightmapBuilt]);
-  const baseGeometry = useMemo(() => new THREE.PlaneGeometry(250, 250, 1, 1), []);
-  const innerBaseGeometry = useMemo(() => new THREE.PlaneGeometry(60, 60, 1, 1), []);
+  const baseGeometry = useMemo(() => new THREE.PlaneGeometry(scaleSize(250), scaleSize(250), 1, 1), []);
+  const innerBaseGeometry = useMemo(() => new THREE.PlaneGeometry(scaleSize(60), scaleSize(60), 1, 1), []);
 
   // Using imported GROUND_PALETTE from environment/constants
   const pick = (list: string[]) => list[Math.floor(seed * list.length) % list.length];
-  const baseColor = district === 'MARKET' ? pick(GROUND_PALETTE.MARKET)
+  const baseColor = (district === 'MARKET' || district === 'STRAIGHT_STREET' || district === 'SOUQ_AXIS' || district === 'MIDAN') ? pick(GROUND_PALETTE.MARKET)
     : district === 'WEALTHY' ? pick(GROUND_PALETTE.WEALTHY)
     : district === 'HOVELS' ? pick(GROUND_PALETTE.HOVELS)
-    : district === 'ALLEYS' ? pick(GROUND_PALETTE.ALLEYS)
+    : (district === 'ALLEYS' || district === 'BAB_SHARQI') ? pick(GROUND_PALETTE.ALLEYS)
     : district === 'JEWISH_QUARTER' ? pick(GROUND_PALETTE.JEWISH_QUARTER)
     : district === 'SALHIYYA' ? pick(GROUND_PALETTE.SALHIYYA)
     : district === 'OUTSKIRTS_FARMLAND' ? pick(GROUND_PALETTE.OUTSKIRTS_FARMLAND)
@@ -4452,7 +6549,7 @@ export const Ground: React.FC<{ onClick?: (point: THREE.Vector3) => void; distri
     : district === 'CIVIC' ? pick(GROUND_PALETTE.CIVIC)
     : pick(GROUND_PALETTE.DEFAULT);
   const overlayColor = district === 'WEALTHY' ? '#c3b9a9'
-    : district === 'HOVELS' || district === 'ALLEYS' ? '#9a734d'
+    : district === 'HOVELS' || district === 'ALLEYS' || district === 'BAB_SHARQI' ? '#9a734d'
     : district === 'JEWISH_QUARTER' ? '#b09a7d' // Lighter stone, distinct from alleys
     : district === 'SALHIYYA' ? '#4a6a3a' // Grass overlay
     : district === 'OUTSKIRTS_FARMLAND' ? '#4f6f3b'
@@ -4706,9 +6803,17 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
 
     // Generate all climbables for all buildings
     const allClimbables: import('../types').ClimbableAccessory[] = [];
+    let stairAdded = false;
     for (const building of buildings) {
       const buildingSeed = building.position[0] * 1000 + building.position[2] + 5000;
-      const buildingClimbables = generateClimbablesForBuilding(building, district, buildingSeed);
+      const preferredStairSide = ((building.doorSide + 2) % 4) as 0 | 1 | 2 | 3;
+      const buildingClimbables = generateClimbablesForBuilding(building, district, buildingSeed, {
+        allowStairs: !stairAdded,
+        preferStairSide: preferredStairSide
+      });
+      if (!stairAdded && buildingClimbables.some((item) => item.type === 'STONE_STAIRCASE')) {
+        stairAdded = true;
+      }
       allClimbables.push(...buildingClimbables);
     }
 
@@ -4765,6 +6870,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
           <OutskirtsFarmlandDecor mapX={mapX} mapY={mapY} />
           <OutskirtsDesertDecor mapX={mapX} mapY={mapY} />
           <SouthernRoadDecor mapX={mapX} mapY={mapY} />
+          <BabSharqiGate mapX={mapX} mapY={mapY} />
           <SalhiyyaDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} onTreePositionsGenerated={onTreePositionsGenerated} buildingPositions={buildingPositions} heightmap={heightmap} />
           <ChristianQuarterDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} heightmap={heightmap} />
           <JewishQuarterDecor mapX={mapX} mapY={mapY} terrainHeightmap={heightmap} sessionSeed={terrainSeed} />

@@ -380,6 +380,7 @@ interface HumanoidProps {
   animationLodDistance?: number;
   shadowLodDistance?: number;
   showGroundShadow?: boolean;
+  shadowMode?: 'full' | 'proxy';
   // Gaze tracking - world position to look toward (e.g., player position)
   gazeTarget?: { x: number; y: number; z: number };
   // This humanoid's world position (needed for calculating gaze direction)
@@ -451,6 +452,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   animationLodDistance = 22,
   shadowLodDistance = 20,
   showGroundShadow = true,
+  shadowMode = 'full',
   gazeTarget,
   worldPosition,
   actionAnimationRef,
@@ -468,6 +470,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const simpleLodActive = enableSimpleLod && distanceFromCamera > simpleLodDistance;
   const animationLodActive = distanceFromCamera > animationLodDistance;
   const castShadowEnabled = distanceFromCamera <= shadowLodDistance;
+  const castsFullShadow = shadowMode === 'full';
   // PERFORMANCE: LOD - skip facial details beyond 25 units
   const showFacialDetails = distanceFromCamera < 25;
   // PERFORMANCE: Hair LOD tiers - high detail when close, simplified when far
@@ -505,6 +508,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   }, [headColor, sicknessLevel, age]);
   const rootRef = useRef<THREE.Group>(null);
   const lastShadowEnabledRef = useRef<boolean | null>(null);
+  const lastShadowModeRef = useRef<'full' | 'proxy' | null>(null);
+  const shadowProxyRef = useRef<THREE.Mesh>(null);
   const leftLeg = useRef<THREE.Group>(null);
   const rightLeg = useRef<THREE.Group>(null);
   const leftKnee = useRef<THREE.Group>(null);
@@ -739,13 +744,28 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const eyeScanCooldown = useRef(0.8 + Math.random() * 1.5);
 
   useFrame((state) => {
-    if (rootRef.current && lastShadowEnabledRef.current !== castShadowEnabled) {
+    if (
+      rootRef.current &&
+      (lastShadowEnabledRef.current !== castShadowEnabled || lastShadowModeRef.current !== shadowMode)
+    ) {
       lastShadowEnabledRef.current = castShadowEnabled;
+      lastShadowModeRef.current = shadowMode;
       rootRef.current.traverse((obj) => {
         if ((obj as THREE.Mesh).isMesh) {
-          (obj as THREE.Mesh).castShadow = castShadowEnabled;
+          (obj as THREE.Mesh).castShadow = false;
         }
       });
+      if (castShadowEnabled) {
+        if (shadowMode === 'full') {
+          rootRef.current.traverse((obj) => {
+            if ((obj as THREE.Mesh).isMesh) {
+              (obj as THREE.Mesh).castShadow = true;
+            }
+          });
+        } else if (shadowProxyRef.current) {
+          shadowProxyRef.current.castShadow = true;
+        }
+      }
     }
     if (simpleLodActive || animationLodActive) return;
     if (isDead) {
@@ -1675,14 +1695,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   if (simpleLodActive) {
     return (
       <group ref={rootRef} scale={scale}>
-        <mesh position={[0, 1.0, 0]} castShadow>
+        <mesh position={[0, 1.0, 0]} castShadow={castsFullShadow}>
           <cylinderGeometry args={[0.35, 0.45, 1.2, 8]} />
           <meshStandardMaterial color={color} roughness={0.9} />
         </mesh>
-        <mesh position={[0, 1.65, 0]} castShadow>
+        <mesh position={[0, 1.65, 0]} castShadow={castsFullShadow}>
           <sphereGeometry args={[0.26, 10, 8]} />
           <meshStandardMaterial color={sickHeadColor} roughness={0.8} />
         </mesh>
+        {!castsFullShadow && (
+          <mesh ref={shadowProxyRef} position={[0, 0.95, 0]} castShadow>
+            <cylinderGeometry args={[0.35, 0.45, 1.7, 6]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
+          </mesh>
+        )}
       </group>
     );
   }
@@ -1690,6 +1716,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   return (
     <group ref={rootRef} scale={scale}>
       <group ref={bodyGroup}>
+        {!castsFullShadow && (
+          <mesh ref={shadowProxyRef} position={[0, 0.95, 0]} castShadow>
+            <cylinderGeometry args={[0.35, 0.45, 1.7, 6]} />
+            <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
+          </mesh>
+        )}
         {!isDead && showGroundShadow && (
           <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
             <circleGeometry args={[0.5, 16]} />

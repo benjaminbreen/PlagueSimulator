@@ -8,6 +8,71 @@ import { PushableObject } from '../../../utils/pushables';
 import { POT_COLORS, FLOWER_COLORS } from '../constants';
 import { HoverableGroup } from '../shared/HoverSystem';
 
+// ==================== SHATTERED POT (shared) ====================
+
+const ShatteredPot: React.FC<{
+  item: PushableObject;
+  potColor: string;
+  hasPlant?: boolean;
+  plantColor?: string;
+}> = ({ item, potColor, hasPlant = false, plantColor = '#3a5a2a' }) => {
+  const scale = item.potSize ?? 1.0;
+
+  return (
+    <HoverableGroup
+      position={[item.position.x, item.position.y, item.position.z]}
+      positionVector={item.position}
+      boxSize={[1.2 * scale, 0.5 * scale, 1.2 * scale]}
+      labelTitle="Shattered Pot"
+      labelLines={['Broken pottery', 'Ceramic shards']}
+      labelOffset={[0, 0.4 * scale, 0]}
+    >
+      <group scale={[scale, scale, scale]} rotation={[0, item.rotation ?? 0, 0]}>
+        {/* Pottery shards scattered on ground */}
+        <mesh position={[0.12, 0.02, 0.15]} rotation={[-Math.PI / 2, 0, 0.4]} castShadow>
+          <boxGeometry args={[0.2, 0.14, 0.03]} />
+          <meshStandardMaterial color={potColor} roughness={0.9} />
+        </mesh>
+        <mesh position={[-0.14, 0.02, 0.08]} rotation={[-Math.PI / 2, 0, -0.3]} castShadow>
+          <boxGeometry args={[0.18, 0.12, 0.03]} />
+          <meshStandardMaterial color={potColor} roughness={0.9} />
+        </mesh>
+        <mesh position={[0.08, 0.02, -0.12]} rotation={[-Math.PI / 2, 0, 0.6]} castShadow>
+          <boxGeometry args={[0.15, 0.10, 0.025]} />
+          <meshStandardMaterial color={potColor} roughness={0.9} />
+        </mesh>
+        <mesh position={[-0.1, 0.02, -0.1]} rotation={[-Math.PI / 2, 0, -0.5]} castShadow>
+          <boxGeometry args={[0.12, 0.08, 0.025]} />
+          <meshStandardMaterial color={potColor} roughness={0.9} />
+        </mesh>
+        {/* Base fragment */}
+        <mesh position={[0, 0.05, 0]} castShadow>
+          <cylinderGeometry args={[0.2, 0.25, 0.12, 8]} />
+          <meshStandardMaterial color={potColor} roughness={0.9} />
+        </mesh>
+        {/* Spilled dirt */}
+        <mesh position={[0.05, 0.03, 0.02]} castShadow>
+          <sphereGeometry args={[0.18, 6, 6]} />
+          <meshStandardMaterial color="#4a3a2a" roughness={0.95} />
+        </mesh>
+        {/* Wilted plant remains if applicable */}
+        {hasPlant && (
+          <>
+            <mesh position={[0.1, 0.08, 0.05]} rotation={[0.4, 0.2, 0.6]} castShadow>
+              <cylinderGeometry args={[0.02, 0.03, 0.15, 6]} />
+              <meshStandardMaterial color={plantColor} roughness={0.9} />
+            </mesh>
+            <mesh position={[-0.08, 0.06, -0.05]} rotation={[-0.3, 0.4, -0.5]} castShadow>
+              <cylinderGeometry args={[0.02, 0.025, 0.12, 6]} />
+              <meshStandardMaterial color={plantColor} roughness={0.9} />
+            </mesh>
+          </>
+        )}
+      </group>
+    </HoverableGroup>
+  );
+};
+
 // ==================== GERANIUM POT ====================
 
 export const PushableGeraniumPot: React.FC<{ item: PushableObject }> = ({ item }) => {
@@ -15,6 +80,10 @@ export const PushableGeraniumPot: React.FC<{ item: PushableObject }> = ({ item }
   const style = item.potStyle ?? 0;
   const potColor = POT_COLORS.terracotta[style] || POT_COLORS.terracotta[0];
   const flowerColor = FLOWER_COLORS.geranium[style] || FLOWER_COLORS.geranium[0];
+
+  if (item.isShattered) {
+    return <ShatteredPot item={item} potColor={potColor} hasPlant plantColor="#3a4a2a" />;
+  }
 
   return (
     <HoverableGroup
@@ -45,6 +114,10 @@ export const PushableOlivePot: React.FC<{ item: PushableObject }> = ({ item }) =
   const scale = item.potSize ?? 1.0;
   const style = item.potStyle ?? 0;
   const potColor = POT_COLORS.clay[style] || POT_COLORS.clay[0];
+
+  if (item.isShattered) {
+    return <ShatteredPot item={item} potColor={potColor} hasPlant plantColor="#3f5d3a" />;
+  }
 
   return (
     <HoverableGroup
@@ -79,6 +152,10 @@ export const PushableLemonPot: React.FC<{ item: PushableObject }> = ({ item }) =
   const scale = item.potSize ?? 1.0;
   const style = item.potStyle ?? 0;
   const potColor = POT_COLORS.clay[style] || POT_COLORS.clay[0];
+
+  if (item.isShattered) {
+    return <ShatteredPot item={item} potColor={potColor} hasPlant plantColor="#4a6b3a" />;
+  }
 
   return (
     <HoverableGroup
@@ -117,6 +194,10 @@ export const PushablePalmPot: React.FC<{ item: PushableObject }> = ({ item }) =>
   const scale = item.potSize ?? 1.0;
   const style = item.potStyle ?? 0;
   const potColor = POT_COLORS.ceramic[style] || POT_COLORS.ceramic[0];
+
+  if (item.isShattered) {
+    return <ShatteredPot item={item} potColor={potColor} hasPlant plantColor="#4a6a2a" />;
+  }
 
   return (
     <HoverableGroup
@@ -165,6 +246,10 @@ export const PushableBougainvilleaPot: React.FC<{ item: PushableObject }> = ({ i
   const style = item.potStyle ?? 0;
   const potColor = POT_COLORS.clay[style] || POT_COLORS.clay[0];
   const flowerColor = FLOWER_COLORS.bougainvillea[style] || FLOWER_COLORS.bougainvillea[0];
+
+  if (item.isShattered) {
+    return <ShatteredPot item={item} potColor={potColor} hasPlant plantColor="#3a5a2a" />;
+  }
 
   return (
     <HoverableGroup

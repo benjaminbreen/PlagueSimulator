@@ -15,6 +15,10 @@ type BiomeType = 'marketplace' | 'wealthy' | 'hovels' | 'desert' | 'civic' | 'ch
 const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
   MARKET: 'marketplace',
   CARAVANSERAI: 'marketplace',
+  STRAIGHT_STREET: 'marketplace',
+  SOUQ_AXIS: 'marketplace',
+  MIDAN: 'marketplace',
+  BAB_SHARQI: 'christian_quarter',
   WEALTHY: 'wealthy',
   SALHIYYA: 'wealthy',        // Kurdish/Hanbali scholarly quarter on Mt. Qasiyun slopes
   HOVELS: 'hovels',

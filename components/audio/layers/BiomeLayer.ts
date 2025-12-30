@@ -23,6 +23,10 @@ type BiomeType = 'marketplace' | 'wealthy' | 'hovels' | 'desert' | 'civic';
 const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
   MARKET: 'marketplace',
   CARAVANSERAI: 'marketplace',
+  STRAIGHT_STREET: 'marketplace',
+  SOUQ_AXIS: 'marketplace',
+  MIDAN: 'marketplace',
+  BAB_SHARQI: 'marketplace',
   WEALTHY: 'wealthy',
   SALHIYYA: 'wealthy',
   HOVELS: 'hovels',

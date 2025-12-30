@@ -13,20 +13,20 @@ interface FluteMusicProps {
   enabled?: boolean;
 }
 
-// Authentic Middle Eastern pentatonic scale (similar to Hijaz maqam)
-// Using frequency ratios for microtonal accuracy
+// Bright pentatonic scale - cheerful and pleasant
+// Major pentatonic for uplifting, playful character
 const SCALE_DEGREES = [
   1.0,      // Root (Tonic)
-  1.067,    // Minor second
-  1.333,    // Perfect fourth
+  1.125,    // Major second
+  1.25,     // Major third
   1.5,      // Perfect fifth
-  1.778,    // Minor seventh
+  1.667,    // Major sixth
   2.0       // Octave
 ];
 
-const BASE_FREQ = 196; // G3 - warm, meditative register
+const BASE_FREQ = 220; // A3 - bright, cheerful register
 const MAX_DISTANCE = 25;
-const MAX_VOLUME = 0.12;
+const MAX_VOLUME = 0.06; // Much softer
 
 export const FluteMusic: React.FC<FluteMusicProps> = ({ distance, enabled = true }) => {
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -41,25 +41,23 @@ export const FluteMusic: React.FC<FluteMusicProps> = ({ distance, enabled = true
   const animationFrameRef = useRef<number | null>(null);
   const cleanupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Flowing melody pattern (scale degree indices)
-  // Designed to sound meditative and continuous, not repetitive
+  // Playful, upbeat melody pattern - snake charming dance tune
+  // Bouncy, cheerful character with clear phrases
   const MELODY_PATTERN = [
-    0, 0, 1, 0, // Opening phrase
-    2, 1, 0, // Descending
-    3, 3, 2, 1, // Middle phrase
-    0, 1, 2, 3, // Ascending
-    4, 3, 2, // High descent
-    1, 0, 0, // Return to tonic
-    2, 3, 4, // Rise again
-    3, 2, 1, 0, // Final descent
-    // Variation
-    0, 2, 3, 2,
-    1, 0, 3, 2,
-    4, 3, 1, 0,
-    2, 1, 0, 0
+    0, 1, 2, 1, 0, 1, 2, // Opening ascending run
+    3, 3, 2, 2, 1, 1, 0, // Descending with repeats - playful
+    0, 2, 4, 3, 2, 1, 0, // Jump to high note and return
+    1, 2, 3, 2, 1, // Middle phrase
+    4, 4, 3, 2, // High dance
+    3, 2, 1, 0, 0, // Return home
+    // Variation - more energetic
+    0, 1, 2, 3, 4, 3, 2, 1, // Fast run up and down
+    0, 2, 0, 2, 0, // Bouncy alternation
+    1, 3, 1, 3, // More bouncing
+    2, 4, 2, 1, 0 // Final flourish
   ];
 
-  const NOTE_DURATION = 1.2; // Longer, more meditative tempo
+  const NOTE_DURATION = 0.35; // Much faster, lively tempo
 
   // Initialize audio context once
   useEffect(() => {
@@ -88,22 +86,22 @@ export const FluteMusic: React.FC<FluteMusicProps> = ({ distance, enabled = true
         ctx.resume();
       }
 
-      // Create oscillator (flute sound with triangle wave for warmth)
+      // Create oscillator (bright, clean flute sound)
       oscillatorRef.current = ctx.createOscillator();
-      oscillatorRef.current.type = 'triangle'; // Warmer than sine
+      oscillatorRef.current.type = 'sine'; // Pure, clear tone
       oscillatorRef.current.frequency.value = BASE_FREQ;
 
-      // Create filter for breathy flute tone
+      // Create filter for bright, pleasant flute tone
       filterRef.current = ctx.createBiquadFilter();
       filterRef.current.type = 'lowpass';
-      filterRef.current.frequency.value = 1800; // Softer, less bright
-      filterRef.current.Q.value = 0.7; // Gentle rolloff
+      filterRef.current.frequency.value = 3500; // Brighter, clearer
+      filterRef.current.Q.value = 0.5; // Smooth, pleasant rolloff
 
-      // Create LFO for vibrato (very subtle)
+      // Create LFO for gentle vibrato
       lfoRef.current = ctx.createOscillator();
-      lfoRef.current.frequency.value = 4.5; // Slower, more natural
+      lfoRef.current.frequency.value = 5.5; // Lively vibrato
       lfoGainRef.current = ctx.createGain();
-      lfoGainRef.current.gain.value = 6; // More subtle variation
+      lfoGainRef.current.gain.value = 3; // Subtle, pleasant variation
 
       // Create gain node for volume control
       gainNodeRef.current = ctx.createGain();
@@ -138,17 +136,17 @@ export const FluteMusic: React.FC<FluteMusicProps> = ({ distance, enabled = true
         const scaleDegree = MELODY_PATTERN[melodyIndexRef.current % MELODY_PATTERN.length];
         const targetFreq = BASE_FREQ * SCALE_DEGREES[scaleDegree];
 
-        // Smooth portamento (pitch slide) instead of abrupt changes
+        // Quick, snappy pitch transitions for playful character
         oscillatorRef.current.frequency.cancelScheduledValues(now);
         oscillatorRef.current.frequency.setValueAtTime(oscillatorRef.current.frequency.value, now);
-        oscillatorRef.current.frequency.exponentialRampToValueAtTime(targetFreq, now + NOTE_DURATION * 0.4);
+        oscillatorRef.current.frequency.exponentialRampToValueAtTime(targetFreq, now + NOTE_DURATION * 0.2);
 
-        // Subtle breath envelope - not too pronounced
+        // Bouncy articulation envelope - clear note attacks
         gainNodeRef.current.gain.cancelScheduledValues(now);
-        gainNodeRef.current.gain.setValueAtTime(volume * 0.8, now);
-        gainNodeRef.current.gain.linearRampToValueAtTime(volume, now + 0.08);
-        gainNodeRef.current.gain.setValueAtTime(volume, now + NOTE_DURATION * 0.7);
-        gainNodeRef.current.gain.linearRampToValueAtTime(volume * 0.85, now + NOTE_DURATION);
+        gainNodeRef.current.gain.setValueAtTime(volume * 0.3, now);
+        gainNodeRef.current.gain.linearRampToValueAtTime(volume, now + 0.02); // Quick attack
+        gainNodeRef.current.gain.setValueAtTime(volume, now + NOTE_DURATION * 0.6);
+        gainNodeRef.current.gain.linearRampToValueAtTime(volume * 0.4, now + NOTE_DURATION); // Clear separation
 
         melodyIndexRef.current++;
         lastNoteTimeRef.current = now;

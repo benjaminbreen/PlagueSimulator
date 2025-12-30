@@ -455,8 +455,19 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     return map;
   }, [activeProps, spec.rooms]);
   const playerSpawn = useMemo<[number, number, number]>(() => {
-    return [entryRoom.center[0], 0, entryRoom.center[2]];
-  }, [entryRoom]);
+    const entrySide = spec.exteriorDoorSide === 0 ? 'north'
+      : spec.exteriorDoorSide === 1 ? 'south'
+        : spec.exteriorDoorSide === 2 ? 'east'
+          : 'west';
+    const [cx, , cz] = entryRoom.center;
+    const halfW = entryRoom.size[0] / 2;
+    const halfD = entryRoom.size[2] / 2;
+    const inset = Math.min(2.0, Math.max(1.2, Math.min(entryRoom.size[0], entryRoom.size[2]) * 0.12));
+    if (entrySide === 'north') return [cx, 0, cz + halfD - inset];
+    if (entrySide === 'south') return [cx, 0, cz - halfD + inset];
+    if (entrySide === 'east') return [cx + halfW - inset, 0, cz];
+    return [cx - halfW + inset, 0, cz];
+  }, [entryRoom, spec.exteriorDoorSide]);
   const isDay = params.timeOfDay >= 7 && params.timeOfDay <= 17;
   const lampProps = useMemo(
     () => activeProps.filter((prop) => (

@@ -166,6 +166,11 @@ export function analyzeConversationImpact(
       friendlinessDelta -= 15;
       threatLevel += 30;
     }
+    if (/i('?| )?ll kill you|i will kill you|kill you/.test(text)) {
+      panicDelta += 25;
+      friendlinessDelta -= 20;
+      threatLevel += 60;
+    }
     // Death/plague mentions (moderate panic)
     else if (/\b(die|dying|death|plague|pestilence|curse|damned|doom)\b/.test(text)) {
       panicDelta += 8;

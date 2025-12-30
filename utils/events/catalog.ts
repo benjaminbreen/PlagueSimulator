@@ -422,6 +422,33 @@ export const EVENT_CATALOG: EventDefinition[] = [
     ]
   },
   {
+    id: 'event_authority_detains_player',
+    title: 'Taken by Authority',
+    body: 'A guard steps in and grips your arm. You are ordered to come along at once.',
+    tags: ['conversation:authority', 'consequence:detain'],
+    options: [
+      {
+        id: 'comply',
+        label: 'Comply and go quietly',
+        outcomeText: 'You are led away through the crowd, eyes on your back.',
+        effects: [{ type: 'worldFlag', key: 'player_detained', value: true }]
+      },
+      {
+        id: 'bribe',
+        label: 'Offer a heavy bribe',
+        outcomeText: 'The guard hesitates, then loosens his grip.',
+        effects: [{ type: 'playerStat', stat: 'currency', delta: -5 }]
+      },
+      {
+        id: 'flee',
+        label: 'Break free and flee',
+        outcomeText: 'You wrench away, but boots pound after you.',
+        followupEventId: 'event_pursuit_alley',
+        effects: [{ type: 'triggerEvent', eventId: 'event_pursuit_alley' }]
+      }
+    ]
+  },
+  {
     id: 'conversation_summon_market_authority',
     title: 'Summons the Market Inspector',
     body: 'The merchant steps back and calls for the muhtasib. A nearby guard turns toward you.',

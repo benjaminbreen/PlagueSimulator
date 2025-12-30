@@ -41,21 +41,63 @@ export const PushableBench: React.FC<{ item: PushableObject }> = ({ item }) => (
 
 // ==================== CLAY JAR ====================
 
-export const PushableClayJar: React.FC<{ item: PushableObject }> = ({ item }) => (
-  <HoverableGroup
-    position={[item.position.x, item.position.y, item.position.z]}
-    positionVector={item.position}
-    boxSize={[0.8, 0.9, 0.8]}
-    labelTitle="Clay Jar"
-    labelLines={['Glazed ceramic', 'Stored goods', 'Earthenware']}
-    labelOffset={[0, 0.7, 0]}
-  >
-    <mesh castShadow>
-      <cylinderGeometry args={[0.25, 0.35, 0.6, 10]} />
-      <meshStandardMaterial color="#a9703a" roughness={0.95} />
-    </mesh>
-  </HoverableGroup>
-);
+export const PushableClayJar: React.FC<{ item: PushableObject }> = ({ item }) => {
+  // If shattered, show pottery shards
+  if (item.isShattered) {
+    return (
+      <HoverableGroup
+        position={[item.position.x, item.position.y, item.position.z]}
+        positionVector={item.position}
+        boxSize={[0.9, 0.4, 0.9]}
+        labelTitle="Shattered Jar"
+        labelLines={['Broken pottery', 'Ceramic shards']}
+        labelOffset={[0, 0.35, 0]}
+      >
+        <group rotation={[0, item.rotation ?? 0, 0]}>
+          {/* Pottery shards scattered on ground */}
+          <mesh position={[0.08, 0.02, 0.1]} rotation={[-Math.PI / 2, 0, 0.4]} castShadow>
+            <boxGeometry args={[0.18, 0.12, 0.025]} />
+            <meshStandardMaterial color="#a9703a" roughness={0.9} />
+          </mesh>
+          <mesh position={[-0.1, 0.02, 0.03]} rotation={[-Math.PI / 2, 0, -0.3]} castShadow>
+            <boxGeometry args={[0.15, 0.10, 0.025]} />
+            <meshStandardMaterial color="#9a6030" roughness={0.9} />
+          </mesh>
+          <mesh position={[0.03, 0.02, -0.1]} rotation={[-Math.PI / 2, 0, 0.7]} castShadow>
+            <boxGeometry args={[0.12, 0.08, 0.02]} />
+            <meshStandardMaterial color="#a9703a" roughness={0.9} />
+          </mesh>
+          <mesh position={[-0.06, 0.02, -0.08]} rotation={[-Math.PI / 2, 0, -0.5]} castShadow>
+            <boxGeometry args={[0.10, 0.07, 0.02]} />
+            <meshStandardMaterial color="#9a6030" roughness={0.9} />
+          </mesh>
+          {/* Base fragment */}
+          <mesh position={[0, 0.04, 0]} castShadow>
+            <cylinderGeometry args={[0.15, 0.18, 0.1, 8]} />
+            <meshStandardMaterial color="#9a6030" roughness={0.9} />
+          </mesh>
+        </group>
+      </HoverableGroup>
+    );
+  }
+
+  // Intact jar
+  return (
+    <HoverableGroup
+      position={[item.position.x, item.position.y, item.position.z]}
+      positionVector={item.position}
+      boxSize={[0.8, 0.9, 0.8]}
+      labelTitle="Clay Jar"
+      labelLines={['Glazed ceramic', 'Stored goods', 'Earthenware']}
+      labelOffset={[0, 0.7, 0]}
+    >
+      <mesh castShadow>
+        <cylinderGeometry args={[0.25, 0.35, 0.6, 10]} />
+        <meshStandardMaterial color="#a9703a" roughness={0.95} />
+      </mesh>
+    </HoverableGroup>
+  );
+};
 
 // ==================== BASKET ====================
 
@@ -250,33 +292,84 @@ export const PushableDroppedItem: React.FC<{ item: PushableObject }> = ({ item }
 
 // ==================== CRATE ====================
 
-export const PushableCrate: React.FC<{ item: PushableObject }> = ({ item }) => (
-  <HoverableGroup
-    position={[item.position.x, item.position.y, item.position.z]}
-    positionVector={item.position}
-    boxSize={[1.0, 1.0, 1.0]}
-    labelTitle="Wooden Crate"
-    labelLines={['Heavy cargo', 'Merchant goods', 'Pushable']}
-    labelOffset={[0, 0.8, 0]}
-  >
-    <group rotation={[0, item.rotation ?? 0, 0]}>
-      {/* Main crate body */}
-      <mesh castShadow receiveShadow>
-        <boxGeometry args={[0.9, 0.9, 0.9]} />
-        <meshStandardMaterial color="#6a5a3a" roughness={0.9} />
-      </mesh>
-      {/* Wood slats for detail */}
-      <mesh position={[0, 0, 0.46]} castShadow>
-        <boxGeometry args={[0.92, 0.1, 0.05]} />
-        <meshStandardMaterial color="#5a4a2a" roughness={0.95} />
-      </mesh>
-      <mesh position={[0, 0, -0.46]} castShadow>
-        <boxGeometry args={[0.92, 0.1, 0.05]} />
-        <meshStandardMaterial color="#5a4a2a" roughness={0.95} />
-      </mesh>
-    </group>
-  </HoverableGroup>
-);
+export const PushableCrate: React.FC<{ item: PushableObject }> = ({ item }) => {
+  // If shattered, show broken wood pieces instead of intact crate
+  if (item.isShattered) {
+    return (
+      <HoverableGroup
+        position={[item.position.x, item.position.y, item.position.z]}
+        positionVector={item.position}
+        boxSize={[1.4, 0.5, 1.4]}
+        labelTitle="Broken Crate"
+        labelLines={['Splintered wood', 'Destroyed cargo']}
+        labelOffset={[0, 0.4, 0]}
+      >
+        <group rotation={[0, item.rotation ?? 0, 0]}>
+          {/* Scattered wood planks */}
+          <mesh position={[0.15, 0.05, 0.2]} rotation={[-0.1, 0.3, 0.15]} castShadow>
+            <boxGeometry args={[0.5, 0.08, 0.15]} />
+            <meshStandardMaterial color="#6a5a3a" roughness={0.9} />
+          </mesh>
+          <mesh position={[-0.2, 0.04, -0.15]} rotation={[0.05, -0.4, -0.1]} castShadow>
+            <boxGeometry args={[0.45, 0.08, 0.12]} />
+            <meshStandardMaterial color="#5a4a2a" roughness={0.95} />
+          </mesh>
+          <mesh position={[0.25, 0.03, -0.25]} rotation={[0.2, 0.5, 0.08]} castShadow>
+            <boxGeometry args={[0.35, 0.06, 0.1]} />
+            <meshStandardMaterial color="#6a5a3a" roughness={0.9} />
+          </mesh>
+          <mesh position={[-0.1, 0.06, 0.3]} rotation={[-0.15, -0.2, 0.3]} castShadow>
+            <boxGeometry args={[0.4, 0.07, 0.13]} />
+            <meshStandardMaterial color="#5a4a2a" roughness={0.95} />
+          </mesh>
+          {/* Corner piece */}
+          <mesh position={[0, 0.08, 0]} rotation={[0.1, 0.1, 0.05]} castShadow>
+            <boxGeometry args={[0.25, 0.25, 0.25]} />
+            <meshStandardMaterial color="#5a4a2a" roughness={0.95} />
+          </mesh>
+          {/* Small splinters */}
+          <mesh position={[-0.3, 0.02, 0.1]} rotation={[0, 0.8, 0.1]} castShadow>
+            <boxGeometry args={[0.2, 0.04, 0.05]} />
+            <meshStandardMaterial color="#7a6a4a" roughness={0.85} />
+          </mesh>
+          <mesh position={[0.35, 0.02, 0.05]} rotation={[0, -0.6, -0.1]} castShadow>
+            <boxGeometry args={[0.18, 0.03, 0.04]} />
+            <meshStandardMaterial color="#7a6a4a" roughness={0.85} />
+          </mesh>
+        </group>
+      </HoverableGroup>
+    );
+  }
+
+  // Intact crate
+  return (
+    <HoverableGroup
+      position={[item.position.x, item.position.y, item.position.z]}
+      positionVector={item.position}
+      boxSize={[1.0, 1.0, 1.0]}
+      labelTitle="Wooden Crate"
+      labelLines={['Heavy cargo', 'Merchant goods', 'Pushable']}
+      labelOffset={[0, 0.8, 0]}
+    >
+      <group rotation={[0, item.rotation ?? 0, 0]}>
+        {/* Main crate body */}
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[0.9, 0.9, 0.9]} />
+          <meshStandardMaterial color="#6a5a3a" roughness={0.9} />
+        </mesh>
+        {/* Wood slats for detail */}
+        <mesh position={[0, 0, 0.46]} castShadow>
+          <boxGeometry args={[0.92, 0.1, 0.05]} />
+          <meshStandardMaterial color="#5a4a2a" roughness={0.95} />
+        </mesh>
+        <mesh position={[0, 0, -0.46]} castShadow>
+          <boxGeometry args={[0.92, 0.1, 0.05]} />
+          <meshStandardMaterial color="#5a4a2a" roughness={0.95} />
+        </mesh>
+      </group>
+    </HoverableGroup>
+  );
+};
 
 // ==================== AMPHORA ====================
 

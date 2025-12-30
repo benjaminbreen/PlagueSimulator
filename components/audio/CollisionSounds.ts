@@ -342,6 +342,85 @@ class CollisionSoundEngine {
     crack.stop(now + 0.1);
   }
 
+  /**
+   * Play a wood splintering/breaking sound (for crates)
+   */
+  playWoodShatter(intensity: number = 0.8): void {
+    const ctx = this.ensureContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+    const volume = 0.22 * intensity;
+
+    // Initial crack - sharp transient
+    const crack = ctx.createOscillator();
+    crack.type = 'sawtooth';
+    crack.frequency.setValueAtTime(1800, now);
+    crack.frequency.exponentialRampToValueAtTime(200, now + 0.06);
+
+    const crackEnv = ctx.createGain();
+    crackEnv.gain.setValueAtTime(volume * 0.9, now);
+    crackEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+
+    crack.connect(crackEnv);
+    crackEnv.connect(ctx.destination);
+
+    // Wood splintering - filtered noise with resonance
+    const noiseBuffer = this.createNoiseBuffer(ctx, 0.25);
+    const noise = ctx.createBufferSource();
+    noise.buffer = noiseBuffer;
+
+    const noiseFilter = ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.value = 600;
+    noiseFilter.Q.value = 1.5;
+
+    const noiseEnv = ctx.createGain();
+    noiseEnv.gain.setValueAtTime(volume * 0.6, now);
+    noiseEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseEnv);
+    noiseEnv.connect(ctx.destination);
+
+    // Secondary splinter sounds - multiple small cracks
+    for (let i = 0; i < 3; i++) {
+      const delay = 0.02 + i * 0.04 + Math.random() * 0.02;
+      const splinter = ctx.createOscillator();
+      splinter.type = 'triangle';
+      splinter.frequency.setValueAtTime(800 + Math.random() * 400, now + delay);
+      splinter.frequency.exponentialRampToValueAtTime(150, now + delay + 0.04);
+
+      const splinterEnv = ctx.createGain();
+      splinterEnv.gain.setValueAtTime(0, now);
+      splinterEnv.gain.setValueAtTime(volume * 0.3, now + delay);
+      splinterEnv.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.06);
+
+      splinter.connect(splinterEnv);
+      splinterEnv.connect(ctx.destination);
+      splinter.start(now);
+      splinter.stop(now + delay + 0.08);
+    }
+
+    // Low thump from impact
+    const thump = ctx.createOscillator();
+    thump.type = 'sine';
+    thump.frequency.value = 80;
+
+    const thumpEnv = ctx.createGain();
+    thumpEnv.gain.setValueAtTime(volume * 0.7, now);
+    thumpEnv.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+    thump.connect(thumpEnv);
+    thumpEnv.connect(ctx.destination);
+
+    crack.start(now);
+    noise.start(now);
+    thump.start(now);
+    crack.stop(now + 0.12);
+    thump.stop(now + 0.15);
+  }
+
   private createNoiseBuffer(ctx: AudioContext, duration: number): AudioBuffer {
     const sampleRate = ctx.sampleRate;
     const length = Math.floor(sampleRate * duration);

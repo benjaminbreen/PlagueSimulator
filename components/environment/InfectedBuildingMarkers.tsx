@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BuildingMetadata, BuildingInfectionState, CONSTANTS } from '../../types';
@@ -6,17 +6,17 @@ import { BuildingMetadata, BuildingInfectionState, CONSTANTS } from '../../types
 interface InfectedBuildingMarkersProps {
   buildings: BuildingMetadata[];
   buildingInfection?: Record<string, BuildingInfectionState>;
-  playerPosition: [number, number, number];
+  playerPosition?: [number, number, number]; // Optional, not currently used but kept for API compatibility
 }
 
 /**
  * Renders big red diamond markers and wireframes above infected/deceased buildings
  * Visible from far away in all camera modes
+ * Label appears on hover of diamond or ground marker
  */
 export const InfectedBuildingMarkers: React.FC<InfectedBuildingMarkersProps> = ({
   buildings,
   buildingInfection,
-  playerPosition,
 }) => {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -42,26 +42,53 @@ export const InfectedBuildingMarkers: React.FC<InfectedBuildingMarkersProps> = (
   return (
     <group ref={groupRef}>
       {infectedBuildings.map(({ building, state }) => (
-        <React.Fragment key={building.id}>
-          {/* Big floating diamond marker */}
-          <InfectedDiamond
-            position={building.position}
-            status={state.status as 'infected' | 'deceased'}
-          />
-          {/* Red light to illuminate building walls */}
-          <BuildingLight
-            position={building.position}
-            storyCount={building.storyCount ?? 1}
-            status={state.status as 'infected' | 'deceased'}
-          />
-          {/* Glowing ground circle marker */}
-          <GroundMarker
-            position={building.position}
-            sizeScale={building.sizeScale ?? 1}
-            status={state.status as 'infected' | 'deceased'}
-          />
-        </React.Fragment>
+        <InfectedBuildingMarker
+          key={building.id}
+          building={building}
+          status={state.status as 'infected' | 'deceased'}
+        />
       ))}
+    </group>
+  );
+};
+
+// Combined marker component with hover detection
+interface InfectedBuildingMarkerProps {
+  building: BuildingMetadata;
+  status: 'infected' | 'deceased';
+}
+
+const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ building, status }) => {
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <group>
+      {/* Big floating diamond marker - with hover detection */}
+      <InfectedDiamond
+        position={building.position}
+        status={status}
+        onHoverChange={setIsHovered}
+      />
+      {/* Red light to illuminate building walls */}
+      <BuildingLight
+        position={building.position}
+        storyCount={building.storyCount ?? 1}
+        status={status}
+      />
+      {/* Glowing ground circle marker - also detects hover */}
+      <GroundMarker
+        position={building.position}
+        sizeScale={building.sizeScale ?? 1}
+        status={status}
+        onHoverChange={setIsHovered}
+      />
+      {/* Floating text label - shows on hover */}
+      {isHovered && (
+        <PlagueHouseLabel
+          position={building.position}
+          status={status}
+        />
+      )}
     </group>
   );
 };
@@ -69,10 +96,11 @@ export const InfectedBuildingMarkers: React.FC<InfectedBuildingMarkersProps> = (
 interface InfectedDiamondProps {
   position: [number, number, number];
   status: 'infected' | 'deceased';
+  onHoverChange?: (hovered: boolean) => void;
 }
 
 // Big red diamond floating above infected building
-const InfectedDiamond: React.FC<InfectedDiamondProps> = ({ position, status }) => {
+const InfectedDiamond: React.FC<InfectedDiamondProps> = ({ position, status, onHoverChange }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   // Pulsing glow and bobbing animation
@@ -104,6 +132,16 @@ const InfectedDiamond: React.FC<InfectedDiamondProps> = ({ position, status }) =
       position={[position[0], 12, position[2]]}
       castShadow={false}
       receiveShadow={false}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        onHoverChange?.(true);
+        document.body.style.cursor = 'pointer';
+      }}
+      onPointerOut={(e) => {
+        e.stopPropagation();
+        onHoverChange?.(false);
+        document.body.style.cursor = 'auto';
+      }}
     >
       {/* Octahedron = diamond shape */}
       <octahedronGeometry args={[2, 0]} />
@@ -163,10 +201,11 @@ interface GroundMarkerProps {
   position: [number, number, number];
   sizeScale: number;
   status: 'infected' | 'deceased';
+  onHoverChange?: (hovered: boolean) => void;
 }
 
 // Glowing circular marker on the ground around the building with radial gradient
-const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status }) => {
+const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status, onHoverChange }) => {
   const meshRef = useRef<THREE.Mesh>(null);
 
   const buildingSize = CONSTANTS.BUILDING_SIZE * sizeScale;
@@ -219,6 +258,16 @@ const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status
       rotation={[-Math.PI / 2, 0, 0]} // Horizontal
       receiveShadow={false}
       castShadow={false}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        onHoverChange?.(true);
+        document.body.style.cursor = 'pointer';
+      }}
+      onPointerOut={(e) => {
+        e.stopPropagation();
+        onHoverChange?.(false);
+        document.body.style.cursor = 'auto';
+      }}
     >
       <circleGeometry args={[circleRadius, 64]} />
       <meshBasicMaterial
@@ -231,5 +280,107 @@ const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status
         blending={THREE.AdditiveBlending} // Makes it glow brighter
       />
     </mesh>
+  );
+};
+
+interface PlagueHouseLabelProps {
+  position: [number, number, number];
+  status: 'infected' | 'deceased';
+}
+
+/**
+ * Floating "PLAGUE HOUSE" label using a sprite with canvas-rendered text
+ * Billboard behavior (always faces camera), performant single draw call
+ * Shows on hover of diamond or ground marker
+ */
+const PlagueHouseLabel: React.FC<PlagueHouseLabelProps> = ({ position, status }) => {
+  const spriteRef = useRef<THREE.Sprite>(null);
+
+  // Create text texture on canvas - memoized for performance
+  const textTexture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    // High resolution for crisp text
+    canvas.width = 512;
+    canvas.height = 128;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Text styling - dramatic red
+    const labelText = status === 'deceased' ? '☠ DEATH HOUSE ☠' : '⚠ PLAGUE HOUSE ⚠';
+    const bgColor = status === 'deceased' ? 'rgba(60, 0, 0, 0.95)' : 'rgba(100, 0, 0, 0.95)';
+    const textColor = '#ff4444';
+    const borderColor = status === 'deceased' ? '#cc0000' : '#ff0000';
+
+    // Draw rounded rectangle background
+    const padding = 12;
+    const radius = 8;
+    ctx.fillStyle = bgColor;
+    ctx.beginPath();
+    ctx.roundRect(padding, padding, canvas.width - padding * 2, canvas.height - padding * 2, radius);
+    ctx.fill();
+
+    // Draw border - thicker
+    ctx.strokeStyle = borderColor;
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    // Draw text
+    ctx.font = 'bold 44px Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Red glow effect
+    ctx.shadowColor = '#ff0000';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    ctx.fillStyle = textColor;
+    ctx.fillText(labelText, canvas.width / 2, canvas.height / 2);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    return texture;
+  }, [status]);
+
+  // Animation - bob synced with diamond, pulse effect
+  useFrame((state) => {
+    if (!spriteRef.current) return;
+
+    const time = state.clock.elapsedTime;
+
+    // Match diamond bob animation
+    const bobHeight = Math.sin(time * 2) * 0.3;
+    spriteRef.current.position.y = 15 + bobHeight; // Above the diamond (which is at 12)
+
+    // Pulse effect
+    const pulseSpeed = status === 'deceased' ? 0.8 : 1.5;
+    const pulse = (Math.sin(time * pulseSpeed) + 1) / 2;
+
+    const material = spriteRef.current.material as THREE.SpriteMaterial;
+    material.opacity = 0.9 + pulse * 0.1;
+  });
+
+  if (!textTexture) return null;
+
+  return (
+    <sprite
+      ref={spriteRef}
+      position={[position[0], 15, position[2]]}
+      scale={[5, 1.25, 1]} // Wide aspect ratio for text
+    >
+      <spriteMaterial
+        map={textTexture}
+        transparent
+        opacity={1}
+        depthTest={true}
+        depthWrite={false}
+        sizeAttenuation={true}
+      />
+    </sprite>
   );
 };

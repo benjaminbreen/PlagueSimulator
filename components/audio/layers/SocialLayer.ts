@@ -154,7 +154,14 @@ export class SocialLayer implements SoundLayer {
     }
 
     // Market calls in market district during daytime
-    if (state.district === 'MARKET' && state.sceneMode === 'outdoor') {
+    if (
+      (state.district === 'MARKET' ||
+        state.district === 'STRAIGHT_STREET' ||
+        state.district === 'SOUQ_AXIS' ||
+        state.district === 'MIDAN' ||
+        state.district === 'BAB_SHARQI') &&
+      state.sceneMode === 'outdoor'
+    ) {
       const isDay = state.timeOfDay >= 7 && state.timeOfDay <= 19;
       if (isDay) {
         this.maybePlayMarketCall(state.timeOfDay);

@@ -1370,16 +1370,17 @@ export const NPC: React.FC<NPCProps> = memo(({
           simpleLodDistance={SIMPLE_LOD_DISTANCE}
           animationLodDistance={ANIMATION_LOD_DISTANCE}
           shadowLodDistance={SHADOW_LOD_DISTANCE}
+          shadowMode="proxy"
         />
         {stats.heldItem && stats.heldItem !== 'none' && (
           <group ref={propGroupRef} position={[0.38, 1.02, 0.15]}>
             {stats.heldItem === 'staff' && (
               <group>
-                <mesh castShadow>
+                <mesh castShadow={false}>
                   <cylinderGeometry args={[0.02, 0.02, 0.9, 6]} />
                   <meshStandardMaterial color="#5c432a" roughness={0.9} />
                 </mesh>
-                <mesh position={[0, 0.42, 0.08]} rotation={[0, 0, Math.PI / 4]} castShadow>
+                <mesh position={[0, 0.42, 0.08]} rotation={[0, 0, Math.PI / 4]} castShadow={false}>
                   <cylinderGeometry args={[0.015, 0.015, 0.25, 6]} />
                   <meshStandardMaterial color="#5c432a" roughness={0.9} />
                 </mesh>
@@ -1387,11 +1388,11 @@ export const NPC: React.FC<NPCProps> = memo(({
             )}
             {stats.heldItem === 'hammer' && (
               <group>
-                <mesh position={[0, -0.1, 0]} castShadow>
+                <mesh position={[0, -0.1, 0]} castShadow={false}>
                   <cylinderGeometry args={[0.02, 0.02, 0.5, 6]} />
                   <meshStandardMaterial color="#5c432a" roughness={0.9} />
                 </mesh>
-                <mesh position={[0, 0.18, 0]} castShadow>
+                <mesh position={[0, 0.18, 0]} castShadow={false}>
                   <boxGeometry args={[0.12, 0.06, 0.06]} />
                   <meshStandardMaterial color="#6b7280" roughness={0.6} />
                 </mesh>
@@ -1399,29 +1400,29 @@ export const NPC: React.FC<NPCProps> = memo(({
             )}
             {stats.heldItem === 'waterskin' && (
               <group>
-                <mesh position={[0, -0.05, 0]} castShadow>
+                <mesh position={[0, -0.05, 0]} castShadow={false}>
                   <sphereGeometry args={[0.08, 10, 10]} />
                   <meshStandardMaterial color="#7b5a3a" roughness={0.9} />
                 </mesh>
-                <mesh position={[0, 0.08, 0]} castShadow>
+                <mesh position={[0, 0.08, 0]} castShadow={false}>
                   <boxGeometry args={[0.08, 0.02, 0.02]} />
                   <meshStandardMaterial color="#c2a878" roughness={0.9} />
                 </mesh>
               </group>
             )}
             {stats.heldItem === 'ledger' && (
-              <mesh position={[0, 0.02, 0]} castShadow>
+              <mesh position={[0, 0.02, 0]} castShadow={false}>
                 <boxGeometry args={[0.14, 0.1, 0.04]} />
                 <meshStandardMaterial color="#3b2a1a" roughness={0.85} />
               </mesh>
             )}
             {stats.heldItem === 'spear' && (
               <group>
-                <mesh position={[0, -0.2, 0]} castShadow>
+                <mesh position={[0, -0.2, 0]} castShadow={false}>
                   <cylinderGeometry args={[0.02, 0.02, 1.0, 6]} />
                   <meshStandardMaterial color="#5c432a" roughness={0.9} />
                 </mesh>
-                <mesh position={[0, 0.35, 0]} castShadow>
+                <mesh position={[0, 0.35, 0]} castShadow={false}>
                   <coneGeometry args={[0.04, 0.12, 6]} />
                   <meshStandardMaterial color="#a9a9a9" roughness={0.5} />
                 </mesh>
@@ -1429,33 +1430,33 @@ export const NPC: React.FC<NPCProps> = memo(({
             )}
             {stats.heldItem === 'tray' && (
               <group>
-                <mesh position={[0, 0.05, 0]} castShadow>
+                <mesh position={[0, 0.05, 0]} castShadow={false}>
                   <boxGeometry args={[0.2, 0.03, 0.14]} />
                   <meshStandardMaterial color="#8b5e3c" roughness={0.9} />
                 </mesh>
-                <mesh position={[-0.05, 0.08, 0.02]} castShadow>
+                <mesh position={[-0.05, 0.08, 0.02]} castShadow={false}>
                   <sphereGeometry args={[0.03, 8, 8]} />
                   <meshStandardMaterial color="#d9b37c" roughness={0.8} />
                 </mesh>
-                <mesh position={[0.05, 0.08, -0.02]} castShadow>
+                <mesh position={[0.05, 0.08, -0.02]} castShadow={false}>
                   <sphereGeometry args={[0.03, 8, 8]} />
                   <meshStandardMaterial color="#d2a96f" roughness={0.8} />
                 </mesh>
               </group>
             )}
             {stats.heldItem === 'plank' && (
-              <mesh position={[0, 0.05, 0]} castShadow>
+              <mesh position={[0, 0.05, 0]} castShadow={false}>
                 <boxGeometry args={[0.25, 0.04, 0.08]} />
                 <meshStandardMaterial color="#8b5e3c" roughness={0.9} />
               </mesh>
             )}
             {stats.heldItem === 'sack' && (
               <group position={[-0.15, 0.2, -0.1]}>
-                <mesh castShadow>
+                <mesh castShadow={false}>
                   <sphereGeometry args={[0.12, 12, 10]} />
                   <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
                 </mesh>
-                <mesh position={[0, 0.12, 0]} castShadow>
+                <mesh position={[0, 0.12, 0]} castShadow={false}>
                   <boxGeometry args={[0.06, 0.02, 0.02]} />
                   <meshStandardMaterial color="#c2a878" roughness={0.9} />
                 </mesh>
@@ -1467,7 +1468,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       {/* GRAPHICS: NPC Torch (1 in 5 NPCs carry a torch at night) */}
       {carriesTorch && (timeOfDay >= 19 || timeOfDay < 5) && stateRef.current !== AgentState.DECEASED && (
         <group position={[0.35, 1.05, 0.25]}>
-          <mesh castShadow>
+          <mesh castShadow={false}>
             <cylinderGeometry args={[0.04, 0.06, 0.4, 8]} />
             <meshStandardMaterial color="#3b2a1a" roughness={0.9} />
           </mesh>

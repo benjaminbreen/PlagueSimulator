@@ -20,6 +20,10 @@ export function getBiomeForDistrict(district: DistrictType): 'marketplace' | 'we
   switch (district) {
     case 'MARKET':
     case 'CARAVANSERAI':
+    case 'STRAIGHT_STREET':
+    case 'SOUQ_AXIS':
+    case 'MIDAN':
+    case 'BAB_SHARQI':
       return 'marketplace';
     case 'WEALTHY':
       return 'wealthy';
@@ -81,18 +85,25 @@ export function checkConversationTrigger(
   if (npcRank < playerRank) return null;
 
   const threatMemory = context.flags?.threatMemory ?? 0;
-  const isThreatening = impact.threatLevel >= 40 || impact.offenseLevel >= 50;
+  const nobleAnyInsult = context.npc.socialClass === SocialClass.NOBILITY
+    && (impact.threatLevel > 0 || impact.offenseLevel > 0);
+  const isThreatening = nobleAnyInsult || impact.threatLevel >= 40 || impact.offenseLevel >= 50;
   if (!isThreatening) return null;
 
   let eventId = 'conversation_guard_warning';
-  if (threatMemory >= 2 || impact.threatLevel >= 70) {
-    if (context.environment.district === 'MARKET' || context.environment.district === 'CARAVANSERAI') {
-      eventId = 'conversation_summon_market_authority';
-    } else if (context.environment.district === 'WEALTHY') {
-      eventId = 'conversation_summon_household_guard';
-    } else {
-      eventId = 'conversation_summon_watch';
-    }
+  const isRepeatThreat = threatMemory >= 1;
+  const isSevereThreat = impact.threatLevel >= 70 || impact.offenseLevel >= 70;
+
+  if (context.npc.socialClass === SocialClass.NOBILITY && nobleAnyInsult) {
+    eventId = 'event_authority_detains_player';
+  } else if (isRepeatThreat || isSevereThreat) {
+    eventId = 'event_authority_detains_player';
+  } else if (context.environment.district === 'MARKET' || context.environment.district === 'CARAVANSERAI') {
+    eventId = 'conversation_summon_market_authority';
+  } else if (context.environment.district === 'WEALTHY') {
+    eventId = 'conversation_summon_household_guard';
+  } else {
+    eventId = 'conversation_summon_watch';
   }
 
   if (existingEventIds.includes(eventId)) return null;

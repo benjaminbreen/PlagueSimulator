@@ -59,6 +59,12 @@ export class SacredLayer implements SoundLayer {
   private lastAdhanHour: number = -1;
   private simTimeAtLastCheck: number = 0;
 
+  // Instrumental music (occasional ney/flute in non-marketplace areas)
+  private instrumentalSynth: AdhanSynth | null = null;
+  private isInstrumentalPlaying: boolean = false;
+  private lastInstrumentalTime: number = 0;
+  private readonly INSTRUMENTAL_MIN_INTERVAL = 120000; // 2 minutes minimum between pieces
+
   constructor(ctx: AudioContext) {
     this.ctx = ctx;
 
@@ -119,6 +125,13 @@ export class SacredLayer implements SoundLayer {
     this.distantAdhan1?.synth.stop();
     this.distantAdhan2?.synth.stop();
 
+    // Stop any playing instrumental
+    if (this.instrumentalSynth) {
+      this.instrumentalSynth.stop();
+      this.instrumentalSynth = null;
+      this.isInstrumentalPlaying = false;
+    }
+
     // Fade out
     const now = this.ctx.currentTime;
     this.output.gain.setTargetAtTime(0, now, 0.5);
@@ -133,6 +146,7 @@ export class SacredLayer implements SoundLayer {
     if (!this.isPlaying) return;
 
     const now = this.ctx.currentTime;
+    const nowMs = now * 1000;
 
     // Check for prayer time (only trigger once per prayer)
     if (!this.isAdhanPlaying) {
@@ -153,6 +167,20 @@ export class SacredLayer implements SoundLayer {
       now,
       2
     );
+
+    // Occasional instrumental music in non-marketplace districts
+    const isMarketplace = state.district === 'MARKET' || state.district === 'CARAVANSERAI';
+    const isOutdoor = state.sceneMode === 'outdoor';
+
+    if (!isMarketplace && isOutdoor && !this.isInstrumentalPlaying && !this.isAdhanPlaying) {
+      // Check if enough time has passed since last instrumental
+      if (nowMs - this.lastInstrumentalTime > this.INSTRUMENTAL_MIN_INTERVAL) {
+        // Random chance to trigger (about once every 5 minutes on average)
+        if (Math.random() < 0.003) { // 0.3% chance per update (~60 updates/sec = ~1.8 checks/sec)
+          this.triggerInstrumental();
+        }
+      }
+    }
   }
 
   private getCurrentPrayer(timeOfDay: number): PrayerTime | null {
@@ -276,6 +304,39 @@ export class SacredLayer implements SoundLayer {
       this.sacredDroneLfo.disconnect();
       this.sacredDroneLfo = null;
     }
+  }
+
+  private triggerInstrumental(): void {
+    this.isInstrumentalPlaying = true;
+    this.lastInstrumentalTime = this.ctx.currentTime * 1000;
+
+    // Randomly choose between Ney and Smooth Flute
+    const melodies: Array<'ney' | 'flute'> = ['ney', 'flute'];
+    const chosenMelody = melodies[Math.floor(Math.random() * melodies.length)];
+
+    console.log(`[SacredLayer] Playing instrumental: ${chosenMelody}`);
+
+    // Create a new synth for this performance
+    this.instrumentalSynth = new AdhanSynth(this.ctx);
+    this.instrumentalSynth.connect(this.output);
+
+    // Play the chosen melody with moderate volume
+    this.instrumentalSynth.play({
+      baseFrequency: 220, // Standard A
+      gain: 0.08, // Quiet, atmospheric
+      reverbWet: 0.6,
+      melody: chosenMelody,
+      onComplete: () => {
+        this.isInstrumentalPlaying = false;
+        console.log(`[SacredLayer] Instrumental ${chosenMelody} complete`);
+
+        // Cleanup synth
+        if (this.instrumentalSynth) {
+          this.instrumentalSynth.stop();
+          this.instrumentalSynth = null;
+        }
+      }
+    });
   }
 
   /**

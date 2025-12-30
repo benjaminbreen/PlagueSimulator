@@ -1,7 +1,7 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance } from '../types';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, BuildingInfectionState, MiniMapData, getLocationLabel, getDistrictType, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance, DistrictType } from '../types';
 import { MoraleStats } from './Agents';
 import { ActionBar } from './ActionBar';
 import { Humanoid } from './Humanoid';
@@ -36,15 +36,20 @@ import {
   Activity
 } from 'lucide-react';
 import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
+import { AdhanSynth, MelodyName } from './audio/synthesis/AdhanSynth';
 import { SoundDebugPanel } from './audio/SoundDebugPanel';
 import { EncounterModal } from './EncounterModal/EncounterModal';
 import { EventModal } from './EventModal';
 import { ConversationSummary } from '../types';
+import { OverworldMap } from './OverworldMap';
 import { ConversationImpact } from '../utils/friendliness';
 import { SicknessMeter } from './SicknessMeter';
 import { getHealthStatusLabel, getPlagueTypeLabel, getSymptomLabels } from '../utils/plague';
 import { GuideTab } from './HistoricalGuide';
 import { ItemPreview3D } from './ItemPreview3D';
+import { Compass } from './Compass';
+import { PerspectiveMenu } from './PerspectiveMenu';
+import { MobilePerspectiveMenu } from './MobilePerspectiveMenu';
 
 interface UIProps {
   params: SimulationParams;
@@ -54,10 +59,14 @@ interface UIProps {
   devSettings: DevSettings;
   setDevSettings: React.Dispatch<React.SetStateAction<DevSettings>>;
   nearBuilding: BuildingMetadata | null;
+  buildingInfection?: Record<string, BuildingInfectionState>;
   onFastTravel: (x: number, y: number) => void;
   selectedNpc: { stats: NPCStats; state: AgentState } | null;
   minimapData: MiniMapData | null;
   sceneMode: 'outdoor' | 'interior';
+  mapX: number;
+  mapY: number;
+  overworldPath: { mapX: number; mapY: number; enteredAtSimTime: number }[];
   pickupPrompt: string | null;
   climbablePrompt: string | null;
   isClimbing: boolean;
@@ -68,6 +77,7 @@ interface UIProps {
   moraleStats: MoraleStats;
   actionSlots: ActionSlotState;
   onTriggerAction: (actionId: ActionId) => void;
+  onTriggerPush?: () => void;
   simTime: number;
   showPlayerModal: boolean;
   setShowPlayerModal: React.Dispatch<React.SetStateAction<boolean>>;
@@ -132,6 +142,216 @@ interface InventoryEntry {
   effects?: Array<{ type: string; value: number }>;
   appearance?: ItemAppearance;
 }
+
+const getNarratorTextForDistrict = (district: DistrictType, timeOfDay: number) => {
+  const bucket = Math.max(0, Math.min(7, Math.floor(timeOfDay / 3)));
+  const timeSlices = [
+    'Before dawn the city is subdued, with only the earliest movements and a cautious quiet.',
+    'In the early morning, activity begins to gather as people start their daily routines.',
+    'By late morning, the streets are active and business moves at a steady pace.',
+    'At midday, the heat slows movement and conversation grows shorter.',
+    'In the early afternoon, activity returns in waves as people resume their tasks.',
+    'Toward evening, work winds down and the streets thin.',
+    'At night, movement is limited and the mood is watchful.',
+    'In the hours before dawn, the city is quiet and expectant.'
+  ];
+  const districtSlices: Record<DistrictType, string[]> = {
+    MARKET: [
+      'Stall owners lift shutters and a few buyers linger near the fountain.',
+      'Merchants call out prices and baskets pass between hands.',
+      'Bargains are struck quickly, with porters weaving through the crowd.',
+      'Shade is scarce and vendors cluster where a breeze can be found.',
+      'Regulars return for essentials while others drift past the spice tables.',
+      'Vendors count coin and sort what remains for tomorrow.',
+      'Watchmen and a few late traders remain near the stalls.',
+      'Carts line up for setup, and the square stays mostly empty.'
+    ],
+    WEALTHY: [
+      'Servants move between houses and guards remain at the gates.',
+      'Courtyard doors open briefly as errands begin.',
+      'Messengers and clerks cross the lanes with sealed notes.',
+      'The streets stay quiet behind shaded walls and screened windows.',
+      'Coaches pass in short bursts, followed by retainers.',
+      'Households close doors and draw in for the night.',
+      'Only guards and lamps mark the edges of the quarter.',
+      'Watchmen patrol the walls while homes remain dark.'
+    ],
+    HOVELS: [
+      'Cookfires are lit and smoke gathers low in the lanes.',
+      'Neighbors share water and small meals at doorways.',
+      'Laborers head out while the sick remain inside.',
+      'The heat presses down and tempers shorten.',
+      'Weary workers return to quiet exchanges and short rest.',
+      'Meals are divided and families gather close.',
+      'Light is scarce and the quarter feels tense.',
+      'Early laborers wait for the day to begin.'
+    ],
+    CIVIC: [
+      'Clerks arrive and the steps are still mostly clear.',
+      'Petitioners form small lines and disputes are prepared.',
+      'Requests move through the halls in steady order.',
+      'Heat and crowding slow the pace inside.',
+      'Fewer petitioners remain and papers are sorted.',
+      'Doors close and guards take their posts.',
+      'The quarter is formal and quiet under watch.',
+      'Only sentries and early clerks move through the square.'
+    ],
+    RESIDENTIAL: [
+      'Neighbors draw water and begin small errands.',
+      'Familiar greetings pass between doorways.',
+      'Laundry and cooking keep households busy.',
+      'Most people keep to shade and stay indoors.',
+      'Children return and voices rise briefly.',
+      'Families gather and the lane settles.',
+      'The street is dim and still.',
+      'Only early risers move along the lane.'
+    ],
+    ALLEYS: [
+      'Only a few footsteps break the quiet.',
+      'Runners pass quickly between corners.',
+      'Traffic increases but the passages stay narrow.',
+      'Doors close and the alleys go quiet in the heat.',
+      'Small groups pass close to the walls.',
+      'Return traffic grows as people head home.',
+      'The alleys feel tense and watchful.',
+      'The passages wait for the first movement.'
+    ],
+    JEWISH_QUARTER: [
+      'Shops are just opening and the lane is calm.',
+      'Familiar neighbors begin trade and greetings.',
+      'Business is steady and voices stay measured.',
+      'The street is active but orderly.',
+      'Shops begin to close and the lane quiets.',
+      'Households prepare for the night in close quarters.',
+      'Lights are low and movement is subdued.',
+      'Only early walkers are visible.'
+    ],
+    CHRISTIAN_QUARTER: [
+      'Doors remain closed and the lane is quiet.',
+      'A few bells sound as shops begin to open.',
+      'Trade is steady and small gatherings form.',
+      'Conversation softens in the heat.',
+      'Activity tapers near the churches.',
+      'Households return and the lanes settle.',
+      'A few lamps light the street.',
+      'The quarter stays still with only early steps.'
+    ],
+    UMAYYAD_MOSQUE: [
+      'The precinct is quiet with only a few passersby.',
+      'Worshippers arrive and foot traffic begins.',
+      'Courtyards fill steadily as visitors pass through.',
+      'Voices carry across stone and the area is busy.',
+      'The flow eases and shade draws people inward.',
+      'The district calms as worshippers depart.',
+      'The precinct is subdued and watched.',
+      'Only the earliest prayers break the quiet.'
+    ],
+    STRAIGHT_STREET: [
+      'Shops open in sequence along the straight road.',
+      'Foot traffic builds as traders arrive from both gates.',
+      'Carts move through the colonnades in steady rhythm.',
+      'Shade gathers under stone arches as the heat rises.',
+      'Errands and gossip flow between merchants.',
+      'Shutters close in turn as the crowd thins.',
+      'A few late walkers move under the gate lamps.',
+      'The road is quiet and the colonnades are empty.'
+    ],
+    SOUQ_AXIS: [
+      'The souq wakes with rustling cloth and clinking scales.',
+      'Vendors call out from shaded stalls.',
+      'The corridor grows dense with shoppers and porters.',
+      'Heat hangs in the narrow passageways.',
+      'Trade continues in bursts as crowds pass through.',
+      'Bundles are packed and the corridor clears.',
+      'A few stallkeepers linger by lamplight.',
+      'The souq is silent, save for a few guards.'
+    ],
+    MIDAN: [
+      'Carters and herders move at the edge of the city.',
+      'Livestock and supplies enter through the southern gate.',
+      'The road fills with caravan traffic and messengers.',
+      'Heat settles over open yards and stables.',
+      'Travelers rest while traders regroup.',
+      'The gate quiets and wagons roll out.',
+      'Watchmen linger at the road markers.',
+      'The route lies still in the pre-dawn hush.'
+    ],
+    BAB_SHARQI: [
+      'Guards take posts at the eastern gate.',
+      'Travelers and petitioners pass through the arch.',
+      'Traffic thickens around the gatehouse.',
+      'Shade pools near the walls in the midday heat.',
+      'The gate quiets as travelers move on.',
+      'Lanterns are lit at the gate as dusk falls.',
+      'The gate stands watch over a quiet road.',
+      'The entryway waits for the first arrivals.'
+    ],
+    SALHIYYA: [
+      'The hillside is cool and lightly traveled.',
+      'Gardeners and pilgrims move along the path.',
+      'Visitors come for quiet air and brief rest.',
+      'Movement slows in the shade.',
+      'Paths thin as people return to the city.',
+      'The hillside grows still again.',
+      'Little movement is seen after dark.',
+      'The hill is quiet except for wind and birds.'
+    ],
+    OUTSKIRTS_FARMLAND: [
+      'Workers are only just arriving at the fields.',
+      'Labor begins along canals and plots.',
+      'Carts move toward the city with produce.',
+      'Work slows under the heat.',
+      'Labor resumes in short bursts.',
+      'Workers head back with their tools.',
+      'Fields are dark and empty.',
+      'Early laborers move along the paths.'
+    ],
+    OUTSKIRTS_DESERT: [
+      'Only distant tracks are visible.',
+      'Morning light reveals a few travelers.',
+      'Heat builds and movement slows.',
+      'The road is harsh and largely empty.',
+      'A small caravan may pass at a measured pace.',
+      'The wind cools and movement returns.',
+      'The edge is still and watchful.',
+      'The road waits for the first caravan.'
+    ],
+    CARAVANSERAI: [
+      'Animals rest and the yard is quiet.',
+      'Arrivals begin and goods are unloaded.',
+      'Merchants compare notes and tally accounts.',
+      'Trade and repair are loud in the yard.',
+      'Activity eases as travelers depart.',
+      'Fires are lit and packs are checked.',
+      'The caravanserai settles into guarded quiet.',
+      'Early travelers prepare to leave.'
+    ],
+    MOUNTAIN_SHRINE: [
+      'The shrine is quiet and nearly empty.',
+      'A few pilgrims arrive with caretakers.',
+      'Visits are brief and prayers are hushed.',
+      'Visitors linger briefly on the warm stone.',
+      'The path clears and the shrine grows still.',
+      'The last visitors descend toward the city.',
+      'The shrine is dark and silent.',
+      'Only wind and distant calls reach this place.'
+    ],
+    SOUTHERN_ROAD: [
+      'Only a few carts are in sight.',
+      'Travelers head toward the city gates.',
+      'Small caravans pass at a measured pace.',
+      'Movement slows in the heat.',
+      'Traffic returns in short intervals.',
+      'Travelers seek shelter and the road empties.',
+      'The road is dark with only watchmen nearby.',
+      'Early travelers gather on the roadside.'
+    ]
+  };
+  const fallback = 'The city holds its breath, uncertain what the next hour will bring.';
+  const timeText = timeSlices[bucket] ?? timeSlices[0];
+  const districtText = districtSlices[district]?.[bucket];
+  return `${timeText} ${districtText ?? fallback}`;
+};
 
 const WeatherModal: React.FC<{
   timeOfDay: number;
@@ -284,9 +504,12 @@ const MapModal: React.FC<{
   const locations = useMemo(() => [
     { title: "CENTRAL\nBAZAAR", titleLines: ["CENTRAL", "BAZAAR"], name: "Al-Buzuriyah Souq", hoverName: "City Center", x: 0, y: 0, type: "market", desc: "Central bazaar south of the Great Mosque", color: "amber" },
     { title: "GREAT\nMOSQUE", titleLines: ["GREAT", "MOSQUE"], name: "Umayyad Mosque", hoverName: "Religious Center", x: 0, y: 2, type: "mosque", desc: "The Great Mosque of Damascus, heart of the city", color: "emerald" },
+    { title: "SOUQ\nAXIS", titleLines: ["SOUQ", "AXIS"], name: "Market Corridor", hoverName: "North-South Souq", x: 0, y: 1, type: "market", desc: "Main souq corridor linking market to the mosque", color: "yellow" },
     { title: "JEWISH\nQUARTER", titleLines: ["JEWISH", "QUARTER"], name: "Al-Yahud", hoverName: "South-Central District", x: 0, y: -2, type: "jewish", desc: "Jewish quarter with synagogues and kosher markets", color: "indigo" },
+    { title: "AL-MIDAN\nGATE", titleLines: ["AL-MIDAN", "GATE"], name: "Midan", hoverName: "Southern Gate Road", x: 0, y: -3, type: "road", desc: "Southern gate route with stables and caravans", color: "orange" },
     { title: "CHRISTIAN\nQUARTER", titleLines: ["CHRISTIAN", "QUARTER"], name: "Bab Touma", hoverName: "East on Straight Street", x: 3, y: 0, type: "residential", desc: "Christian district at eastern end of Via Recta", color: "blue" },
-    { title: "EASTERN\nDISTRICT", titleLines: ["EASTERN", "DISTRICT"], name: "Bab Sharqi", hoverName: "Eastern Gate Area", x: 4, y: 1, type: "alley", desc: "Eastern gate district with narrow alleys", color: "slate" },
+    { title: "STRAIGHT\nSTREET", titleLines: ["STRAIGHT", "STREET"], name: "Via Recta", hoverName: "East-West Artery", x: 2, y: 0, type: "road", desc: "Roman straight street lined with colonnades", color: "yellow" },
+    { title: "BAB\nSHARQI", titleLines: ["BAB", "SHARQI"], name: "Bab Sharqi", hoverName: "Eastern Gate", x: 4, y: 1, type: "gate", desc: "Eastern gate and entry road into the city", color: "slate" },
     { title: "HILLSIDE\nQUARTER", titleLines: ["HILLSIDE", "QUARTER"], name: "Al-Salihiyya", hoverName: "Mountain Slopes", x: -4, y: 4, type: "hillside", desc: "Hillside quarter on Mount Qassioun's slopes", color: "green" },
     { title: "WEALTHY\nQUARTER", titleLines: ["WEALTHY", "QUARTER"], name: "Al-Qaymariyya", hoverName: "Northwest Quarter", x: -2, y: 3, type: "wealthy", desc: "Wealthy merchant quarter northwest of center", color: "purple" },
     { title: "SOUTHERN\nQUARTER", titleLines: ["SOUTHERN", "QUARTER"], name: "Al-Shaghour", hoverName: "Far South", x: 0, y: -4, type: "poor", desc: "Dense southern quarter outside old walls", color: "red" },
@@ -410,10 +633,7 @@ const MapModal: React.FC<{
                     {/* Current location indicator - expanding pulse */}
                     {isCurrent && (
                       <>
-                        <circle cx={svgX} cy={svgY} r="16" className={colors.ring} strokeWidth="2" fill="none" opacity="0.3">
-                          <animate attributeName="r" from="12" to="20" dur="1.5s" repeatCount="indefinite" />
-                          <animate attributeName="opacity" from="0.4" to="0" dur="1.5s" repeatCount="indefinite" />
-                        </circle>
+                        <circle cx={svgX} cy={svgY} r="16" className={`${colors.ring} animate-ping`} strokeWidth="2" fill="none" opacity="0.3" />
                         <circle cx={svgX} cy={svgY} r="12" className={colors.ring} strokeWidth="2" fill="none" opacity="0.6" />
                       </>
                     )}
@@ -541,7 +761,7 @@ const MapModal: React.FC<{
   );
 };
 
-const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void }> = ({ data, sceneMode, onClose }) => {
+const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void; onToggle: () => void }> = ({ data, sceneMode, onClose, onToggle }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [minimapSize, setMinimapSize] = useState(() => (window.innerWidth < 640 ? 150 : 220));
 
@@ -796,6 +1016,10 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     data.district === 'OUTSKIRTS_DESERT' ? 'Desert Outskirts' :
     data.district === 'CARAVANSERAI' ? 'Caravanserai' :
     data.district === 'SOUTHERN_ROAD' ? 'Southern Road' :
+    data.district === 'STRAIGHT_STREET' ? 'Straight Street' :
+    data.district === 'SOUQ_AXIS' ? 'Souq Axis' :
+    data.district === 'MIDAN' ? 'Al-Midan' :
+    data.district === 'BAB_SHARQI' ? 'Bab Sharqi' :
     'Residential';
 
   return (
@@ -804,14 +1028,29 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         className="rounded-full p-[3px]"
         style={{ background: 'linear-gradient(135deg, #7a5a2e, #d3a45a 45%, #6b4b22)' }}
       >
-        <div className="relative rounded-full p-[6px] bg-black/80 border border-amber-900/40 shadow-[0_0_24px_rgba(210,164,90,0.35)]">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={onToggle}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onToggle();
+            }
+          }}
+          className="relative rounded-full p-[6px] bg-black/80 border border-amber-900/40 shadow-[0_0_24px_rgba(210,164,90,0.35)] focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300/60"
+          aria-label="Toggle Overworld Map"
+        >
           <canvas ref={canvasRef} className="rounded-full block" />
           <div
             className="absolute inset-0 rounded-full pointer-events-none"
             style={{ background: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.12), transparent 55%)' }}
           />
           <button
-            onClick={onClose}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
             className="absolute top-2 right-2 rounded-full border border-amber-700/50 bg-black/70 px-2 py-0.5 text-[9px] uppercase tracking-widest text-amber-200/80 opacity-0 transition-opacity duration-200 hover:text-amber-100 group-hover:opacity-100"
           >
             Close
@@ -913,7 +1152,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, onFastTravel, selectedNpc, minimapData, sceneMode, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
@@ -941,10 +1180,88 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [inventoryView, setInventoryView] = useState<'list' | 'grid'>('list');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryEntry | null>(null);
   const [minimapVisible, setMinimapVisible] = useState(true);
+  const [minimapMode, setMinimapMode] = useState<'local' | 'overworld'>('local');
   const [showMobilePerspectiveMenu, setShowMobilePerspectiveMenu] = useState(false);
+  const [narratorMessage, setNarratorMessage] = useState<string | null>(null);
+  const [narratorKey, setNarratorKey] = useState(0);
+  const [narratorHistory, setNarratorHistory] = useState<string[]>([]);
+  const [narratorOpen, setNarratorOpen] = useState(false);
+  const skipFirstNarrationRef = useRef(true);
+  const narratorTimeoutRef = useRef<number | null>(null);
+  const perspectiveTimeoutRef = useRef<number | null>(null);
+
+  const pushNarration = useCallback((text: string) => {
+    setNarratorMessage(text);
+    setNarratorHistory((prev) => [...prev, text]);
+    setNarratorKey((prev) => prev + 1);
+    if (narratorTimeoutRef.current) {
+      window.clearTimeout(narratorTimeoutRef.current);
+    }
+    narratorTimeoutRef.current = window.setTimeout(() => setNarratorMessage(null), 10000);
+  }, []);
 
   // Biome ambience preview for settings
   const { currentPreview, playPreview, stopPreview } = useBiomeAmbiencePreview();
+
+  // Sacred tune (Adhan) preview for settings
+  const [currentAdhanPreview, setCurrentAdhanPreview] = useState<MelodyName | null>(null);
+  const adhanSynthRef = useRef<AdhanSynth | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const playAdhanPreview = useCallback((melody: MelodyName) => {
+    // Stop any currently playing adhan
+    if (adhanSynthRef.current) {
+      adhanSynthRef.current.stop();
+    }
+
+    // Initialize audio context if needed
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioContext();
+    }
+
+    const ctx = audioContextRef.current;
+
+    // Resume context if suspended (required by browsers)
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+
+    // Create new synth and connect to output
+    const synth = new AdhanSynth(ctx);
+    synth.connect(ctx.destination);
+    adhanSynthRef.current = synth;
+
+    // Play the selected melody
+    setCurrentAdhanPreview(melody);
+    synth.play({
+      melody,
+      gain: 0.25,  // Moderate volume
+      reverbWet: 0.6,
+      onComplete: () => {
+        setCurrentAdhanPreview(null);
+      }
+    });
+  }, []);
+
+  const stopAdhanPreview = useCallback(() => {
+    if (adhanSynthRef.current) {
+      adhanSynthRef.current.stop();
+      adhanSynthRef.current = null;
+    }
+    setCurrentAdhanPreview(null);
+  }, []);
+
+  // Cleanup adhan synth on unmount
+  useEffect(() => {
+    return () => {
+      if (adhanSynthRef.current) {
+        adhanSynthRef.current.stop();
+      }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
+    };
+  }, []);
 
   // Track player movement (for sickness meter visibility)
   useEffect(() => {
@@ -1138,6 +1455,17 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     setShowPerspective(true);
   };
 
+  const showPerspectiveMenu = useCallback((openMobileMenu: boolean) => {
+    setShowPerspective(true);
+    if (perspectiveTimeoutRef.current) {
+      window.clearTimeout(perspectiveTimeoutRef.current);
+    }
+    perspectiveTimeoutRef.current = window.setTimeout(() => setShowPerspective(false), 10000);
+    if (openMobileMenu && window.innerWidth < 768) {
+      setShowMobilePerspectiveMenu(true);
+    }
+  }, []);
+
   const getBuildingTypeLabel = (type: BuildingType) => {
     switch (type) {
       case BuildingType.RESIDENTIAL: return 'Private Residence';
@@ -1239,21 +1567,54 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   }, [params.cameraMode]);
 
   useEffect(() => {
-    setShowPerspective(true);
-    const timer = window.setTimeout(() => setShowPerspective(false), 10000);
-    return () => window.clearTimeout(timer);
+    showPerspectiveMenu(false);
+    return () => {
+      if (perspectiveTimeoutRef.current) {
+        window.clearTimeout(perspectiveTimeoutRef.current);
+      }
+    };
   }, [params.cameraMode]);
+
+  useEffect(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+    pushNarration(getNarratorTextForDistrict(district, params.timeOfDay));
+    return () => {
+      if (narratorTimeoutRef.current) {
+        window.clearTimeout(narratorTimeoutRef.current);
+        narratorTimeoutRef.current = null;
+      }
+    };
+  }, [params.mapX, params.mapY, params.timeOfDay, pushNarration]);
+
+  useEffect(() => {
+    if (skipFirstNarrationRef.current) {
+      skipFirstNarrationRef.current = false;
+      return;
+    }
+    const district = getDistrictType(params.mapX, params.mapY);
+    pushNarration(getNarratorTextForDistrict(district, params.timeOfDay));
+  }, [params.mapX, params.mapY, params.timeOfDay, pushNarration]);
 
   const formatHeight = (scale: number) => `${Math.round(scale * 170)} cm`;
   const formatWeight = (scale: number) => `${Math.round(scale * 70)} kg`;
 
   return (
     <div className="absolute inset-0 pointer-events-none flex flex-col z-10 text-amber-50">
-      {minimapVisible && (
+      {minimapVisible && minimapMode === 'local' && (
         <MiniMap
           data={minimapData}
           sceneMode={sceneMode}
           onClose={() => setMinimapVisible(false)}
+          onToggle={() => setMinimapMode('overworld')}
+        />
+      )}
+      {minimapVisible && minimapMode === 'overworld' && (
+        <OverworldMap
+          centerX={mapX}
+          centerY={mapY}
+          path={overworldPath}
+          sceneMode={sceneMode}
+          onToggle={() => setMinimapMode('local')}
         />
       )}
       
@@ -1349,51 +1710,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         </div>
       </div>
 
-      {showMobilePerspectiveMenu && (
-        <div className="absolute top-16 right-4 md:hidden pointer-events-auto bg-black/80 backdrop-blur-lg border border-amber-900/50 rounded-xl shadow-2xl p-2 w-44">
-          <div className="text-[9px] uppercase tracking-widest text-amber-500/80 font-bold mb-1 px-2">
-            Perspective
-          </div>
-          <div className="grid grid-cols-1 gap-1">
-            <button
-              onClick={() => {
-                handleChange('cameraMode', CameraMode.FIRST_PERSON);
-                setShowMobilePerspectiveMenu(false);
-              }}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.FIRST_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-            >
-              <Eye size={12} /> First Person
-            </button>
-            <button
-              onClick={() => {
-                handleChange('cameraMode', CameraMode.OVER_SHOULDER);
-                setShowMobilePerspectiveMenu(false);
-              }}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVER_SHOULDER ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-            >
-              <User size={12} /> Over Shoulder
-            </button>
-            <button
-              onClick={() => {
-                handleChange('cameraMode', CameraMode.THIRD_PERSON);
-                setShowMobilePerspectiveMenu(false);
-              }}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.THIRD_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-            >
-              <Camera size={12} /> Orbit View
-            </button>
-            <button
-              onClick={() => {
-                handleChange('cameraMode', CameraMode.OVERHEAD);
-                setShowMobilePerspectiveMenu(false);
-              }}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVERHEAD ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-            >
-              <Layers size={12} /> Overhead Map
-            </button>
-          </div>
-        </div>
-      )}
+      <MobilePerspectiveMenu
+        visible={showMobilePerspectiveMenu}
+        cameraMode={params.cameraMode}
+        onChange={(mode) => handleChange('cameraMode', mode)}
+        onClose={() => setShowMobilePerspectiveMenu(false)}
+      />
 
       {/* CENTER LOCATION PILLS */}
       <div className="absolute top-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-xs md:max-w-md pointer-events-none">
@@ -1412,29 +1734,56 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </div>
         </button>
 
-        {nearBuilding && (
-          <div className="bg-black/60 backdrop-blur-lg p-3 rounded-xl border border-amber-600/30 shadow-2xl w-full transition-all duration-300 animate-in fade-in slide-in-from-top-4 pointer-events-auto">
-            <div className="flex justify-between items-start mb-1">
-              <h3 className="text-amber-400 font-bold text-[10px] historical-font tracking-tight uppercase">
-                {getBuildingTypeLabel(nearBuilding.type)}
-              </h3>
-              <Info size={12} className="text-amber-600/50" />
-            </div>
-            
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2 text-amber-100">
-                <User size={10} className="text-amber-500/70" />
-                <span className="text-xs font-semibold">{nearBuilding.ownerName}</span>
-                <span className="text-[10px] text-amber-100/50">Age {nearBuilding.ownerAge}</span>
+        {nearBuilding && (() => {
+          const infectionState = buildingInfection?.[nearBuilding.id];
+          const isInfected = infectionState?.status === 'infected' || infectionState?.status === 'deceased';
+          const isDeceased = infectionState?.status === 'deceased';
+
+          return (
+            <div className={`backdrop-blur-lg p-3 rounded-xl shadow-2xl w-full transition-all duration-300 animate-in fade-in slide-in-from-top-4 pointer-events-auto ${
+              isInfected
+                ? 'bg-red-950/80 border-2 border-red-500/60'
+                : 'bg-black/60 border border-amber-600/30'
+            }`}>
+              {/* Plague warning banner */}
+              {isInfected && (
+                <div className={`flex items-center justify-center gap-2 mb-2 py-1.5 rounded-lg ${
+                  isDeceased ? 'bg-red-900/60' : 'bg-red-800/50'
+                } animate-pulse`}>
+                  <span className="text-red-200 font-black text-xs uppercase tracking-[0.2em]">
+                    {isDeceased ? '☠ DEATH HOUSE ☠' : '⚠ PLAGUE HOUSE ⚠'}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex justify-between items-start mb-1">
+                <h3 className={`font-bold text-[10px] historical-font tracking-tight uppercase ${
+                  isInfected ? 'text-red-300' : 'text-amber-400'
+                }`}>
+                  {getBuildingTypeLabel(nearBuilding.type)}
+                </h3>
+                <Info size={12} className={isInfected ? 'text-red-400/50' : 'text-amber-600/50'} />
               </div>
-              <div className="flex items-center gap-2 pl-4">
-                <span className="text-[9px] uppercase tracking-widest text-amber-400/80 bg-amber-950/50 px-1.5 py-0.5 rounded border border-amber-900/30 font-bold">
-                  {nearBuilding.ownerProfession}
-                </span>
+
+              <div className="flex flex-col gap-1.5">
+                <div className={`flex items-center gap-2 ${isInfected ? 'text-red-100' : 'text-amber-100'}`}>
+                  <User size={10} className={isInfected ? 'text-red-400/70' : 'text-amber-500/70'} />
+                  <span className="text-xs font-semibold">{nearBuilding.ownerName}</span>
+                  <span className={`text-[10px] ${isInfected ? 'text-red-100/50' : 'text-amber-100/50'}`}>Age {nearBuilding.ownerAge}</span>
+                </div>
+                <div className="flex items-center gap-2 pl-4">
+                  <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded border font-bold ${
+                    isInfected
+                      ? 'text-red-300/80 bg-red-950/50 border-red-700/30'
+                      : 'text-amber-400/80 bg-amber-950/50 border-amber-900/30'
+                  }`}>
+                    {nearBuilding.ownerProfession}
+                  </span>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* OVERWORLD MAP MODAL */}
@@ -2064,39 +2413,17 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </div>
         )}
 
+        <div className="absolute bottom-6 left-6">
+          <Compass minimapData={minimapData} onClick={() => showPerspectiveMenu(true)} />
+        </div>
+
         {/* Bottom Controls */}
         <div className="flex flex-col md:flex-row gap-4 items-end pointer-events-auto">
-          {showPerspective && (
-            <div className="hidden md:block bg-black/70 backdrop-blur-lg p-3 rounded-xl border border-amber-900/50 shadow-2xl flex flex-col gap-2">
-              <span className="text-[9px] uppercase tracking-widest text-amber-500/80 font-bold mb-1 px-1">Observation Perspective</span>
-              <div className="grid grid-cols-1 gap-1">
-                <button
-                  onClick={() => handleChange('cameraMode', CameraMode.FIRST_PERSON)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.FIRST_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-                >
-                  <Eye size={12} /> First Person
-                </button>
-                <button
-                  onClick={() => handleChange('cameraMode', CameraMode.OVER_SHOULDER)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVER_SHOULDER ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-                >
-                  <User size={12} /> Over Shoulder
-                </button>
-                <button
-                  onClick={() => handleChange('cameraMode', CameraMode.THIRD_PERSON)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.THIRD_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-                >
-                  <Camera size={12} /> Orbit View
-                </button>
-                <button
-                  onClick={() => handleChange('cameraMode', CameraMode.OVERHEAD)}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${params.cameraMode === CameraMode.OVERHEAD ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
-                >
-                  <Layers size={12} /> Overhead Map
-                </button>
-              </div>
-            </div>
-          )}
+          <PerspectiveMenu
+            visible={showPerspective}
+            cameraMode={params.cameraMode}
+            onChange={(mode) => handleChange('cameraMode', mode)}
+          />
         </div>
       </div>
 
@@ -2278,6 +2605,103 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 {currentPreview && (
                   <BiomeAmbience biome={currentPreview} enabled={true} volume={0.6} />
                 )}
+
+                {/* Sacred Tunes (Adhan) Preview Section */}
+                <div className="mt-8 pt-8 border-t border-white/10">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-amber-400 uppercase tracking-widest text-xs font-bold">
+                        Sacred Instrumental Themes
+                      </h3>
+                      <p className="text-[10px] text-amber-100/40 mt-1">
+                        Haunting melodies using authentic 14th century Middle Eastern instruments and maqam scales
+                      </p>
+                    </div>
+                    {currentAdhanPreview && (
+                      <button
+                        onClick={stopAdhanPreview}
+                        className="flex items-center gap-2 px-3 py-1.5 bg-red-900/40 border border-red-700/50 rounded-lg text-[10px] uppercase tracking-widest text-red-300 hover:bg-red-900/60 transition-colors"
+                      >
+                        <Square size={10} fill="currentColor" />
+                        Stop
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-3">
+                    {[
+                      { melody: 'ney' as MelodyName, name: 'Ney (Reed Flute)', description: 'Breathy, mournful descent - traditional Saba maqam lament', maqam: 'Saba', instrument: 'Reed with breath noise' },
+                      { melody: 'flute' as MelodyName, name: 'Smooth Flute', description: 'Joyful ascending melody with gentle ornaments - bright and flowing', maqam: 'Rast', instrument: 'Pure tone with harmonics' },
+                    ].map(({ melody, name, description, maqam, instrument }) => {
+                      const isPlaying = currentAdhanPreview === melody;
+                      return (
+                        <div
+                          key={melody}
+                          className={`p-4 rounded-lg border transition-all ${
+                            isPlaying
+                              ? 'bg-emerald-900/30 border-emerald-600/60 shadow-lg shadow-emerald-900/20'
+                              : 'bg-black/30 border-amber-900/30 hover:border-amber-700/50'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2">
+                                <h4 className={`font-bold uppercase tracking-wide text-sm ${
+                                  isPlaying ? 'text-emerald-400' : 'text-amber-200'
+                                }`}>
+                                  {name}
+                                </h4>
+                                {isPlaying && (
+                                  <div className="flex gap-0.5">
+                                    {[0, 1, 2].map((i) => (
+                                      <div
+                                        key={i}
+                                        className="w-1 bg-emerald-500 rounded-full animate-pulse"
+                                        style={{
+                                          height: `${8 + Math.sin(Date.now() / 200 + i) * 4}px`,
+                                          animationDelay: `${i * 0.15}s`,
+                                        }}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-amber-100/50 mt-1">{description}</p>
+                              <div className="flex gap-3 mt-1">
+                                <p className="text-[9px] text-emerald-400/60 italic">Maqam: {maqam}</p>
+                                <p className="text-[9px] text-amber-400/40 italic">{instrument}</p>
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => isPlaying ? stopAdhanPreview() : playAdhanPreview(melody)}
+                              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] uppercase tracking-widest font-bold transition-all ${
+                                isPlaying
+                                  ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                                  : 'bg-amber-900/40 border border-amber-700/50 text-amber-200 hover:bg-amber-800/50'
+                              }`}
+                            >
+                              {isPlaying ? (
+                                <>
+                                  <Square size={10} fill="currentColor" />
+                                  Stop
+                                </>
+                              ) : (
+                                <>
+                                  <Play size={10} fill="currentColor" />
+                                  Preview
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="text-[10px] text-amber-100/30 italic text-center pt-4 border-t border-white/5 mt-4">
+                    Procedural synthesis of 14th century Middle Eastern instruments using authentic maqam scales
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="mt-6 space-y-6 text-amber-50/80">
@@ -3233,15 +3657,21 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
       {/* Action Bar - only show in outdoor mode */}
       {sceneMode === 'outdoor' && (
-        <ActionBar
-          actionSlots={actionSlots}
-          onTriggerAction={onTriggerAction}
-          simTime={simTime}
-          playerStats={playerStats}
-          inventoryItems={inventoryEntries}
-          onOpenItemModal={(item) => setSelectedInventoryItem(item)}
-          onDropItemAtScreen={onDropItemAtScreen}
-        />
+          <ActionBar
+            actionSlots={actionSlots}
+            onTriggerAction={onTriggerAction}
+            onTriggerPush={onTriggerPush}
+            simTime={simTime}
+            playerStats={playerStats}
+            narratorMessage={narratorMessage}
+            narratorKey={narratorKey}
+            narratorHistory={narratorHistory}
+            narratorOpen={narratorOpen}
+            onToggleNarrator={setNarratorOpen}
+            inventoryItems={inventoryEntries}
+            onOpenItemModal={(item) => setSelectedInventoryItem(item)}
+            onDropItemAtScreen={onDropItemAtScreen}
+          />
       )}
     </div>
   );

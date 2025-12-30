@@ -92,7 +92,7 @@ export const useObserveMode = ({
       })();
       fallbackTimerRef.current = window.setTimeout(() => {
         setObserveLines(prev => (prev.length === 0 ? defaultObserveLines : prev));
-      }, 1200);
+      }, 2000);
     } else {
       setObserveLines(defaultObserveLines);
     }
@@ -131,15 +131,11 @@ export const useObserveMode = ({
       if (idx >= observeLines.length) {
         window.clearInterval(interval);
       }
-    }, 1400);
-    const timeout = window.setTimeout(() => {
-      stopObserveMode();
-    }, 1400 * observeLines.length + 6000);
+    }, 3200);
     return () => {
       window.clearInterval(interval);
-      window.clearTimeout(timeout);
     };
-  }, [observeMode, observeLines.length, stopObserveMode]);
+  }, [observeMode, observeLines.length]);
 
   return {
     observeMode,

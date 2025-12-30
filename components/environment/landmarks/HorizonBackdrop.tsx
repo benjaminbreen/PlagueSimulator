@@ -5,7 +5,7 @@
 
 import React, { useMemo, useRef } from 'react';
 import * as THREE from 'three';
-import { DistrictType } from '../../../types';
+import { CONSTANTS, DistrictType } from '../../../types';
 import { SANDSTONE_PALETTE } from '../constants';
 
 // Horizon profile types based on urban density
@@ -72,6 +72,9 @@ const getHorizonProfile = (district?: DistrictType): HorizonProfile => {
     case 'MARKET':
     case 'CIVIC':
     case 'WEALTHY':
+    case 'STRAIGHT_STREET':
+    case 'SOUQ_AXIS':
+    case 'BAB_SHARQI':
       return 'DENSE_URBAN';
 
     case 'RESIDENTIAL':
@@ -79,6 +82,7 @@ const getHorizonProfile = (district?: DistrictType): HorizonProfile => {
     case 'JEWISH_QUARTER':
     case 'HOVELS':
     case 'CHRISTIAN_QUARTER':
+    case 'MIDAN':
       return 'RESIDENTIAL';
 
     case 'CARAVANSERAI':
@@ -107,6 +111,8 @@ export const HorizonBackdrop: React.FC<{
   mapY?: number;
 }> = ({ timeOfDay, showCityWalls = true, wallRadius = 82, district, mapX = 0, mapY = 0 }) => {
   const time = timeOfDay ?? 12;
+  const radiusScale = (CONSTANTS.MAP_RADIUS / 55) * 0.9;
+  const scaleRadius = (radius: number) => radius * radiusScale;
 
   // Get horizon profile and configuration based on district
   const profile = useMemo(() => getHorizonProfile(district), [district]);
@@ -198,13 +204,13 @@ export const HorizonBackdrop: React.FC<{
     if (!buildingInstancesRef.current) return;
 
     const tempObj = new THREE.Object3D();
-    const baseRadius = isDesert ? 120 : 105; // Pushed farther out
+    const baseRadius = scaleRadius(isDesert ? 120 : 105); // Pushed farther out
 
     for (let i = 0; i < buildingCount; i++) {
       // Add procedural variation to angle based on district seed
       const angleOffset = ((buildingSeed + i * 7) % 100) / 100 * 0.1; // Small random offset
       const angle = (i / buildingCount) * Math.PI * 2 + angleOffset;
-      const radiusVariation = ((i * 7 + buildingSeed) % 5) * 3;
+      const radiusVariation = scaleRadius(((i * 7 + buildingSeed) % 5) * 3);
       const radius = baseRadius + radiusVariation;
 
       const x = Math.cos(angle) * radius;
@@ -327,7 +333,7 @@ export const HorizonBackdrop: React.FC<{
             // Distribute minarets around horizon with procedural variation
             const angleOffset = ((buildingSeed + i * 31) % 100) / 100 * 0.3;
             const angle = (i / config.minaretCount) * Math.PI * 2 + angleOffset;
-            const radius = 145 + ((i * 13 + buildingSeed) % 15);
+            const radius = scaleRadius(145 + ((i * 13 + buildingSeed) % 15));
             const height = 4.0 + ((i * 7 + buildingSeed) % 20) / 10; // 4.0-6.0 units
 
             const x = Math.cos(angle) * radius;
@@ -369,7 +375,7 @@ export const HorizonBackdrop: React.FC<{
             // Distribute domes around horizon with procedural variation
             const angleOffset = ((buildingSeed + i * 43) % 100) / 100 * 0.4;
             const angle = (i / config.domeCount) * Math.PI * 2 + angleOffset;
-            const radius = 142 + ((i * 17 + buildingSeed) % 16);
+            const radius = scaleRadius(142 + ((i * 17 + buildingSeed) % 16));
 
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
@@ -433,7 +439,7 @@ export const HorizonBackdrop: React.FC<{
             // Add procedural variation to angle
             const angleOffset = ((buildingSeed + i * 19) % 100) / 100 * 0.2;
             const angle = (i / count) * Math.PI * 2 + angleOffset;
-            const radius = (isDesert ? 150 : 140) + ((i * 7 + buildingSeed) % 4) * 4;
+            const radius = scaleRadius((isDesert ? 150 : 140) + ((i * 7 + buildingSeed) % 4) * 4);
             const x = Math.cos(angle) * radius;
             const z = Math.sin(angle) * radius;
             // Realistic distant tree heights - much shorter
@@ -488,12 +494,12 @@ export const HorizonBackdrop: React.FC<{
       {(() => {
         const hazeLayersRef = useRef<THREE.InstancedMesh>(null);
         const hazeData = [
-          { x: 100, z: 100, height: 8, size: 1.5 },
-          { x: -110, z: 95, height: 10, size: 1.8 },
-          { x: 105, z: -100, height: 7, size: 1.4 },
-          { x: -95, z: -105, height: 9, size: 1.6 },
-          { x: 120, z: -80, height: 11, size: 2.0 },
-          { x: -130, z: 110, height: 8, size: 1.7 },
+          { x: scaleRadius(100), z: scaleRadius(100), height: 8, size: 1.5 },
+          { x: scaleRadius(-110), z: scaleRadius(95), height: 10, size: 1.8 },
+          { x: scaleRadius(105), z: scaleRadius(-100), height: 7, size: 1.4 },
+          { x: scaleRadius(-95), z: scaleRadius(-105), height: 9, size: 1.6 },
+          { x: scaleRadius(120), z: scaleRadius(-80), height: 11, size: 2.0 },
+          { x: scaleRadius(-130), z: scaleRadius(110), height: 8, size: 1.7 },
         ];
 
         React.useEffect(() => {
@@ -518,7 +524,7 @@ export const HorizonBackdrop: React.FC<{
 
       {/* Mount Qasioun - very distant mountain ring with atmospheric fade */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 10, 0]}>
-        <ringGeometry args={[165, 180, 64]} />
+        <ringGeometry args={[scaleRadius(165), scaleRadius(180), 64]} />
         <meshStandardMaterial
           color={mountainColor}
           transparent
@@ -540,18 +546,18 @@ export const HorizonBackdrop: React.FC<{
 
         // ENHANCED: 12 gradient layers for ultra-smooth blending
         const gradientLayers = [
-          { height: 0.05, radius: [100, 180], opacity: 0.45, colorMix: 0 },      // Near ground
-          { height: 0.2, radius: [100, 180], opacity: 0.42, colorMix: 0.08 },
-          { height: 0.5, radius: [100, 180], opacity: 0.38, colorMix: 0.16 },
-          { height: 0.9, radius: [100, 180], opacity: 0.35, colorMix: 0.24 },
-          { height: 1.4, radius: [100, 180], opacity: 0.32, colorMix: 0.34 },
-          { height: 2.0, radius: [100, 180], opacity: 0.28, colorMix: 0.44 },
-          { height: 2.8, radius: [100, 180], opacity: 0.25, colorMix: 0.54 },
-          { height: 3.8, radius: [100, 180], opacity: 0.22, colorMix: 0.64 },
-          { height: 5.0, radius: [100, 180], opacity: 0.18, colorMix: 0.74 },
-          { height: 6.5, radius: [100, 180], opacity: 0.14, colorMix: 0.84 },
-          { height: 8.5, radius: [100, 180], opacity: 0.10, colorMix: 0.92 },
-          { height: 11.0, radius: [100, 180], opacity: 0.06, colorMix: 0.98 },   // Blend to sky
+          { height: 0.05, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.45, colorMix: 0 },      // Near ground
+          { height: 0.2, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.42, colorMix: 0.08 },
+          { height: 0.5, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.38, colorMix: 0.16 },
+          { height: 0.9, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.35, colorMix: 0.24 },
+          { height: 1.4, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.32, colorMix: 0.34 },
+          { height: 2.0, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.28, colorMix: 0.44 },
+          { height: 2.8, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.25, colorMix: 0.54 },
+          { height: 3.8, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.22, colorMix: 0.64 },
+          { height: 5.0, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.18, colorMix: 0.74 },
+          { height: 6.5, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.14, colorMix: 0.84 },
+          { height: 8.5, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.10, colorMix: 0.92 },
+          { height: 11.0, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.06, colorMix: 0.98 },   // Blend to sky
         ];
 
         return (

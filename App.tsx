@@ -30,6 +30,7 @@ import { Toast, ToastMessage } from './components/Toast';
 import { calculateDirection, formatDistrictName } from './utils/directions';
 import { buildObservePrompt } from './utils/observeContext';
 import { useObserveMode } from './hooks/useObserveMode';
+import { useOverworldPath } from './hooks/useOverworldPath';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -54,6 +55,8 @@ function App() {
   });
 
   const [transitioning, setTransitioning] = useState(false);
+  const [mapEntrySpawn, setMapEntrySpawn] = useState<{ mapX: number; mapY: number; position: [number, number, number] } | null>(null);
+  const overworldPath = useOverworldPath(params.mapX, params.mapY, stats.simTime);
   const [gameLoading, setGameLoading] = useState(true); // Initial loading state
   const [nearBuilding, setNearBuilding] = useState<BuildingMetadata | null>(null);
   const [showEnterModal, setShowEnterModal] = useState(false);
@@ -65,6 +68,7 @@ function App() {
   const lastOutdoorIdsRef = useRef<string[]>([]);
   const lastStatsUpdateRef = useRef(0);
   const lastMoraleUpdateRef = useRef(0);
+  const pushTriggerRef = useRef<number | null>(null);
   const scheduleWorkRef = useRef<{
     registry: { npcMap: Map<string, NPCRecord>; lastScheduleSimTime: number };
     phase: number;
@@ -102,6 +106,7 @@ function App() {
   const [lastEventNote, setLastEventNote] = useState<string | null>(null);
   const eventCooldownsRef = useRef<Record<string, number>>({});
   const npcThreatMemoryRef = useRef<Record<string, { count: number; lastSimTime: number }>>({});
+  const suppressDismissalEventRef = useRef(false);
   // Track NPC that dismissed player for handling "insist on following" option
   const dismissedNpcRef = useRef<{ npcId: string; npcName: string } | null>(null);
   const initialTriggerState = useMemo<TriggerState>(() => {
@@ -902,19 +907,24 @@ function App() {
       }
     };
 
-    if (meta?.action !== 'end_conversation') {
-      const dayIndex = Math.floor(stats.simTime);
-      const recentIds = Object.keys(eventCooldownsRef.current).filter(id => eventCooldownsRef.current[id] === dayIndex);
-      const convoEvent = checkConversationTrigger(context, impact, recentIds);
-      if (convoEvent) {
-        eventCooldownsRef.current[convoEvent.definitionId || convoEvent.id] = dayIndex;
-        void enqueueEventWithOptionalLLM(convoEvent);
+    const dayIndex = Math.floor(stats.simTime);
+    const recentIds = Object.keys(eventCooldownsRef.current).filter(id => eventCooldownsRef.current[id] === dayIndex);
+    const convoEvent = checkConversationTrigger(context, impact, recentIds);
+    if (convoEvent) {
+      eventCooldownsRef.current[convoEvent.definitionId || convoEvent.id] = dayIndex;
+      if (meta?.action === 'end_conversation') {
+        suppressDismissalEventRef.current = true;
       }
+      void enqueueEventWithOptionalLLM(convoEvent);
     }
   }, [currentWeather, enqueueEventWithOptionalLLM, outdoorNpcPool, params.mapX, params.mapY, params.timeOfDay, playerStats, stats.simTime]);
 
   // Handle triggering events from conversation actions (e.g., NPC dismissing player)
   const handleTriggerConversationEvent = useCallback((eventId: string, npcContext?: { npcId: string; npcName: string }, delayMs = 0) => {
+    if (eventId === 'npc_dismissed_player' && suppressDismissalEventRef.current) {
+      suppressDismissalEventRef.current = false;
+      return;
+    }
     const def = getEventById(eventId);
     if (!def) return;
 
@@ -1010,7 +1020,7 @@ function App() {
   const lastPerfChangeRef = useRef(0);
   const shadowsDisabledByPerf = useRef(false); // Track if we disabled shadows due to low FPS
   const PERF_DEBOUNCE_MS = 2000; // Debounce performance state changes by 2 seconds
-  const LOW_FPS_THRESHOLD = 20; // Disable shadows below this FPS
+  const LOW_FPS_THRESHOLD = 5; // Disable shadows below this FPS
 
   // Time tracking
   useEffect(() => {
@@ -1145,6 +1155,14 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode]);
 
+  // Push trigger function
+  const triggerPush = useCallback(() => {
+    // Set push trigger ref to full charge (1.0)
+    if (pushTriggerRef.current !== null) {
+      pushTriggerRef.current = 1.0;
+    }
+  }, []);
+
   // Action trigger function
   const triggerAction = useCallback((actionId: ActionId) => {
     const action = PLAYER_ACTIONS[actionId];
@@ -1211,22 +1229,32 @@ function App() {
     setTimeout(() => setActionEvent(null), 500);
   }, [actionSlots.cooldowns, playerStats.charisma, stats.simTime]);
 
-  // Action hotkey listener (1, 2, 3)
+  // Action hotkey listener (1, 2, 3, 4, 5)
   useEffect(() => {
     const handleActionKey = (e: KeyboardEvent) => {
       // Don't trigger if typing in an input or modal is open
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal) return;
       if (sceneMode !== 'outdoor') return;
-      if (e.key === '3' && selectedNpc) return;
 
       if (e.key === '1') {
+        // Push action
         e.preventDefault();
-        triggerAction(actionSlots.slot1);
+        triggerPush();
       } else if (e.key === '2') {
+        // Inventory toggle - handled by ActionBar component
+        // Don't prevent default here so ActionBar can handle it
+      } else if (e.key === '3') {
+        // Action slot 1 (was hotkey 1)
+        e.preventDefault();
+        if (selectedNpc) return; // Don't trigger if NPC is selected
+        triggerAction(actionSlots.slot1);
+      } else if (e.key === '4') {
+        // Action slot 2 (was hotkey 2)
         e.preventDefault();
         triggerAction(actionSlots.slot2);
-      } else if (e.key === '3') {
+      } else if (e.key === '5') {
+        // Action slot 3 (was hotkey 3)
         e.preventDefault();
         triggerAction(actionSlots.slot3);
       }
@@ -1234,13 +1262,18 @@ function App() {
 
     window.addEventListener('keydown', handleActionKey);
     return () => window.removeEventListener('keydown', handleActionKey);
-  }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, sceneMode, selectedNpc]);
+  }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, triggerPush, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, sceneMode, selectedNpc]);
 
-  const handleMapChange = useCallback((dx: number, dy: number) => {
+  const handleMapChange = useCallback((dx: number, dy: number, entrySpawn?: [number, number, number]) => {
     setTransitioning(true);
     setTimeout(() => {
       const nextX = params.mapX + dx;
       const nextY = params.mapY + dy;
+      if (entrySpawn) {
+        setMapEntrySpawn({ mapX: nextX, mapY: nextY, position: entrySpawn });
+      } else {
+        setMapEntrySpawn(null);
+      }
       const nextDistrict = getDistrictType(nextX, nextY);
       tryTriggerEvent({
         when: 'districtEnter',
@@ -1277,6 +1310,7 @@ function App() {
   const handleFastTravel = useCallback((x: number, y: number) => {
     setTransitioning(true);
     setTimeout(() => {
+      setMapEntrySpawn(null);
       const nextDistrict = getDistrictType(x, y);
       tryTriggerEvent({
         when: 'districtEnter',
@@ -1455,7 +1489,11 @@ function App() {
       OUTSKIRTS_DESERT: 'the desert fringe',
       CARAVANSERAI: 'the caravanserai yard',
       MOUNTAIN_SHRINE: 'the mountain path',
-      SOUTHERN_ROAD: 'the southern road'
+      SOUTHERN_ROAD: 'the southern road',
+      STRAIGHT_STREET: 'the straight street',
+      SOUQ_AXIS: 'the souq corridor',
+      MIDAN: 'the southern gate road',
+      BAB_SHARQI: 'the eastern gate road'
     };
     return labels[districtType] ?? 'the street';
   }, []);
@@ -2101,10 +2139,14 @@ function App() {
         devSettings={devSettings}
         setDevSettings={setDevSettings}
         nearBuilding={nearBuilding}
+        buildingInfection={buildingInfectionState}
         onFastTravel={handleFastTravel}
         selectedNpc={selectedNpc}
         minimapData={minimapData}
         sceneMode={sceneMode}
+        mapX={params.mapX}
+        mapY={params.mapY}
+        overworldPath={overworldPath}
         pickupPrompt={pickupPrompt}
         climbablePrompt={climbablePrompt}
         isClimbing={isClimbing}
@@ -2115,6 +2157,7 @@ function App() {
         moraleStats={moraleStats}
         actionSlots={actionSlots}
         onTriggerAction={triggerAction}
+        onTriggerPush={triggerPush}
         simTime={stats.simTime}
         showPlayerModal={showPlayerModal}
         setShowPlayerModal={setShowPlayerModal}
@@ -2329,6 +2372,7 @@ function App() {
               onPickupItem={handlePickupItem}
               onWeatherUpdate={setCurrentWeather}
               onPushCharge={setPushCharge}
+              pushTriggerRef={pushTriggerRef}
               onMoraleUpdate={handleMoraleUpdate}
               actionEvent={actionEvent}
               showDemographicsOverlay={showDemographicsOverlay}
@@ -2346,6 +2390,7 @@ function App() {
               onNearSpeakableNpc={setNearSpeakableNpc}
               observeMode={observeMode}
               gameLoading={gameLoading}
+              mapEntrySpawn={mapEntrySpawn}
             />
           )}
           {!transitioning && sceneMode === 'interior' && interiorSpec && (

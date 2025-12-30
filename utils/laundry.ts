@@ -25,6 +25,10 @@ export interface LaundryLine {
 // District-specific color palettes
 const CLOTH_COLORS: Record<DistrictType, string[]> = {
   MARKET: ['#d8c8b8', '#c8b8a8', '#b8a898', '#a89888'],
+  STRAIGHT_STREET: ['#d8c8b8', '#c8b8a8', '#b8a898', '#a89888'],
+  SOUQ_AXIS: ['#d8c8b8', '#c8b8a8', '#b8a898', '#a89888'],
+  MIDAN: ['#c8b8a8', '#b8a898', '#d8c8b8'],
+  BAB_SHARQI: ['#7a6a5a', '#9a8a7a', '#6a5a4a', '#8a7a6a'],
   WEALTHY: ['#c85a4a', '#5a7a8a', '#8a6a9a', '#e8d8c8', '#d8c8b8'],
   HOVELS: ['#6a5a4a', '#8a7a6a', '#5a4a3a', '#7a6a5a'],
   ALLEYS: ['#7a6a5a', '#9a8a7a', '#6a5a4a', '#8a7a6a'],
@@ -48,6 +52,10 @@ const LINE_DENSITY: Record<DistrictType, number> = {
   JEWISH_QUARTER: 0.6,
   RESIDENTIAL: 0.4,
   MARKET: 0.2,
+  STRAIGHT_STREET: 0.25,
+  SOUQ_AXIS: 0.3,
+  MIDAN: 0.35,
+  BAB_SHARQI: 0.4,
   WEALTHY: 0.1,
   CIVIC: 0.15,
   UMAYYAD_MOSQUE: 0.2,

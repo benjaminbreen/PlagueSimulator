@@ -13,6 +13,7 @@ import {
   CONSTANTS,
 } from '../types';
 import { seededRandom } from './procedural';
+import { getBuildingHeight } from './buildingHeights';
 
 // ==================== PLACEMENT RULES ====================
 
@@ -52,6 +53,24 @@ const DISTRICT_RULES: Record<DistrictType, ClimbableRule[]> = {
     { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
     { type: 'LEAN_TO', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
     { type: 'GRAPE_TRELLIS', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
+  ],
+  STRAIGHT_STREET: [
+    { type: 'WOODEN_LADDER', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
+    { type: 'LEAN_TO', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
+  ],
+  SOUQ_AXIS: [
+    { type: 'WOODEN_LADDER', probability: 0.35, minStories: 1, maxPerBuilding: 1 },
+    { type: 'LEAN_TO', probability: 0.45, minStories: 1, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.35, minStories: 1, maxPerBuilding: 1 },
+  ],
+  MIDAN: [
+    { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
+    { type: 'LEAN_TO', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
+  ],
+  BAB_SHARQI: [
+    { type: 'STONE_STAIRCASE', probability: 0.4, minStories: 2, maxPerBuilding: 1 },
+    { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
   ],
   CIVIC: [
     { type: 'STONE_STAIRCASE', probability: 0.6, minStories: 2, maxPerBuilding: 1 },
@@ -166,13 +185,18 @@ function createClimbable(
   const width = config.baseWidth * (0.9 + rand() * 0.2);
   // Use building height so ladders reach the roof (minus small offset so they don't poke through)
   const height = buildingHeight - 0.3;
-  const depth = config.baseDepth;
+  const placementDepth = config.baseDepth;
+  const stairStepHeight = 0.35;
+  const stairStepDepth = 0.45;
+  const stairStepCount = Math.max(4, Math.floor(height / stairStepHeight));
+  const stairRun = stairStepCount * stairStepDepth * 0.8;
+  const depth = (type === 'STONE_STAIRCASE' || type === 'LEAN_TO') ? stairRun : config.baseDepth;
 
-  const basePosition = calculateWallPosition(building, wallSide, wallOffset, depth, district);
+  const basePosition = calculateWallPosition(building, wallSide, wallOffset, placementDepth, district);
 
   // For staircases, top position is offset by stair depth (they extend outward)
   const isStaircase = type === 'STONE_STAIRCASE' || type === 'LEAN_TO';
-  const stairTopOffset = isStaircase ? depth * 0.8 : 0;
+  const stairTopOffset = isStaircase ? depth : 0;
 
   let topX = basePosition[0];
   let topZ = basePosition[2];
@@ -210,20 +234,7 @@ function createClimbable(
  * Calculate building height (must match Environment.tsx Building component logic exactly)
  */
 function calculateBuildingHeight(building: BuildingMetadata, district: DistrictType): number {
-  const localSeed = building.position[0] * 1000 + building.position[2];
-
-  // This matches the Building component in Environment.tsx (lines 2129-2133)
-  const baseHeight = district === 'HOVELS' && building.type !== 'RELIGIOUS' && building.type !== 'CIVIC'
-    ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
-    : building.type === 'RELIGIOUS' || building.type === 'CIVIC' ? 12 : 4 + seededRandom(localSeed + 1) * 6;
-
-  const districtScale =
-    district === 'WEALTHY' ? 1.35 :
-    district === 'HOVELS' ? 0.65 :
-    district === 'CIVIC' ? 1.2 :
-    1.0;
-
-  return baseHeight * districtScale;
+  return getBuildingHeight(building, district);
 }
 
 /**
@@ -232,12 +243,18 @@ function calculateBuildingHeight(building: BuildingMetadata, district: DistrictT
 export function generateClimbablesForBuilding(
   building: BuildingMetadata,
   district: DistrictType,
-  seed: number
+  seed: number,
+  options?: {
+    allowStairs?: boolean;
+    preferStairSide?: 0 | 1 | 2 | 3 | null;
+  }
 ): ClimbableAccessory[] {
   const accessories: ClimbableAccessory[] = [];
   const rules = DISTRICT_RULES[district] || DISTRICT_RULES.RESIDENTIAL;
   const buildingHeight = calculateBuildingHeight(building, district);
   const storyCount = building.storyCount ?? 1;
+  const allowStairs = options?.allowStairs ?? true;
+  const preferStairSide = options?.preferStairSide ?? null;
 
   let localSeed = seed;
   const rand = () => seededRandom(localSeed++);
@@ -249,6 +266,8 @@ export function generateClimbablesForBuilding(
   for (const rule of rules) {
     // Check story requirement
     if (storyCount < rule.minStories) continue;
+    // Limit staircases to 2 stories max and allow only if enabled
+    if (rule.type === 'STONE_STAIRCASE' && (!allowStairs || storyCount > 2)) continue;
 
     // Roll for probability
     if (rand() > rule.probability) continue;
@@ -261,7 +280,12 @@ export function generateClimbablesForBuilding(
     const availableSides = [0, 1, 2, 3].filter(s => !usedSides.has(s));
     if (availableSides.length === 0) continue;
 
-    const wallSide = availableSides[Math.floor(rand() * availableSides.length)] as 0 | 1 | 2 | 3;
+    let wallSide: 0 | 1 | 2 | 3;
+    if (rule.type === 'STONE_STAIRCASE' && preferStairSide !== null && availableSides.includes(preferStairSide)) {
+      wallSide = preferStairSide;
+    } else {
+      wallSide = availableSides[Math.floor(rand() * availableSides.length)] as 0 | 1 | 2 | 3;
+    }
     const wallOffset = (rand() - 0.5) * 0.6; // Spread along wall
 
     const accessory = createClimbable(
@@ -356,6 +380,14 @@ export function isOnRooftop(
     const dx = Math.abs(position.x - bx);
     const dz = Math.abs(position.z - bz);
 
+    if (building.hasCourtyard) {
+      const courtyardScale = building.courtyardScale ?? 0.55;
+      const courtyardHalf = halfSize * courtyardScale;
+      if (dx < courtyardHalf && dz < courtyardHalf) {
+        continue;
+      }
+    }
+
     if (dx < halfSize && dz < halfSize) {
       // Check if at roof height (within 1.0 units for more reliable detection)
       const heightDiff = Math.abs(position.y - roofHeight);
@@ -386,6 +418,14 @@ export function getRoofHeightAt(
     // Check if within building bounds
     const dx = Math.abs(position.x - bx);
     const dz = Math.abs(position.z - bz);
+
+    if (building.hasCourtyard) {
+      const courtyardScale = building.courtyardScale ?? 0.55;
+      const courtyardHalf = halfSize * courtyardScale;
+      if (dx < courtyardHalf && dz < courtyardHalf) {
+        continue;
+      }
+    }
 
     if (dx < halfSize && dz < halfSize) {
       return calculateBuildingHeight(building, district);

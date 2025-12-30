@@ -1,6 +1,7 @@
 
 import { BuildingType, BuildingMetadata, SocialClass, NPCStats, PlayerStats, DistrictType, getDistrictType, Ethnicity, Religion } from '../types';
 import { assignDemographics } from './demographics';
+import { getBuildingHeight } from './buildingHeights';
 
 // ============================================
 // ETHNICITY-SPECIFIC NAME POOLS
@@ -1989,19 +1990,30 @@ const getDistrictReligiousProfessions = (district: DistrictType): string[] => {
   }
 };
 
-export const generateBuildingMetadata = (seed: number, x: number, z: number): BuildingMetadata => {
+export const generateBuildingMetadata = (seed: number, x: number, z: number, districtOverride?: DistrictType): BuildingMetadata => {
   let s = seed + Math.abs(x) * 13 + Math.abs(z) * 7;
   const rand = () => seededRandom(s++);
   const sizeScale = 0.88 + rand() * 0.24;
 
   // Determine district first (needed for religious profession filtering and styling)
-  const district = getDistrictType(x, z);
+  const district = districtOverride ?? getDistrictType(x, z);
 
   const typeRand = rand();
   let type = BuildingType.RESIDENTIAL;
-  if (typeRand < 0.1) type = BuildingType.RELIGIOUS;
-  else if (typeRand < 0.2) type = BuildingType.CIVIC;
-  else if (typeRand < 0.6) type = BuildingType.COMMERCIAL;
+
+  // WEALTHY district: heavily favor residential (wealthy private homes)
+  if (district === 'WEALTHY') {
+    // 75% residential, 15% commercial (upscale shops), 8% civic, 2% religious
+    if (typeRand < 0.02) type = BuildingType.RELIGIOUS;
+    else if (typeRand < 0.10) type = BuildingType.CIVIC;
+    else if (typeRand < 0.25) type = BuildingType.COMMERCIAL;
+    // else remains RESIDENTIAL (75%)
+  } else {
+    // Default distribution for other districts
+    if (typeRand < 0.1) type = BuildingType.RELIGIOUS;
+    else if (typeRand < 0.2) type = BuildingType.CIVIC;
+    else if (typeRand < 0.6) type = BuildingType.COMMERCIAL;
+  }
 
   let ownerName = '';
   let ownerAge = Math.floor(rand() * 45) + 18;
@@ -2058,19 +2070,44 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
   }
 
   // Calculate building height using the same formula as Environment.tsx
-  const localSeed = x * 1000 + z;
-  const baseHeight = district === 'HOVELS' && type !== BuildingType.RELIGIOUS && type !== BuildingType.CIVIC
-    ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
-    : type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC ? 12 : 4 + seededRandom(localSeed + 1) * 6;
-  const districtScale = district === 'WEALTHY' ? 1.35 : district === 'HOVELS' ? 0.65 : district === 'CIVIC' ? 1.2 : 1.0;
-  const height = baseHeight * districtScale;
+  const height = getBuildingHeight(
+    {
+      id: `bld-${x}-${z}`,
+      type,
+      ownerName,
+      ownerAge,
+      ownerProfession,
+      ownerGender,
+      position: [x, 0, z],
+      sizeScale,
+      storyCount: 1,
+      doorSide: 0,
+      hasSymmetricalWindows: false,
+      district
+    },
+    district
+  );
 
   // Determine story count based on building height
   // 1 story: < 6, 2 stories: 6-10, 3 stories: >= 10
-  const storyCount: 1 | 2 | 3 = height < 6 ? 1 : height < 10 ? 2 : 3;
+  let storyCount: 1 | 2 | 3 = height < 6 ? 1 : height < 10 ? 2 : 3;
+  if (district === 'WEALTHY' && (type === BuildingType.RESIDENTIAL || type === BuildingType.COMMERCIAL)) {
+    // Wealthy mansions are 2-3 stories
+    storyCount = height > 12 ? 3 : 2;
+  }
 
   // Adjust footprint based on story count: 3-story buildings are ~10% wider
   let footprintScale = storyCount === 3 ? sizeScale * 1.1 : storyCount === 2 ? sizeScale * 1.05 : sizeScale;
+  if (district === 'WEALTHY' && (type === BuildingType.RESIDENTIAL || type === BuildingType.COMMERCIAL)) {
+    footprintScale *= 2.0;  // 50% larger than before (was 1.35)
+  }
+
+  const wealthyCourtyardEligible = district === 'WEALTHY' && (type === BuildingType.RESIDENTIAL || type === BuildingType.COMMERCIAL);
+  const hasCourtyard = wealthyCourtyardEligible && rand() > 0.35;
+  const courtyardScale = hasCourtyard ? 0.52 + rand() * 0.08 : undefined;
+  if (hasCourtyard) {
+    footprintScale *= 1.2;
+  }
 
   // Override footprint scale for civic buildings based on profession (matches Environment.tsx rendering)
   if (type === BuildingType.CIVIC && ownerProfession) {
@@ -2106,6 +2143,8 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number): Bu
     isPointOfInterest: type === BuildingType.RELIGIOUS || type === BuildingType.CIVIC || rand() > 0.985,
     isQuarantined: type === BuildingType.RESIDENTIAL && rand() > 0.965,
     isOpen: type !== BuildingType.RESIDENTIAL ? true : rand() > 0.25,
-    district // Include district for styling
+    district, // Include district for styling
+    hasCourtyard,
+    courtyardScale
   };
 };

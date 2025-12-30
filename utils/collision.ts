@@ -1,27 +1,13 @@
 import * as THREE from 'three';
 import { BuildingMetadata, CONSTANTS, Obstacle } from '../types';
 import { SpatialHash, queryNearbyBuildings } from './spatial';
-import { seededRandom } from './procedural';
+import { getBuildingHeight } from './buildingHeights';
 
 /**
  * Calculate building height - matches the calculation in Environment.tsx and climbables.ts
  */
 function getBuildingRoofHeight(building: BuildingMetadata): number {
-  const district = building.district ?? 'RESIDENTIAL';
-  const localSeed = building.position[0] * 1000 + building.position[2];
-
-  // This matches the Building component in Environment.tsx
-  const baseHeight = district === 'HOVELS' && building.type !== 'RELIGIOUS' && building.type !== 'CIVIC'
-    ? (3 + seededRandom(localSeed + 1) * 1.6) * 1.2
-    : building.type === 'RELIGIOUS' || building.type === 'CIVIC' ? 12 : 4 + seededRandom(localSeed + 1) * 6;
-
-  const districtScale =
-    district === 'WEALTHY' ? 1.35 :
-    district === 'HOVELS' ? 0.65 :
-    district === 'CIVIC' ? 1.2 :
-    1.0;
-
-  return baseHeight * districtScale;
+  return getBuildingHeight(building, building.district);
 }
 
 export const isBlockedByBuildings = (
@@ -36,6 +22,28 @@ export const isBlockedByBuildings = (
     const dx = Math.abs(position.x - b.position[0]);
     const dz = Math.abs(position.z - b.position[2]);
     if (dx < half + radius && dz < half + radius) {
+      if (b.hasCourtyard) {
+        const courtyardScale = b.courtyardScale ?? 0.55;
+        const courtyardHalf = half * courtyardScale;
+        const relX = position.x - b.position[0];
+        const relZ = position.z - b.position[2];
+        const gateWidth = Math.min(half * 0.7, half - 0.2);
+        const gateDepth = half * 0.6;
+        const absX = Math.abs(relX);
+        const absZ = Math.abs(relZ);
+
+        // Inside courtyard: no block
+        if (absX < courtyardHalf && absZ < courtyardHalf) {
+          return false;
+        }
+
+        // Gate corridor: allow entry
+        if (b.doorSide === 0 && relZ > half - gateDepth && absX < gateWidth / 2) return false;
+        if (b.doorSide === 2 && relZ < -half + gateDepth && absX < gateWidth / 2) return false;
+        if (b.doorSide === 1 && relX > half - gateDepth && absZ < gateWidth / 2) return false;
+        if (b.doorSide === 3 && relX < -half + gateDepth && absZ < gateWidth / 2) return false;
+      }
+
       // Calculate roof height using the same formula as Environment.tsx
       const roofHeight = getBuildingRoofHeight(b);
 

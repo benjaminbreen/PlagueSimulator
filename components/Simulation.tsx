@@ -11,7 +11,7 @@ import { Player } from './Player';
 import { MarketStall } from './MarketStall';
 import { MerchantNPC } from './MerchantNPC';
 import { AgentSnapshot, SpatialHash, buildBuildingHash, buildObstacleHash, queryNearbyAgents } from '../utils/spatial';
-import { PushableObject, PickupInfo, createPushable } from '../utils/pushables';
+import { PushableObject, PickupInfo, createPushable, ShatterLootItem } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
@@ -28,6 +28,7 @@ import { Astrologer } from './npcs/Astrologer';
 import { Scribe } from './npcs/Scribe';
 import { exposePlayerToPlague } from '../utils/plague';
 import { InfectedBuildingMarkers } from './environment/InfectedBuildingMarkers';
+import { BoundaryHeadingIndicator } from './BoundaryHeadingIndicator';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -35,7 +36,7 @@ interface SimulationProps {
   devSettings: DevSettings;
   playerStats: PlayerStats;
   onStatsUpdate: (stats: SimulationCounts) => void;
-  onMapChange: (dx: number, dy: number) => void;
+  onMapChange: (dx: number, dy: number, entrySpawn?: [number, number, number]) => void;
   onNearBuilding: (building: BuildingMetadata | null) => void;
   onBuildingsUpdate?: (buildings: BuildingMetadata[]) => void;
   onNearMerchant?: (merchant: MerchantNPCType | null) => void;
@@ -52,6 +53,7 @@ interface SimulationProps {
   onPickupItem?: (pickup: PickupInfo) => void;
   onWeatherUpdate?: (weatherType: string) => void;
   onPushCharge?: (charge: number) => void;
+  pushTriggerRef?: React.MutableRefObject<number | null>;
   onMoraleUpdate?: (morale: MoraleStats) => void;
   actionEvent?: PlayerActionEvent | null;
   showDemographicsOverlay?: boolean;
@@ -75,6 +77,7 @@ interface SimulationProps {
   observeMode?: boolean;
   /** Initial game loading state - delays camera animations */
   gameLoading?: boolean;
+  mapEntrySpawn?: { mapX: number; mapY: number; position: [number, number, number] } | null;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -882,7 +885,7 @@ const MilkyWay: React.FC<{ visible: boolean; simTime: number }> = ({ visible, si
   );
 };
 
-const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
+const SkyGradientDome: React.FC<{ timeOfDay: number; weatherType: WeatherType }> = ({ timeOfDay, weatherType }) => {
   const sunriseBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
   const sunsetBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
   const dawnVariant = useMemo(() => Math.random(), []);
@@ -948,6 +951,19 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
     mid.lerp(new THREE.Color(mid).lerp(new THREE.Color('#d6dde8'), desat), 0.25);
     bottom.lerp(new THREE.Color(bottom).lerp(new THREE.Color('#e6d6b8'), desat), 0.25);
 
+    if (weatherType === WeatherType.OVERCAST) {
+      top.lerp(new THREE.Color('#8a98a8'), 0.4);
+      mid.lerp(new THREE.Color('#7b8794'), 0.4);
+      bottom.lerp(new THREE.Color('#6e7882'), 0.35);
+    } else if (weatherType === WeatherType.SANDSTORM) {
+      const dustTop = new THREE.Color('#b9956a');
+      const dustMid = new THREE.Color('#c3a276');
+      const dustBottom = new THREE.Color('#b28554');
+      top.lerp(dustTop, 0.65);
+      mid.lerp(dustMid, 0.65);
+      bottom.lerp(dustBottom, 0.7);
+    }
+
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
     gradient.addColorStop(0, `#${top.getHexString()}`);
     gradient.addColorStop(0.55, `#${mid.getHexString()}`);
@@ -971,7 +987,7 @@ const SkyGradientDome: React.FC<{ timeOfDay: number }> = ({ timeOfDay }) => {
     tex.minFilter = THREE.LinearFilter;
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
-  }, [skyKey, sunriseBoost, sunsetBoost, dawnVariant]);
+  }, [skyKey, sunriseBoost, sunsetBoost, dawnVariant, weatherType]);
 
   const easedTexture = useMemo(() => {
     if (!texture) return null;
@@ -1190,7 +1206,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1236,6 +1252,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
   const [playerSpawn, setPlayerSpawn] = useState<[number, number, number]>(() => {
     // Start at edge to avoid spawning inside buildings in dense districts
+    if (mapEntrySpawn && mapEntrySpawn.mapX === params.mapX && mapEntrySpawn.mapY === params.mapY) {
+      return mapEntrySpawn.position;
+    }
     return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [28, 0, 28];
   });
   const [buildingsState, setBuildingsState] = useState<BuildingMetadata[]>([]);
@@ -1248,6 +1267,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
   // Ambient audio state
   const moraleStatsRef = useRef<MoraleStats>({ avgAwareness: 0, avgPanic: 0, agentCount: 0 });
+  const resolvedWeatherTypeRef = useRef<WeatherType>(WeatherType.CLEAR);
   const nearbyInfectedRef = useRef(0);
   const nearbyDeceasedRef = useRef(0);
   const playerPositionRef = useRef<[number, number, number]>([0, 0, 0]);
@@ -1259,8 +1279,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const isOutskirts = district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT';
   useEffect(() => {
     // Start at edge to avoid spawning inside buildings in dense districts
-    setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [28, 0, 28]);
-  }, [params.mapX, params.mapY]);
+    if (mapEntrySpawn && mapEntrySpawn.mapX === params.mapX && mapEntrySpawn.mapY === params.mapY) {
+      setPlayerSpawn(mapEntrySpawn.position);
+    } else {
+      setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [28, 0, 28]);
+    }
+  }, [params.mapX, params.mapY, mapEntrySpawn]);
   const pushableSeed = useMemo(
     () => params.mapX * 1000 + params.mapY * 100 + sessionSeed,
     [params.mapX, params.mapY, sessionSeed]
@@ -1516,6 +1540,33 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     onPickupItem?.(pickup);
   }, [onPickupItem]);
 
+  // Shatter loot handler - spawns dropped items when objects break
+  const handleShatterLoot = useCallback((loot: ShatterLootItem[]) => {
+    if (loot.length === 0) return;
+    setPushables(prev => {
+      const newItems: PushableObject[] = loot.map(lootItem => {
+        const item = createPushable(
+          lootItem.itemId,
+          'droppedItem',
+          lootItem.position,
+          0.25,
+          0.4,
+          Math.random() * Math.PI * 2,
+          lootItem.material
+        );
+        // Give a small upward and outward velocity for visual effect
+        item.velocity.set(
+          (Math.random() - 0.5) * 2,
+          2 + Math.random() * 1.5,
+          (Math.random() - 0.5) * 2
+        );
+        item.pickup = { type: 'item', label: lootItem.itemName, itemId: lootItem.itemId };
+        return item;
+      });
+      return [...prev, ...newItems];
+    });
+  }, []);
+
   // Plague exposure handler - called when player is exposed to plague
   const handlePlagueExposure = useCallback((
     exposureType: 'flea' | 'airborne' | 'contact',
@@ -1599,8 +1650,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   useEffect(() => {
     const district = getDistrictType(params.mapX, params.mapY);
 
-    // Only generate carpets in MARKET districts
-    if (district !== 'MARKET' || buildingsRef.current.length < 2) {
+    // Only generate carpets in market corridors
+    const carpetDistricts = new Set(['MARKET', 'SOUQ_AXIS', 'STRAIGHT_STREET']);
+    if (!carpetDistricts.has(district) || buildingsRef.current.length < 2) {
       setHangingCarpets([]);
       return;
     }
@@ -1851,7 +1903,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   // Astrologer - 50% chance in marketplace and standard street biomes
   const astrologerPosition = useMemo<[number, number, number] | null>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
-    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'JEWISH_QUARTER', 'RESIDENTIAL', 'WEALTHY'];
+    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'JEWISH_QUARTER', 'RESIDENTIAL', 'WEALTHY', 'STRAIGHT_STREET', 'SOUQ_AXIS', 'MIDAN', 'BAB_SHARQI'];
 
     if (!validDistricts.includes(district)) return null;
 
@@ -1875,7 +1927,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   // Scribe - 50% chance in marketplace and standard street biomes
   const scribePosition = useMemo<[number, number, number] | null>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
-    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'JEWISH_QUARTER', 'RESIDENTIAL', 'WEALTHY'];
+    const validDistricts = ['MARKET', 'HOVELS', 'ALLEYS', 'JEWISH_QUARTER', 'RESIDENTIAL', 'WEALTHY', 'STRAIGHT_STREET', 'SOUQ_AXIS', 'MIDAN', 'BAB_SHARQI'];
 
     if (!validDistricts.includes(district)) return null;
 
@@ -2128,9 +2180,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           ? devSettings.weatherOverride as WeatherType
           : weather.current.weatherType;
 
+        const resolvedWeatherType = weatherType;
+        resolvedWeatherTypeRef.current = resolvedWeatherType;
+
         // Notify UI of weather changes
         if (onWeatherUpdate) {
-          onWeatherUpdate(weatherType);
+          onWeatherUpdate(resolvedWeatherType);
         }
 
         // Tier 2: Harsher sun for intense midday heat
@@ -2238,7 +2293,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         temp2.set("#02040a");
         skyColor.lerp(temp1, twilightFactor * 0.6).lerp(temp2, nightFactor);
 
-        if (weatherType === WeatherType.OVERCAST) {
+        if (resolvedWeatherType === WeatherType.OVERCAST) {
           ambientIntensity += 0.18;
           hemiIntensity += 0.2;
           // Overcast: cool, desaturated horizon blending
@@ -2248,7 +2303,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           fogColor.lerp(temp1, 0.45);
           temp2.set("#4a5560");
           skyColor.lerp(temp2, 0.4);
-        } else if (weatherType === WeatherType.SANDSTORM) {
+        } else if (resolvedWeatherType === WeatherType.SANDSTORM) {
           ambientIntensity += 0.05;
           hemiIntensity += 0.1;
           // Sandstorm: thick ochre/tan dust at horizon
@@ -2304,10 +2359,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         );
 
         // Weather-based shadow adjustment
-        if (weatherType === WeatherType.OVERCAST) {
+        if (resolvedWeatherType === WeatherType.OVERCAST) {
           // Overcast: diffuse light from clouds, softer shadows
           baseShadowSoftness = THREE.MathUtils.lerp(baseShadowSoftness, -0.004, 0.7);
-        } else if (weatherType === WeatherType.SANDSTORM) {
+        } else if (resolvedWeatherType === WeatherType.SANDSTORM) {
           // Sandstorm: heavy dust scatter, very soft/barely visible shadows
           baseShadowSoftness = THREE.MathUtils.lerp(baseShadowSoftness, -0.008, 0.85);
         }
@@ -2346,12 +2401,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           let shadowFillIntensity = dayFactor * 0.4 * (1 - shadowContrast * 0.2);
 
           // Weather-based adjustments
-          if (weatherType === WeatherType.OVERCAST) {
+          if (resolvedWeatherType === WeatherType.OVERCAST) {
             // Overcast: reduced intensity (clouds block direct skylight)
             shadowFillIntensity *= 0.5;
             // Desaturated gray-blue for overcast shadow fill
             shadowFillColor.set('#8a9aaa');
-          } else if (weatherType === WeatherType.SANDSTORM) {
+          } else if (resolvedWeatherType === WeatherType.SANDSTORM) {
             // Sandstorm: minimal intensity, warm dust-scattered light
             shadowFillIntensity *= 0.25;
             // Warm ochre for dust-scattered light
@@ -2382,9 +2437,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           shadowFillLightRef.current.color.lerp(shadowFillColor, 0.05);
         }
         if (marketBounceRef.current) {
-          const isMarket = params.mapX === 0 && params.mapY === 0;
+          const district = getDistrictType(params.mapX, params.mapY);
+          const marketDistricts = new Set(['MARKET', 'SOUQ_AXIS', 'STRAIGHT_STREET', 'MIDAN', 'BAB_SHARQI']);
           // Tier 2: Boosted market bounce for warmer fill light
-          const bounceTarget = isMarket ? dayFactor * 0.75 : 0;
+          const bounceTarget = marketDistricts.has(district) ? dayFactor * 0.75 : 0;
           marketBounceRef.current.intensity = THREE.MathUtils.lerp(marketBounceRef.current.intensity, bounceTarget, 0.05);
         }
 
@@ -2399,10 +2455,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           let baseFog = 0;
           let horizonHaze = 0;
 
-          if (weatherType === WeatherType.SANDSTORM) {
+          if (resolvedWeatherType === WeatherType.SANDSTORM) {
             baseFog = 0.012; // Visible dust throughout
             horizonHaze = 0.008; // Heavy horizon obscuring
-          } else if (weatherType === WeatherType.OVERCAST) {
+          } else if (resolvedWeatherType === WeatherType.OVERCAST) {
             baseFog = 0.006; // Misty atmosphere
             horizonHaze = 0.005; // Soft horizon blending
           } else {
@@ -2457,12 +2513,39 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       onPlayerPositionUpdate?.(pos);
 
       const district = getDistrictType(params.mapX, params.mapY);
-      const boundary = district === 'SOUTHERN_ROAD' ? 40 : CONSTANTS.BOUNDARY;
+      const boundary = district === 'SOUTHERN_ROAD' ? CONSTANTS.SOUTHERN_ROAD_BOUNDARY : CONSTANTS.TRANSITION_RADIUS;
 
-      if (pos.z > boundary) { onMapChange(0, 1); pos.z = -boundary + 2; } 
-      else if (pos.z < -boundary) { onMapChange(0, -1); pos.z = boundary - 2; } 
-      else if (pos.x > boundary) { onMapChange(1, 0); pos.x = -boundary + 2; } 
-      else if (pos.x < -boundary) { onMapChange(-1, 0); pos.x = boundary - 2; }
+      const clampToEdge = (value: number, edge: number) => Math.min(edge, Math.max(-edge, value));
+
+      if (pos.z > boundary) {
+        const nextDistrict = getDistrictType(params.mapX, params.mapY + 1);
+        const nextBoundary = nextDistrict === 'SOUTHERN_ROAD' ? CONSTANTS.SOUTHERN_ROAD_BOUNDARY : CONSTANTS.TRANSITION_RADIUS;
+        const edge = nextBoundary - 2;
+        const entry: [number, number, number] = [clampToEdge(pos.x, edge), 0, -edge];
+        onMapChange(0, 1, entry);
+        pos.z = -boundary + 2;
+      } else if (pos.z < -boundary) {
+        const nextDistrict = getDistrictType(params.mapX, params.mapY - 1);
+        const nextBoundary = nextDistrict === 'SOUTHERN_ROAD' ? CONSTANTS.SOUTHERN_ROAD_BOUNDARY : CONSTANTS.TRANSITION_RADIUS;
+        const edge = nextBoundary - 2;
+        const entry: [number, number, number] = [clampToEdge(pos.x, edge), 0, edge];
+        onMapChange(0, -1, entry);
+        pos.z = boundary - 2;
+      } else if (pos.x > boundary) {
+        const nextDistrict = getDistrictType(params.mapX + 1, params.mapY);
+        const nextBoundary = nextDistrict === 'SOUTHERN_ROAD' ? CONSTANTS.SOUTHERN_ROAD_BOUNDARY : CONSTANTS.TRANSITION_RADIUS;
+        const edge = nextBoundary - 2;
+        const entry: [number, number, number] = [-edge, 0, clampToEdge(pos.z, edge)];
+        onMapChange(1, 0, entry);
+        pos.x = -boundary + 2;
+      } else if (pos.x < -boundary) {
+        const nextDistrict = getDistrictType(params.mapX - 1, params.mapY);
+        const nextBoundary = nextDistrict === 'SOUTHERN_ROAD' ? CONSTANTS.SOUTHERN_ROAD_BOUNDARY : CONSTANTS.TRANSITION_RADIUS;
+        const edge = nextBoundary - 2;
+        const entry: [number, number, number] = [edge, 0, clampToEdge(pos.z, edge)];
+        onMapChange(-1, 0, entry);
+        pos.x = boundary - 2;
+      }
 
       let closest: BuildingMetadata | null = null;
       let minDist = CONSTANTS.PROXIMITY_THRESHOLD;
@@ -2660,7 +2743,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         color="#5a8fd8"
       />
 
-      <SkyGradientDome timeOfDay={params.timeOfDay} />
+      <SkyGradientDome timeOfDay={params.timeOfDay} weatherType={resolvedWeatherTypeRef.current} />
       <SunDisc timeOfDay={params.timeOfDay} weather={weather} />
       {/* Tier 1: Boosted environment intensity for richer reflections and ambient color */}
       <DreiEnvironment
@@ -2861,6 +2944,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onPickupPrompt={onPickupPrompt}
         onPickup={handlePickupItem}
         onPushCharge={onPushCharge}
+        pushTriggerRef={pushTriggerRef}
         dossierMode={dossierMode}
         sprintStateRef={sprintStateRef}
         ratsRef={ratsRef}
@@ -2875,7 +2959,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onPlayerStartMove={onPlayerStartMove}
         observeMode={observeMode}
         gameLoading={gameLoading}
+        onShatterLoot={handleShatterLoot}
       />
+      <BoundaryHeadingIndicator playerRef={playerRef} mapX={params.mapX} mapY={params.mapY} />
 
       {/* Footprints in sand (OUTSKIRTS_DESERT only) */}
       {playerRef.current && district === 'OUTSKIRTS_DESERT' && (

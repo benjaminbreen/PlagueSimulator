@@ -48,7 +48,7 @@ export const StoneStaircase: React.FC<StoneStaircaseProps> = ({
     for (let i = 0; i < stepCount; i++) {
       result.push({
         y: i * actualStepHeight + actualStepHeight / 2,
-        z: -i * stepDepth * 0.8,
+        z: i * stepDepth * 0.8,
         width: width * (1 - i * 0.01), // Slight taper
       });
     }
@@ -59,7 +59,7 @@ export const StoneStaircase: React.FC<StoneStaircaseProps> = ({
   const landingWidth = width * 1.2;
   const landingDepth = 1.2;
   const landingY = height - 0.1;
-  const landingZ = -stepCount * stepDepth * 0.8 - landingDepth / 2;
+  const landingZ = stepCount * stepDepth * 0.8 + landingDepth / 2;
 
   return (
     <group
@@ -85,7 +85,7 @@ export const StoneStaircase: React.FC<StoneStaircaseProps> = ({
 
       {/* Side wall (left) */}
       <mesh
-        position={[-width / 2 - 0.1, height / 2, -(stepCount * stepDepth * 0.8) / 2]}
+        position={[-width / 2 - 0.1, height / 2, (stepCount * stepDepth * 0.8) / 2]}
         castShadow
         receiveShadow
       >
@@ -99,7 +99,7 @@ export const StoneStaircase: React.FC<StoneStaircaseProps> = ({
 
       {/* Side wall (right) - partial, for aesthetics */}
       <mesh
-        position={[width / 2 + 0.1, height * 0.3, -(stepCount * stepDepth * 0.8) / 3]}
+        position={[width / 2 + 0.1, height * 0.3, (stepCount * stepDepth * 0.8) / 3]}
         castShadow
         receiveShadow
       >

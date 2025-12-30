@@ -2493,10 +2493,10 @@ export const InteriorPropRenderer: React.FC<{
 }> = ({ prop, rugMaterial, prayerRugMaterial, profession, roomSize, positionVector }) => {
   const labelOffset = useMemo(() => getPropLabelOffset(prop.type), [prop.type]);
   const zeroVector = useMemo(() => new THREE.Vector3(0, 0, 0), []);
-  const displayProp = useMemo(() => {
-    if (!positionVector) return prop;
-    return { ...prop, position: [0, 0, 0] as [number, number, number] };
-  }, [prop, positionVector]);
+  const displayProp = useMemo(() => ({
+    ...prop,
+    position: [0, 0, 0] as [number, number, number]
+  }), [prop]);
   const groupPosition = positionVector ? undefined : [prop.position[0], prop.position[1], prop.position[2]] as [number, number, number];
   return (
     <InteriorHoverable

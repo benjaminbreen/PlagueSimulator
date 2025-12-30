@@ -3,7 +3,7 @@ import React, { useRef, useState, useEffect, forwardRef, useImperativeHandle, us
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { OrbitControls } from '@react-three/drei';
-import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent, AgentState, ClimbableAccessory, ClimbingState, PlagueType } from '../types';
+import { CameraMode, BuildingMetadata, PlayerStats, Obstacle, DistrictType, PlayerActionEvent, AgentState, ClimbableAccessory, ClimbingState, PlagueType, CONSTANTS } from '../types';
 import { Humanoid } from './Humanoid';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import {
@@ -17,12 +17,13 @@ import {
 } from '../utils/climbing';
 import { findNearbyClimbable, findNearbyClimbableFast, getRoofHeightAt, ClimbableSpatialHash } from '../utils/climbables';
 import { AgentSnapshot, SpatialHash, queryNearbyAgents } from '../utils/spatial';
-import { PushableObject, PickupInfo, PushableMaterial } from '../utils/pushables';
+import { PushableObject, PickupInfo, PushableMaterial, isClimbablePushable, getPushableClimbHeight, canBreak, getBreakChance, generateShatterLoot, ShatterLootItem } from '../utils/pushables';
 import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
 import { calculateTerrainGradient } from '../utils/terrain-gradient';
 import { collisionSounds, CollisionMaterial } from './audio/CollisionSounds';
 import { EXPOSURE_CONFIG, calculatePlagueProtection } from '../utils/plagueExposure';
 import { Rat } from './Rats';
+import { getAllItems } from '../utils/merchantItems';
 
 // Map pushable materials to collision sound materials
 const materialToSound = (mat: PushableMaterial): CollisionMaterial => {
@@ -69,6 +70,7 @@ interface PlayerProps {
   onPickupPrompt?: (label: string | null) => void;
   onPickup?: (itemId: string, pickup: PickupInfo) => void;
   onPushCharge?: (charge: number) => void;
+  pushTriggerRef?: React.MutableRefObject<number | null>;
   dossierMode?: boolean;
   actionEvent?: PlayerActionEvent | null;
   sprintStateRef?: React.MutableRefObject<boolean>;
@@ -84,6 +86,7 @@ interface PlayerProps {
   onPlayerStartMove?: () => void;
   observeMode?: boolean;
   gameLoading?: boolean;
+  onShatterLoot?: (loot: ShatterLootItem[]) => void;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -107,6 +110,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onPickupPrompt,
   onPickup,
   onPushCharge,
+  pushTriggerRef,
   dossierMode = false,
   actionEvent,
   sprintStateRef,
@@ -121,7 +125,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   cameraViewTarget,
   onPlayerStartMove,
   observeMode = false,
-  gameLoading = true
+  gameLoading = true,
+  onShatterLoot
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -215,6 +220,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const climbingStateRef = useRef<ClimbingState>(createClimbingState());
   const activeClimbableRef = useRef<ClimbableAccessory | null>(null);
   const nearbyClimbableRef = useRef<ClimbableAccessory | null>(null);
+  const nearbyClimbablePushableRef = useRef<PushableObject | null>(null); // For climbing onto crates, etc.
+  const standingOnPushableRef = useRef<PushableObject | null>(null); // Track what object we're standing on
   const [isClimbing, setIsClimbing] = useState(false);
   const climbAnimationPhaseRef = useRef(0);
 
@@ -234,7 +241,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   // Dynamic FOV for sprint effect
   const currentFovRef = useRef(75); // Base FOV
   const BASE_FOV = 35;
-  const SPRINT_FOV = 82; // Wider when sprinting
+  const SPRINT_FOV = 52; // Wider when sprinting
 
   // Camera bob for landing impact
   const cameraBobRef = useRef(0); // Current vertical offset from landing
@@ -268,6 +275,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   // Track if we've initialized position for this initialPosition
   const lastInitialPosRef = useRef<string>('');
+  const pendingSpawnValidationRef = useRef(false);
 
   useEffect(() => {
     if (!group.current) return;
@@ -276,36 +284,101 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     const posKey = `${initialPosition[0]},${initialPosition[1]},${initialPosition[2]}`;
 
     // Skip if we've already initialized for this position
-    if (lastInitialPosRef.current === posKey) return;
-    lastInitialPosRef.current = posKey;
+    if (lastInitialPosRef.current !== posKey) {
+      lastInitialPosRef.current = posKey;
+      pendingSpawnValidationRef.current = true;
+    }
+    if (!pendingSpawnValidationRef.current) return;
 
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
     const ground = sampleTerrainHeight(heightmap, initialPosition[0], initialPosition[2]);
     const spawnPos = new THREE.Vector3(initialPosition[0], ground + initialPosition[1], initialPosition[2]);
+    const hasCollisionData = buildings.length > 0 || obstacles.length > 0;
+
+    if (!hasCollisionData) {
+      group.current.position.copy(spawnPos);
+      lastPlayerPos.current.copy(spawnPos);
+      lastMovePosRef.current.copy(spawnPos);
+      return;
+    }
+
+    const radius = 0.6;
+    const blockedAtSpawn = isBlockedByBuildings(spawnPos, buildings, radius, buildingHash || undefined) ||
+      isBlockedByObstacles(spawnPos, obstacles, radius, obstacleHash || undefined);
+    const currentPos = group.current.position.clone();
+    const blockedAtCurrent = isBlockedByBuildings(currentPos, buildings, radius, buildingHash || undefined) ||
+      isBlockedByObstacles(currentPos, obstacles, radius, obstacleHash || undefined);
+
+    // If the player already moved away and is not blocked, don't snap them back.
+    if (!blockedAtSpawn && !blockedAtCurrent && currentPos.distanceTo(spawnPos) > 1.5) {
+      pendingSpawnValidationRef.current = false;
+      return;
+    }
 
     // Validate spawn isn't inside a building - if so, find safe position
-    if (isBlockedByBuildings(spawnPos, buildings, 0.6, buildingHash || undefined)) {
+    if (blockedAtSpawn || blockedAtCurrent) {
       // Try to find a nearby safe position
-      const offsets = [2, 4, 6, 8];
+      const offsets = [2, 4, 6, 8, 10, 12, 14];
       let safePos: THREE.Vector3 | null = null;
       for (const r of offsets) {
-        for (let i = 0; i < 8; i++) {
-          const angle = (i / 8) * Math.PI * 2;
+        for (let i = 0; i < 12; i++) {
+          const angle = (i / 12) * Math.PI * 2;
           const candidate = new THREE.Vector3(
             spawnPos.x + Math.cos(angle) * r,
-            ground,
+            spawnPos.y,
             spawnPos.z + Math.sin(angle) * r
           );
-          if (!isBlockedByBuildings(candidate, buildings, 0.6, buildingHash || undefined) &&
-              !isBlockedByObstacles(candidate, obstacles, 0.6, obstacleHash || undefined)) {
+          const candidateGround = sampleTerrainHeight(heightmap, candidate.x, candidate.z);
+          candidate.y = candidateGround + initialPosition[1];
+          if (!isBlockedByBuildings(candidate, buildings, radius, buildingHash || undefined) &&
+              !isBlockedByObstacles(candidate, obstacles, radius, obstacleHash || undefined)) {
             safePos = candidate;
             break;
           }
         }
         if (safePos) break;
       }
-      // Use safe position if found, otherwise use edge of map
-      const finalPos = safePos || new THREE.Vector3(30, ground, 30);
+
+      if (!safePos) {
+        const boundary = district === 'SOUTHERN_ROAD' ? CONSTANTS.SOUTHERN_ROAD_BOUNDARY : CONSTANTS.TRANSITION_RADIUS;
+        const edgeInset = boundary - 4;
+        const center = new THREE.Vector3(0, spawnPos.y, 0);
+        for (let t = 0.15; t <= 0.75; t += 0.15) {
+          const candidate = spawnPos.clone().lerp(center, t);
+          const candidateGround = sampleTerrainHeight(heightmap, candidate.x, candidate.z);
+          candidate.y = candidateGround + initialPosition[1];
+          if (!isBlockedByBuildings(candidate, buildings, radius, buildingHash || undefined) &&
+              !isBlockedByObstacles(candidate, obstacles, radius, obstacleHash || undefined) &&
+              Math.abs(candidate.x) < edgeInset &&
+              Math.abs(candidate.z) < edgeInset) {
+            safePos = candidate;
+            break;
+          }
+        }
+      }
+
+      if (!safePos) {
+        const boundary = district === 'SOUTHERN_ROAD' ? CONSTANTS.SOUTHERN_ROAD_BOUNDARY : CONSTANTS.TRANSITION_RADIUS;
+        const edgeInset = boundary - 6;
+        for (let i = 0; i < 30; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const radiusRoll = Math.random() * edgeInset * 0.8;
+          const candidate = new THREE.Vector3(
+            Math.cos(angle) * radiusRoll,
+            spawnPos.y,
+            Math.sin(angle) * radiusRoll
+          );
+          const candidateGround = sampleTerrainHeight(heightmap, candidate.x, candidate.z);
+          candidate.y = candidateGround + initialPosition[1];
+          if (!isBlockedByBuildings(candidate, buildings, radius, buildingHash || undefined) &&
+              !isBlockedByObstacles(candidate, obstacles, radius, obstacleHash || undefined)) {
+            safePos = candidate;
+            break;
+          }
+        }
+      }
+
+      const finalPos = safePos || spawnPos;
       group.current.position.copy(finalPos);
       lastPlayerPos.current.copy(finalPos);
       lastMovePosRef.current.copy(finalPos);
@@ -314,7 +387,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       lastPlayerPos.current.copy(spawnPos);
       lastMovePosRef.current.copy(spawnPos);
     }
-  }, [initialPosition, heightmap, buildings, buildingHash, obstacles]);
+
+    pendingSpawnValidationRef.current = false;
+  }, [initialPosition, heightmap, buildings, buildingHash, obstacles, obstacleHash, district]);
 
   const [keys, setKeys] = useState({
     up: false, down: false, left: false, right: false,
@@ -606,9 +681,13 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     osc.stop(ctx.currentTime + 0.09);
   };
 
-  const applyJump = (charge = 0) => {
-    const boost = charge * 4;
+  const applyJump = (charge = 0, launchBoost = 0, forwardBoost = 0) => {
+    const boost = charge * 5 + launchBoost;
     velV.current = JUMP_FORCE + boost;
+    if (forwardBoost > 0) {
+      const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), group.current?.rotation.y ?? 0);
+      velH.current.add(forward.multiplyScalar(forwardBoost));
+    }
     isGrounded.current = false;
     jumpTimer.current = 0;
     jumpBuffer.current = 0;
@@ -750,14 +829,41 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         const nearby = nearbyFromGround || nearbyFromRoof;
         nearbyClimbableRef.current = nearby;
 
-        // Update climbable prompt
+        // Check for nearby climbable pushable objects (crates, benches, etc.)
+        let nearbyPushable: PushableObject | null = null;
+        if (pushablesRef?.current && isGrounded.current && !standingOnPushableRef.current) {
+          const PUSHABLE_CLIMB_RANGE = 1.8;
+          let bestDist = Infinity;
+          // Convert player rotation to facing vector
+          const facingVec = new THREE.Vector3(Math.sin(playerFacing), 0, Math.cos(playerFacing));
+          for (const item of pushablesRef.current) {
+            if (!isClimbablePushable(item.kind)) continue;
+            const dx = item.position.x - playerPos.x;
+            const dz = item.position.z - playerPos.z;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist < PUSHABLE_CLIMB_RANGE && dist < bestDist) {
+              // Check if facing the object (within ~90 degree cone)
+              const toObject = new THREE.Vector3(dx, 0, dz).normalize();
+              const dot = facingVec.dot(toObject);
+              if (dot > 0.3) {
+                bestDist = dist;
+                nearbyPushable = item;
+              }
+            }
+          }
+        }
+        nearbyClimbablePushableRef.current = nearbyPushable;
+
+        // Update climbable prompt (ladders/stairs take priority over pushables)
         if (nearby && onClimbablePrompt) {
           if (nearbyFromRoof) {
             onClimbablePrompt('Press C to descend');
           } else {
             onClimbablePrompt('Press C to climb');
           }
-        } else if (!nearby && onClimbablePrompt) {
+        } else if (nearbyPushable && onClimbablePrompt) {
+          onClimbablePrompt('Press C to climb onto');
+        } else if (!nearby && !nearbyPushable && onClimbablePrompt) {
           onClimbablePrompt(null);
         }
 
@@ -765,6 +871,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         const cJustPressed = keys.c && !lastCRef.current;
         const wantsClimbUp = cJustPressed && nearbyFromGround && isGrounded.current;
         const wantsClimbDown = cJustPressed && nearbyFromRoof && isOnRoof;
+        const wantsClimbPushable = cJustPressed && nearbyPushable && isGrounded.current && !nearby;
 
         if (wantsClimbUp && nearbyFromGround) {
           // Start climbing from bottom
@@ -785,6 +892,19 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           onClimbingStateChange?.(true); // Notify UI of climbing state
           velV.current = 0;
           // IMPORTANT: Mark C as already processed so the cancel check doesn't trigger on same frame
+          lastCRef.current = true;
+        } else if (wantsClimbPushable && nearbyPushable) {
+          // Step up onto the pushable object (crate, bench, etc.)
+          const targetHeight = getPushableClimbHeight(nearbyPushable);
+          // Move player to center of object at the top
+          group.current.position.set(
+            nearbyPushable.position.x,
+            targetHeight,
+            nearbyPushable.position.z
+          );
+          standingOnPushableRef.current = nearbyPushable;
+          velV.current = 0;
+          isGrounded.current = true;
           lastCRef.current = true;
         }
       }
@@ -935,25 +1055,30 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     // BUGFIX: Use bilinear interpolation for accurate terrain sampling
     let groundHeight = sampleTerrainHeight(heightmap, group.current.position.x, group.current.position.z);
 
-    // PHYSICS: Check for crate platforms (player can stand on crates)
+    // PHYSICS: Check for climbable object platforms (crates, benches, boulders, etc.)
     if (pushablesRef?.current) {
-      const CRATE_HEIGHT = 0.9; // Visual height of crate box
-      const CRATE_PLATFORM_RADIUS = 0.55; // Slightly larger than crate for easier landing
+      const PLATFORM_RADIUS = 0.6; // Radius for standing on objects
 
+      let currentStandingOn: PushableObject | null = null;
       for (const item of pushablesRef.current) {
-        if (!item || item.kind !== 'crate' || !item.position) continue;
+        if (!item || !item.position || !isClimbablePushable(item.kind)) continue;
 
-        // Check horizontal distance to crate
+        // Check horizontal distance to object
         const dx = group.current.position.x - item.position.x;
         const dz = group.current.position.z - item.position.z;
         const distSq = dx * dx + dz * dz;
 
-        if (distSq < CRATE_PLATFORM_RADIUS * CRATE_PLATFORM_RADIUS) {
-          // Player is above this crate - use crate top as ground
-          const crateTop = item.position.y + CRATE_HEIGHT / 2;
-          groundHeight = Math.max(groundHeight, crateTop);
+        if (distSq < PLATFORM_RADIUS * PLATFORM_RADIUS) {
+          // Player is above this object - use object top as ground
+          const objectTop = getPushableClimbHeight(item);
+          if (objectTop > groundHeight) {
+            groundHeight = objectTop;
+            currentStandingOn = item;
+          }
         }
       }
+      // Track what we're standing on (for walking off detection)
+      standingOnPushableRef.current = currentStandingOn;
     }
 
     // ROOFTOP COLLISION: Check if player is on a building roof
@@ -980,6 +1105,15 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       isGrounded.current = false;
       velV.current = 0; // Start with zero vertical velocity (natural fall)
       coyoteTimer.current = 0; // Allow brief coyote time for recovery jump
+      jumpBuffer.current = Math.max(jumpBuffer.current, 0.18);
+      if (keys.space) {
+        // Edge jump assist: allow a jump if space is held at the moment of stepping off
+        const edgeCharge = chargingRef.current ? Math.min(1, jumpChargeRef.current + 0.2) : 0.35;
+        const roofLaunchBoost = 6.5;
+        const roofForwardBoost = 9.5;
+        chargingRef.current = false;
+        applyJump(edgeCharge, roofLaunchBoost, roofForwardBoost);
+      }
       // Track height when edge fall started for fall damage calculation
       fallStartHeight.current = group.current.position.y;
     }
@@ -1046,7 +1180,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       chargingRef.current = false;
     }
 
-    const canJump = !chargingRef.current && (isGrounded.current || coyoteTimer.current < 0.12) && jumpBuffer.current > 0;
+    const canJump = !chargingRef.current && (isGrounded.current || coyoteTimer.current < 0.4) && jumpBuffer.current > 0;
     if (canJump) {
       applyJump(sprintCharge.current);
     }
@@ -1149,8 +1283,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
               onImpactPuff?.(item.position, intensity);
             }
 
-            // PHYSICS: Shatter ceramic objects (amphorae) on hard impact
-            if (item.material === 'ceramic' && !item.isShattered) {
+            // PHYSICS: Shatter breakable objects on hard wall impact
+            if (!item.isShattered && canBreak(item.kind)) {
               // Shatter threshold: medium speed or higher (0.7+)
               // Power move with full charge can easily exceed this
               const shatterThreshold = 0.65;
@@ -1159,8 +1293,17 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
                 item.shatterTime = now;
                 // Extra impact puff for dramatic shatter
                 onImpactPuff?.(item.position, 1.0);
-                // Play shatter sound
-                collisionSounds.playShatter(intensity);
+                // Play appropriate shatter sound
+                if (item.material === 'wood') {
+                  collisionSounds.playWoodShatter(intensity);
+                } else {
+                  collisionSounds.playShatter(intensity);
+                }
+                // Generate loot from shattered object
+                const loot = generateShatterLoot(item.position, getAllItems);
+                if (loot.length > 0 && onShatterLoot) {
+                  onShatterLoot(loot);
+                }
               }
             }
 
@@ -1489,6 +1632,16 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       onPushCharge?.(0);
     }
 
+    // Check for external push trigger (from action button)
+    if (pushTriggerRef?.current !== null && pushTriggerRef?.current !== undefined) {
+      const strength = pushTriggerRef.current;
+      if (strength > 0.12) {
+        interactSwingRef.current = strength;
+        interactTriggerRef.current = strength;
+      }
+      pushTriggerRef.current = null; // Reset after triggering
+    }
+
     let currentSpeed = 0;
     if (moving) {
       moveVec.normalize();
@@ -1693,7 +1846,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         playPickup();
         onPickup(id, pickup);
       }
-      const forward = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), group.current.rotation.y);
+      const forward = new THREE.Vector3(0, 0, 1).applyAxisAngle(new THREE.Vector3(0, 1, 0), group.current.rotation.y);
       const hitRange = 1.6 + strength * 0.4;
       let hit: { id: string; pos: THREE.Vector3 } | null = null;
       if (agentHashRef?.current) {
@@ -1743,8 +1896,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           pushDir.y = 0;
           pushDir.normalize();
 
-          // Calculate push force - stronger for testing
-          const PUSH_FORCE_BASE = 25.0;  // Increased for testing
+          // Calculate push force
+          const PUSH_FORCE_BASE = 10.0;  // Reduced from 25 - was causing ice-like sliding
           const pushForce = PUSH_FORCE_BASE * (0.5 + strength * 0.5) / Math.max(0.3, hitItem.mass * 0.03);
 
           // Apply velocity to the object
@@ -1769,6 +1922,30 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           // Visual and audio feedback
           onImpactPuff?.(hitItem.position.clone(), 0.5 + strength * 0.4);
           playObjectImpact(hitItem.material, 0.5 + strength * 0.3);
+
+          // Check for shattering on push (only if not already shattered)
+          if (!hitItem.isShattered && canBreak(hitItem.kind)) {
+            const breakChance = getBreakChance(hitItem.kind);
+            // Higher strength = slightly higher break chance
+            const adjustedChance = breakChance * (0.8 + strength * 0.4);
+            if (Math.random() < adjustedChance) {
+              hitItem.isShattered = true;
+              hitItem.shatterTime = state.clock.elapsedTime;
+              // Extra dramatic effect for shattering
+              onImpactPuff?.(hitItem.position.clone(), 1.0);
+              // Play appropriate shatter sound based on material
+              if (hitItem.material === 'wood') {
+                collisionSounds.playWoodShatter(0.8 + strength * 0.2);
+              } else {
+                collisionSounds.playShatter(0.8 + strength * 0.2);
+              }
+              // Generate loot from shattered object (50% chance, 1-2 items)
+              const loot = generateShatterLoot(hitItem.position, getAllItems);
+              if (loot.length > 0 && onShatterLoot) {
+                onShatterLoot(loot);
+              }
+            }
+          }
         } else {
           const testPoint = group.current.position.clone().add(forward.multiplyScalar(0.9));
           const blocked = isBlockedByBuildings(testPoint, buildings, 0.2, buildingHash || undefined)

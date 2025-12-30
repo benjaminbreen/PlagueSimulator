@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
 import { ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerStats, ItemAppearance } from '../types';
-import { AlertTriangle, Heart, Eye, Sparkles, Coins, Cross, Package } from 'lucide-react';
+import { AlertTriangle, Heart, Eye, Sparkles, Coins, Cross, Package, Hand } from 'lucide-react';
 
 interface ActionBarProps {
   actionSlots: ActionSlotState;
   onTriggerAction: (actionId: ActionId) => void;
+  onTriggerPush?: () => void;
   simTime: number;
   playerStats: PlayerStats;
+  narratorMessage?: string | null;
+  narratorKey?: number;
+  narratorHistory?: string[];
+  narratorOpen?: boolean;
+  onToggleNarrator?: (open: boolean) => void;
   inventoryItems: Array<{
     id: string;
     itemId: string;
@@ -47,7 +53,7 @@ const getActionIcon = (iconName: string, size: number = 18) => {
 
 interface ActionButtonProps {
   actionId: ActionId;
-  hotkey: '1' | '2' | '3';
+  hotkey: '1' | '2' | '3' | '4' | '5';
   cooldownEnd: number;
   simTime: number;
   playerStats: PlayerStats;
@@ -156,11 +162,142 @@ const ActionButton: React.FC<ActionButtonProps> = ({
   );
 };
 
+// Narrator panel component - separate to prevent re-render issues
+interface NarratorPanelProps {
+  visible: boolean;
+  narratorKey: number;
+  message: string;
+  narratorOpen: boolean;
+  narratorHistory: string[];
+}
+
+const NarratorPanel: React.FC<NarratorPanelProps> = React.memo(({ visible, narratorKey, message, narratorOpen, narratorHistory }) => {
+  return (
+    <div
+      className={`w-[320px] md:w-[360px] max-w-[92vw] transition-all ease-in-out ${
+        visible ? 'duration-[5000ms]' : 'duration-[2000ms]'
+      } ${
+        visible
+          ? 'opacity-100 translate-y-0'
+          : 'opacity-0 translate-y-3 pointer-events-none'
+      } ${narratorOpen ? 'pointer-events-auto' : 'pointer-events-none'}`}
+    >
+      <div className="relative">
+        {/* Subtle glow effect */}
+        <div className="absolute -inset-4 rounded-3xl bg-white/[0.02] blur-xl" />
+
+        <div className="relative rounded-2xl px-4 py-3 bg-black/20 backdrop-blur-md shadow-[0_4px_16px_rgba(0,0,0,0.12)] border border-white/[0.06]">
+          <div className="text-[8px] uppercase tracking-[0.5em] text-white/40 mb-2 font-light">
+            The Narrator
+          </div>
+
+          {narratorOpen ? (
+            <div className="max-h-48 overflow-y-auto pr-1 text-[15px] md:text-[17px] leading-relaxed text-white/80 font-light tracking-[0.02em]" style={{ fontFamily: 'Lato, sans-serif' }}>
+              {narratorHistory.length > 0
+                ? narratorHistory.map((entry, idx) => (
+                    <p key={`${entry}-${idx}`} className="mb-3 last:mb-0">
+                      {entry}
+                    </p>
+                  ))
+                : message}
+            </div>
+          ) : (
+            <div
+              className="text-[15px] md:text-[17px] leading-relaxed text-white/75 font-light tracking-[0.02em]"
+              style={{
+                fontFamily: 'Lato, sans-serif',
+                display: '-webkit-box',
+                WebkitBoxOrient: 'vertical',
+                WebkitLineClamp: 5,
+                overflow: 'hidden'
+              }}
+            >
+              {message}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}, (prevProps, nextProps) => {
+  // Only re-render when these specific props change
+  return (
+    prevProps.narratorKey === nextProps.narratorKey &&
+    prevProps.visible === nextProps.visible &&
+    prevProps.narratorOpen === nextProps.narratorOpen &&
+    prevProps.message === nextProps.message &&
+    prevProps.narratorHistory === nextProps.narratorHistory
+  );
+});
+
+NarratorPanel.displayName = 'NarratorPanel';
+
+// Push button component
+interface PushButtonProps {
+  onTrigger: () => void;
+}
+
+const PushButton: React.FC<PushButtonProps> = ({ onTrigger }) => {
+  return (
+    <div className="relative group">
+      <button
+        onClick={onTrigger}
+        className="
+          relative w-14 h-14 rounded-lg
+          bg-black/80 backdrop-blur-md
+          border border-amber-700/60 hover:border-amber-500/80 hover:bg-amber-900/30
+          transition-all duration-200
+          flex flex-col items-center justify-center gap-0.5
+          hover:scale-105 active:scale-95 cursor-pointer
+        "
+      >
+        {/* Icon */}
+        <div className="relative z-10 text-amber-400">
+          <Hand size={20} />
+        </div>
+
+        {/* Hotkey badge */}
+        <div className="
+          absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold
+          flex items-center justify-center
+          bg-amber-600 text-white
+        ">
+          1
+        </div>
+      </button>
+
+      {/* Tooltip */}
+      <div className="
+        absolute bottom-full right-0 mb-2 w-48 p-2.5
+        bg-black/95 backdrop-blur-md rounded-lg
+        border border-amber-800/50 shadow-xl
+        opacity-0 group-hover:opacity-100
+        pointer-events-none transition-opacity duration-150
+        z-50
+      ">
+        <div className="flex items-center gap-2 mb-1">
+          <span className="text-amber-400 font-bold text-sm">Push</span>
+          <span className="text-amber-600/60 text-[10px] uppercase tracking-wider">[1]</span>
+        </div>
+        <p className="text-amber-100/70 text-[10px] leading-relaxed">
+          Push nearby objects with full force. Same as holding Shift until charged.
+        </p>
+      </div>
+    </div>
+  );
+};
+
 export const ActionBar: React.FC<ActionBarProps> = ({
   actionSlots,
   onTriggerAction,
+  onTriggerPush,
   simTime,
   playerStats,
+  narratorMessage,
+  narratorKey,
+  narratorHistory = [],
+  narratorOpen = false,
+  onToggleNarrator,
   inventoryItems,
   onOpenItemModal,
   onDropItemAtScreen
@@ -170,6 +307,8 @@ export const ActionBar: React.FC<ActionBarProps> = ({
   const dragStartRef = React.useRef<{ x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
+  const [narratorVisible, setNarratorVisible] = useState(false);
+
   const itemsToShow = inventoryItems.slice(0, 8);
   const slots = [...itemsToShow];
   while (slots.length < 8) {
@@ -238,6 +377,36 @@ export const ActionBar: React.FC<ActionBarProps> = ({
     };
   }, [dragging, onDropItemAtScreen]);
 
+  // Keyboard listener for "2" key to toggle inventory
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if typing in an input
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      if (e.key === '2') {
+        e.preventDefault();
+        setShowInventory(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Auto-show/hide narrator based on message state
+  React.useEffect(() => {
+    // Show panel if narrator is open or there's a message
+    const shouldBeVisible = narratorOpen || !!narratorMessage;
+
+    // Only update state if it needs to change
+    setNarratorVisible(prev => {
+      if (prev !== shouldBeVisible) {
+        return shouldBeVisible;
+      }
+      return prev;
+    });
+  }, [narratorMessage, narratorOpen]);
+
   return (
     <div className="fixed bottom-6 right-6 z-40 pointer-events-auto">
       {dragging && dragItemRef.current && dragPosition && (
@@ -250,6 +419,24 @@ export const ActionBar: React.FC<ActionBarProps> = ({
           </div>
         </div>
       )}
+      <div className="absolute bottom-72 right-0 mb-3 flex flex-col items-end gap-4">
+        {(narratorMessage || narratorOpen) && (
+          <NarratorPanel
+            visible={narratorVisible}
+            narratorKey={narratorKey}
+            message={narratorMessage || narratorHistory[narratorHistory.length - 1] || ''}
+            narratorOpen={narratorOpen}
+            narratorHistory={narratorHistory}
+          />
+        )}
+        <input
+          type="text"
+          placeholder="Ask the narrator…"
+          onFocus={() => onToggleNarrator?.(true)}
+          onClick={() => onToggleNarrator?.(true)}
+          className="w-[320px] md:w-[360px] max-w-[92vw] rounded-full bg-black/10 text-white/50 placeholder:text-white/25 text-[11px] px-4 py-2.5 backdrop-blur-md border border-white/10 focus:outline-none focus:border-white/25 focus:bg-black/30 focus:text-white/90 focus:placeholder:text-white/40 hover:bg-black/15 hover:border-white/15 transition-all duration-300 pointer-events-auto shadow-lg"
+        />
+      </div>
       <div
         className={`
           absolute bottom-24 right-0 w-[320px] md:w-[360px]
@@ -311,30 +498,10 @@ export const ActionBar: React.FC<ActionBarProps> = ({
         </div>
       </div>
       <div className="flex gap-2">
-        <ActionButton
-          actionId={actionSlots.slot1}
-          hotkey="1"
-          cooldownEnd={actionSlots.cooldowns[actionSlots.slot1] || 0}
-          simTime={simTime}
-          playerStats={playerStats}
-          onTrigger={() => onTriggerAction(actionSlots.slot1)}
-        />
-        <ActionButton
-          actionId={actionSlots.slot2}
-          hotkey="2"
-          cooldownEnd={actionSlots.cooldowns[actionSlots.slot2] || 0}
-          simTime={simTime}
-          playerStats={playerStats}
-          onTrigger={() => onTriggerAction(actionSlots.slot2)}
-        />
-        <ActionButton
-          actionId={actionSlots.slot3}
-          hotkey="3"
-          cooldownEnd={actionSlots.cooldowns[actionSlots.slot3] || 0}
-          simTime={simTime}
-          playerStats={playerStats}
-          onTrigger={() => onTriggerAction(actionSlots.slot3)}
-        />
+        {/* Push Button - Hotkey 1 */}
+        {onTriggerPush && <PushButton onTrigger={onTriggerPush} />}
+
+        {/* Inventory Button - Hotkey 2 */}
         <div className="relative group">
           <button
             onClick={() => setShowInventory((prev) => !prev)}
@@ -351,7 +518,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({
               <Package size={20} />
             </div>
             <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center bg-amber-600 text-white">
-              4
+              2
             </div>
           </button>
 
@@ -365,13 +532,43 @@ export const ActionBar: React.FC<ActionBarProps> = ({
           ">
             <div className="flex items-center gap-2 mb-1">
               <span className="text-amber-400 font-bold text-sm">Inventory</span>
-              <span className="text-amber-600/60 text-[10px] uppercase tracking-wider">[4]</span>
+              <span className="text-amber-600/60 text-[10px] uppercase tracking-wider">[2]</span>
             </div>
             <p className="text-amber-100/70 text-[10px] leading-relaxed">
               Quick access to carried items.
             </p>
           </div>
         </div>
+
+        {/* Action Slot 1 - Hotkey 3 */}
+        <ActionButton
+          actionId={actionSlots.slot1}
+          hotkey="3"
+          cooldownEnd={actionSlots.cooldowns[actionSlots.slot1] || 0}
+          simTime={simTime}
+          playerStats={playerStats}
+          onTrigger={() => onTriggerAction(actionSlots.slot1)}
+        />
+
+        {/* Action Slot 2 - Hotkey 4 */}
+        <ActionButton
+          actionId={actionSlots.slot2}
+          hotkey="4"
+          cooldownEnd={actionSlots.cooldowns[actionSlots.slot2] || 0}
+          simTime={simTime}
+          playerStats={playerStats}
+          onTrigger={() => onTriggerAction(actionSlots.slot2)}
+        />
+
+        {/* Action Slot 3 - Hotkey 5 */}
+        <ActionButton
+          actionId={actionSlots.slot3}
+          hotkey="5"
+          cooldownEnd={actionSlots.cooldowns[actionSlots.slot3] || 0}
+          simTime={simTime}
+          playerStats={playerStats}
+          onTrigger={() => onTriggerAction(actionSlots.slot3)}
+        />
       </div>
 
       {/* Label */}

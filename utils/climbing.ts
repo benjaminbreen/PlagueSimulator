@@ -9,8 +9,8 @@ import { ClimbableAccessory, ClimbingState } from '../types';
 
 export const CLIMBING_CONSTANTS = {
   // Detection
-  CLIMB_DETECTION_RADIUS: 3.0,    // How close to start climbing prompt (increased for easier access)
-  CLIMB_ANGLE_THRESHOLD: 0.5,     // cos(60deg) - more lenient facing requirement
+  CLIMB_DETECTION_RADIUS: 4.5,    // How close to start climbing prompt (increased for easier access)
+  CLIMB_ANGLE_THRESHOLD: 0.25,    // cos(75deg) - wider facing requirement
 
   // Movement
   CLIMB_SPEED_MULTIPLIER: 1.0,    // Applied to climbable's climbSpeed
@@ -177,7 +177,7 @@ export function calculateClimbingPosition(
 
   // For staircases, player moves along the stair path (away from wall) as they climb
   const isStaircase = climbable.type === 'STONE_STAIRCASE' || climbable.type === 'LEAN_TO';
-  const stairDepthOffset = isStaircase ? progress * climbable.depth * 0.8 : 0;
+  const stairDepthOffset = isStaircase ? progress * climbable.depth : 0;
 
   // Player stands OUTSIDE the building, offset away from the wall
   // Wall 0 (North): ladder on north edge, player further north (+Z)
