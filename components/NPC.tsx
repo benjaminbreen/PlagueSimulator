@@ -1281,7 +1281,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       propGroupRef.current.position.y = 1.02 + bob;
     }
 
-    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT' || district === 'MOUNTAIN_SHRINE')) {
+    if (group.current && (district === 'SALHIYYA' || district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT' || district === 'MOUNTAIN_SHRINE' || district === 'UMAYYAD_MOSQUE')) {
       group.current.position.y = sampleTerrainHeight(heightmap, currentPosRef.current.x, currentPosRef.current.z);
     } else if (group.current) {
       group.current.position.y = 0;

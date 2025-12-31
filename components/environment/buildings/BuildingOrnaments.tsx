@@ -145,6 +145,9 @@ export const BuildingOrnaments: React.FC<BuildingOrnamentsProps> = ({
   otherMaterials,
   nightFactor
 }) => {
+  const doorRotation = data.doorSide * (Math.PI / 2);
+  const groundY = doorPos[1] - 1.25;
+
   return (
     <>
       {/* ORNATE ABLAQ BANDS - Alternating light/dark stone horizontal stripes (Mamluk Damascus style) */}
@@ -453,6 +456,82 @@ export const BuildingOrnaments: React.FC<BuildingOrnamentsProps> = ({
 
       {hasTurret && (
         <CornerTurret position={[finalBuildingSize / 2 - 0.6, finalHeight / 2 - 1.1, finalBuildingSize / 2 - 0.6]} />
+      )}
+
+      {/* SCHOOL PORTAL + INSCRIPTION BAND + SABIL */}
+      {data.type === BuildingType.SCHOOL && (
+        <group position={[doorPos[0], groundY, doorPos[2]]} rotation={[0, doorRotation, 0]}>
+          {/* Monumental portal frame */}
+          <group position={[0, 0, 0.1]}>
+            <mesh position={[0, 1.3, 0]} castShadow>
+              <boxGeometry args={[3.0, 2.4, 0.12]} />
+              <meshStandardMaterial color="#d7c7b1" roughness={0.88} />
+            </mesh>
+            <mesh position={[0, 2.2, 0.02]} castShadow>
+              <circleGeometry args={[1.5, 20, 0, Math.PI]} />
+              <meshStandardMaterial color="#c9b89f" roughness={0.9} side={THREE.DoubleSide} />
+            </mesh>
+          </group>
+          {/* Inscription band */}
+          <mesh position={[0, 2.55, 0.18]} castShadow>
+            <boxGeometry args={[finalBuildingSize * 0.7, 0.18, 0.06]} />
+            <meshStandardMaterial color="#bcae97" roughness={0.85} />
+          </mesh>
+          {/* Thuluth-style relief (subtle engraved blocks) */}
+          {Array.from({ length: 7 }).map((_, i) => (
+            <mesh
+              key={`inscribe-${i}`}
+              position={[
+                (i - 3) * (finalBuildingSize * 0.08),
+                2.55,
+                0.205
+              ]}
+              castShadow
+            >
+              <boxGeometry args={[finalBuildingSize * 0.07, 0.09, 0.012]} />
+              <meshStandardMaterial color="#a99985" roughness={0.9} />
+            </mesh>
+          ))}
+          {/* Sabil basin near entry */}
+          <group position={[1.25, 0.2, 0.9]}>
+            <mesh castShadow>
+              <boxGeometry args={[0.6, 0.3, 0.35]} />
+              <meshStandardMaterial color="#bfb2a0" roughness={0.85} />
+            </mesh>
+            <mesh position={[0, 0.25, 0.15]} castShadow>
+              <boxGeometry args={[0.35, 0.1, 0.08]} />
+              <meshStandardMaterial color="#a8967f" roughness={0.9} />
+            </mesh>
+            <mesh position={[0, 0.05, 0.2]} castShadow>
+              <cylinderGeometry args={[0.12, 0.12, 0.12, 8]} />
+              <meshStandardMaterial color="#8c7b65" roughness={0.9} />
+            </mesh>
+          </group>
+        </group>
+      )}
+
+      {/* HOSPITALITY PORCH - table and two chairs */}
+      {data.type === BuildingType.HOSPITALITY && (
+        <group position={[doorPos[0], groundY, doorPos[2]]} rotation={[0, doorRotation, 0]}>
+          <group position={[0.0, 0, 1.0]}>
+            <mesh position={[0, 0.5, 0]} castShadow>
+              <boxGeometry args={[0.9, 0.08, 0.6]} />
+              <meshStandardMaterial color="#7a5b3a" roughness={0.85} />
+            </mesh>
+            {[-0.35, 0.35].map((x) => (
+              <mesh key={`inn-chair-${x}`} position={[x, 0.25, -0.55]} castShadow>
+                <boxGeometry args={[0.35, 0.5, 0.35]} />
+                <meshStandardMaterial color="#8b6a45" roughness={0.9} />
+              </mesh>
+            ))}
+            {[-0.35, 0.35].map((x) => (
+              <mesh key={`inn-chair-back-${x}`} position={[x, 0.6, -0.68]} castShadow>
+                <boxGeometry args={[0.35, 0.45, 0.08]} />
+                <meshStandardMaterial color="#7a5b3a" roughness={0.9} />
+              </mesh>
+            ))}
+          </group>
+        </group>
       )}
 
       {/* Wall Torches */}

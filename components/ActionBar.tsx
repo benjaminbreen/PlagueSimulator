@@ -15,6 +15,7 @@ interface ActionBarProps {
   narratorHistory?: string[];
   narratorOpen?: boolean;
   onToggleNarrator?: (open: boolean) => void;
+  mobileNarratorVisible?: boolean;
   inventoryItems: Array<{
     id: string;
     itemId: string;
@@ -230,6 +231,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({
   narratorHistory = [],
   narratorOpen = false,
   onToggleNarrator,
+  mobileNarratorVisible = false,
   inventoryItems,
   onOpenItemModal,
   onDropItemAtScreen
@@ -351,8 +353,14 @@ export const ActionBar: React.FC<ActionBarProps> = ({
           </div>
         </div>
       )}
-      <div className="absolute bottom-72 right-0 mb-3 flex flex-col items-end gap-4">
-        {(narratorMessage || narratorOpen) && (
+      {/* Narrator Panel - Desktop: normal behavior, Mobile: controlled by toggle */}
+      <div className={`
+        absolute bottom-72 right-0 mb-3 flex flex-col items-end gap-4
+        transition-all duration-300
+        ${mobileNarratorVisible ? 'translate-x-0 opacity-100' : 'md:translate-x-0 md:opacity-100 translate-x-full opacity-0 pointer-events-none md:pointer-events-auto'}
+      `}>
+        {/* On desktop, show when narratorMessage/narratorOpen. On mobile, show when mobileNarratorVisible */}
+        {((narratorMessage || narratorOpen) || mobileNarratorVisible) && (
           <NarratorPanel
             visible={narratorVisible}
             narratorKey={narratorKey}

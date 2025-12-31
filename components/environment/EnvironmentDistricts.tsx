@@ -18,6 +18,7 @@ import { ChristianQuarterDecor } from './districts/ChristianQuarterDecor';
 import JewishQuarterDecor from './districts/JewishQuarterDecor';
 import { BabSharqiGate } from './districts/BabSharqiGate';
 import UmayyadMosqueDistrict from './districts/UmayyadMosqueDistrict';
+import { HovelsDecor } from './districts/HovelsDecor';
 
 type EnvironmentDistrictsProps = {
   mapX: number;
@@ -63,9 +64,10 @@ export const EnvironmentDistricts: React.FC<EnvironmentDistrictsProps> = ({
     <BirdFlock mapX={mapX} mapY={mapY} center={[0, 7, 0]} count={5} bounds={22} />
     <WealthyGarden mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} buildingPositions={buildingPositions} />
     <CitadelComplex mapX={mapX} mapY={mapY} />
-    <OutskirtsFarmlandDecor mapX={mapX} mapY={mapY} />
-    <OutskirtsDesertDecor mapX={mapX} mapY={mapY} />
-    <OutskirtsScrublandDecor mapX={mapX} mapY={mapY} />
+    <HovelsDecor mapX={mapX} mapY={mapY} buildingPositions={buildingPositions} />
+    <OutskirtsFarmlandDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+    <OutskirtsDesertDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+    <OutskirtsScrublandDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
     <RoadsideDecor mapX={mapX} mapY={mapY} />
     <SouthernRoadDecor mapX={mapX} mapY={mapY} />
     <BabSharqiGate mapX={mapX} mapY={mapY} />
@@ -79,7 +81,7 @@ export const EnvironmentDistricts: React.FC<EnvironmentDistrictsProps> = ({
       heightmap={heightmap}
     />
     <ChristianQuarterDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} heightmap={heightmap} />
-    <JewishQuarterDecor mapX={mapX} mapY={mapY} terrainHeightmap={heightmap} sessionSeed={terrainSeed} />
+    <JewishQuarterDecor mapX={mapX} mapY={mapY} terrainHeightmap={heightmap} sessionSeed={terrainSeed} buildingPositions={buildingPositions} timeOfDay={timeOfDay} />
     <UmayyadMosqueDistrict mapX={mapX} mapY={mapY} terrainHeightmap={heightmap} sessionSeed={terrainSeed} playerPosition={playerPosition} />
     <MountainShrineDecor
       mapX={mapX}

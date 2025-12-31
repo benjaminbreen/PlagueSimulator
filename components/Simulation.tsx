@@ -18,10 +18,14 @@ import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
 import { generateMerchantNPC, mapStallTypeToMerchantType } from '../utils/merchantGeneration';
 import { LaundryLine, generateLaundryLine, shouldGenerateLaundryLine } from '../utils/laundry';
 import { HangingCarpet, generateMarketCarpets } from '../utils/hangingCarpets';
+import { getBedouinTentPositionsForTile } from '../utils/bedouinMerchants';
+import { MerchantType } from '../types';
 import { ActionEffects } from './ActionEffects';
 import { Footprints } from './Footprints';
 import { SkyGradient } from './SkyGradient';
 import { AmbientAudio, SpatialSource } from './AmbientAudio';
+import { getBirdcagePlacements } from './environment/buildings/BirdcageSystem';
+import { getFarmlandLandmarks } from './environment/districts/OutskirtsFarmlandDecor';
 import { SnakeCharmer } from './npcs/SnakeCharmer';
 import { FluteMusic } from './audio/FluteMusic';
 import { Astrologer } from './npcs/Astrologer';
@@ -50,6 +54,8 @@ interface SimulationProps {
   onClimbablePrompt?: (label: string | null) => void;
   onClimbingStateChange?: (climbing: boolean) => void;
   climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
+  pickupTriggerRef?: React.MutableRefObject<boolean>;    // Mobile/touch trigger for pickup
+  climbTriggerRef?: React.MutableRefObject<boolean>;     // Mobile/touch trigger for initiating climb
   onPickupItem?: (pickup: PickupInfo) => void;
   onWeatherUpdate?: (weatherType: string) => void;
   onPushCharge?: (charge: number) => void;
@@ -91,6 +97,8 @@ interface SimulationProps {
   }) => void;
   /** Callback when player is near a storage chest in outdoor mode */
   onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
+  /** Callback when player is near a hanging birdcage */
+  onNearBirdcage?: (birdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -1219,7 +1227,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1269,6 +1277,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     if (mapEntrySpawn && mapEntrySpawn.mapX === params.mapX && mapEntrySpawn.mapY === params.mapY) {
       return mapEntrySpawn.position;
     }
+    const currentDistrict = getDistrictType(params.mapX, params.mapY);
+    if (currentDistrict === 'UMAYYAD_MOSQUE') {
+      // Spawn in center of mosque courtyard
+      return [0, 0, 0];
+    }
     return params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [28, 0, 28];
   });
   const [buildingsState, setBuildingsState] = useState<BuildingMetadata[]>([]);
@@ -1278,6 +1291,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [currentNearMerchant, setCurrentNearMerchant] = useState<MerchantNPCType | null>(null);
   const [currentNearSpeakableNpc, setCurrentNearSpeakableNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
   const [currentNearChest, setCurrentNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
+  const [currentNearBirdcage, setCurrentNearBirdcage] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const nearSpeakableNpcTickRef = useRef(0);
 
   // Ambient audio state
@@ -1296,10 +1310,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     // Start at edge to avoid spawning inside buildings in dense districts
     if (mapEntrySpawn && mapEntrySpawn.mapX === params.mapX && mapEntrySpawn.mapY === params.mapY) {
       setPlayerSpawn(mapEntrySpawn.position);
+    } else if (district === 'UMAYYAD_MOSQUE') {
+      // Spawn in center of mosque courtyard
+      setPlayerSpawn([0, 0, 0]);
     } else {
       setPlayerSpawn(params.mapX === 0 && params.mapY === 0 ? [6, 0, 6] : [28, 0, 28]);
     }
-  }, [params.mapX, params.mapY, mapEntrySpawn]);
+  }, [params.mapX, params.mapY, mapEntrySpawn, district]);
   const pushableSeed = useMemo(
     () => params.mapX * 1000 + params.mapY * 100 + sessionSeed,
     [params.mapX, params.mapY, sessionSeed]
@@ -1344,8 +1361,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       items.push(
         createPushable('bench-north', 'bench', [-12, 0.2, 9], 1.1, 2.6, Math.PI / 6, 'stone'),
         createPushable('bench-south', 'bench', [12, 0.2, -9], 1.1, 2.6, -Math.PI / 8, 'stone'),
-        createPushable('jar-west', 'clayJar', [-3.2, 0.3, -3.2], 0.65, 0.9, 0, 'ceramic'),
-        createPushable('jar-east', 'clayJar', [3.4, 0.3, 3.3], 0.65, 0.9, 0, 'ceramic')
+        createPushable('jar-west', 'clayJar', [-3.2, 0, -3.2], 0.65, 0.9, 0, 'ceramic'),
+        createPushable('jar-east', 'clayJar', [3.4, 0, 3.3], 0.65, 0.9, 0, 'ceramic')
       );
       if (roll > 0.4) {
         items.push(
@@ -1414,11 +1431,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
     if (district === 'HOVELS') {
       items.push(
-        createPushable('jar-hovel-1', 'clayJar', [-2.6, 0.3, 2.2], 0.6, 0.8, 0, 'ceramic'),
-        createPushable('jar-hovel-2', 'clayJar', [2.4, 0.3, -2.0], 0.6, 0.8, 0, 'ceramic'),
+        createPushable('jar-hovel-1', 'clayJar', [-2.6, 0, 2.2], 0.6, 0.8, 0, 'ceramic'),
+        createPushable('jar-hovel-2', 'clayJar', [2.4, 0, -2.0], 0.6, 0.8, 0, 'ceramic'),
         createPushable('basket-hovel', 'basket', [1.4, 0.2, 3.6], 0.6, 0.6, -0.2, 'wood'),
         createPushable('basket-hovel-2', 'basket', [-3.1, 0.2, -2.8], 0.6, 0.6, 0.15, 'wood'),
-        createPushable('jar-hovel-3', 'clayJar', [3.3, 0.3, 3.4], 0.6, 0.8, 0, 'ceramic')
+        createPushable('jar-hovel-3', 'clayJar', [3.3, 0, 3.4], 0.6, 0.8, 0, 'ceramic')
       );
       addPickupItem('twine-hovel-1', 'twine', [-1.6, 0.05, 3.2], 'Palm Twine', 'ground-twine');
       addPickupItem('shard-hovel-1', 'potteryShard', [2.4, 0.05, -3.2], 'Pottery Shard', 'ground-pottery');
@@ -1427,7 +1444,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
     if (district === 'ALLEYS' || district === 'JEWISH_QUARTER') {
       items.push(
-        createPushable('jar-alley', 'clayJar', [-1.8, 0.3, 1.6], 0.6, 0.8, 0, 'ceramic'),
+        createPushable('jar-alley', 'clayJar', [-1.8, 0, 1.6], 0.6, 0.8, 0, 'ceramic'),
         createPushable('basket-alley', 'basket', [2.2, 0.2, -1.2], 0.6, 0.6, 0.1, 'wood')
       );
       addPickupItem('linen-alley-1', 'linenScrap', [-0.8, 0.05, 0.4], 'Linen Scrap', 'ground-linen');
@@ -1482,14 +1499,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       );
       items.push(
         createPushable('basket-road-1', 'basket', [8, 0.2, -8], 0.6, 0.6, 0.3, 'wood'),
-        createPushable('jar-road-1', 'clayJar', [-6, 0.3, 4], 0.6, 0.8, 0, 'ceramic')
+        createPushable('jar-road-1', 'clayJar', [-6, 0, 4], 0.6, 0.8, 0, 'ceramic')
       );
       addCoin('coin-road-1', [2, 0.05, 0]);
       addPickupItem('shard-road-1', 'potteryShard', [-4, 0.05, 2], 'Pottery Shard', 'ground-pottery');
       return items;
     }
     items.push(
-      createPushable('jar-res-1', 'clayJar', [-2.2, 0.3, -1.8], 0.6, 0.8, 0, 'ceramic')
+      createPushable('jar-res-1', 'clayJar', [-2.2, 0, -1.8], 0.6, 0.8, 0, 'ceramic')
     );
     addVariedPot('pot-res-1', [2.6, 0.2, 2.4], pushableSeed + 301);
     addPickupItem('shard-res-1', 'potteryShard', [-0.6, 0.05, 1.2], 'Pottery Shard', 'ground-pottery');
@@ -1710,6 +1727,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     setHangingCarpets(carpets);
   }, [buildingsState, params.mapX, params.mapY, sessionSeed]);
 
+  const birdcagePlacements = useMemo(
+    () => getBirdcagePlacements(buildingsState, district, sessionSeed),
+    [buildingsState, district, sessionSeed]
+  );
+
   // Generate spatial audio sources from buildings
   const spatialAudioSources = useMemo<SpatialSource[]>(() => {
     const sources: SpatialSource[] = [];
@@ -1759,8 +1781,17 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       }
     }
 
+    // Birdcage chirps (rare decorative elements)
+    birdcagePlacements.forEach((cage, index) => {
+      sources.push({
+        id: `birdcage-${params.mapX}-${params.mapY}-${index}`,
+        type: 'bird',
+        position: cage.position,
+      });
+    });
+
     return sources;
-  }, [buildingsState, params.mapX, params.mapY]);
+  }, [buildingsState, birdcagePlacements, params.mapX, params.mapY]);
 
   // Procedurally generate 1-3 market stalls in the main marketplace
   const marketStalls = useMemo<MarketStallData[]>(() => {
@@ -1915,6 +1946,43 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       );
     });
   }, [params.mapX, params.mapY, marketStalls, simTime, sessionSeed]);
+
+  // Generate Bedouin merchant NPCs for Bedouin tents in outskirts
+  const bedouinMerchants = useMemo<MerchantNPCType[]>(() => {
+    const district = getDistrictType(params.mapX, params.mapY);
+
+    // Only spawn in outskirts districts
+    if (district !== 'OUTSKIRTS_DESERT' && district !== 'OUTSKIRTS_SCRUBLAND' && district !== 'OUTSKIRTS_FARMLAND') {
+      return [];
+    }
+
+    const tents = getBedouinTentPositionsForTile(params.mapX, params.mapY);
+
+    return tents.map((tent, index) => {
+      const seed = tent.seed + sessionSeed * 17;
+
+      // Position merchant near the tent entrance (slightly offset)
+      const position: [number, number, number] = [
+        tent.pos[0] + 2.5, // Offset to the side of the tent
+        tent.pos[1],
+        tent.pos[2]
+      ];
+
+      return generateMerchantNPC(
+        `bedouin-tent-${params.mapX}-${params.mapY}-${index}`,
+        'STALL', // Use STALL type since they're outdoor merchants
+        MerchantType.BEDOUIN,
+        position,
+        seed,
+        simTime
+      );
+    });
+  }, [params.mapX, params.mapY, simTime, sessionSeed]);
+
+  // Combine all merchants (stall merchants + Bedouin merchants)
+  const allMerchants = useMemo<MerchantNPCType[]>(() => {
+    return [...merchants, ...bedouinMerchants];
+  }, [merchants, bedouinMerchants]);
 
   // Snake Charmer Sufi - Saʿdiyya tariqa member
   // Always spawns in marketplace corners, 20% chance in other districts
@@ -2617,7 +2685,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       let closestMerchant: MerchantNPCType | null = null;
       let minMerchantDist = 5; // 5 unit interaction range for merchants
 
-      merchants.forEach(m => {
+      allMerchants.forEach(m => {
         const dx = m.position[0] - pos.x;
         const dz = m.position[2] - pos.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
@@ -2659,6 +2727,33 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         setCurrentNearChest(closestChest);
         if (onNearChest) {
           onNearChest(closestChest);
+        }
+      }
+
+      // Check proximity to hanging birdcages
+      let closestBirdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null = null;
+      let minBirdcageDist = 2.6;
+
+      birdcagePlacements.forEach((cage, index) => {
+        const dx = cage.position[0] - pos.x;
+        const dz = cage.position[2] - pos.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist < minBirdcageDist) {
+          minBirdcageDist = dist;
+          const districtLabel = getDistrictType(params.mapX, params.mapY).replace(/_/g, ' ').toLowerCase();
+          closestBirdcage = {
+            id: `birdcage-${params.mapX}-${params.mapY}-${index}`,
+            label: 'Birdcage',
+            position: cage.position,
+            locationName: districtLabel
+          };
+        }
+      });
+
+      if (closestBirdcage?.id !== currentNearBirdcage?.id) {
+        setCurrentNearBirdcage(closestBirdcage);
+        if (onNearBirdcage) {
+          onNearBirdcage(closestBirdcage);
         }
       }
 
@@ -2770,11 +2865,22 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             }
           }
 
+          const landmarks: MiniMapData['landmarks'] = district === 'OUTSKIRTS_FARMLAND'
+            ? getFarmlandLandmarks(params.mapX, params.mapY)
+              .filter((lm) => {
+                const dx = lm.x - pos.x;
+                const dz = lm.z - pos.z;
+                return (dx * dx + dz * dz) <= maxDistSq;
+              })
+              .slice(0, 12)
+            : [];
+
           onMinimapUpdate({
             player: { x: pos.x, z: pos.z, yaw: playerRef.current.rotation.y, cameraYaw },
             buildings,
             npcs,
             specialNPCs,
+            landmarks,
             district,
             radius,
           });
@@ -2884,8 +2990,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         <MarketStall key={stall.id} stall={stall} nightFactor={nightFactor} />
       ))}
 
-      {/* Merchant NPCs - standing at their stalls */}
-      {merchants.map((merchant) => {
+      {/* Merchant NPCs - standing at their stalls and tents */}
+      {allMerchants.map((merchant) => {
         const stall = marketStalls.find(s => s.id === merchant.locationId);
         return (
           <MerchantNPC
@@ -3031,6 +3137,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onClimbablePrompt={onClimbablePrompt}
         onClimbingStateChange={onClimbingStateChange}
         climbInputRef={climbInputRef}
+        pickupTriggerRef={pickupTriggerRef}
+        climbTriggerRef={climbTriggerRef}
         onFallDamage={onFallDamage}
         cameraViewTarget={cameraViewTarget}
         onPlayerStartMove={onPlayerStartMove}

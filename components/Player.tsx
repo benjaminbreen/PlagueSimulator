@@ -23,7 +23,7 @@ import { calculateTerrainGradient } from '../utils/terrain-gradient';
 import { collisionSounds, CollisionMaterial } from './audio/CollisionSounds';
 import { EXPOSURE_CONFIG, calculatePlagueProtection } from '../utils/plagueExposure';
 import { Rat } from './Rats';
-import { getAllItems } from '../utils/merchantItems';
+import { getAllItems, getItemDetailsByItemId } from '../utils/merchantItems';
 
 // Map pushable materials to collision sound materials
 const materialToSound = (mat: PushableMaterial): CollisionMaterial => {
@@ -40,6 +40,19 @@ const materialToSound = (mat: PushableMaterial): CollisionMaterial => {
 const PLAYER_SPEED = 6;
 const RUN_SPEED = 11;
 const CAMERA_SENSITIVITY = 4.2;
+
+// Helper for smooth angle interpolation that takes the shortest path around the circle
+// Prevents the "long way around" issue when switching between opposite directions
+const lerpAngle = (current: number, target: number, t: number): number => {
+  // Normalize both angles to -π to π range
+  let diff = target - current;
+
+  // Wrap difference to -π to π (shortest path)
+  while (diff > Math.PI) diff -= Math.PI * 2;
+  while (diff < -Math.PI) diff += Math.PI * 2;
+
+  return current + diff * t;
+};
 const JUMP_FORCE = 8;
 const GRAVITY = -24;
 const OVERHEAD_ZOOM_SPEED = 1.2;
@@ -81,6 +94,8 @@ interface PlayerProps {
   onClimbingStateChange?: (state: ClimbingState | boolean) => void;
   onClimbablePrompt?: (prompt: string | null) => void;
   climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
+  pickupTriggerRef?: React.MutableRefObject<boolean>;    // Mobile/touch trigger for pickup
+  climbTriggerRef?: React.MutableRefObject<boolean>;     // Mobile/touch trigger for initiating climb
   onFallDamage?: (fallHeight: number, fatal: boolean) => void;
   cameraViewTarget?: [number, number, number] | null;
   onPlayerStartMove?: () => void;
@@ -123,6 +138,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onClimbingStateChange,
   onClimbablePrompt,
   climbInputRef,
+  pickupTriggerRef,
+  climbTriggerRef,
   onFallDamage,
   cameraViewTarget,
   onPlayerStartMove,
@@ -154,6 +171,36 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     hash.build(climbables);
     return hash;
   }, [climbables]);
+
+  // Extract visible item names from player inventory for rendering on character
+  const visibleItems = useMemo(() => {
+    if (!playerStats?.inventory) return [];
+    const itemNames: string[] = [];
+    for (const item of playerStats.inventory) {
+      const details = getItemDetailsByItemId(item.itemId);
+      if (details?.name) {
+        itemNames.push(details.name);
+      }
+    }
+    return itemNames;
+  }, [playerStats?.inventory]);
+
+  // Detect cosmetic items (kohl, henna) for visual effects on character
+  const cosmeticEffects = useMemo(() => {
+    if (!playerStats?.inventory) return undefined;
+    let hasKohl = false;
+    let hasHenna = false;
+    for (const item of playerStats.inventory) {
+      const details = getItemDetailsByItemId(item.itemId);
+      if (details?.name) {
+        const nameLower = details.name.toLowerCase();
+        if (nameLower.includes('kohl')) hasKohl = true;
+        if (nameLower.includes('henna')) hasHenna = true;
+      }
+    }
+    if (!hasKohl && !hasHenna) return undefined;
+    return { hasKohl, hasHenna };
+  }, [playerStats?.inventory]);
 
   const markerGlowMap = useMemo(() => {
     const size = 128;
@@ -242,6 +289,16 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   // Action animation state (warn, encourage, observe)
   const actionAnimationRef = useRef<{ action: string; progress: number } | null>(null);
+
+  // ANIMATION: Turn/pivot, walk-run transition, and movement inertia refs
+  const turnPhaseRef = useRef(0); // 0-1 progress through pivot animation
+  const lastRotationRef = useRef(0); // Previous frame's rotation for angular velocity
+  const angularVelocityRef = useRef(0); // Current turn rate (radians per frame)
+  const movementStartTimeRef = useRef(0); // When walking started (for start inertia)
+  const movementStopTimeRef = useRef(0); // When walking stopped (for stop inertia)
+  const wasWalkingRef = useRef(false); // Track previous walking state
+  const wasSprintingRef = useRef(false); // Track previous sprint state
+  const sprintTransitionRef = useRef(0); // 0 = walk, 1 = full sprint (for blending)
   const actionStartTimeRef = useRef<number>(0);
 
   // Wall occlusion system for over-shoulder camera
@@ -524,7 +581,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     mouseDeltaRef.current.y = 0;
   }, [observeMode]);
 
-  // Mouse drag handlers for first-person camera look
+  // Mouse and touch drag handlers for first-person camera look
   useEffect(() => {
     const onMouseDown = (e: MouseEvent) => {
       if (observeMode) return;
@@ -546,15 +603,84 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         lastMouseRef.current = { x: e.clientX, y: e.clientY };
       }
     };
+    // Touch equivalents for mobile - with deadzone to distinguish tap (move) from swipe (look)
+    let touchStartPos = { x: 0, y: 0 };
+    let touchMoved = false;
+    const TOUCH_DEADZONE = 10; // pixels before registering as camera movement
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (observeMode) return;
+      if (cameraMode === CameraMode.FIRST_PERSON && e.touches.length === 1) {
+        touchStartPos = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        lastMouseRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        touchMoved = false;
+      }
+    };
+    const onTouchEnd = () => {
+      isDraggingRef.current = false;
+      touchMoved = false;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (observeMode) return;
+      if (cameraMode === CameraMode.FIRST_PERSON && e.touches.length === 1) {
+        const dx = e.touches[0].clientX - lastMouseRef.current.x;
+        const dy = e.touches[0].clientY - lastMouseRef.current.y;
+        // Check if we've moved past the deadzone
+        const totalDx = e.touches[0].clientX - touchStartPos.x;
+        const totalDy = e.touches[0].clientY - touchStartPos.y;
+        const totalDist = Math.sqrt(totalDx * totalDx + totalDy * totalDy);
+        if (totalDist > TOUCH_DEADZONE) {
+          isDraggingRef.current = true;
+          touchMoved = true;
+          mouseDeltaRef.current.x += dx;
+          mouseDeltaRef.current.y += dy;
+        }
+        lastMouseRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+      }
+    };
     window.addEventListener('mousedown', onMouseDown);
     window.addEventListener('mouseup', onMouseUp);
     window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('touchstart', onTouchStart, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
     return () => {
       window.removeEventListener('mousedown', onMouseDown);
       window.removeEventListener('mouseup', onMouseUp);
       window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('touchstart', onTouchStart);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('touchmove', onTouchMove);
     };
   }, [cameraMode, observeMode]);
+
+  // Mobile camera rotation button handler
+  useEffect(() => {
+    const ROTATION_AMOUNT = 30; // pixels equivalent
+    const handleMobileCameraRotate = (e: Event) => {
+      const customEvent = e as CustomEvent<{ direction: 'left' | 'right' | 'up' | 'down' }>;
+      if (cameraMode !== CameraMode.FIRST_PERSON) return;
+
+      switch (customEvent.detail.direction) {
+        case 'left':
+          mouseDeltaRef.current.x -= ROTATION_AMOUNT;
+          break;
+        case 'right':
+          mouseDeltaRef.current.x += ROTATION_AMOUNT;
+          break;
+        case 'up':
+          mouseDeltaRef.current.y -= ROTATION_AMOUNT;
+          break;
+        case 'down':
+          mouseDeltaRef.current.y += ROTATION_AMOUNT;
+          break;
+      }
+    };
+    window.addEventListener('mobileCameraRotate', handleMobileCameraRotate);
+    return () => {
+      window.removeEventListener('mobileCameraRotate', handleMobileCameraRotate);
+    };
+  }, [cameraMode]);
 
   // Trigger action animation when actionEvent changes
   useEffect(() => {
@@ -913,11 +1039,16 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           onClimbablePrompt(null);
         }
 
-        // Check for climb initiation (press C near a climbable)
+        // Check for climb initiation (press C near a climbable, or mobile/touch trigger)
         const cJustPressed = keys.c && !lastCRef.current;
-        const wantsClimbUp = cJustPressed && nearbyFromGround && isGrounded.current;
-        const wantsClimbDown = cJustPressed && nearbyFromRoof && isOnRoof;
-        const wantsClimbPushable = cJustPressed && nearbyPushable && isGrounded.current && !nearby;
+        const mobileTrigger = climbTriggerRef?.current === true;
+        if (mobileTrigger && climbTriggerRef) {
+          climbTriggerRef.current = false; // Reset immediately
+        }
+        const wantsClimb = cJustPressed || mobileTrigger;
+        const wantsClimbUp = wantsClimb && nearbyFromGround && isGrounded.current;
+        const wantsClimbDown = wantsClimb && nearbyFromRoof && isOnRoof;
+        const wantsClimbPushable = wantsClimb && nearbyPushable && isGrounded.current && !nearby;
 
         if (wantsClimbUp && nearbyFromGround) {
           // Start climbing from bottom
@@ -1655,18 +1786,34 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     // In first-person mode: WASD controls camera look, arrow keys control movement
 
     const moving = moveVec.lengthSq() > 0.01;
+    const now = performance.now() * 0.001;
+
+    // ANIMATION: Track movement start/stop for inertia
     if (walkingRef.current !== moving) {
+      if (moving) {
+        movementStartTimeRef.current = now;
+      } else {
+        movementStopTimeRef.current = now;
+      }
+      wasWalkingRef.current = walkingRef.current;
       walkingRef.current = moving;
       setIsWalking(moving);
     }
+
     const sprinting = moving && keys.shift;
+
+    // ANIMATION: Track sprint transition for walk-to-run blending
     if (sprintingRef.current !== sprinting) {
+      wasSprintingRef.current = sprintingRef.current;
       sprintingRef.current = sprinting;
       setIsSprinting(sprinting);
       if (sprintStateRef) {
         sprintStateRef.current = sprinting;
       }
     }
+    // Smoothly transition sprint blend (0 = walk, 1 = sprint)
+    const sprintTarget = sprinting ? 1 : 0;
+    sprintTransitionRef.current = THREE.MathUtils.lerp(sprintTransitionRef.current, sprintTarget, 0.15);
     if (moving && keys.shift) {
       interactChargingRef.current = false;
       interactChargeRef.current = 0;
@@ -1686,6 +1833,13 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         interactTriggerRef.current = strength;
       }
       pushTriggerRef.current = null; // Reset after triggering
+    }
+
+    // Check for mobile/touch pickup trigger
+    if (pickupTriggerRef?.current) {
+      // Trigger a quick pickup action (equivalent to a brief shift press)
+      interactTriggerRef.current = 1.0;
+      pickupTriggerRef.current = false; // Reset after triggering
     }
 
     let currentSpeed = 0;
@@ -1718,8 +1872,34 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         const targetRot = Math.atan2(moveVec.x, moveVec.z);
         // OVER_SHOULDER: Fast rotation so character always faces movement direction
         // THIRD_PERSON: Slower rotation for more controllable orbiting
-        const rotSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
-        group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, targetRot, rotSpeed);
+        // Use higher speed when direction change is large (> 90°) for snappy turning
+        const currentRot = group.current.rotation.y;
+        let angleDiff = Math.abs(targetRot - currentRot);
+        if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+        const isSharpTurn = angleDiff > Math.PI / 2;
+        const baseSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
+        const rotSpeed = isSharpTurn ? Math.min(0.6, baseSpeed * 2) : baseSpeed;
+
+        // ANIMATION: Track angular velocity for pivot detection
+        const prevRot = lastRotationRef.current;
+        let rotDelta = group.current.rotation.y - prevRot;
+        // Normalize to -π to π
+        while (rotDelta > Math.PI) rotDelta -= Math.PI * 2;
+        while (rotDelta < -Math.PI) rotDelta += Math.PI * 2;
+        angularVelocityRef.current = rotDelta / Math.max(delta, 0.001);
+
+        // ANIMATION: Update turn phase based on sharp turns
+        // turnPhase goes 0->1 during a pivot, then decays
+        if (isSharpTurn && angleDiff > Math.PI / 3) {
+          // Start or continue pivot - ramp up quickly
+          turnPhaseRef.current = Math.min(1, turnPhaseRef.current + delta * 8);
+        } else {
+          // Decay pivot phase
+          turnPhaseRef.current = Math.max(0, turnPhaseRef.current - delta * 4);
+        }
+
+        group.current.rotation.y = lerpAngle(group.current.rotation.y, targetRot, rotSpeed);
+        lastRotationRef.current = group.current.rotation.y;
       }
     }
 
@@ -1776,8 +1956,13 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         // Rotate character to face movement direction
         if (cameraMode !== CameraMode.FIRST_PERSON) {
           const targetRot = Math.atan2(moveVec.x, moveVec.z);
-          const rotSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
-          group.current.rotation.y = THREE.MathUtils.lerp(group.current.rotation.y, targetRot, rotSpeed);
+          const currentRot = group.current.rotation.y;
+          let angleDiff = Math.abs(targetRot - currentRot);
+          if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+          const isSharpTurn = angleDiff > Math.PI / 2;
+          const baseSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
+          const rotSpeed = isSharpTurn ? Math.min(0.6, baseSpeed * 2) : baseSpeed;
+          group.current.rotation.y = lerpAngle(group.current.rotation.y, targetRot, rotSpeed);
         }
       } else {
         // Arrived at target
@@ -2355,33 +2540,82 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           const isBlocked = blockingHits.length > 0;
 
           const currentlyOccluded = new Set<THREE.Mesh>();
+          const setMaterialFade = (material: THREE.Material, targetOpacity: number, lerpSpeed: number) => {
+            if (!('opacity' in material)) return;
+            const nextOpacity = THREE.MathUtils.lerp((material as THREE.Material & { opacity: number }).opacity, targetOpacity, lerpSpeed);
+            (material as THREE.Material & { opacity: number }).opacity = nextOpacity;
+            const shouldBeTransparent = targetOpacity < 1;
+            if ('transparent' in material) {
+              const matWithTransparency = material as THREE.Material & { transparent?: boolean };
+              if (matWithTransparency.transparent !== shouldBeTransparent) {
+                matWithTransparency.transparent = shouldBeTransparent;
+                material.needsUpdate = true;
+              }
+            }
+            if ('depthWrite' in material) {
+              const matWithDepth = material as THREE.Material & { depthWrite?: boolean };
+              const nextDepthWrite = !shouldBeTransparent;
+              if (matWithDepth.depthWrite !== nextDepthWrite) {
+                matWithDepth.depthWrite = nextDepthWrite;
+                material.needsUpdate = true;
+              }
+            }
+          };
+
           if (isBlocked) {
             for (const hit of blockingHits) {
               const mesh = hit.object as THREE.Mesh;
-              currentlyOccluded.add(mesh);
-              if (!occludedMeshesRef.current.has(mesh)) {
-                occludedMeshesRef.current.add(mesh);
-                if (mesh.material) {
-                  const mat = mesh.material as THREE.MeshStandardMaterial;
-                  mat.transparent = true;
-                  mat.depthWrite = false;
+              const buildingId = mesh.userData?.buildingId ?? mesh.parent?.userData?.buildingId;
+              let root: THREE.Object3D = mesh.parent ?? mesh;
+              if (buildingId) {
+                let cursor: THREE.Object3D | null = mesh;
+                while (cursor?.parent) {
+                  if (cursor.userData?.buildingId === buildingId) {
+                    root = cursor;
+                  }
+                  cursor = cursor.parent;
                 }
               }
-              if (mesh.material) {
-                const mat = mesh.material as THREE.MeshStandardMaterial;
-                mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.18, 0.18);
-              }
+              root.traverse((child) => {
+                if (!(child as THREE.Mesh).isMesh) return;
+                const childMesh = child as THREE.Mesh;
+                currentlyOccluded.add(childMesh);
+                if (!occludedMeshesRef.current.has(childMesh)) {
+                  occludedMeshesRef.current.add(childMesh);
+                }
+                if (Array.isArray(childMesh.material)) {
+                  childMesh.material.forEach((material) => setMaterialFade(material, 0.18, 0.18));
+                } else if (childMesh.material) {
+                  setMaterialFade(childMesh.material, 0.18, 0.18);
+                }
+              });
             }
           }
 
           occludedMeshesRef.current.forEach((mesh) => {
-            if (!currentlyOccluded.has(mesh) && mesh.material) {
-              const mat = mesh.material as THREE.MeshStandardMaterial;
-              mat.opacity = THREE.MathUtils.lerp(mat.opacity, 1.0, 0.08);
-              if (mat.opacity > 0.98) {
-                mat.opacity = 1.0;
-                mat.transparent = false;
-                mat.depthWrite = true;
+            if (!currentlyOccluded.has(mesh)) {
+              if (Array.isArray(mesh.material)) {
+                mesh.material.forEach((material) => setMaterialFade(material, 1.0, 0.08));
+              } else if (mesh.material) {
+                setMaterialFade(mesh.material, 1.0, 0.08);
+              }
+              const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+              const materialOpacity = material && 'opacity' in material ? (material as THREE.Material & { opacity: number }).opacity : 1;
+              if (materialOpacity > 0.98) {
+                if (Array.isArray(mesh.material)) {
+                  mesh.material.forEach((mat) => {
+                    if (!('opacity' in mat)) return;
+                    (mat as THREE.Material & { opacity: number }).opacity = 1.0;
+                    if ('transparent' in mat) mat.transparent = false;
+                    if ('depthWrite' in mat) mat.depthWrite = true;
+                    mat.needsUpdate = true;
+                  });
+                } else if (mesh.material && 'opacity' in mesh.material) {
+                  (mesh.material as THREE.Material & { opacity: number }).opacity = 1.0;
+                  if ('transparent' in mesh.material) mesh.material.transparent = false;
+                  if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
+                  mesh.material.needsUpdate = true;
+                }
                 occludedMeshesRef.current.delete(mesh);
               }
             }
@@ -2457,32 +2691,41 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             // Make wall transparent if not already
             if (!occludedMeshesRef.current.has(mesh)) {
               occludedMeshesRef.current.add(mesh);
-              if (mesh.material) {
-                const mat = mesh.material as THREE.MeshStandardMaterial;
-                mat.transparent = true;
-                mat.depthWrite = false;
-              }
             }
 
-            // Fade to ghosted opacity
-            if (mesh.material) {
-              const mat = mesh.material as THREE.MeshStandardMaterial;
-              mat.opacity = THREE.MathUtils.lerp(mat.opacity, 0.15, 0.1);
+            if (Array.isArray(mesh.material)) {
+              mesh.material.forEach((material) => setMaterialFade(material, 0.15, 0.1));
+            } else if (mesh.material) {
+              setMaterialFade(mesh.material, 0.15, 0.1);
             }
           }
         }
 
         // Restore meshes that are no longer occluding
         occludedMeshesRef.current.forEach((mesh) => {
-          if (!currentlyOccluded.has(mesh) && mesh.material) {
-            const mat = mesh.material as THREE.MeshStandardMaterial;
-            mat.opacity = THREE.MathUtils.lerp(mat.opacity, 1.0, 0.05);
-
-            // Fully restore when opacity is high enough
-            if (mat.opacity > 0.98) {
-              mat.opacity = 1.0;
-              mat.transparent = false;
-              mat.depthWrite = true;
+          if (!currentlyOccluded.has(mesh)) {
+            if (Array.isArray(mesh.material)) {
+              mesh.material.forEach((material) => setMaterialFade(material, 1.0, 0.05));
+            } else if (mesh.material) {
+              setMaterialFade(mesh.material, 1.0, 0.05);
+            }
+            const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+            const materialOpacity = material && 'opacity' in material ? (material as THREE.Material & { opacity: number }).opacity : 1;
+            if (materialOpacity > 0.98) {
+              if (Array.isArray(mesh.material)) {
+                mesh.material.forEach((mat) => {
+                  if (!('opacity' in mat)) return;
+                  (mat as THREE.Material & { opacity: number }).opacity = 1.0;
+                  if ('transparent' in mat) mat.transparent = false;
+                  if ('depthWrite' in mat) mat.depthWrite = true;
+                  mat.needsUpdate = true;
+                });
+              } else if (mesh.material && 'opacity' in mesh.material) {
+                (mesh.material as THREE.Material & { opacity: number }).opacity = 1.0;
+                if ('transparent' in mesh.material) mesh.material.transparent = false;
+                if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
+                mesh.material.needsUpdate = true;
+              }
               occludedMeshesRef.current.delete(mesh);
             }
           }
@@ -2491,11 +2734,19 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     } else if (cameraMode !== CameraMode.THIRD_PERSON) {
       // Restore all occluded meshes when not using any occlusion mode.
       occludedMeshesRef.current.forEach((mesh) => {
-        if (mesh.material) {
-          const mat = mesh.material as THREE.MeshStandardMaterial;
-          mat.opacity = 1.0;
-          mat.transparent = false;
-          mat.depthWrite = true;
+        if (Array.isArray(mesh.material)) {
+          mesh.material.forEach((material) => {
+            if (!('opacity' in material)) return;
+            (material as THREE.Material & { opacity: number }).opacity = 1.0;
+            if ('transparent' in material) material.transparent = false;
+            if ('depthWrite' in material) material.depthWrite = true;
+            material.needsUpdate = true;
+          });
+        } else if (mesh.material && 'opacity' in mesh.material) {
+          (mesh.material as THREE.Material & { opacity: number }).opacity = 1.0;
+          if ('transparent' in mesh.material) mesh.material.transparent = false;
+          if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
+          mesh.material.needsUpdate = true;
         }
       });
       occludedMeshesRef.current.clear();
@@ -2728,6 +2979,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             footwearStyle={playerStats?.footwearStyle}
             footwearColor={playerStats?.footwearColor}
             accessories={playerStats?.accessories}
+            visibleItems={visibleItems}
+            cosmeticEffects={cosmeticEffects}
             isWalking={isWalking}
             isSprinting={isSprinting}
             isJumpingRef={isJumpingRef}
@@ -2740,6 +2993,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             animationBoost={1.35}
             distanceFromCamera={0}
             showGroundShadow={false}
+            turnPhaseRef={turnPhaseRef}
+            angularVelocityRef={angularVelocityRef}
+            movementStartTimeRef={movementStartTimeRef}
+            movementStopTimeRef={movementStopTimeRef}
+            sprintTransitionRef={sprintTransitionRef}
           />
         )}
         

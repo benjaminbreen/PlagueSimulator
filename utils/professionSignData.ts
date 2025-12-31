@@ -127,6 +127,65 @@ export const PROFESSION_SIGN_MAP: Record<string, ProfessionSign> = {
     scale: 1.0
   },
 
+  'Hakim': {
+    type: 'mounted',
+    geometry: 'mortar',
+    color: '#7c8f7a', // Medicinal stone/green tint
+    metalness: 0.05,
+    roughness: 0.7,
+    secondaryColor: '#6fb26f',
+    bracketOffset: 0,
+    heightOffset: 0.85,
+    scale: 1.1
+  },
+
+  'Physician': {
+    type: 'mounted',
+    geometry: 'mortar',
+    color: '#7c8f7a',
+    metalness: 0.05,
+    roughness: 0.7,
+    secondaryColor: '#6fb26f',
+    bracketOffset: 0,
+    heightOffset: 0.85,
+    scale: 1.1
+  },
+
+  'Apothecary': {
+    type: 'hanging',
+    geometry: 'mortar',
+    color: '#6f7f6e',
+    metalness: 0.05,
+    roughness: 0.75,
+    secondaryColor: '#7cc27c',
+    bracketOffset: 0.35,
+    heightOffset: 0.8,
+    scale: 1.05
+  },
+
+  'Pharmacist': {
+    type: 'hanging',
+    geometry: 'mortar',
+    color: '#6f7f6e',
+    metalness: 0.05,
+    roughness: 0.75,
+    secondaryColor: '#7cc27c',
+    bracketOffset: 0.35,
+    heightOffset: 0.8,
+    scale: 1.05
+  },
+
+  'Barber': {
+    type: 'hanging',
+    geometry: 'bowl',
+    color: '#b97a45',
+    metalness: 0.5,
+    roughness: 0.5,
+    bracketOffset: 0.4,
+    heightOffset: 0.75,
+    scale: 0.95
+  },
+
   'Innkeeper': {
     type: 'hanging',
     geometry: 'lamp',
@@ -136,6 +195,86 @@ export const PROFESSION_SIGN_MAP: Record<string, ProfessionSign> = {
     emissive: '#ff9944', // Warm glow at night
     bracketOffset: 0.4,
     heightOffset: 0.8,
+    scale: 1.0
+  },
+
+  'Funduq Keeper': {
+    type: 'hanging',
+    geometry: 'lamp',
+    color: '#c08a4c',
+    metalness: 0.7,
+    roughness: 0.45,
+    emissive: '#ff9a3d',
+    bracketOffset: 0.45,
+    heightOffset: 0.85,
+    scale: 1.1
+  },
+
+  'Khan Warden': {
+    type: 'hanging',
+    geometry: 'lamp',
+    color: '#c08a4c',
+    metalness: 0.7,
+    roughness: 0.45,
+    emissive: '#ff9a3d',
+    bracketOffset: 0.45,
+    heightOffset: 0.85,
+    scale: 1.1
+  },
+
+  'Caravanserai Keeper': {
+    type: 'hanging',
+    geometry: 'lamp',
+    color: '#c08a4c',
+    metalness: 0.7,
+    roughness: 0.45,
+    emissive: '#ff9a3d',
+    bracketOffset: 0.45,
+    heightOffset: 0.85,
+    scale: 1.1
+  },
+
+  'Madrasa Teacher': {
+    type: 'mounted',
+    geometry: 'medallion',
+    color: '#4f6b8a', // Cool scholarly blue
+    metalness: 0.2,
+    roughness: 0.7,
+    bracketOffset: 0,
+    heightOffset: 0.9,
+    scale: 1.0
+  },
+
+  'Qur\'an Teacher': {
+    type: 'mounted',
+    geometry: 'medallion',
+    color: '#4f6b8a',
+    metalness: 0.2,
+    roughness: 0.7,
+    bracketOffset: 0,
+    heightOffset: 0.9,
+    scale: 1.0
+  },
+
+  'Copyist Teacher': {
+    type: 'mounted',
+    geometry: 'medallion',
+    color: '#4f6b8a',
+    metalness: 0.2,
+    roughness: 0.7,
+    bracketOffset: 0,
+    heightOffset: 0.9,
+    scale: 1.0
+  },
+
+  'Madrasa Administrator': {
+    type: 'mounted',
+    geometry: 'medallion',
+    color: '#4f6b8a',
+    metalness: 0.2,
+    roughness: 0.7,
+    bracketOffset: 0,
+    heightOffset: 0.9,
     scale: 1.0
   },
 

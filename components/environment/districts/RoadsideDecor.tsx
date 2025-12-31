@@ -296,38 +296,127 @@ export const RoadsideDecor: React.FC<{ mapX: number; mapY: number }> = ({ mapX, 
         </group>
       ))}
 
-      {/* Palm trees along roadside */}
-      {trees.map((treePos, i) => (
-        <group key={`tree-${i}`} position={treePos}>
-          {/* Trunk */}
-          <mesh position={[0, 2.0, 0]} castShadow>
-            <cylinderGeometry args={[0.22, 0.3, 4.0, 8]} />
-            <meshStandardMaterial color="#7f5c3b" roughness={0.92} />
-          </mesh>
-          {/* Canopy */}
-          <mesh position={[0, 4.2, 0]} castShadow>
-            <sphereGeometry args={[1.1, 8, 6]} />
-            <meshStandardMaterial color="#3f6a3a" roughness={0.87} />
-          </mesh>
-          {/* Palm fronds */}
-          <mesh position={[0.7, 4.0, 0]} rotation={[0.2, 0, 0]} castShadow>
-            <boxGeometry args={[2.0, 0.12, 0.4]} />
-            <meshStandardMaterial color="#3b6538" roughness={0.87} />
-          </mesh>
-          <mesh position={[-0.7, 4.0, 0]} rotation={[-0.2, 0, 0]} castShadow>
-            <boxGeometry args={[2.0, 0.12, 0.4]} />
-            <meshStandardMaterial color="#3b6538" roughness={0.87} />
-          </mesh>
-          <mesh position={[0, 4.0, 0.7]} rotation={[0, 0, 0.2]} castShadow>
-            <boxGeometry args={[0.4, 0.12, 2.0]} />
-            <meshStandardMaterial color="#3b6538" roughness={0.87} />
-          </mesh>
-          <mesh position={[0, 4.0, -0.7]} rotation={[0, 0, -0.2]} castShadow>
-            <boxGeometry args={[0.4, 0.12, 2.0]} />
-            <meshStandardMaterial color="#3b6538" roughness={0.87} />
-          </mesh>
-        </group>
-      ))}
+      {/* Palm trees along roadside - REALISTIC DATE PALMS */}
+      {trees.map((treePos, i) => {
+        // Randomize each palm based on position
+        const palmSeed = Math.abs(treePos[0] * 11 + treePos[2] * 17 + i * 29);
+        const heightMult = 0.9 + (palmSeed % 25) / 100; // 0.9-1.15x height
+        const trunkThickness = 0.2 + ((palmSeed % 12) / 150); // Vary trunk
+        const frondCount = 6 + (palmSeed % 3); // 6-8 fronds
+
+        return (
+          <group key={`tree-${i}`} position={treePos}>
+            {/* DATE PALM TRUNK - segmented realistic structure */}
+            {/* Base segment */}
+            <mesh position={[0, 0.5 * heightMult, 0]} castShadow>
+              <cylinderGeometry args={[trunkThickness + 0.08, trunkThickness + 0.12, 1.0 * heightMult, 10]} />
+              <meshStandardMaterial color="#8a6a4a" roughness={0.94} />
+            </mesh>
+            {/* Segment ring */}
+            <mesh position={[0, 0.95 * heightMult, 0]} castShadow>
+              <cylinderGeometry args={[trunkThickness + 0.09, trunkThickness + 0.09, 0.1, 10]} />
+              <meshStandardMaterial color="#6a5a3a" roughness={0.97} />
+            </mesh>
+            {/* Mid-lower segment */}
+            <mesh position={[0, 1.5 * heightMult, 0]} castShadow>
+              <cylinderGeometry args={[trunkThickness + 0.06, trunkThickness + 0.08, 1.0 * heightMult, 10]} />
+              <meshStandardMaterial color="#7a5a3a" roughness={0.94} />
+            </mesh>
+            {/* Segment ring */}
+            <mesh position={[0, 1.95 * heightMult, 0]} castShadow>
+              <cylinderGeometry args={[trunkThickness + 0.07, trunkThickness + 0.07, 0.1, 10]} />
+              <meshStandardMaterial color="#6a5a3a" roughness={0.97} />
+            </mesh>
+            {/* Mid-upper segment */}
+            <mesh position={[0, 2.6 * heightMult, 0]} castShadow>
+              <cylinderGeometry args={[trunkThickness + 0.04, trunkThickness + 0.06, 1.2 * heightMult, 10]} />
+              <meshStandardMaterial color="#8a6a4a" roughness={0.94} />
+            </mesh>
+            {/* Segment ring */}
+            <mesh position={[0, 3.15 * heightMult, 0]} castShadow>
+              <cylinderGeometry args={[trunkThickness + 0.05, trunkThickness + 0.05, 0.1, 10]} />
+              <meshStandardMaterial color="#6a5a3a" roughness={0.97} />
+            </mesh>
+            {/* Top segment */}
+            <mesh position={[0, 3.6 * heightMult, 0]} castShadow>
+              <cylinderGeometry args={[trunkThickness + 0.02, trunkThickness + 0.04, 0.9 * heightMult, 10]} />
+              <meshStandardMaterial color="#7a5a3a" roughness={0.94} />
+            </mesh>
+
+            {/* Crown base where fronds emerge */}
+            <mesh position={[0, 4.1 * heightMult, 0]} castShadow>
+              <sphereGeometry args={[trunkThickness + 0.15, 8, 6]} />
+              <meshStandardMaterial color="#5a6a3a" roughness={0.9} />
+            </mesh>
+
+            {/* REALISTIC PALM FRONDS - radiating outward */}
+            {Array.from({ length: frondCount }).map((_, frondIdx) => {
+              const angle = (frondIdx / frondCount) * Math.PI * 2 + (palmSeed % 100) / 100;
+              const droop = 0.6 + ((palmSeed + frondIdx) % 20) / 100; // Varied droop
+
+              return (
+                <group key={`frond-${frondIdx}`} position={[0, 4.15 * heightMult, 0]} rotation={[0, angle, 0]}>
+                  {/* Frond stem (rachis) */}
+                  <mesh position={[0, 0, 0.6]} rotation={[droop, 0, 0]} castShadow>
+                    <cylinderGeometry args={[0.025, 0.035, 1.2, 6]} />
+                    <meshStandardMaterial color="#6a7a4a" roughness={0.92} />
+                  </mesh>
+
+                  {/* Leaflets along frond - alternating sides */}
+                  {Array.from({ length: 10 }).map((_, leafIdx) => {
+                    const leafOffset = (leafIdx / 9) * 1.1;
+                    const leafSide = leafIdx % 2 === 0 ? 0.4 : -0.4;
+                    const leafSize = 0.3 - leafIdx * 0.02; // Smaller toward tip
+
+                    return (
+                      <group
+                        key={`leaf-${leafIdx}`}
+                        position={[0, Math.sin(droop) * leafOffset * 0.3, leafOffset]}
+                        rotation={[droop + leafIdx * 0.04, 0, leafSide]}
+                      >
+                        <mesh castShadow>
+                          <boxGeometry args={[leafSize, 0.01, 0.15]} />
+                          <meshStandardMaterial
+                            color={leafIdx < 3 ? '#5a7a3a' : leafIdx < 7 ? '#4a6a2a' : '#3a5a2a'}
+                            roughness={0.87}
+                            side={2}
+                          />
+                        </mesh>
+                      </group>
+                    );
+                  })}
+                </group>
+              );
+            })}
+
+            {/* Date clusters hanging from crown */}
+            {[0, 1, 2].map((clusterIdx) => {
+              const clusterAngle = (clusterIdx / 3) * Math.PI * 2 + palmSeed;
+              const clusterX = Math.cos(clusterAngle) * 0.15;
+              const clusterZ = Math.sin(clusterAngle) * 0.15;
+
+              return (
+                <group key={`dates-${clusterIdx}`} position={[clusterX, 3.8 * heightMult, clusterZ]}>
+                  {[0, 1, 2, 3, 4].map((dateIdx) => (
+                    <mesh
+                      key={`date-${dateIdx}`}
+                      position={[
+                        (Math.sin(palmSeed + dateIdx) - 0.5) * 0.08,
+                        -dateIdx * 0.06,
+                        (Math.cos(palmSeed + dateIdx) - 0.5) * 0.08
+                      ]}
+                      castShadow
+                    >
+                      <sphereGeometry args={[0.03, 6, 4]} />
+                      <meshStandardMaterial color="#6a4a2a" roughness={0.8} />
+                    </mesh>
+                  ))}
+                </group>
+              );
+            })}
+          </group>
+        );
+      })}
 
     </group>
   );

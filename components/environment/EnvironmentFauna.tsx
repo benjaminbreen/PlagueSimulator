@@ -824,7 +824,7 @@ export const EnvironmentFauna: React.FC<EnvironmentFaunaProps> = ({ mapX, mapY, 
     return results;
   }, [mapX, mapY]);
 
-  // Chicken spawning for farm and roadside areas
+  // Chicken spawning for farm, roadside, and hovels areas
   const chickens = useMemo(() => {
     const district = getDistrictType(mapX, mapY);
     const seedBase = mapX * 1000 + mapY * 13 + 5555;
@@ -834,11 +834,12 @@ export const EnvironmentFauna: React.FC<EnvironmentFaunaProps> = ({ mapX, mapY, 
 
     const isFarmland = district === 'OUTSKIRTS_FARMLAND';
     const isRoadside = district === 'ROADSIDE';
+    const isHovels = district === 'HOVELS';
 
-    if (isFarmland || isRoadside) {
-      // Number of chickens: 4-8 for farmland, 2-4 for roadside
-      const baseCount = isFarmland ? 4 : 2;
-      const extraCount = isFarmland ? 4 : 2;
+    if (isFarmland || isRoadside || isHovels) {
+      // Number of chickens: 4-8 for farmland, 2-4 for roadside, 3-6 for hovels
+      const baseCount = isFarmland ? 4 : isHovels ? 3 : 2;
+      const extraCount = isFarmland ? 4 : isHovels ? 3 : 2;
       const count = baseCount + Math.floor(rand(1) * extraCount);
 
       // Spawn chickens in a loose flock

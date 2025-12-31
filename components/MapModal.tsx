@@ -46,7 +46,7 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
         className="max-w-6xl w-full bg-black/80 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex-1 p-6 md:p-8 border-b md:border-b-0 md:border-r border-amber-900/40">
+        <div className="flex-1 p-3 sm:p-6 md:p-8 border-b md:border-b-0 md:border-r border-amber-900/40 max-h-[45vh] md:max-h-none overflow-hidden">
           <div className="flex items-center justify-between mb-6">
             <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Damascus Map — 1348</h4>
             <button
@@ -195,13 +195,13 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
           </div>
         </div>
 
-        <div className="w-full md:w-96 p-6 flex flex-col gap-4 overflow-hidden">
-          <div className="pb-3 border-b border-amber-900/40">
-            <h3 className="text-lg font-bold text-amber-100 uppercase tracking-wider">Fast Travel</h3>
-            <p className="text-[10px] text-amber-100/40 mt-1">Select a district to visit</p>
+        <div className="w-full md:w-96 p-3 sm:p-6 flex flex-col gap-3 sm:gap-4 overflow-hidden min-h-0">
+          <div className="pb-2 sm:pb-3 border-b border-amber-900/40">
+            <h3 className="text-base sm:text-lg font-bold text-amber-100 uppercase tracking-wider">Fast Travel</h3>
+            <p className="text-[10px] text-amber-100/40 mt-0.5 sm:mt-1">Select a district to visit</p>
           </div>
 
-          <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+          <div className="flex-1 overflow-y-auto space-y-1.5 sm:space-y-2 pr-1 sm:pr-2 min-h-0">
             {locations.map((loc) => {
               const isCurrent = loc.x === currentX && loc.y === currentY;
               return (
@@ -209,7 +209,7 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
                   key={loc.name}
                   onClick={() => onSelectLocation(loc.x, loc.y)}
                   disabled={isCurrent}
-                  className={`w-full text-left p-3 rounded-lg border transition-all group ${
+                  className={`w-full text-left p-2 sm:p-3 rounded-lg border transition-all group ${
                     isCurrent
                       ? 'bg-amber-900/40 border-amber-700/60 cursor-default'
                       : 'bg-black/30 border-amber-900/30 hover:bg-amber-900/20 hover:border-amber-700/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.15)]'

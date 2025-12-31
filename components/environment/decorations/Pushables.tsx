@@ -23,17 +23,106 @@ export const PushableBench: React.FC<{ item: PushableObject }> = ({ item }) => (
     labelOffset={[0, 0.6, 0]}
   >
     <group rotation={[0, item.rotation ?? 0, 0]}>
-      <mesh castShadow>
-        <boxGeometry args={[1.8, 0.2, 0.7]} />
+      {/* CARVED STONE SEAT - layered construction */}
+      {/* Seat top surface (main sitting area) */}
+      <mesh position={[0, 0.02, 0]} castShadow receiveShadow>
+        <boxGeometry args={[1.8, 0.08, 0.7]} />
+        <meshStandardMaterial color="#b89a73" roughness={0.85} />
+      </mesh>
+
+      {/* Seat edge molding (decorative lip) */}
+      <mesh position={[0, -0.02, 0]} castShadow receiveShadow>
+        <boxGeometry args={[1.85, 0.05, 0.75]} />
         <meshStandardMaterial color="#a98963" roughness={0.9} />
       </mesh>
-      <mesh position={[-0.6, -0.1, 0]} castShadow>
-        <boxGeometry args={[0.2, 0.2, 0.7]} />
-        <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
+
+      {/* Seat underside (thicker for structural look) */}
+      <mesh position={[0, -0.08, 0]} receiveShadow>
+        <boxGeometry args={[1.75, 0.08, 0.65]} />
+        <meshStandardMaterial color="#9a7a5a" roughness={0.95} />
       </mesh>
-      <mesh position={[0.6, -0.1, 0]} castShadow>
-        <boxGeometry args={[0.2, 0.2, 0.7]} />
-        <meshStandardMaterial color="#8a6b4f" roughness={0.9} />
+
+      {/* Carved decorative border on seat front */}
+      {[-0.7, -0.35, 0, 0.35, 0.7].map((x, i) => (
+        <mesh key={`front-carving-${i}`} position={[x, 0, 0.38]} castShadow>
+          <boxGeometry args={[0.15, 0.06, 0.03]} />
+          <meshStandardMaterial color="#8a6a4a" roughness={0.95} />
+        </mesh>
+      ))}
+
+      {/* LEFT LEG - carved stone support */}
+      {/* Main leg pillar */}
+      <mesh position={[-0.65, -0.22, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.25, 0.3, 0.7]} />
+        <meshStandardMaterial color="#9a7a5a" roughness={0.92} />
+      </mesh>
+      {/* Leg capital (top detail) */}
+      <mesh position={[-0.65, -0.05, 0]} castShadow>
+        <boxGeometry args={[0.28, 0.06, 0.73]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.95} />
+      </mesh>
+      {/* Leg base (wider bottom) */}
+      <mesh position={[-0.65, -0.38, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.28, 0.04, 0.73]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.95} />
+      </mesh>
+      {/* Decorative carved panel on leg */}
+      <mesh position={[-0.65, -0.22, 0.36]} castShadow>
+        <boxGeometry args={[0.18, 0.22, 0.02]} />
+        <meshStandardMaterial color="#7a5a3f" roughness={0.98} />
+      </mesh>
+
+      {/* RIGHT LEG - carved stone support */}
+      {/* Main leg pillar */}
+      <mesh position={[0.65, -0.22, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.25, 0.3, 0.7]} />
+        <meshStandardMaterial color="#9a7a5a" roughness={0.92} />
+      </mesh>
+      {/* Leg capital (top detail) */}
+      <mesh position={[0.65, -0.05, 0]} castShadow>
+        <boxGeometry args={[0.28, 0.06, 0.73]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.95} />
+      </mesh>
+      {/* Leg base (wider bottom) */}
+      <mesh position={[0.65, -0.38, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.28, 0.04, 0.73]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.95} />
+      </mesh>
+      {/* Decorative carved panel on leg */}
+      <mesh position={[0.65, -0.22, 0.36]} castShadow>
+        <boxGeometry args={[0.18, 0.22, 0.02]} />
+        <meshStandardMaterial color="#7a5a3f" roughness={0.98} />
+      </mesh>
+
+      {/* ORNAMENTAL BRACKETS connecting seat to legs */}
+      {/* Left bracket - curved support */}
+      <mesh position={[-0.65, -0.08, 0.32]} rotation={[0.3, 0, 0]} castShadow>
+        <boxGeometry args={[0.12, 0.15, 0.06]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.93} />
+      </mesh>
+      <mesh position={[-0.65, -0.08, -0.32]} rotation={[-0.3, 0, 0]} castShadow>
+        <boxGeometry args={[0.12, 0.15, 0.06]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.93} />
+      </mesh>
+
+      {/* Right bracket - curved support */}
+      <mesh position={[0.65, -0.08, 0.32]} rotation={[0.3, 0, 0]} castShadow>
+        <boxGeometry args={[0.12, 0.15, 0.06]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.93} />
+      </mesh>
+      <mesh position={[0.65, -0.08, -0.32]} rotation={[-0.3, 0, 0]} castShadow>
+        <boxGeometry args={[0.12, 0.15, 0.06]} />
+        <meshStandardMaterial color="#8a6b4f" roughness={0.93} />
+      </mesh>
+
+      {/* Stone weathering detail (darker patches) */}
+      <mesh position={[-0.4, 0, 0.15]} receiveShadow>
+        <boxGeometry args={[0.3, 0.02, 0.2]} />
+        <meshStandardMaterial color="#8a7a6a" roughness={0.98} transparent opacity={0.5} />
+      </mesh>
+      <mesh position={[0.5, 0, -0.2]} receiveShadow>
+        <boxGeometry args={[0.25, 0.02, 0.18]} />
+        <meshStandardMaterial color="#8a7a6a" roughness={0.98} transparent opacity={0.5} />
       </mesh>
     </group>
   </HoverableGroup>
@@ -81,7 +170,7 @@ export const PushableClayJar: React.FC<{ item: PushableObject }> = ({ item }) =>
     );
   }
 
-  // Intact jar
+  // Intact jar - AMPHORA STYLE with handles
   return (
     <HoverableGroup
       position={[item.position.x, item.position.y, item.position.z]}
@@ -91,10 +180,109 @@ export const PushableClayJar: React.FC<{ item: PushableObject }> = ({ item }) =>
       labelLines={['Glazed ceramic', 'Stored goods', 'Earthenware']}
       labelOffset={[0, 0.7, 0]}
     >
-      <mesh castShadow>
-        <cylinderGeometry args={[0.25, 0.35, 0.6, 10]} />
-        <meshStandardMaterial color="#a9703a" roughness={0.95} />
-      </mesh>
+      <group rotation={[0, item.rotation ?? 0, 0]}>
+        {/* AMPHORA BASE - pointed bottom typical of ancient storage jars */}
+        <mesh position={[0, 0.08, 0]} castShadow receiveShadow>
+          <coneGeometry args={[0.12, 0.16, 12]} />
+          <meshStandardMaterial color="#9a6030" roughness={0.92} />
+        </mesh>
+        {/* Base disk so the jar sits on the ground */}
+        <mesh position={[0, 0.01, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.14, 0.16, 0.02, 12]} />
+          <meshStandardMaterial color="#8a5528" roughness={0.92} />
+        </mesh>
+
+        {/* LOWER BODY - wide belly for storage */}
+        <mesh position={[0, 0.24, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.32, 0.12, 0.2, 16]} />
+          <meshStandardMaterial color="#a9703a" roughness={0.88} />
+        </mesh>
+
+        {/* MID BODY - widest point */}
+        <mesh position={[0, 0.38, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.35, 0.32, 0.16, 16]} />
+          <meshStandardMaterial color="#b98050" roughness={0.85} />
+        </mesh>
+
+        {/* UPPER BODY - tapering toward neck */}
+        <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.28, 0.35, 0.14, 16]} />
+          <meshStandardMaterial color="#a9703a" roughness={0.88} />
+        </mesh>
+
+        {/* SHOULDER - transition to neck */}
+        <mesh position={[0, 0.6, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.18, 0.28, 0.12, 16]} />
+          <meshStandardMaterial color="#9a6030" roughness={0.9} />
+        </mesh>
+
+        {/* NECK - narrow cylindrical neck */}
+        <mesh position={[0, 0.72, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.15, 0.18, 0.18, 14]} />
+          <meshStandardMaterial color="#a9703a" roughness={0.9} />
+        </mesh>
+
+        {/* RIM - flared opening */}
+        <mesh position={[0, 0.82, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.18, 0.15, 0.06, 14]} />
+          <meshStandardMaterial color="#8a5a2a" roughness={0.85} />
+        </mesh>
+
+        {/* LIP - top edge */}
+        <mesh position={[0, 0.86, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+          <torusGeometry args={[0.18, 0.02, 8, 16]} />
+          <meshStandardMaterial color="#7a4a1a" roughness={0.9} />
+        </mesh>
+
+        {/* HANDLES - characteristic amphora loop handles */}
+        {/* Left handle */}
+        <mesh position={[-0.28, 0.52, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+          <torusGeometry args={[0.12, 0.025, 8, 12, Math.PI]} />
+          <meshStandardMaterial color="#9a6030" roughness={0.92} />
+        </mesh>
+        {/* Left handle attachment (top) */}
+        <mesh position={[-0.30, 0.64, 0]} castShadow>
+          <cylinderGeometry args={[0.04, 0.03, 0.06, 8]} />
+          <meshStandardMaterial color="#8a5a2a" roughness={0.95} />
+        </mesh>
+        {/* Left handle attachment (bottom) */}
+        <mesh position={[-0.32, 0.40, 0]} castShadow>
+          <cylinderGeometry args={[0.04, 0.03, 0.06, 8]} />
+          <meshStandardMaterial color="#8a5a2a" roughness={0.95} />
+        </mesh>
+
+        {/* Right handle */}
+        <mesh position={[0.28, 0.52, 0]} rotation={[0, 0, -Math.PI / 2]} castShadow>
+          <torusGeometry args={[0.12, 0.025, 8, 12, Math.PI]} />
+          <meshStandardMaterial color="#9a6030" roughness={0.92} />
+        </mesh>
+        {/* Right handle attachment (top) */}
+        <mesh position={[0.30, 0.64, 0]} castShadow>
+          <cylinderGeometry args={[0.04, 0.03, 0.06, 8]} />
+          <meshStandardMaterial color="#8a5a2a" roughness={0.95} />
+        </mesh>
+        {/* Right handle attachment (bottom) */}
+        <mesh position={[0.32, 0.40, 0]} castShadow>
+          <cylinderGeometry args={[0.04, 0.03, 0.06, 8]} />
+          <meshStandardMaterial color="#8a5a2a" roughness={0.95} />
+        </mesh>
+
+        {/* DECORATIVE BANDS - painted/glazed stripes */}
+        <mesh position={[0, 0.46, 0]} castShadow>
+          <cylinderGeometry args={[0.36, 0.36, 0.04, 16]} />
+          <meshStandardMaterial color="#6a3a1a" roughness={0.7} />
+        </mesh>
+        <mesh position={[0, 0.58, 0]} castShadow>
+          <cylinderGeometry args={[0.26, 0.26, 0.03, 16]} />
+          <meshStandardMaterial color="#6a3a1a" roughness={0.7} />
+        </mesh>
+
+        {/* GLAZE DRIP EFFECT - darker patch running down */}
+        <mesh position={[0.15, 0.45, 0.25]} receiveShadow>
+          <boxGeometry args={[0.08, 0.3, 0.02]} />
+          <meshStandardMaterial color="#7a5030" roughness={0.8} transparent opacity={0.6} />
+        </mesh>
+      </group>
     </HoverableGroup>
   );
 };
@@ -110,14 +298,124 @@ export const PushableBasket: React.FC<{ item: PushableObject }> = ({ item }) => 
     labelLines={['Woven reeds', 'Market goods', 'Handmade']}
     labelOffset={[0, 0.6, 0]}
   >
-    <mesh castShadow>
-      <cylinderGeometry args={[0.35, 0.4, 0.35, 12]} />
-      <meshStandardMaterial color="#a67c52" roughness={0.95} />
-    </mesh>
-    <mesh position={[0, 0.2, 0]} castShadow>
-      <torusGeometry args={[0.32, 0.03, 8, 18]} />
-      <meshStandardMaterial color="#8b6a3e" roughness={0.95} />
-    </mesh>
+    <group rotation={[0, item.rotation ?? 0, 0]}>
+      {/* WOVEN BASKET BODY - layered construction for texture */}
+
+      {/* Base - wider bottom */}
+      <mesh position={[0, 0.03, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.38, 0.42, 0.06, 16]} />
+        <meshStandardMaterial color="#9a7a52" roughness={0.98} />
+      </mesh>
+
+      {/* Main body - tapered sides with woven texture rings */}
+      {[0, 1, 2, 3, 4, 5].map((i) => {
+        const y = 0.09 + i * 0.05;
+        const topR = 0.35 - i * 0.015;
+        const botR = 0.38 - i * 0.015;
+        const color = i % 2 === 0 ? '#a67c52' : '#b68c62';
+
+        return (
+          <mesh key={`weave-${i}`} position={[0, y, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[topR, botR, 0.05, 18]} />
+            <meshStandardMaterial color={color} roughness={0.96} />
+          </mesh>
+        );
+      })}
+
+      {/* Rim reinforcement - darker woven band */}
+      <mesh position={[0, 0.36, 0]} castShadow>
+        <cylinderGeometry args={[0.36, 0.34, 0.04, 18]} />
+        <meshStandardMaterial color="#7a5a3a" roughness={0.98} />
+      </mesh>
+
+      {/* Top edge - rolled lip */}
+      <mesh position={[0, 0.39, 0]} castShadow>
+        <torusGeometry args={[0.35, 0.025, 10, 20]} />
+        <meshStandardMaterial color="#8a6a4a" roughness={0.97} />
+      </mesh>
+
+      {/* WOVEN TEXTURE DETAIL - vertical ribs/strands */}
+      {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((i) => {
+        const angle = (i / 12) * Math.PI * 2;
+        const x = Math.cos(angle) * 0.38;
+        const z = Math.sin(angle) * 0.38;
+
+        return (
+          <mesh key={`rib-${i}`} position={[x, 0.2, z]} rotation={[0, -angle, 0]} castShadow>
+            <boxGeometry args={[0.02, 0.32, 0.015]} />
+            <meshStandardMaterial color="#9a7552" roughness={0.99} />
+          </mesh>
+        );
+      })}
+
+      {/* BASKET HANDLES - woven reed handles */}
+      {/* Left handle */}
+      <group position={[-0.32, 0.28, 0]}>
+        {/* Handle arch */}
+        <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
+          <torusGeometry args={[0.14, 0.02, 8, 14, Math.PI]} />
+          <meshStandardMaterial color="#8a6a4a" roughness={0.96} />
+        </mesh>
+        {/* Handle attachment - woven binding */}
+        <mesh position={[0, -0.14, 0]} castShadow>
+          <cylinderGeometry args={[0.03, 0.035, 0.06, 8]} />
+          <meshStandardMaterial color="#7a5a3a" roughness={0.98} />
+        </mesh>
+        <mesh position={[0, 0.14, 0]} castShadow>
+          <cylinderGeometry args={[0.03, 0.035, 0.06, 8]} />
+          <meshStandardMaterial color="#7a5a3a" roughness={0.98} />
+        </mesh>
+        {/* Wrapped cord detail on handle */}
+        {[0, 1, 2, 3].map((j) => {
+          const offset = -0.12 + j * 0.08;
+          return (
+            <mesh key={`left-cord-${j}`} position={[0, offset, 0]} rotation={[0, 0, Math.PI / 2]}>
+              <torusGeometry args={[Math.abs(offset) + 0.02, 0.008, 6, 10]} />
+              <meshStandardMaterial color="#6a4a2a" roughness={0.99} />
+            </mesh>
+          );
+        })}
+      </group>
+
+      {/* Right handle */}
+      <group position={[0.32, 0.28, 0]}>
+        {/* Handle arch */}
+        <mesh rotation={[0, 0, -Math.PI / 2]} castShadow>
+          <torusGeometry args={[0.14, 0.02, 8, 14, Math.PI]} />
+          <meshStandardMaterial color="#8a6a4a" roughness={0.96} />
+        </mesh>
+        {/* Handle attachment - woven binding */}
+        <mesh position={[0, -0.14, 0]} castShadow>
+          <cylinderGeometry args={[0.03, 0.035, 0.06, 8]} />
+          <meshStandardMaterial color="#7a5a3a" roughness={0.98} />
+        </mesh>
+        <mesh position={[0, 0.14, 0]} castShadow>
+          <cylinderGeometry args={[0.03, 0.035, 0.06, 8]} />
+          <meshStandardMaterial color="#7a5a3a" roughness={0.98} />
+        </mesh>
+        {/* Wrapped cord detail on handle */}
+        {[0, 1, 2, 3].map((j) => {
+          const offset = -0.12 + j * 0.08;
+          return (
+            <mesh key={`right-cord-${j}`} position={[0, offset, 0]} rotation={[0, 0, -Math.PI / 2]}>
+              <torusGeometry args={[Math.abs(offset) + 0.02, 0.008, 6, 10]} />
+              <meshStandardMaterial color="#6a4a2a" roughness={0.99} />
+            </mesh>
+          );
+        })}
+      </group>
+
+      {/* BASE PATTERN - woven star/cross pattern on bottom */}
+      {[0, 1, 2, 3].map((i) => {
+        const angle = (i / 4) * Math.PI * 2;
+        return (
+          <mesh key={`base-weave-${i}`} position={[0, 0.01, 0]} rotation={[0, angle, Math.PI / 2]} receiveShadow>
+            <boxGeometry args={[0.02, 0.6, 0.015]} />
+            <meshStandardMaterial color="#8a6a4a" roughness={0.99} />
+          </mesh>
+        );
+      })}
+    </group>
   </HoverableGroup>
 );
 

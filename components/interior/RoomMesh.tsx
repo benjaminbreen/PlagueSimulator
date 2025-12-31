@@ -16,11 +16,13 @@ interface InteriorRoomMeshProps {
   buildingType: BuildingType;
   wallHeight?: number;
   interiorDoorSide: Side | null;
+  interiorDoorSides?: Side[];
   exteriorDoorSide: Side | null;
   cutawaySide: Side | null;
   doorVariant: number;
   alcoveSide: Side | null;
   doorLabel: string | null;
+  labelDoorSide: Side | null;
   roomSeed: number;
   sharedWalls?: Side[];  // Walls shared with adjacent rooms (skip rendering to avoid z-fighting)
 }
@@ -43,11 +45,13 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
   buildingType,
   wallHeight,
   interiorDoorSide,
+  interiorDoorSides = [],
   exteriorDoorSide,
   cutawaySide,
   doorVariant,
   alcoveSide,
   doorLabel,
+  labelDoorSide,
   roomSeed,
   sharedWalls = [],
 }) => {
@@ -85,6 +89,13 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
     color: darkenHex(wallColor, 0.72),
     roughness: 0.92,
   }), [wallColor]);
+  const doorSides = useMemo(() => {
+    const sides = new Set<Side>();
+    if (interiorDoorSide) sides.add(interiorDoorSide);
+    interiorDoorSides.forEach((side) => sides.add(side));
+    if (exteriorDoorSide) sides.add(exteriorDoorSide);
+    return sides;
+  }, [interiorDoorSide, interiorDoorSides, exteriorDoorSide]);
   const tileMat = useMemo(() => new THREE.MeshStandardMaterial({
     color: darkenHex('#e6ddcc', 0.98),
     roughness: 0.8,
@@ -264,7 +275,7 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
         : side === 'east'
           ? [w / 2, height / 2, 0]
           : [-w / 2, height / 2, 0];
-    const hasDoor = side === interiorDoorSide || side === exteriorDoorSide;
+    const hasDoor = side === exteriorDoorSide || side === interiorDoorSide || interiorDoorSides.includes(side);
     const isCivicDoor = hasDoor && (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL);
 
     return (
@@ -289,7 +300,7 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
             {renderCivicArchDecoration(side, -thickness / 2 - 0.08)}
           </>
         )}
-        {hasDoor && doorLabel && (
+        {labelDoorSide === side && doorLabel && (
           <mesh
             position={[0, 1.1, thickness / 2 + 0.02]}
             rotation={[0, 0, 0]}
@@ -299,7 +310,7 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
             <meshStandardMaterial transparent opacity={0} />
           </mesh>
         )}
-        {hasDoor && hoverDoor === side && doorLabel && (
+        {labelDoorSide === side && hoverDoor === side && doorLabel && (
           <DoorLabel label={doorLabel} position={doorLabelPos(side)} />
         )}
       </group>
@@ -436,25 +447,33 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
       {renderWall('west')}
       {showBaseboards && (
         <>
-          <mesh position={[0, 0.12, d / 2 - 0.02]}>
-            <boxGeometry args={[w, 0.18, 0.06]} />
-            <primitive object={baseboardMat} attach="material" />
-          </mesh>
-          <mesh position={[0, 0.12, -d / 2 + 0.02]}>
-            <boxGeometry args={[w, 0.18, 0.06]} />
-            <primitive object={baseboardMat} attach="material" />
-          </mesh>
-          <mesh position={[w / 2 - 0.02, 0.12, 0]}>
-            <boxGeometry args={[0.06, 0.18, d]} />
-            <primitive object={baseboardMat} attach="material" />
-          </mesh>
-          <mesh position={[-w / 2 + 0.02, 0.12, 0]}>
-            <boxGeometry args={[0.06, 0.18, d]} />
-            <primitive object={baseboardMat} attach="material" />
-          </mesh>
+          {!doorSides.has('north') && (
+            <mesh position={[0, 0.12, d / 2 - 0.02]}>
+              <boxGeometry args={[w, 0.18, 0.06]} />
+              <primitive object={baseboardMat} attach="material" />
+            </mesh>
+          )}
+          {!doorSides.has('south') && (
+            <mesh position={[0, 0.12, -d / 2 + 0.02]}>
+              <boxGeometry args={[w, 0.18, 0.06]} />
+              <primitive object={baseboardMat} attach="material" />
+            </mesh>
+          )}
+          {!doorSides.has('east') && (
+            <mesh position={[w / 2 - 0.02, 0.12, 0]}>
+              <boxGeometry args={[0.06, 0.18, d]} />
+              <primitive object={baseboardMat} attach="material" />
+            </mesh>
+          )}
+          {!doorSides.has('west') && (
+            <mesh position={[-w / 2 + 0.02, 0.12, 0]}>
+              <boxGeometry args={[0.06, 0.18, d]} />
+              <primitive object={baseboardMat} attach="material" />
+            </mesh>
+          )}
         </>
       )}
-      {showTiles && tileWall !== cutawaySide && (
+      {showTiles && tileWall !== cutawaySide && !sharedWalls.includes(tileWall) && !doorSides.has(tileWall) && (
         <mesh
           position={
             tileWall === 'north'

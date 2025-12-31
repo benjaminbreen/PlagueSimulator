@@ -14,7 +14,9 @@ import {
   User,
   Map as MapIcon,
   Activity,
-  X
+  X,
+  FileText,
+  MessageSquare
 } from 'lucide-react';
 import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
 import { AdhanSynth, MelodyName } from './audio/synthesis/AdhanSynth';
@@ -58,6 +60,8 @@ interface UIProps {
   climbablePrompt: string | null;
   isClimbing: boolean;
   onClimbInput?: (direction: 'up' | 'down' | 'cancel' | null) => void;
+  onTriggerPickup?: () => void;  // Trigger pickup action (mobile/touch)
+  onTriggerClimb?: () => void;   // Trigger climb initiation (mobile/touch)
   pickupToast: string | null;
   currentWeather: string;
   pushCharge: number;
@@ -360,6 +364,32 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       ctx.globalAlpha = 1;
     });
 
+    if (data.landmarks && data.landmarks.length > 0) {
+      data.landmarks.forEach((lm) => {
+        const p = project(lm.x, lm.z);
+        const distSq = p.x * p.x + p.y * p.y;
+        if (distSq > radius * radius) return;
+        const dist = Math.sqrt(distSq) / radius;
+        const alpha = Math.pow(1 - dist, 2.1);
+        if (alpha < 0.2) return;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(210, 190, 140, 0.9)';
+        ctx.beginPath();
+        ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.font = '8px Lato, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(230, 210, 160, 0.9)';
+        ctx.fillText(lm.label.toUpperCase(), 0, 4);
+        ctx.restore();
+      });
+    }
+
     ctx.shadowBlur = 12;
     ctx.shadowColor = '#f7c66a';
     ctx.fillStyle = '#f7c66a';
@@ -519,7 +549,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
@@ -550,6 +580,9 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [minimapVisible, setMinimapVisible] = useState(true);
   const [minimapMode, setMinimapMode] = useState<'local' | 'overworld'>('local');
   const [showMobilePerspectiveMenu, setShowMobilePerspectiveMenu] = useState(false);
+  // Mobile-specific panel visibility (default to hidden on mobile)
+  const [mobileReportsPanelVisible, setMobileReportsPanelVisible] = useState(false);
+  const [mobileNarratorVisible, setMobileNarratorVisible] = useState(false);
   const {
     narratorMessage,
     narratorKey,
@@ -594,7 +627,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     setCurrentAdhanPreview(melody);
     synth.play({
       melody,
-      gain: 0.25,  // Moderate volume
+      gain: 0.175,  // Quieter volume
       reverbWet: 0.6,
       onComplete: () => {
         setCurrentAdhanPreview(null);
@@ -1005,9 +1038,54 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
       {/* CENTER LOCATION PILLS */}
       <div className="absolute top-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-xs md:max-w-md pointer-events-none">
-        <button 
+        {/* Mobile toggle buttons row */}
+        <div className="md:hidden flex items-center gap-2 pointer-events-auto">
+          {/* Left button - Reports Panel */}
+          <button
+            onClick={() => setMobileReportsPanelVisible(!mobileReportsPanelVisible)}
+            className={`p-2.5 rounded-full border shadow-lg transition-all active:scale-95 ${
+              mobileReportsPanelVisible
+                ? 'bg-amber-600 border-amber-500 text-white'
+                : 'bg-black/70 border-amber-600/40 text-amber-500 hover:bg-black/90'
+            }`}
+            title="Toggle Reports"
+          >
+            <FileText size={18} />
+          </button>
+
+          {/* Center - Map button */}
+          <button
+            onClick={() => setShowMap(true)}
+            className="bg-black/60 hover:bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-amber-600/40 text-amber-500 shadow-xl flex items-center gap-2 transition-all group active:scale-95"
+          >
+            <div className="bg-amber-500/10 p-1 rounded-full group-hover:bg-amber-500/20 transition-colors">
+              <MapIcon size={14} />
+            </div>
+            <div className="flex flex-col items-start leading-none">
+              <span className="historical-font text-[10px] whitespace-nowrap tracking-wider font-bold">
+                {getLocationLabel(params.mapX, params.mapY)}
+              </span>
+            </div>
+          </button>
+
+          {/* Right button - Narrator Panel */}
+          <button
+            onClick={() => setMobileNarratorVisible(!mobileNarratorVisible)}
+            className={`p-2.5 rounded-full border shadow-lg transition-all active:scale-95 ${
+              mobileNarratorVisible
+                ? 'bg-amber-600 border-amber-500 text-white'
+                : 'bg-black/70 border-amber-600/40 text-amber-500 hover:bg-black/90'
+            }`}
+            title="Toggle Narrator"
+          >
+            <MessageSquare size={18} />
+          </button>
+        </div>
+
+        {/* Desktop - Original map button */}
+        <button
           onClick={() => setShowMap(true)}
-          className="bg-black/60 hover:bg-black/80 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/40 text-amber-500 shadow-xl flex items-center gap-3 pointer-events-auto transition-all group active:scale-95"
+          className="hidden md:flex bg-black/60 hover:bg-black/80 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/40 text-amber-500 shadow-xl items-center gap-3 pointer-events-auto transition-all group active:scale-95"
         >
           <div className="bg-amber-500/10 p-1 rounded-full group-hover:bg-amber-500/20 transition-colors">
             <MapIcon size={14} />
@@ -1096,38 +1174,62 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
       {/* FLOATING WINDOWS */}
       <div className={`flex flex-col flex-1 justify-between p-4 md:p-6 transition-all duration-500 ${params.uiMinimized ? 'opacity-0 scale-95 pointer-events-none translate-y-4' : 'opacity-100 scale-100'}`}>
-        <ReportsPanel
-          reportTab={reportTab}
-          setReportTab={setReportTab}
-          tabPulse={tabPulse}
-          setTabPulse={setTabPulse}
-          reportsPanelCollapsed={reportsPanelCollapsed}
-          setReportsPanelCollapsed={setReportsPanelCollapsed}
-          stats={stats}
-          infectedHouseholds={infectedHouseholds}
-          onNavigateToHousehold={onNavigateToHousehold}
-          moraleStats={moraleStats}
-          alchemistTableCollapsed={alchemistTableCollapsed}
-          setAlchemistTableCollapsed={setAlchemistTableCollapsed}
-          params={params}
-          onChangeParam={handleChange}
-          showDemographicsOverlay={showDemographicsOverlay}
-          setShowDemographicsOverlay={setShowDemographicsOverlay}
-          playerStats={playerStats}
-          onShowPlayerModal={() => setShowPlayerModal(true)}
-          inventoryEntries={inventoryEntries}
-          onDropItem={onDropItem}
-          inventorySortBy={inventorySortBy}
-          setInventorySortBy={setInventorySortBy}
-          getRarityMeta={getRarityMeta}
-          formatHeight={formatHeight}
-          formatWeight={formatWeight}
-          currentBiomeLabel={getLocationLabel(params.mapX, params.mapY)}
-          nearbyNPCs={nearbyNPCs}
-          onOpenGuideModal={onOpenGuideModal}
-          onSelectGuideEntry={onSelectGuideEntry}
-          playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
-        />
+        {/* Reports Panel - Hidden by default on mobile, slides in from left */}
+        <div className={`
+          fixed md:relative top-0 left-0 h-full md:h-auto z-50 md:z-auto
+          transition-transform duration-300 ease-out
+          md:transform-none md:opacity-100
+          ${mobileReportsPanelVisible ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+        `}>
+          {/* Mobile backdrop */}
+          {mobileReportsPanelVisible && (
+            <div
+              className="md:hidden fixed inset-0 bg-black/50 -z-10"
+              onClick={() => setMobileReportsPanelVisible(false)}
+            />
+          )}
+          {/* Mobile close button */}
+          <button
+            onClick={() => setMobileReportsPanelVisible(false)}
+            className="md:hidden absolute top-4 right-4 z-10 p-2 rounded-full bg-black/80 border border-amber-600/40 text-amber-500"
+          >
+            <X size={20} />
+          </button>
+          <div className="h-full md:h-auto overflow-y-auto md:overflow-visible bg-black/95 md:bg-transparent pt-16 md:pt-0">
+            <ReportsPanel
+              reportTab={reportTab}
+              setReportTab={setReportTab}
+              tabPulse={tabPulse}
+              setTabPulse={setTabPulse}
+              reportsPanelCollapsed={reportsPanelCollapsed}
+              setReportsPanelCollapsed={setReportsPanelCollapsed}
+              stats={stats}
+              infectedHouseholds={infectedHouseholds}
+              onNavigateToHousehold={onNavigateToHousehold}
+              moraleStats={moraleStats}
+              alchemistTableCollapsed={alchemistTableCollapsed}
+              setAlchemistTableCollapsed={setAlchemistTableCollapsed}
+              params={params}
+              onChangeParam={handleChange}
+              showDemographicsOverlay={showDemographicsOverlay}
+              setShowDemographicsOverlay={setShowDemographicsOverlay}
+              playerStats={playerStats}
+              onShowPlayerModal={() => setShowPlayerModal(true)}
+              inventoryEntries={inventoryEntries}
+              onDropItem={onDropItem}
+              inventorySortBy={inventorySortBy}
+              setInventorySortBy={setInventorySortBy}
+              getRarityMeta={getRarityMeta}
+              formatHeight={formatHeight}
+              formatWeight={formatWeight}
+              currentBiomeLabel={getLocationLabel(params.mapX, params.mapY)}
+              nearbyNPCs={nearbyNPCs}
+              onOpenGuideModal={onOpenGuideModal}
+              onSelectGuideEntry={onSelectGuideEntry}
+              playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
+            />
+          </div>
+        </div>
 
         {selectedNpc && (
           <div className="self-end md:self-start mt-4 w-full md:w-[420px]">
@@ -1233,15 +1335,29 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </div>
         )}
 
+        {/* Pickup Prompt - clickable for mobile */}
         {pickupPrompt && (
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-amber-700/50 text-amber-200 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_20px_rgba(245,158,11,0.25)]">
-            {pickupPrompt}
-          </div>
+          <button
+            onClick={onTriggerPickup}
+            className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2.5 rounded-full border border-amber-700/50 text-amber-200 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(245,158,11,0.25)] pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none"
+          >
+            <span className="flex items-center gap-2">
+              <span className="hidden md:inline opacity-60">[SHIFT]</span>
+              {pickupPrompt}
+            </span>
+          </button>
         )}
+        {/* Climb Prompt - clickable for mobile */}
         {climbablePrompt && !pickupPrompt && !isClimbing && (
-          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-sky-700/50 text-sky-200 text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_20px_rgba(56,189,248,0.25)]">
-            {climbablePrompt}
-          </div>
+          <button
+            onClick={onTriggerClimb}
+            className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2.5 rounded-full border border-sky-700/50 text-sky-200 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(56,189,248,0.25)] pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none"
+          >
+            <span className="flex items-center gap-2">
+              <span className="hidden md:inline opacity-60">[C]</span>
+              {climbablePrompt}
+            </span>
+          </button>
         )}
 
         {/* Climbing Controls - shows when actively climbing */}
@@ -1317,6 +1433,71 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         <div className="absolute bottom-6 left-6">
           <Compass minimapData={minimapData} onClick={() => showPerspectiveMenu(true)} />
         </div>
+
+        {/* Mobile Movement Hint - shows only on mobile before first movement */}
+        {!hasPlayerMoved && sceneMode === 'outdoor' && (
+          <div className="md:hidden absolute bottom-20 left-1/2 -translate-x-1/2 pointer-events-none animate-pulse">
+            <div className="bg-black/50 backdrop-blur-sm px-4 py-2 rounded-full border border-amber-700/30 text-amber-200/70 text-xs tracking-wider flex flex-col items-center gap-0.5">
+              <span>Tap anywhere to move</span>
+              {params.cameraMode === CameraMode.FIRST_PERSON && (
+                <span className="text-[10px] text-amber-200/50">Swipe to look around</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Camera Controls - compact buttons for camera rotation (first-person mode only) */}
+        {sceneMode === 'outdoor' && params.cameraMode === CameraMode.FIRST_PERSON && (
+          <div className="md:hidden absolute bottom-6 right-6 pointer-events-auto">
+            <div className="flex flex-col items-center gap-1 opacity-60">
+              <button
+                className="w-10 h-10 bg-black/40 backdrop-blur-sm rounded-lg border border-white/20 text-white/70 flex items-center justify-center active:bg-white/20 active:scale-95 transition-all touch-manipulation"
+                onPointerDown={() => {
+                  window.dispatchEvent(new CustomEvent('mobileCameraRotate', { detail: { direction: 'up' } }));
+                }}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+              <div className="flex gap-1">
+                <button
+                  className="w-10 h-10 bg-black/40 backdrop-blur-sm rounded-lg border border-white/20 text-white/70 flex items-center justify-center active:bg-white/20 active:scale-95 transition-all touch-manipulation"
+                  onPointerDown={() => {
+                    // Rotate camera left - we'll use a custom event
+                    window.dispatchEvent(new CustomEvent('mobileCameraRotate', { detail: { direction: 'left' } }));
+                  }}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                </button>
+                <button
+                  className="w-10 h-10 bg-black/40 backdrop-blur-sm rounded-lg border border-white/20 text-white/70 flex items-center justify-center active:bg-white/20 active:scale-95 transition-all touch-manipulation"
+                  onPointerDown={() => {
+                    // Rotate camera right
+                    window.dispatchEvent(new CustomEvent('mobileCameraRotate', { detail: { direction: 'right' } }));
+                  }}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              </div>
+              <button
+                className="w-10 h-10 bg-black/40 backdrop-blur-sm rounded-lg border border-white/20 text-white/70 flex items-center justify-center active:bg-white/20 active:scale-95 transition-all touch-manipulation"
+                onPointerDown={() => {
+                  // Simulate downward camera look
+                  window.dispatchEvent(new CustomEvent('mobileCameraRotate', { detail: { direction: 'down' } }));
+                }}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Bottom Controls */}
         <div className="flex flex-col md:flex-row gap-4 items-end pointer-events-auto">
@@ -1598,6 +1779,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             narratorHistory={narratorHistory}
             narratorOpen={narratorOpen}
             onToggleNarrator={setNarratorOpen}
+            mobileNarratorVisible={mobileNarratorVisible}
             inventoryItems={inventoryEntries}
             onOpenItemModal={(item) => setSelectedInventoryItem(item)}
             onDropItemAtScreen={onDropItemAtScreen}

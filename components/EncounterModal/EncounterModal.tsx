@@ -530,7 +530,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
           <div className="w-full md:w-72 lg:w-80 border-b md:border-b-0 md:border-r border-amber-900/30 bg-black/20 flex flex-col flex-shrink-0">
 
             {/* Portrait Container */}
-            <div className="relative h-48 sm:h-56 md:h-64 bg-gradient-to-b from-amber-950/30 to-black/50 overflow-hidden">
+            <div className="relative h-40 sm:h-48 md:h-64 bg-gradient-to-b from-amber-950/30 to-black/50 overflow-hidden">
               {/* Ambient glow behind portrait */}
               <div className={`absolute inset-0 bg-gradient-radial from-amber-900/20 via-transparent to-transparent transition-opacity duration-1000 ${
                 isLoading ? 'opacity-100' : 'opacity-40'
@@ -573,7 +573,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
             </div>
 
             {/* NPC Info Panel */}
-            <div className="flex-1 p-3 space-y-3 overflow-y-auto min-h-0">
+            <div className="flex-1 p-2 sm:p-3 space-y-2 sm:space-y-3 overflow-y-auto min-h-0">
               {/* Name with fade-in */}
               <div className={`text-center pt-2 pb-3 border-b border-amber-900/30 transition-all duration-500 delay-100 ${
                 isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
@@ -824,7 +824,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                 )}
 
                 {/* Input Area */}
-                <div className="p-3 border-t border-amber-900/30 bg-black/30 flex-shrink-0">
+                <div className="p-2 sm:p-3 border-t border-amber-900/30 bg-black/30 flex-shrink-0">
                   <div className="flex gap-2">
                     <input
                       ref={inputRef}

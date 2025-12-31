@@ -326,6 +326,8 @@ export enum InteriorPropType {
   MORTAR = 'MORTAR',
   HERB_RACK = 'HERB_RACK',
   MEDICINE_SHELF = 'MEDICINE_SHELF',  // Wide shelf with drug jars for apothecaries
+  TREATMENT_SHELF = 'TREATMENT_SHELF', // Clinic shelf with linens and jars
+  LECTERN = 'LECTERN',  // Reading stand for madrasas
   ARCH_COLUMN = 'ARCH_COLUMN',  // Decorative arch columns for religious buildings
   // Bed types (historically accurate for medieval Damascus)
   SLEEPING_MAT = 'SLEEPING_MAT',    // Simple reed/straw mat for poorest
@@ -339,6 +341,22 @@ export enum InteriorPropType {
   WATER_JUG = 'WATER_JUG',          // Simple water container
   STORAGE_CHEST = 'STORAGE_CHEST',  // Large storage chest
   BARREL = 'BARREL',                // Wooden storage barrel
+  CHILD_TOY = 'CHILD_TOY',          // Simple wooden toy
+  CRADLE = 'CRADLE',                // Wooden cradle for infants
+  // Food & Kitchen props
+  BREAD_LOAF = 'BREAD_LOAF',           // Stack of flatbreads
+  FOOD_BOWL = 'FOOD_BOWL',             // Ceramic bowl with food
+  SPICE_JAR = 'SPICE_JAR',             // Small ceramic jar for spices
+  DATE_BASKET = 'DATE_BASKET',         // Basket of dates (common food)
+  COOKING_POT = 'COOKING_POT',         // Copper pot on stand
+  GRAIN_SACK = 'GRAIN_SACK',           // Burlap sack of grain/flour
+  // Merchant-specific display props
+  SPICE_DISPLAY = 'SPICE_DISPLAY',       // Elevated jars of spices
+  PERFUME_BOTTLES = 'PERFUME_BOTTLES',   // Glass bottles on stand
+  METAL_SAMPLES = 'METAL_SAMPLES',       // Metalwork display pieces
+  CERAMIC_DISPLAY = 'CERAMIC_DISPLAY',   // Stacked pottery/ceramics
+  LEATHER_GOODS = 'LEATHER_GOODS',       // Leather bags/items hung
+  JEWELRY_CASE = 'JEWELRY_CASE',         // Small locked display case
 }
 
 // Profession lifestyle categories for interior generation
@@ -415,12 +433,26 @@ export interface InteriorProp {
 
 export interface InteriorNPC {
   id: string;
-  role: 'owner' | 'family' | 'guest' | 'servant' | 'apprentice' | 'worshipper';
+  role: 'owner' | 'family' | 'guest' | 'servant' | 'apprentice' | 'worshipper' | 'student' | 'patient';
   position: [number, number, number];
   rotation: [number, number, number];
   stats: NPCStats;
   state: AgentState;
   plagueMeta?: NPCPlagueMeta;
+}
+
+export type InteriorFloorType = 'public' | 'private';
+
+export interface InteriorFloor {
+  level: number;
+  floorType: InteriorFloorType;
+  seed: number;
+  rooms: InteriorRoom[];
+  props: InteriorProp[];
+  npcs: InteriorNPC[];
+  wallHeight?: number;
+  exteriorDoorSide?: number;
+  narratorState: InteriorNarratorState;
 }
 
 export interface InteriorNarratorState {
@@ -446,6 +478,7 @@ export interface InteriorSpec {
   props: InteriorProp[];
   npcs: InteriorNPC[];
   narratorState: InteriorNarratorState;
+  floors?: InteriorFloor[];
 }
 
 export interface InteriorOverrides {
@@ -573,7 +606,8 @@ export enum MerchantType {
   TEXTILE = 'TEXTILE',        // Fabrics, robes, clothing
   APOTHECARY = 'APOTHECARY',  // Medicines, spices, herbs
   METALSMITH = 'METALSMITH',  // Weapons, tools, brass goods
-  TRADER = 'TRADER'           // General goods, food, misc
+  TRADER = 'TRADER',          // General goods, food, misc
+  BEDOUIN = 'BEDOUIN'         // Desert nomad trader, rare exotic goods
 }
 
 export interface ItemEffect {
@@ -652,6 +686,7 @@ export interface MiniMapData {
   buildings: Array<{ x: number; z: number; type: BuildingType; size: number; doorSide: number }>;
   npcs: Array<{ x: number; z: number; state: AgentState }>;
   specialNPCs: Array<{ x: number; z: number; type: SpecialNPCType }>;
+  landmarks?: Array<{ x: number; z: number; label: string }>;
   district: DistrictType;
   radius: number;
 }
@@ -923,6 +958,13 @@ const isNearPoint = (x: number, targetX: number, y: number, targetY: number, rad
   return Math.sqrt(dx * dx + dy * dy) <= radius;
 };
 
+const hashToUnit = (x: number, y: number, seed = 0): number => {
+  let h = x * 374761393 + y * 668265263 + seed * 1442695041;
+  h = (h ^ (h >> 13)) * 1274126177;
+  h = (h ^ (h >> 16)) >>> 0;
+  return h / 0xffffffff;
+};
+
 /**
  * Get district type based on map coordinates
  * 7x7 grid with exact tile mapping (radius 0.5 = one tile per district)
@@ -931,38 +973,70 @@ const isNearPoint = (x: number, targetX: number, y: number, targetY: number, rad
  * Geography: West = mountains/scrubland, East = desert, North = Qassioun slopes, South = plains
  */
 export const getDistrictType = (mapX: number, mapY: number): DistrictType => {
-  // OUTER PERIMETER (7x7 grid edges) - Desert and Scrubland
-  // West edge (X=-3): Scrubland (mountain foothills)
-  if (isNearPoint(mapX, -3, mapY, 3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -3, mapY, 2, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -3, mapY, 1, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -3, mapY, 0, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -3, mapY, -1, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -3, mapY, -2, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -3, mapY, -3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
+  const tileX = Math.round(mapX);
+  const tileY = Math.round(mapY);
+  const absX = Math.abs(tileX);
+  const absY = Math.abs(tileY);
 
-  // East edge (X=3): Desert (Syrian desert approach)
-  if (isNearPoint(mapX, 3, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 3, mapY, 2, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 3, mapY, 1, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 3, mapY, 0, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 3, mapY, -1, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 3, mapY, -2, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 3, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
+  // Beyond outer perimeter: geographic bias with roads + mixed outskirts
+  if (absX > 3 || absY > 3) {
+    if (tileX === 1 && tileY <= -3) return 'SOUTHERN_ROAD';
 
-  // North edge (Y=3): Mix of scrubland, desert, farmland
-  if (isNearPoint(mapX, -2, mapY, 3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -1, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 0, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 1, mapY, 3, 0.5)) return 'OUTSKIRTS_FARMLAND';
-  if (isNearPoint(mapX, 2, mapY, 3, 0.5)) return 'OUTSKIRTS_DESERT';
+    let desert = 0.22;
+    let scrub = 0.45;
+    let farm = 0.2;
+    let hovels = 0.13;
 
-  // South edge (Y=-3): Mix of scrubland and desert
-  if (isNearPoint(mapX, -2, mapY, -3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, -1, mapY, -3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';
-  if (isNearPoint(mapX, 0, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 1, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
-  if (isNearPoint(mapX, 2, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';
+    if (tileX >= 4) {
+      desert += 0.2;
+      scrub -= 0.1;
+      farm -= 0.05;
+    }
+    if (tileX <= -4) {
+      scrub += 0.15;
+      desert -= 0.08;
+    }
+    if (tileY >= 4 || tileY <= -4) {
+      farm += 0.08;
+      desert -= 0.04;
+      scrub -= 0.04;
+    }
+    if (Math.abs(tileX - 1) <= 1 && tileY <= -3) {
+      hovels += 0.08;
+    }
+    if (tileY >= 4 || tileY <= -4) {
+      hovels += 0.04;
+    }
+
+    desert = Math.max(0.05, desert);
+    scrub = Math.max(0.1, scrub);
+    farm = Math.max(0.08, farm);
+    hovels = Math.max(0.05, hovels);
+    const total = desert + scrub + farm + hovels;
+    const roll = hashToUnit(tileX, tileY, 19) * total;
+    if (roll < hovels) return 'HOVELS';
+    if (roll < hovels + farm) return 'OUTSKIRTS_FARMLAND';
+    if (roll < hovels + farm + scrub) return 'OUTSKIRTS_SCRUBLAND';
+    return 'OUTSKIRTS_DESERT';
+  }
+
+  // OUTER PERIMETER (7x7 grid edges) - Ghouta belt + desert/foothills
+  if (absX === 3 || absY === 3) {
+    const edgeRoll = hashToUnit(tileX, tileY, 7);
+
+    if (tileX === -3) return 'OUTSKIRTS_SCRUBLAND';
+    if (tileX === 3) return edgeRoll < 0.7 ? 'OUTSKIRTS_DESERT' : 'OUTSKIRTS_SCRUBLAND';
+    if (tileY === 3) {
+      if (tileX <= -2) return 'OUTSKIRTS_SCRUBLAND';
+      if (edgeRoll < 0.12) return 'HOVELS';
+      return 'OUTSKIRTS_FARMLAND';
+    }
+    if (tileY === -3) {
+      if (tileX === 1) return 'SOUTHERN_ROAD';
+      if (edgeRoll < 0.15) return 'HOVELS';
+      return edgeRoll < 0.75 ? 'OUTSKIRTS_FARMLAND' : 'OUTSKIRTS_SCRUBLAND';
+    }
+  }
 
   // INNER 5x5 GRID - Named districts and connectors
   // Y=2 row (northern districts)

@@ -449,6 +449,85 @@ export const EVENT_CATALOG: EventDefinition[] = [
     ]
   },
   {
+    id: 'event_birdcage_theft_scolded',
+    title: 'A Scolding Voice',
+    body: 'A window creaks open. “Hey!” a household voice snaps, eyes narrowed at the open cage. A few heads turn.',
+    tags: ['action:theft', 'birdcage'],
+    options: [
+      {
+        id: 'apologize',
+        label: 'Apologize and back away',
+        outcomeText: 'You step back with raised hands. The voice huffs and withdraws.',
+        effects: []
+      },
+      {
+        id: 'deny',
+        label: 'Claim you saw the door already ajar',
+        outcomeText: 'The voice lingers, unconvinced, then falls silent.',
+        effects: [{ type: 'playerStat', stat: 'charisma', delta: -1 }]
+      },
+      {
+        id: 'leave',
+        label: 'Leave before it grows worse',
+        outcomeText: 'You slip away into the lane.',
+        effects: []
+      }
+    ]
+  },
+  {
+    id: 'event_birdcage_theft_neighbor',
+    title: 'Courtyard Gossip',
+    body: 'An older neighbor emerges, hands on hips. “People will talk,” they mutter, glancing toward the street.',
+    tags: ['action:theft', 'birdcage'],
+    options: [
+      {
+        id: 'coin',
+        label: 'Offer a small coin for silence',
+        outcomeText: 'The coin disappears. The neighbor says nothing more.',
+        effects: [{ type: 'playerStat', stat: 'currency', delta: -1 }]
+      },
+      {
+        id: 'explain',
+        label: 'Explain yourself and move on',
+        outcomeText: 'The neighbor watches you leave, unimpressed.',
+        effects: []
+      },
+      {
+        id: 'flee',
+        label: 'Hurry away',
+        outcomeText: 'You move quickly before anyone else arrives.',
+        effects: []
+      }
+    ]
+  },
+  {
+    id: 'event_birdcage_theft_patrol',
+    title: 'A Patrol’s Glance',
+    body: 'Two watchmen come around the corner. One tilts his head as a chirp sounds from your satchel.',
+    tags: ['action:theft', 'birdcage', 'conversation:authority'],
+    options: [
+      {
+        id: 'innocent',
+        label: 'Play innocent',
+        outcomeText: 'They study you a moment longer, then move on.',
+        effects: [{ type: 'playerStat', stat: 'charisma', delta: -1 }]
+      },
+      {
+        id: 'payment',
+        label: 'Offer a “fee”',
+        outcomeText: 'A palm opens. The watchmen drift away without a word.',
+        effects: [{ type: 'playerStat', stat: 'currency', delta: -2 }]
+      },
+      {
+        id: 'bolt',
+        label: 'Bolt into the alleys',
+        outcomeText: 'Boots scrape stone behind you.',
+        followupEventId: 'event_pursuit_alley',
+        effects: [{ type: 'triggerEvent', eventId: 'event_pursuit_alley' }]
+      }
+    ]
+  },
+  {
     id: 'conversation_summon_market_authority',
     title: 'Summons the Market Inspector',
     body: 'The merchant steps back and calls for the muhtasib. A nearby guard turns toward you.',

@@ -13,13 +13,23 @@ export const getDoorStyle = (
   const roll = seededRandom(seed);
 
   // Religious buildings - ornate arched or double doors
-  if (buildingType === 3) { // RELIGIOUS
+  if (buildingType === BuildingType.RELIGIOUS) {
     return roll > 0.4 ? 'arched' : 'double';
   }
 
   // Civic buildings - studded or double doors
-  if (buildingType === 2) { // CIVIC
+  if (buildingType === BuildingType.CIVIC || buildingType === BuildingType.MEDICAL) {
     return roll > 0.5 ? 'studded' : 'double';
+  }
+
+  // School buildings - arched portal doors
+  if (buildingType === BuildingType.SCHOOL) {
+    return roll > 0.4 ? 'arched' : 'double';
+  }
+
+  // Hospitality buildings - large welcoming entrances
+  if (buildingType === BuildingType.HOSPITALITY) {
+    return roll > 0.5 || sizeScale > 1.05 ? 'double' : 'studded';
   }
 
   // Wealthy district - carved or studded
@@ -33,7 +43,7 @@ export const getDoorStyle = (
   }
 
   // Large commercial buildings
-  if (buildingType === 1 && sizeScale > 1.05) { // COMMERCIAL
+  if (buildingType === BuildingType.COMMERCIAL && sizeScale > 1.05) {
     return roll > 0.6 ? 'studded' : 'paneled';
   }
 

@@ -57,7 +57,7 @@ export const GROUND_PALETTE = {
   SALHIYYA: ['#6a8a4a', '#5f7d45', '#548040'],
   OUTSKIRTS_FARMLAND: ['#6e8f4a', '#5f7f42', '#6a934f', '#57823f'],
   OUTSKIRTS_DESERT: ['#d89556', '#c8904e', '#db9e62', '#c87d42'], // Warm amber-yellow-orange desert sand
-  OUTSKIRTS_SCRUBLAND: ['#7a8a5a', '#6f7d50', '#849060', '#6a7545'], // Dry grassland
+  OUTSKIRTS_SCRUBLAND: ['#8d8465', '#7f7658', '#9a8f6b', '#8a7d5e'], // Dusty scrub soil
   ROADSIDE: ['#b8a888', '#a89878', '#c0b090', '#9a8a70'], // Mixed dirt and stone path
   MOUNTAIN_SHRINE: ['#6b7d5a', '#7a8a68', '#889775', '#5f6e4f'],
   CARAVANSERAI: ['#c8a86f', '#c19d64', '#b7935d'],

@@ -26,7 +26,6 @@ import { TimeLayer } from './audio/layers/TimeLayer';
 import { WeatherLayer } from './audio/layers/WeatherLayer';
 import { SacredLayer } from './audio/layers/SacredLayer';
 import { SocialLayer } from './audio/layers/SocialLayer';
-import { PlagueLayer } from './audio/layers/PlagueLayer';
 import { BiomeLayer } from './audio/layers/BiomeLayer';
 import { DistrictType, getDistrictType } from '../types';
 
@@ -109,7 +108,7 @@ export const AmbientAudio: React.FC<AmbientAudioProps> = ({
     engine.registerLayer(new SacredLayer(ctx));
     // SocialLayer disabled - crowd sounds not fitting
     // engine.registerLayer(new SocialLayer(ctx));
-    engine.registerLayer(new PlagueLayer(ctx));
+    // PlagueLayer disabled - remove plague ambient sounds entirely
     // BiomeLayer ENABLED - redesigned with pleasant ambient sounds for testing
     engine.registerLayer(new BiomeLayer(ctx));
 

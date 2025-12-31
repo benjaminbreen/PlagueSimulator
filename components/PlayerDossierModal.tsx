@@ -1,6 +1,7 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import { AgentState, PlayerStats, ItemAppearance } from '../types';
+import { ItemIcon } from './items/ItemIcon';
 
 interface InventoryEntry {
   id: string;
@@ -58,7 +59,7 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
         }}
       />
       <div className="absolute inset-0 bg-black/60 -z-20" />
-      <div className="w-full max-w-4xl h-[88vh] bg-slate-950/70 border border-amber-900/40 rounded-2xl shadow-2xl p-6 md:p-10 animate-in slide-in-from-left-8 fade-in overflow-hidden">
+      <div className="w-full max-w-4xl max-h-[92vh] md:max-h-[88vh] bg-slate-950/70 border border-amber-900/40 rounded-2xl shadow-2xl p-4 md:p-10 animate-in slide-in-from-left-8 fade-in overflow-hidden flex flex-col">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-amber-900/30 pb-4">
           <div>
             <h3 className="historical-font text-amber-400 text-2xl tracking-widest">Player Dossier</h3>
@@ -86,7 +87,7 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
           </div>
         </div>
 
-        <div className="mt-6 h-[calc(85vh-140px)] overflow-y-auto pr-2">
+        <div className="mt-4 md:mt-6 flex-1 overflow-y-auto pr-2 min-h-0">
           {dossierTab === 'overview' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 text-amber-50/85 text-[12px]">
               <div className="lg:col-span-2 space-y-5">
@@ -179,16 +180,19 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
           )}
 
           {dossierTab === 'health' && (
-            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-6 text-amber-50/85 text-[12px]">
-              <div className="space-y-6">
-                <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-slate-900/60 to-slate-950/80 p-5">
-                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-4">Vital Map</div>
-                  <div
-                    className="relative mx-auto h-[420px] w-[220px] rounded-[28px] border border-white/5"
-                    style={{
-                      backgroundImage: 'linear-gradient(120deg, rgba(255,255,255,0.05), transparent 40%), radial-gradient(circle at 40% 30%, rgba(245,158,11,0.12), transparent 60%)',
-                    }}
-                  >
+            <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 md:gap-6 text-amber-50/85 text-[12px]">
+              <div className="space-y-4 md:space-y-6">
+                <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-slate-900/60 to-slate-950/80 p-3 md:p-5">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-2 md:mb-4">Vital Map</div>
+                  {/* Wrapper that scales the vital map on mobile */}
+                  <div className="flex justify-center">
+                    <div className="origin-top scale-[0.65] md:scale-100 h-[273px] md:h-[420px]">
+                      <div
+                        className="relative mx-auto h-[420px] w-[220px] rounded-[28px] border border-white/5"
+                        style={{
+                          backgroundImage: 'linear-gradient(120deg, rgba(255,255,255,0.05), transparent 40%), radial-gradient(circle at 40% 30%, rgba(245,158,11,0.12), transparent 60%)',
+                        }}
+                      >
                     <div className="absolute inset-0 rounded-[28px] bg-[radial-gradient(circle_at_50%_30%,rgba(148,163,184,0.08),transparent_55%)]" />
                     <div className={`absolute left-[86px] top-[6px] h-12 w-12 rounded-full border border-amber-400/40 bg-amber-400/10 ${playerStats.plague.delirium > 0 ? 'shadow-[0_0_22px_rgba(124,58,237,0.5)] border-purple-400/70' : ''}`} />
                     <div className={`absolute left-[60px] top-[52px] h-5 w-5 rounded-full border border-amber-400/30 bg-amber-500/10 ${playerStats.baselineAilments.some(a => a.zone === 'ears') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
@@ -219,6 +223,8 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                     <div className={`absolute right-[78px] top-[335px] h-16 w-12 rounded-[18px] border border-amber-400/20 bg-amber-500/5 ${playerStats.baselineAilments.some(a => a.zone === 'calves') ? 'shadow-[0_0_16px_rgba(59,130,246,0.6)] border-sky-400/70' : ''}`} />
                     <div className={`absolute left-[78px] top-[385px] h-10 w-12 rounded-[16px] border border-amber-400/20 bg-amber-500/5 ${playerStats.plague.gangrene > 0 ? 'shadow-[0_0_22px_rgba(15,23,42,0.7)] border-slate-400/70' : ''}`} />
                     <div className={`absolute right-[78px] top-[385px] h-10 w-12 rounded-[16px] border border-amber-400/20 bg-amber-500/5 ${playerStats.plague.gangrene > 0 ? 'shadow-[0_0_22px_rgba(15,23,42,0.7)] border-slate-400/70' : ''}`} />
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -361,13 +367,6 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
               {inventoryView === 'list' ? (
                 <div className="space-y-3">
                   {inventoryEntries.map((entry) => {
-                    const name = entry.name.toLowerCase();
-                    const icon = name.includes('dagger') || name.includes('sword') ? '🗡️'
-                      : name.includes('bread') || name.includes('fig') || name.includes('olive') || name.includes('apricot') ? '🥖'
-                      : name.includes('satchel') || name.includes('bag') ? '🧺'
-                      : name.includes('water') || name.includes('waterskin') ? '🪣'
-                      : name.includes('herb') || name.includes('spice') ? '🧪'
-                      : '📦';
                     return (
                       <button
                         key={entry.id}
@@ -375,8 +374,8 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                         className="w-full text-left rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all"
                       >
                         <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-full bg-black/40 border border-amber-500/40 flex items-center justify-center text-lg">
-                            {icon}
+                          <div className="h-10 w-10 rounded-lg bg-black/40 border border-amber-500/40 flex items-center justify-center overflow-hidden">
+                            <ItemIcon name={entry.name} size={36} />
                           </div>
                           <div className="flex-1">
                             <div className="flex items-center justify-between">
@@ -409,13 +408,6 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {inventoryEntries.map((entry) => {
-                    const name = entry.name.toLowerCase();
-                    const icon = name.includes('dagger') || name.includes('sword') ? '🗡️'
-                      : name.includes('bread') || name.includes('fig') || name.includes('olive') || name.includes('apricot') ? '🥖'
-                      : name.includes('satchel') || name.includes('bag') ? '🧺'
-                      : name.includes('water') || name.includes('waterskin') ? '🪣'
-                      : name.includes('herb') || name.includes('spice') ? '🧪'
-                      : '📦';
                     return (
                       <button
                         key={entry.id}
@@ -423,8 +415,8 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                         className="rounded-2xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all"
                       >
                         <div className="flex items-center justify-between mb-3">
-                          <div className="h-10 w-10 rounded-full bg-black/40 border border-amber-500/40 flex items-center justify-center text-lg">
-                            {icon}
+                          <div className="h-12 w-12 rounded-lg bg-black/40 border border-amber-500/40 flex items-center justify-center overflow-hidden">
+                            <ItemIcon name={entry.name} size={44} />
                           </div>
                           <span className="text-[9px] uppercase tracking-widest px-2 py-1 rounded-full border border-amber-400/30 text-amber-300/70">
                             {entry.rarity}

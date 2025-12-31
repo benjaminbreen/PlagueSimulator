@@ -54,6 +54,8 @@ export const EnvironmentBase: React.FC<EnvironmentBaseProps> = ({
 }) => (
   <>
     <GroundComponent
+      mapX={mapX}
+      mapY={mapY}
       onClick={onGroundClick}
       district={district}
       seed={groundSeed}

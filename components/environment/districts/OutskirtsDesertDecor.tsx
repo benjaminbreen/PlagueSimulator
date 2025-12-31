@@ -5,10 +5,47 @@
 
 import React from 'react';
 import { getDistrictType } from '../../../types';
+import { seededRandom } from '../../../utils/procedural';
+import { BedouinTent } from '../decorations/BedouinTent';
 
-export const OutskirtsDesertDecor: React.FC<{ mapX: number; mapY: number }> = ({ mapX, mapY }) => {
+// Helper to get Bedouin tent positions for merchant generation
+export const getBedouinTentPositions = (mapX: number, mapY: number, district: string): Array<{ pos: [number, number, number]; seed: number }> => {
+  if (district !== 'OUTSKIRTS_DESERT') return [];
+
+  const seed = mapX * 73 + mapY * 139;
+  const rand = (offset: number) => seededRandom(seed + offset);
+  const tentCount = 1 + (rand(100) > 0.4 ? 1 : 0); // 1-2 tents
+  const tents: Array<{ pos: [number, number, number]; seed: number }> = [];
+
+  for (let i = 0; i < tentCount; i++) {
+    const angle = rand(110 + i) * Math.PI * 2;
+    const distance = 12 + rand(120 + i) * 10;
+    tents.push({
+      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance],
+      seed: seed + i * 50
+    });
+  }
+
+  return tents;
+};
+
+export const OutskirtsDesertDecor: React.FC<{ mapX: number; mapY: number; timeOfDay?: number }> = ({ mapX, mapY, timeOfDay }) => {
   const district = getDistrictType(mapX, mapY);
   if (district !== 'OUTSKIRTS_DESERT') return null;
+
+  // Bedouin tent spawning (1-2 tents always)
+  const seed = mapX * 73 + mapY * 139;
+  const rand = (offset: number) => seededRandom(seed + offset);
+  const tentCount = 1 + (rand(100) > 0.4 ? 1 : 0); // 1-2 tents
+  const tents: Array<{ pos: [number, number, number]; seed: number }> = [];
+  for (let i = 0; i < tentCount; i++) {
+    const angle = rand(110 + i) * Math.PI * 2;
+    const distance = 12 + rand(120 + i) * 10;
+    tents.push({
+      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance],
+      seed: seed + i * 50
+    });
+  }
 
   const scrub: Array<[number, number, number]> = [
     [-14, 0, -8],
@@ -130,6 +167,11 @@ export const OutskirtsDesertDecor: React.FC<{ mapX: number; mapY: number }> = ({
           </group>
         );
       })}
+
+      {/* Bedouin Tents */}
+      {tents.map((tent, i) => (
+        <BedouinTent key={`tent-${i}`} position={tent.pos} seed={tent.seed} timeOfDay={timeOfDay} />
+      ))}
     </group>
   );
 };

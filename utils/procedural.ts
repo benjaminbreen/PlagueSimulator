@@ -2021,8 +2021,21 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
   const typeRand = rand();
   let type = BuildingType.RESIDENTIAL;
 
-  // WEALTHY district: heavily favor residential (wealthy private homes)
-  if (district === 'WEALTHY') {
+  // Farmland: only private dwellings and farmhouses
+  if (district === 'OUTSKIRTS_FARMLAND') {
+    type = BuildingType.RESIDENTIAL;
+  } else if (district === 'HOVELS') {
+    // Poor quarter (Al-Shaghour): Only small one-story residences and merchant stalls
+    // 60% residential (cramped private dwellings), 40% commercial (small merchant stalls, workshops)
+    if (typeRand < 0.40) type = BuildingType.COMMERCIAL;
+    // else remains RESIDENTIAL (60%)
+  } else if (district === 'JEWISH_QUARTER') {
+    // Jewish Quarter (Al-Yahud): Only residential homes and Jewish merchant shops
+    // Synagogue, mikveh, yeshiva, etc. are spawned by JewishQuarterDecor component
+    // 65% residential (Jewish homes with mezuzahs), 35% commercial (kosher shops, merchants)
+    if (typeRand < 0.35) type = BuildingType.COMMERCIAL;
+    // else remains RESIDENTIAL (65%)
+  } else if (district === 'WEALTHY') {
     // 66% residential, 14% commercial, 4% civic, 2% religious, 6% school, 4% medical, 4% hospitality
     if (typeRand < 0.02) type = BuildingType.RELIGIOUS;
     else if (typeRand < 0.06) type = BuildingType.CIVIC;
@@ -2102,13 +2115,35 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
       ? `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`
       : `${FIRST_NAMES_FEMALE[Math.floor(rand() * FIRST_NAMES_FEMALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
   } else {
-    ownerName = ownerGender === 'Male'
-      ? `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`
-      : `${FIRST_NAMES_FEMALE[Math.floor(rand() * FIRST_NAMES_FEMALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
+    // Jewish Quarter residents use Jewish names
+    if (district === 'JEWISH_QUARTER') {
+      const firstName = ownerGender === 'Male'
+        ? JEWISH_NAMES.male[Math.floor(rand() * JEWISH_NAMES.male.length)]
+        : JEWISH_NAMES.female[Math.floor(rand() * JEWISH_NAMES.female.length)];
+      const surname = JEWISH_NAMES.surnames[Math.floor(rand() * JEWISH_NAMES.surnames.length)];
+      ownerName = `${firstName} ${surname}`;
+    } else {
+      ownerName = ownerGender === 'Male'
+        ? `${FIRST_NAMES_MALE[Math.floor(rand() * FIRST_NAMES_MALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`
+        : `${FIRST_NAMES_FEMALE[Math.floor(rand() * FIRST_NAMES_FEMALE.length)]} ${LAST_NAMES[Math.floor(rand() * LAST_NAMES.length)]}`;
+    }
 
     ownerProfession = type === BuildingType.COMMERCIAL
       ? COMMERCIAL_PROFESSIONS[Math.floor(rand() * COMMERCIAL_PROFESSIONS.length)]
       : RESIDENTIAL_PROFESSIONS[Math.floor(rand() * RESIDENTIAL_PROFESSIONS.length)];
+
+    // Jewish Quarter specific professions
+    if (district === 'JEWISH_QUARTER') {
+      const jewishProfessions = ['Jeweler', 'Goldsmith', 'Textile Merchant', 'Silk Trader', 'Money Changer', 'Wine Merchant', 'Scribe', 'Scholar', 'Merchant', 'Tradesman'];
+      if (type === BuildingType.COMMERCIAL) {
+        ownerProfession = jewishProfessions[Math.floor(rand() * jewishProfessions.length)];
+      }
+    }
+  }
+
+  if (district === 'OUTSKIRTS_FARMLAND') {
+    const farmlandProfessions = ['Farmer', 'Field Worker', 'Orchard Keeper', 'Irrigation Keeper', 'Farmhand'];
+    ownerProfession = farmlandProfessions[Math.floor(rand() * farmlandProfessions.length)];
   }
 
   // Calculate building height using the same formula as Environment.tsx
@@ -2133,7 +2168,10 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
   // Determine story count based on building height
   // 1 story: < 6, 2 stories: 6-10, 3 stories: >= 10
   let storyCount: 1 | 2 | 3 = height < 6 ? 1 : height < 10 ? 2 : 3;
-  if (district === 'WEALTHY' && (type === BuildingType.RESIDENTIAL || type === BuildingType.COMMERCIAL)) {
+  if (district === 'HOVELS') {
+    // Poor quarter: Always single-story cramped dwellings and small shops
+    storyCount = 1;
+  } else if (district === 'WEALTHY' && (type === BuildingType.RESIDENTIAL || type === BuildingType.COMMERCIAL)) {
     // Wealthy mansions are 2-3 stories
     storyCount = height > 12 ? 3 : 2;
   }
@@ -2169,7 +2207,7 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
       footprintScale = sizeScale * 0.6; // Small sabil
     }
   } else if (type === BuildingType.SCHOOL) {
-    footprintScale = sizeScale * 1.05;
+    footprintScale = sizeScale * 1.2;
   } else if (type === BuildingType.MEDICAL) {
     footprintScale = sizeScale * 1.05;
   } else if (type === BuildingType.HOSPITALITY) {

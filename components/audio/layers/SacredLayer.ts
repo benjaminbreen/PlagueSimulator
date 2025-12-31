@@ -29,11 +29,11 @@ const PRAYER_TIMES: PrayerTime[] = [
 
 // Character adjustments for different prayer times
 const CHARACTER_SETTINGS: Record<PrayerTime['character'], { baseFreq: number; gain: number }> = {
-  contemplative: { baseFreq: 200, gain: 0.10 },
-  strong: { baseFreq: 240, gain: 0.14 },
-  measured: { baseFreq: 220, gain: 0.12 },
-  reflective: { baseFreq: 210, gain: 0.11 },
-  peaceful: { baseFreq: 195, gain: 0.09 },
+  contemplative: { baseFreq: 200, gain: 0.07 },
+  strong: { baseFreq: 240, gain: 0.098 },
+  measured: { baseFreq: 220, gain: 0.084 },
+  reflective: { baseFreq: 210, gain: 0.077 },
+  peaceful: { baseFreq: 195, gain: 0.063 },
 };
 
 export class SacredLayer implements SoundLayer {
@@ -102,10 +102,10 @@ export class SacredLayer implements SoundLayer {
     this.isPlaying = true;
 
     // Setup distant mosque voices
-    this.distantAdhan1 = createDistantAdhan(this.ctx, { delay: 0.8, gain: 0.04, filterCutoff: 1200 });
+    this.distantAdhan1 = createDistantAdhan(this.ctx, { delay: 0.8, gain: 0.028, filterCutoff: 1200 });
     this.distantAdhan1.output.connect(this.output);
 
-    this.distantAdhan2 = createDistantAdhan(this.ctx, { delay: 1.5, gain: 0.025, filterCutoff: 800 });
+    this.distantAdhan2 = createDistantAdhan(this.ctx, { delay: 1.5, gain: 0.0175, filterCutoff: 800 });
     this.distantAdhan2.output.connect(this.output);
 
     // Setup sacred drone
@@ -159,7 +159,7 @@ export class SacredLayer implements SoundLayer {
     // Sacred drone: active near religious buildings or during prayer
     // For now, keep a subtle presence that increases during prayer times
     const isPrayerTime = this.isNearPrayerTime(state.timeOfDay);
-    const droneTarget = isPrayerTime ? 0.02 : 0.005;
+    const droneTarget = isPrayerTime ? 0.014 : 0.0035;
     const interiorMultiplier = state.sceneMode === 'interior' ? 1.5 : 1.0; // Louder inside
 
     this.sacredDroneGain.gain.setTargetAtTime(

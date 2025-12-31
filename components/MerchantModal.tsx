@@ -49,11 +49,11 @@ export const MerchantModal: React.FC<MerchantModalProps> = ({
   };
 
   return (
-    <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
-      <div className="bg-black/90 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl max-w-6xl w-full h-[85vh] flex flex-col overflow-hidden">
+    <div className="absolute inset-0 z-[100] flex items-center justify-center p-2 md:p-4 bg-black/80 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-200">
+      <div className="bg-black/90 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl max-w-6xl w-full max-h-[95vh] md:max-h-[85vh] flex flex-col overflow-hidden">
 
         {/* Header */}
-        <div className="border-b border-amber-900/40 bg-black/50 px-6 py-4 flex items-center justify-between">
+        <div className="border-b border-amber-900/40 bg-black/50 px-3 md:px-6 py-3 md:py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div>
               <h2 className="text-xl text-amber-100 font-semibold tracking-tight mb-1">
@@ -73,19 +73,19 @@ export const MerchantModal: React.FC<MerchantModalProps> = ({
         </div>
 
         {/* Stats Bar */}
-        <div className="bg-black/40 px-6 py-3 border-b border-amber-900/30 flex items-center justify-between">
-          <div className="flex items-center gap-8">
-            <div className="flex items-center gap-2">
-              <Coins size={16} className="text-amber-500" />
-              <span className="text-xs uppercase tracking-wider text-amber-500/60">Currency</span>
-              <span className="text-amber-100 font-mono text-base font-semibold ml-1">{playerStats.currency}</span>
+        <div className="bg-black/40 px-3 md:px-6 py-2 md:py-3 border-b border-amber-900/30 flex items-center justify-between">
+          <div className="flex items-center gap-3 md:gap-8 flex-wrap">
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <Coins size={14} className="text-amber-500 md:w-4 md:h-4" />
+              <span className="hidden md:inline text-xs uppercase tracking-wider text-amber-500/60">Currency</span>
+              <span className="text-amber-100 font-mono text-sm md:text-base font-semibold">{playerStats.currency}</span>
             </div>
-            <div className="w-px h-5 bg-amber-800/30" />
-            <div className="flex items-center gap-2">
-              <Package size={16} className="text-amber-500" />
-              <span className="text-xs uppercase tracking-wider text-amber-500/60">Inventory</span>
-              <span className="text-amber-100 font-mono text-base font-semibold ml-1">
-                {playerStats.inventory.reduce((sum, item) => sum + item.quantity, 0)} / {playerStats.maxInventorySlots}
+            <div className="w-px h-4 md:h-5 bg-amber-800/30" />
+            <div className="flex items-center gap-1.5 md:gap-2">
+              <Package size={14} className="text-amber-500 md:w-4 md:h-4" />
+              <span className="hidden md:inline text-xs uppercase tracking-wider text-amber-500/60">Inventory</span>
+              <span className="text-amber-100 font-mono text-sm md:text-base font-semibold">
+                {playerStats.inventory.reduce((sum, item) => sum + item.quantity, 0)}/{playerStats.maxInventorySlots}
               </span>
             </div>
           </div>

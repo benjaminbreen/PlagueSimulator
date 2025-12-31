@@ -10,6 +10,7 @@ interface SimulationShellProps {
   transitioning: boolean;
   sceneMode: 'outdoor' | 'interior';
   interiorSpec: InteriorSpec | null;
+  activeFloorIndex?: number;
   params: SimulationParams;
   stats: SimulationStats;
   devSettings: DevSettings;
@@ -56,6 +57,8 @@ interface SimulationShellProps {
   mapEntrySpawn?: { mapX: number; mapY: number; position: [number, number, number] } | null;
   onExitInterior?: () => void;
   onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
+  onNearStairs?: (stairs: { id: string; label: string; position: [number, number, number]; type: import('../types').InteriorPropType } | null) => void;
+  onNearBirdcage?: (birdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
   onShowLootModal?: (data: {
     type: 'shatter';
     sourceObjectName: string;
@@ -82,6 +85,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   transitioning,
   sceneMode,
   interiorSpec,
+  activeFloorIndex,
   params,
   stats,
   devSettings,
@@ -128,6 +132,8 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   mapEntrySpawn,
   onExitInterior,
   onNearChest,
+  onNearStairs,
+  onNearBirdcage,
   onShowLootModal,
   performanceMonitor
 }) => {
@@ -226,11 +232,13 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             mapEntrySpawn={mapEntrySpawn}
             onShowLootModal={onShowLootModal}
             onNearChest={onNearChest}
+            onNearBirdcage={onNearBirdcage}
           />
         )}
         {!transitioning && sceneMode === 'interior' && interiorSpec && (
           <InteriorScene
             spec={interiorSpec}
+            activeFloorIndex={activeFloorIndex}
             params={params}
             simTime={stats.simTime}
             playerStats={playerStats}
@@ -247,6 +255,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             observeMode={observeMode}
             onExitInterior={onExitInterior}
             onNearChest={onNearChest}
+            onNearStairs={onNearStairs}
           />
         )}
       </Suspense>

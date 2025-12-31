@@ -539,7 +539,7 @@ export const Camel: React.FC<CamelProps> = ({
                 </mesh>
 
                 {/* === HEAD === */}
-                <group ref={headRef} position={[0.12, 0.2 * neckLen, 0]}>
+                <group ref={headRef} position={[0.12, 0.32 * neckLen, 0]}>
                   {/* Skull */}
                   <mesh castShadow>
                     <boxGeometry args={[0.22, 0.14, 0.14]} />

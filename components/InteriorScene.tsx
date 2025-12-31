@@ -10,7 +10,7 @@ import { seededRandom } from '../utils/procedural';
 import { Player } from './Player';
 import { InteriorExitIndicator } from './InteriorExitIndicator';
 import { Humanoid } from './Humanoid';
-import { generateInteriorObstacles } from '../utils/interior';
+import { generateInteriorObstacles, getSharedWalls } from '../utils/interior';
 import { PushableObject, createPushable } from '../utils/pushables';
 import { PushableDroppedItem } from './environment/decorations/Pushables';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
@@ -37,12 +37,14 @@ interface InteriorSceneProps {
   observeMode?: boolean;
   onExitInterior?: () => void;
   onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
+  onNearStairs?: (stairs: { id: string; label: string; position: [number, number, number]; type: InteriorPropType } | null) => void;
+  activeFloorIndex?: number;
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0 }) => {
   const { scene, gl } = useThree();
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null);
@@ -110,11 +112,22 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const exitTriggeredRef = useRef(false);
   const [pickedUpIds, setPickedUpIds] = useState<Set<string>>(new Set());
   const [hoveredNpcId, setHoveredNpcId] = useState<string | null>(null);
-  const npcStatsMap = useMemo(() => new Map(spec.npcs.map((npc) => [npc.id, npc.stats])), [spec.npcs]);
+  const nearStairsIdRef = useRef<string | null>(null);
+  const activeFloor = useMemo(() => spec.floors?.[activeFloorIndex] ?? null, [spec.floors, activeFloorIndex]);
+  const activeRooms = useMemo(() => activeFloor?.rooms ?? spec.rooms, [activeFloor, spec.rooms]);
+  const baseProps = useMemo(() => activeFloor?.props ?? spec.props, [activeFloor, spec.props]);
+  const activeNpcs = useMemo(() => activeFloor?.npcs ?? spec.npcs, [activeFloor, spec.npcs]);
+  const activeExteriorDoorSide = activeFloorIndex === 0
+    ? (activeFloor?.exteriorDoorSide ?? spec.exteriorDoorSide)
+    : activeFloor?.exteriorDoorSide;
+  const activeWallHeight = activeFloor?.wallHeight ?? spec.wallHeight;
+  const activeSeed = activeFloor?.seed ?? spec.seed;
+
+  const npcStatsMap = useMemo(() => new Map(activeNpcs.map((npc) => [npc.id, npc.stats])), [activeNpcs]);
 
   useEffect(() => {
     exitTriggeredRef.current = false;
-  }, [spec.id]);
+  }, [spec.id, activeFloorIndex]);
 
   useFrame(() => {
     if (playerRef.current) {
@@ -124,6 +137,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
 
   useFrame(() => {
     if (!playerRef.current || !onExitInterior) return;
+    if (activeFloorIndex !== 0 || activeExteriorDoorSide === undefined) return;
     if (exitTriggeredRef.current) return;
     const pos = playerRef.current.position;
     const [cx, , cz] = entryRoom.center;
@@ -183,6 +197,48 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     }
   });
 
+  // Track nearby stairs/ladder for floor transition
+  useFrame(() => {
+    if (!playerRef.current || !onNearStairs) return;
+    const stairProps = activeProps.filter(
+      (prop) => prop.type === InteriorPropType.STAIRS || prop.type === InteriorPropType.LADDER
+    );
+    if (stairProps.length === 0) {
+      if (nearStairsIdRef.current !== null) {
+        nearStairsIdRef.current = null;
+        onNearStairs(null);
+      }
+      return;
+    }
+    const pos = playerRef.current.position;
+    const INTERACT_DISTANCE = 1.9;
+    let nearest: InteriorProp | null = null;
+    let nearestDist = Infinity;
+    for (const stair of stairProps) {
+      const dx = pos.x - stair.position[0];
+      const dz = pos.z - stair.position[2];
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < INTERACT_DISTANCE && dist < nearestDist) {
+        nearestDist = dist;
+        nearest = stair;
+      }
+    }
+    const newId = nearest?.id ?? null;
+    if (newId !== nearStairsIdRef.current) {
+      nearStairsIdRef.current = newId;
+      if (nearest) {
+        onNearStairs({
+          id: nearest.id,
+          label: nearest.type === InteriorPropType.LADDER ? 'Ladder' : 'Stairs',
+          position: nearest.position,
+          type: nearest.type,
+        });
+      } else {
+        onNearStairs(null);
+      }
+    }
+  });
+
   // Helper function to determine ring color based on health state
   const getHealthRingColor = (state: AgentState) => {
     switch (state) {
@@ -195,12 +251,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   };
 
   const activeProps = useMemo(() => {
-    const roomMap = new Map(spec.rooms.map((room) => [room.id, room]));
-    const entrySide = spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : 'west';
+    const roomMap = new Map(activeRooms.map((room) => [room.id, room]));
+    const entrySide = activeExteriorDoorSide === 0 ? 'north' : activeExteriorDoorSide === 1 ? 'south' : activeExteriorDoorSide === 2 ? 'east' : 'west';
     const openSide: 'north' | 'south' | 'east' | 'west' | null = spec.buildingType === BuildingType.CIVIC
       || spec.buildingType === BuildingType.RELIGIOUS
       || spec.buildingType === BuildingType.SCHOOL
       || spec.buildingType === BuildingType.MEDICAL
+      || activeExteriorDoorSide === undefined
       ? null
       : entrySide;
     const keepInsideOpenSide = (room: InteriorRoom, pos: [number, number, number], inset = 1.8): [number, number, number] => {
@@ -224,10 +281,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       }
       return next;
     };
-    return spec.props
+    return baseProps
       .filter((prop) => !pickedUpIds.has(prop.id))
       .map((prop) => {
-        const room = roomMap.get(prop.roomId) ?? spec.rooms[0];
+        const room = roomMap.get(prop.roomId) ?? activeRooms[0];
         const needsInset = prop.type === InteriorPropType.RUG
           || prop.type === InteriorPropType.PRAYER_RUG
           || prop.type === InteriorPropType.FLOOR_MAT
@@ -257,7 +314,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         }
         return { ...prop, position: clamped, roomId: room.id };
       });
-  }, [spec.props, pickedUpIds, spec.rooms, spec.exteriorDoorSide, spec.buildingType]);
+  }, [baseProps, pickedUpIds, activeRooms, activeExteriorDoorSide, spec.buildingType]);
   useEffect(() => {
     setPickedUpIds(new Set());
   }, [spec.id]);
@@ -497,16 +554,16 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     });
     onPickupItem?.(pickup);
   }, [onPickupItem]);
-  const entryRoom = useMemo(() => spec.rooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? spec.rooms[0], [spec.rooms]);
+  const entryRoom = useMemo(() => activeRooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? activeRooms[0], [activeRooms]);
   const roomMap = useMemo(() => {
     const map = new Map<string, InteriorRoom>();
-    spec.rooms.forEach((room) => map.set(room.id, room));
+    activeRooms.forEach((room) => map.set(room.id, room));
     return map;
-  }, [spec.rooms]);
-  const wallHeight = spec.wallHeight ?? 3.2;
+  }, [activeRooms]);
+  const wallHeight = activeWallHeight ?? 3.2;
   const roomHotspots = useMemo(() => {
     const map = new Map<string, Array<{ position: THREE.Vector3; action: 'sit' | 'stand' | 'read' | 'cook' }>>();
-    spec.rooms.forEach((room) => map.set(room.id, []));
+    activeRooms.forEach((room) => map.set(room.id, []));
     activeProps.forEach((prop) => {
       const list = map.get(prop.roomId);
       if (!list) return;
@@ -537,11 +594,30 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       }
     });
     return map;
-  }, [activeProps, spec.rooms]);
+  }, [activeProps, activeRooms]);
   const playerSpawn = useMemo<[number, number, number]>(() => {
-    const entrySide = spec.exteriorDoorSide === 0 ? 'north'
-      : spec.exteriorDoorSide === 1 ? 'south'
-        : spec.exteriorDoorSide === 2 ? 'east'
+    if (activeFloorIndex > 0) {
+      const stair = activeProps.find((prop) => prop.type === InteriorPropType.STAIRS || prop.type === InteriorPropType.LADDER);
+      const stairRoom = stair ? activeRooms.find((room) => room.id === stair.roomId) ?? activeRooms[0] : activeRooms[0];
+      if (stair && stairRoom) {
+        const yaw = stair.rotation?.[1] ?? 0;
+        const offset = 0.9;
+        const dx = Math.sin(yaw) * offset;
+        const dz = Math.cos(yaw) * offset;
+        const spawn: [number, number, number] = [stair.position[0] + dx, 0, stair.position[2] + dz];
+        const [cx, , cz] = stairRoom.center;
+        const halfW = stairRoom.size[0] / 2 - 1.0;
+        const halfD = stairRoom.size[2] / 2 - 1.0;
+        return [
+          Math.max(cx - halfW, Math.min(cx + halfW, spawn[0])),
+          0,
+          Math.max(cz - halfD, Math.min(cz + halfD, spawn[2]))
+        ];
+      }
+    }
+    const entrySide = activeExteriorDoorSide === 0 ? 'north'
+      : activeExteriorDoorSide === 1 ? 'south'
+        : activeExteriorDoorSide === 2 ? 'east'
           : 'west';
     const [cx, , cz] = entryRoom.center;
     const halfW = entryRoom.size[0] / 2;
@@ -551,13 +627,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     if (entrySide === 'south') return [cx, 0, cz - halfD + inset];
     if (entrySide === 'east') return [cx + halfW - inset, 0, cz];
     return [cx - halfW + inset, 0, cz];
-  }, [entryRoom, spec.exteriorDoorSide]);
+  }, [activeFloorIndex, activeProps, activeRooms, entryRoom, activeExteriorDoorSide]);
   const entrySide = useMemo<'north' | 'south' | 'east' | 'west'>(() => (
-    spec.exteriorDoorSide === 0 ? 'north'
-      : spec.exteriorDoorSide === 1 ? 'south'
-        : spec.exteriorDoorSide === 2 ? 'east'
+    activeExteriorDoorSide === 0 ? 'north'
+      : activeExteriorDoorSide === 1 ? 'south'
+        : activeExteriorDoorSide === 2 ? 'east'
           : 'west'
-  ), [spec.exteriorDoorSide]);
+  ), [activeExteriorDoorSide]);
   const isDay = params.timeOfDay >= 7 && params.timeOfDay <= 17;
   const lampProps = useMemo(
     () => activeProps.filter((prop) => (
@@ -570,13 +646,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     )),
     [activeProps]
   );
-  const styleSeed = useMemo(() => spec.seed + spec.rooms.length * 31, [spec.seed, spec.rooms.length]);
+  const styleSeed = useMemo(() => activeSeed + activeRooms.length * 31, [activeSeed, activeRooms.length]);
   const interiorDoorMap = useMemo(() => {
     const map = new Map<string, 'north' | 'south' | 'east' | 'west'>();
-    spec.rooms.forEach((room) => {
+    activeRooms.forEach((room) => {
       let closest: InteriorRoom | null = null;
       let closestDist = Infinity;
-      spec.rooms.forEach((candidate) => {
+      activeRooms.forEach((candidate) => {
         if (candidate.id === room.id) return;
         const dx = candidate.center[0] - room.center[0];
         const dz = candidate.center[2] - room.center[2];
@@ -596,19 +672,23 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       }
     });
     return map;
-  }, [spec.rooms]);
+  }, [activeRooms]);
 
   // Calculate shared walls between adjacent rooms to avoid z-fighting
   // Each shared wall is only rendered by one room (the one with lower index)
-  const sharedWallsMap = useMemo(() => {
+  const { sharedWallsMap, interiorDoorSidesMap } = useMemo(() => {
     const map = new Map<string, ('north' | 'south' | 'east' | 'west')[]>();
-    spec.rooms.forEach((room) => map.set(room.id, []));
+    const doorMap = new Map<string, ('north' | 'south' | 'east' | 'west')[]>();
+    activeRooms.forEach((room) => {
+      map.set(room.id, []);
+      doorMap.set(room.id, []);
+    });
 
     // Check each pair of rooms for adjacency
-    for (let i = 0; i < spec.rooms.length; i++) {
-      const roomA = spec.rooms[i];
-      for (let j = i + 1; j < spec.rooms.length; j++) {
-        const roomB = spec.rooms[j];
+    for (let i = 0; i < activeRooms.length; i++) {
+      const roomA = activeRooms[i];
+      for (let j = i + 1; j < activeRooms.length; j++) {
+        const roomB = activeRooms[j];
         const dx = roomB.center[0] - roomA.center[0];
         const dz = roomB.center[2] - roomA.center[2];
 
@@ -624,10 +704,14 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             // Room B is east of Room A
             // Room A owns the east wall, Room B skips its west wall
             map.get(roomB.id)?.push('west');
+            if (!doorMap.get(roomA.id)?.includes('east')) doorMap.get(roomA.id)?.push('east');
+            if (!doorMap.get(roomB.id)?.includes('west')) doorMap.get(roomB.id)?.push('west');
           } else {
             // Room B is west of Room A
             // Room A owns the west wall, Room B skips its east wall
             map.get(roomB.id)?.push('east');
+            if (!doorMap.get(roomA.id)?.includes('west')) doorMap.get(roomA.id)?.push('west');
+            if (!doorMap.get(roomB.id)?.includes('east')) doorMap.get(roomB.id)?.push('east');
           }
         }
 
@@ -637,31 +721,37 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             // Room B is north of Room A
             // Room A owns the north wall, Room B skips its south wall
             map.get(roomB.id)?.push('south');
+            if (!doorMap.get(roomA.id)?.includes('north')) doorMap.get(roomA.id)?.push('north');
+            if (!doorMap.get(roomB.id)?.includes('south')) doorMap.get(roomB.id)?.push('south');
           } else {
             // Room B is south of Room A
             // Room A owns the south wall, Room B skips its north wall
             map.get(roomB.id)?.push('north');
+            if (!doorMap.get(roomA.id)?.includes('south')) doorMap.get(roomA.id)?.push('south');
+            if (!doorMap.get(roomB.id)?.includes('north')) doorMap.get(roomB.id)?.push('north');
           }
         }
       }
     }
-    return map;
-  }, [spec.rooms]);
+    return { sharedWallsMap: map, interiorDoorSidesMap: doorMap };
+  }, [activeRooms]);
 
   const doorMapForObstacles = useMemo(() => {
     const map = new Map<string, 'north' | 'south' | 'east' | 'west' | null>();
     interiorDoorMap.forEach((side, id) => map.set(id, side));
-    const entrySide = spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : spec.exteriorDoorSide === 3 ? 'west' : 'north';
-    spec.rooms.forEach((room) => {
-      if (room.type === InteriorRoomType.ENTRY) {
-        if (!map.has(room.id)) {
-          map.set(room.id, entrySide);
+    if (activeExteriorDoorSide !== undefined) {
+      const entrySide = activeExteriorDoorSide === 0 ? 'north' : activeExteriorDoorSide === 1 ? 'south' : activeExteriorDoorSide === 2 ? 'east' : activeExteriorDoorSide === 3 ? 'west' : 'north';
+      activeRooms.forEach((room) => {
+        if (room.type === InteriorRoomType.ENTRY) {
+          if (!map.has(room.id)) {
+            map.set(room.id, entrySide);
+          }
         }
-      }
-    });
+      });
+    }
     return map;
-  }, [spec.rooms, interiorDoorMap, spec.exteriorDoorSide]);
-  const activeSpec = useMemo(() => ({ ...spec, props: activeProps }), [spec, activeProps]);
+  }, [activeRooms, interiorDoorMap, activeExteriorDoorSide]);
+  const activeSpec = useMemo(() => ({ ...spec, rooms: activeRooms, props: activeProps }), [spec, activeRooms, activeProps]);
   const rawObstacles = useMemo<Obstacle[]>(() => generateInteriorObstacles(activeSpec, doorMapForObstacles), [activeSpec, doorMapForObstacles]);
   const obstacles = useMemo<Obstacle[]>(() => {
     if (pushables.length === 0) return rawObstacles;
@@ -694,10 +784,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   }, [activeProps, spec.buildingType]);
   const doorTargetMap = useMemo(() => {
     const map = new Map<string, InteriorRoom>();
-    spec.rooms.forEach((room) => {
+    activeRooms.forEach((room) => {
       let closest: InteriorRoom | null = null;
       let closestDist = Infinity;
-      spec.rooms.forEach((candidate) => {
+      activeRooms.forEach((candidate) => {
         if (candidate.id === room.id) return;
         const dx = candidate.center[0] - room.center[0];
         const dz = candidate.center[2] - room.center[2];
@@ -710,15 +800,21 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       if (closest) map.set(room.id, closest);
     });
     return map;
-  }, [spec.rooms]);
+  }, [activeRooms]);
   const windowMap = useMemo(() => {
     const map = new Map<string, 'north' | 'south' | 'east' | 'west'>();
-    const exteriorSide = spec.exteriorDoorSide;
+    const exteriorSide = activeExteriorDoorSide;
     const entrySide = exteriorSide === 0 ? 'north' : exteriorSide === 1 ? 'south' : exteriorSide === 2 ? 'east' : 'west';
-    spec.rooms.forEach((room) => {
+    const allSides: ('north' | 'south' | 'east' | 'west')[] = ['north', 'south', 'east', 'west'];
+
+    activeRooms.forEach((room) => {
       const index = parseInt(room.id.split('-')[1] || '0', 10);
       const roll = seededRandom(styleSeed + index * 23);
       let side: 'north' | 'south' | 'east' | 'west' = roll < 0.25 ? 'north' : roll < 0.5 ? 'south' : roll < 0.75 ? 'east' : 'west';
+
+      // Get shared walls (interior doorways) for this room - we should NOT place windows on these
+      const sharedWalls = getSharedWalls(room, activeRooms);
+
       if (room.type === InteriorRoomType.ENTRY && exteriorSide !== undefined) {
         if (spec.buildingType === BuildingType.COMMERCIAL || spec.buildingType === BuildingType.HOSPITALITY) {
           side = entrySide;
@@ -726,10 +822,22 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           side = exteriorSide === 0 ? 'south' : exteriorSide === 1 ? 'north' : exteriorSide === 2 ? 'west' : 'east';
         }
       }
+
+      // If the selected side is a shared wall (interior doorway), pick a different side
+      if (sharedWalls.includes(side)) {
+        // Get available walls (not shared with adjacent rooms)
+        const availableWalls = allSides.filter(w => !sharedWalls.includes(w));
+        if (availableWalls.length > 0) {
+          // Pick a random available wall
+          const altRoll = seededRandom(styleSeed + index * 37);
+          side = availableWalls[Math.floor(altRoll * availableWalls.length)];
+        }
+      }
+
       map.set(room.id, side);
     });
     return map;
-  }, [spec.rooms, styleSeed, spec.exteriorDoorSide, spec.buildingType]);
+  }, [activeRooms, styleSeed, activeExteriorDoorSide, spec.buildingType]);
 
   const doorVolumes = useMemo(() => {
     const volumes: Array<{
@@ -740,11 +848,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       width: number;
       target?: THREE.Vector3;
     }> = [];
-    const entrySide = spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : spec.exteriorDoorSide === 3 ? 'west' : 'north';
-    spec.rooms.forEach((room) => {
+    const entrySide = activeExteriorDoorSide === 0 ? 'north' : activeExteriorDoorSide === 1 ? 'south' : activeExteriorDoorSide === 2 ? 'east' : activeExteriorDoorSide === 3 ? 'west' : 'north';
+    activeRooms.forEach((room) => {
       const targetRoom = doorTargetMap.get(room.id);
       if (room.type === InteriorRoomType.ENTRY && !targetRoom) return;
-      const side = room.type === InteriorRoomType.ENTRY ? (interiorDoorMap.get(room.id) ?? entrySide) : (interiorDoorMap.get(room.id) ?? 'north');
+      const side = room.type === InteriorRoomType.ENTRY && activeExteriorDoorSide !== undefined
+        ? (interiorDoorMap.get(room.id) ?? entrySide)
+        : (interiorDoorMap.get(room.id) ?? 'north');
       const halfW = room.size[0] / 2;
       const halfD = room.size[2] / 2;
       const pos = side === 'north'
@@ -768,13 +878,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       });
     });
     return volumes;
-  }, [spec.rooms, spec.exteriorDoorSide, interiorDoorMap, doorTargetMap]);
+  }, [activeRooms, activeExteriorDoorSide, interiorDoorMap, doorTargetMap]);
 
   useEffect(() => {
-    npcStatesRef.current = spec.npcs.map((npc, index) => {
+    npcStatesRef.current = activeNpcs.map((npc, index) => {
       let nearestRoom = entryRoom;
       let best = Infinity;
-      spec.rooms.forEach((room) => {
+      activeRooms.forEach((room) => {
         const dx = npc.position[0] - room.center[0];
         const dz = npc.position[2] - room.center[2];
         const dist = dx * dx + dz * dz;
@@ -783,7 +893,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           nearestRoom = room;
         }
       });
-      const seed = spec.seed + index * 31;
+      const seed = activeSeed + index * 31;
       let randOffset = 0;
       const rand = () => seededRandom(seed + randOffset++);
       const hotspots = roomHotspots.get(nearestRoom.id) ?? [];
@@ -810,7 +920,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         rumorTimer: 0,
       };
     });
-  }, [spec, entryRoom, spec.rooms, roomHotspots, simTime]);
+  }, [activeNpcs, activeRooms, entryRoom, roomHotspots, simTime, activeSeed]);
 
   useEffect(() => {
     if (!npcStateOverride) return;
@@ -889,7 +999,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         const dist = dir.length();
         if (dist < 0.3) {
           let randOffset = 0;
-          const rand = () => seededRandom(spec.seed + npc.id.length * 17 + randOffset++);
+          const rand = () => seededRandom(activeSeed + npc.id.length * 17 + randOffset++);
           const hotspots = roomHotspots.get(room.id) ?? [];
           const pickHotspot = () => hotspots[Math.floor(rand() * hotspots.length)];
           const hotspot = hotspots.length > 0 ? pickHotspot() : null;
@@ -986,7 +1096,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             // If all angles blocked, pick new target (stuck recovery)
             if (!foundPath) {
               let randOffset = 0;
-              const rand = () => seededRandom(spec.seed + npc.id.length * 19 + randOffset++);
+              const rand = () => seededRandom(activeSeed + npc.id.length * 19 + randOffset++);
               const hotspots = roomHotspots.get(room.id) ?? [];
               const pickHotspot = () => hotspots[Math.floor(rand() * hotspots.length)];
               const hotspot = hotspots.length > 0 ? pickHotspot() : null;
@@ -1498,7 +1608,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           />
         );
       })}
-      {isDay && (
+      {isDay && activeExteriorDoorSide !== undefined && (
         <>
           <mesh position={[entryRoom.center[0], 1.4, entryRoom.center[2] - entryRoom.size[2] / 2 + 0.12]}>
             <planeGeometry args={[1.4, 1.1]} />
@@ -1508,12 +1618,14 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         </>
       )}
 
-      {spec.rooms.map((room, index) => {
+      {activeRooms.map((room, index) => {
         const wallIndex = Math.floor(seededRandom(styleSeed + index * 7) * wallMaterials.length);
         const wallMaterial = wallMaterials[wallIndex];
         const wallColor = wallPalette[wallIndex] ?? '#b7a48a';
         const floorMaterial = floorMaterials[Math.floor(seededRandom(styleSeed + index * 11) * floorMaterials.length)];
-        const entrySide = spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : spec.exteriorDoorSide === 3 ? 'west' : 'north';
+        const entrySide = activeExteriorDoorSide === undefined
+          ? null
+          : activeExteriorDoorSide === 0 ? 'north' : activeExteriorDoorSide === 1 ? 'south' : activeExteriorDoorSide === 2 ? 'east' : 'west';
         const interiorDoorSide = interiorDoorMap.get(room.id) ?? null;
         const exteriorDoorSide = room.type === InteriorRoomType.ENTRY ? entrySide : null;
         const cutawaySide = spec.buildingType === BuildingType.CIVIC
@@ -1577,11 +1689,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
               buildingType={spec.buildingType}
               wallHeight={wallHeight}
               interiorDoorSide={interiorDoorSide}
+              interiorDoorSides={interiorDoorSidesMap.get(room.id) ?? []}
               exteriorDoorSide={exteriorDoorSide}
               cutawaySide={cutawaySide}
               doorVariant={doorVariant}
               alcoveSide={alcoveSide}
               doorLabel={doorLabel}
+              labelDoorSide={room.type === InteriorRoomType.ENTRY ? exteriorDoorSide : interiorDoorSide}
               roomSeed={styleSeed + index * 31}
               sharedWalls={sharedWallsMap.get(room.id) ?? []}
             />
@@ -1613,7 +1727,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
 
       {activeProps.map((prop, index) => {
         const pushable = pushables.find((item) => item.sourceId === prop.id);
-        const roomForProp = spec.rooms.find((room) => room.id === prop.roomId);
+        const roomForProp = activeRooms.find((room) => room.id === prop.roomId);
         const rugMat = rugMaterials[Math.floor(seededRandom(styleSeed + index * 13) * rugMaterials.length)];
         const prayerMat = prayerRugMaterials[Math.floor(seededRandom(styleSeed + index * 17) * prayerRugMaterials.length)];
         return (
@@ -1634,7 +1748,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         <PushableDroppedItem key={item.id} item={item} />
       ))}
 
-      {spec.npcs.map((npc) => (
+      {activeNpcs.map((npc) => (
         <group
           key={npc.id}
           ref={(node) => {
@@ -1747,16 +1861,20 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         onPickup={handlePickup}
         setTargetPosition={() => {}}
         observeMode={observeMode}
-        interiorEntrySide={spec.exteriorDoorSide === 0 ? 'north' : spec.exteriorDoorSide === 1 ? 'south' : spec.exteriorDoorSide === 2 ? 'east' : 'west'}
-        interiorEntryToken={spec.buildingId}
+        interiorEntrySide={activeFloorIndex === 0 && activeExteriorDoorSide !== undefined
+          ? (activeExteriorDoorSide === 0 ? 'north' : activeExteriorDoorSide === 1 ? 'south' : activeExteriorDoorSide === 2 ? 'east' : 'west')
+          : null}
+        interiorEntryToken={`${spec.buildingId}-floor-${activeFloorIndex}`}
       />
-      <InteriorExitIndicator
-        playerRef={playerRef}
-        entrySide={entrySide}
-        entryRoom={entryRoom}
-        mapX={params.mapX}
-        mapY={params.mapY}
-      />
+      {activeFloorIndex === 0 && activeExteriorDoorSide !== undefined && (
+        <InteriorExitIndicator
+          playerRef={playerRef}
+          entrySide={entrySide}
+          entryRoom={entryRoom}
+          mapX={params.mapX}
+          mapY={params.mapY}
+        />
+      )}
     </group>
   );
 };

@@ -276,28 +276,7 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
               <coneGeometry args={[0.2, 0.4, 6]} />
               <meshStandardMaterial color="#2a1a0a" roughness={0.9} />
             </mesh>
-            {nightFactor > 0.05 && (
-              <>
-                <mesh position={[0, 0.9, 0]}>
-                  <coneGeometry args={[0.15, 0.5, 4]} />
-                  <meshStandardMaterial
-                    color="#ff8a3c"
-                    emissive="#ff6a1c"
-                    emissiveIntensity={0.7 + Math.sin(Date.now() * 0.004 + idx) * 0.2}
-                    transparent
-                    opacity={0.9}
-                  />
-                </mesh>
-                <pointLight
-                  position={[0, 1, 0]}
-                  intensity={2.8 * nightFactor}
-                  distance={18}
-                  decay={2}
-                  color="#ff9a4c"
-                  castShadow
-                />
-              </>
-            )}
+            {/* Torch light removed for performance */}
           </group>
         ))}
       </group>
@@ -317,16 +296,7 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
           <meshStandardMaterial color={sandstoneColor} roughness={0.88} />
         </mesh>
         {/* Tower torch */}
-        {nightFactor > 0.05 && (
-          <pointLight
-            position={[0, wallHeight + 1.5, 0]}
-            intensity={3 * nightFactor}
-            distance={25}
-            decay={2}
-            color="#ff9a4c"
-            castShadow
-          />
-        )}
+        {/* Tower torch light removed for performance */}
       </group>
     );
   };
@@ -645,5 +615,4 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
     </group>
   );
 };
-
 

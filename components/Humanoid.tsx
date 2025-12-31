@@ -2,6 +2,7 @@
 import React, { useRef, memo, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { WornItemMesh, getWornItemConfig, WornItemConfig } from './items/WornItemMeshes';
 
 const damaskCache = new Map<string, THREE.CanvasTexture>();
 const strawCache = new Map<string, THREE.CanvasTexture>();
@@ -400,6 +401,19 @@ interface HumanoidProps {
   isSpeaking?: boolean;
   mood?: string;
   panicLevel?: number;
+  // Visible inventory items to render on character
+  visibleItems?: string[];
+  // Cosmetic effects based on inventory (kohl, henna)
+  cosmeticEffects?: {
+    hasKohl?: boolean;
+    hasHenna?: boolean;
+  };
+  // ANIMATION: Enhanced movement animations
+  turnPhaseRef?: React.MutableRefObject<number>; // 0-1 pivot animation progress
+  angularVelocityRef?: React.MutableRefObject<number>; // Current turn rate for pivot direction
+  movementStartTimeRef?: React.MutableRefObject<number>; // For start inertia
+  movementStopTimeRef?: React.MutableRefObject<number>; // For stop inertia
+  sprintTransitionRef?: React.MutableRefObject<number>; // 0-1 walk to run blend
 }
 
 export const Humanoid: React.FC<HumanoidProps> = memo(({
@@ -466,6 +480,14 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   isSpeaking = false,
   mood = 'neutral',
   panicLevel = 0,
+  visibleItems = [],
+  cosmeticEffects,
+  // Enhanced movement animation props
+  turnPhaseRef,
+  angularVelocityRef,
+  movementStartTimeRef,
+  movementStopTimeRef,
+  sprintTransitionRef,
 }) => {
   const simpleLodActive = enableSimpleLod && distanceFromCamera > simpleLodDistance;
   const animationLodActive = distanceFromCamera > animationLodDistance;
@@ -828,12 +850,53 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const anticipate = jumpAnticipationRef ? jumpAnticipationRef.current : 0;
     const landing = landingImpulseRef ? landingImpulseRef.current : 0;
     const jumpBoost = jumpChargeRef ? jumpChargeRef.current : 0;
-    const baseSpeed = isSprinting ? walkSpeed * 2.2 : walkSpeed;
+
+    // ANIMATION: Get enhanced movement values
+    const turnPhase = turnPhaseRef?.current ?? 0;
+    const angularVel = angularVelocityRef?.current ?? 0;
+    const sprintBlend = sprintTransitionRef?.current ?? (isSprinting ? 1 : 0);
+    // Use performance.now() to match the time source used in Player.tsx
+    const perfNow = performance.now() * 0.001;
+
+    // ANIMATION: Calculate movement inertia (start/stop ramp)
+    let movementInertia = 1;
+    if (movementStartTimeRef && movementStopTimeRef) {
+      if (isWalking) {
+        // Ramp up over 0.25 seconds when starting to walk
+        const startTime = movementStartTimeRef.current || perfNow;
+        const timeSinceStart = Math.max(0, perfNow - startTime);
+        movementInertia = Math.min(1, timeSinceStart / 0.25);
+        // Ease the ramp for smoother start
+        movementInertia = movementInertia * movementInertia * (3 - 2 * movementInertia); // smoothstep
+      } else {
+        // Decay over 0.2 seconds when stopping
+        const stopTime = movementStopTimeRef.current || perfNow;
+        const timeSinceStop = Math.max(0, perfNow - stopTime);
+        movementInertia = Math.max(0, 1 - timeSinceStop / 0.2);
+        movementInertia = movementInertia * movementInertia; // ease out
+      }
+    }
+
+    // ANIMATION: Blend between walk and run gaits using sprintBlend
+    const walkAmp = 0.55;
+    const runAmp = 0.85;
+    const walkSpeed_gait = walkSpeed;
+    const runSpeed_gait = walkSpeed * 2.2;
+    // Interpolate amplitude and speed based on sprint transition
+    const blendedAmp = walkAmp + (runAmp - walkAmp) * sprintBlend;
+    const blendedSpeed = walkSpeed_gait + (runSpeed_gait - walkSpeed_gait) * sprintBlend;
+
+    const baseSpeed = blendedSpeed;
     // Age affects both speed (ageScale) and stride length (ageStrideModifier)
     const effectiveWalkSpeed = baseSpeed * ageScale * ageStrideModifier * healthScale * (0.9 + strideVariance * 0.15);
     const t = state.clock.elapsedTime * effectiveWalkSpeed + gaitPhaseOffset;
     const strideScale = (isFemale ? 0.88 : 1) * ageStrideModifier;
-    const amp = isWalking ? (isSprinting ? 0.85 : 0.55) * strideScale * strideVariance : 0; // Stronger walk stride
+
+    // Apply inertia and turn damping to amplitude
+    const turnDamping = 1 - turnPhase * 0.6; // Reduce stride during sharp turns
+    const amp = (isWalking || movementInertia > 0.01)
+      ? blendedAmp * strideScale * strideVariance * movementInertia * turnDamping
+      : 0;
 
     // Easing function for more organic, weighted movement
     const easeInOutQuad = (x: number) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
@@ -847,33 +910,56 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const leftPhase = easeInOutQuad(leftNorm) * 2 - 1; // Back to -1 to 1 with easing
     const rightPhase = easeInOutQuad(rightNorm) * 2 - 1;
 
+    // ANIMATION: Calculate pivot/turn adjustments
+    // During sharp turns, add cross-step motion
+    const turnDirection = angularVel > 0 ? 1 : -1; // Positive = turning right
+    const pivotCrossStep = turnPhase * 0.4 * turnDirection; // Cross-step offset
+
     // Leg swinging with eased motion for weight transfer feel
     if (leftLeg.current) {
-      const targetRotation = isWalking ? leftPhase * amp : 0;
-      leftLeg.current.rotation.x = THREE.MathUtils.lerp(leftLeg.current.rotation.x, targetRotation, 0.15);
+      // During pivot, inside leg steps across
+      const pivotOffset = turnDirection > 0 ? pivotCrossStep * 0.5 : -pivotCrossStep;
+      const targetRotation = (isWalking || movementInertia > 0.01) ? leftPhase * amp + pivotOffset : 0;
+      leftLeg.current.rotation.x = THREE.MathUtils.lerp(leftLeg.current.rotation.x, targetRotation, 0.18);
+      // Add lateral rotation during turn (leg swings outward)
+      const lateralTurn = turnPhase * 0.15 * (turnDirection > 0 ? 1 : -0.3);
+      leftLeg.current.rotation.z = THREE.MathUtils.lerp(leftLeg.current.rotation.z || 0, lateralTurn, 0.12);
     }
     if (rightLeg.current) {
-      const targetRotation = isWalking ? rightPhase * amp : 0;
-      rightLeg.current.rotation.x = THREE.MathUtils.lerp(rightLeg.current.rotation.x, targetRotation, 0.15);
+      // During pivot, outside leg plants
+      const pivotOffset = turnDirection < 0 ? pivotCrossStep * 0.5 : -pivotCrossStep;
+      const targetRotation = (isWalking || movementInertia > 0.01) ? rightPhase * amp + pivotOffset : 0;
+      rightLeg.current.rotation.x = THREE.MathUtils.lerp(rightLeg.current.rotation.x, targetRotation, 0.18);
+      // Add lateral rotation during turn
+      const lateralTurn = turnPhase * 0.15 * (turnDirection < 0 ? 1 : -0.3);
+      rightLeg.current.rotation.z = THREE.MathUtils.lerp(rightLeg.current.rotation.z || 0, lateralTurn, 0.12);
     }
 
     // Knee bending - flexes during swing phase, extends during stance
-    // Knee bends more when sprinting (leg kicks up higher behind)
-    const leftKneeFlexion = isWalking ? Math.max(0, -leftPhase) * (isSprinting ? 1.1 : 0.5) : 0;
-    const rightKneeFlexion = isWalking ? Math.max(0, -rightPhase) * (isSprinting ? 1.1 : 0.5) : 0;
+    // ANIMATION: More knee bend when running, smooth blend
+    const walkKnee = 0.5;
+    const runKnee = 1.1;
+    const kneeFlexAmount = walkKnee + (runKnee - walkKnee) * sprintBlend;
+    const leftKneeFlexion = (isWalking || movementInertia > 0.01) ? Math.max(0, -leftPhase) * kneeFlexAmount * movementInertia : 0;
+    const rightKneeFlexion = (isWalking || movementInertia > 0.01) ? Math.max(0, -rightPhase) * kneeFlexAmount * movementInertia : 0;
     if (leftKnee.current) {
-      leftKnee.current.rotation.x = THREE.MathUtils.lerp(leftKnee.current.rotation.x, leftKneeFlexion, 0.15);
+      leftKnee.current.rotation.x = THREE.MathUtils.lerp(leftKnee.current.rotation.x, leftKneeFlexion, 0.18);
     }
     if (rightKnee.current) {
-      rightKnee.current.rotation.x = THREE.MathUtils.lerp(rightKnee.current.rotation.x, rightKneeFlexion, 0.15);
+      rightKnee.current.rotation.x = THREE.MathUtils.lerp(rightKnee.current.rotation.x, rightKneeFlexion, 0.18);
     }
 
     // Hip counter-rotation for natural weight shift
-    if (hipGroup.current && isWalking) {
-      const hipRotation = leftPhase * amp * (isSprinting ? 0.28 : 0.22);
-      const hipTilt = Math.abs(leftPhase) * amp * (isSprinting ? 0.1 : 0.08); // More tilt during sprint
-      hipGroup.current.rotation.y = hipRotation;
-      hipGroup.current.rotation.z = leftPhase * amp * 0.06;
+    // ANIMATION: Add pivot rotation to hips during sharp turns
+    const hipWalkRot = 0.22;
+    const hipRunRot = 0.28;
+    const hipRotAmount = hipWalkRot + (hipRunRot - hipWalkRot) * sprintBlend;
+    if (hipGroup.current && (isWalking || movementInertia > 0.01)) {
+      const baseHipRotation = leftPhase * amp * hipRotAmount;
+      // During pivot, hips lead the turn
+      const pivotHipTurn = turnPhase * 0.3 * turnDirection;
+      hipGroup.current.rotation.y = baseHipRotation + pivotHipTurn;
+      hipGroup.current.rotation.z = leftPhase * amp * 0.06 * movementInertia;
     } else if (hipGroup.current) {
       hipGroup.current.rotation.y = THREE.MathUtils.lerp(hipGroup.current.rotation.y, 0, 0.1);
       hipGroup.current.rotation.z = THREE.MathUtils.lerp(hipGroup.current.rotation.z, 0, 0.1);
@@ -881,10 +967,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     // Torso twist - counter-rotates against hips for natural contra-posto
     // Age posture adds forward lean for elderly NPCs
-    if (torsoGroup.current && isWalking) {
+    if (torsoGroup.current && (isWalking || movementInertia > 0.01)) {
       const torsoTwist = -leftPhase * amp * 0.15; // Opposite to hip rotation
-      const torsoLean = leftPhase * amp * 0.04; // Subtle side lean
-      torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, torsoTwist, 0.15);
+      const torsoLean = leftPhase * amp * 0.04 * movementInertia; // Subtle side lean
+      // During pivot, torso follows hips with delay (twist into turn)
+      const pivotTorsoTurn = turnPhase * 0.2 * turnDirection;
+      torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, torsoTwist + pivotTorsoTurn, 0.15);
       torsoGroup.current.rotation.z = THREE.MathUtils.lerp(torsoGroup.current.rotation.z, torsoLean, 0.12);
       // Age-based forward lean while walking
       torsoGroup.current.rotation.x = THREE.MathUtils.lerp(torsoGroup.current.rotation.x, agePosture.torsoLean, 0.1);
@@ -1405,18 +1493,35 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     }
 
     if (bodyGroup.current) {
-      // Bobbing and breathing
-      const breathingSpeed = isSprinting ? 3.2 : 1.6; // Faster breathing when sprinting
-      const breathing = Math.sin(state.clock.elapsedTime * breathingSpeed) * (isSprinting ? 0.01 : 0.02);
-      const runBob = Math.abs(Math.sin(t * 2)) * (isSprinting ? 0.08 : 0.025);
+      // ANIMATION: Bobbing and breathing with smooth blend
+      const walkBreathSpeed = 1.6;
+      const runBreathSpeed = 3.2;
+      const breathingSpeed = walkBreathSpeed + (runBreathSpeed - walkBreathSpeed) * sprintBlend;
+      const walkBreathAmp = 0.02;
+      const runBreathAmp = 0.01;
+      const breathAmp = walkBreathAmp + (runBreathAmp - walkBreathAmp) * sprintBlend;
+      const breathing = Math.sin(state.clock.elapsedTime * breathingSpeed) * breathAmp;
+
+      // ANIMATION: Body bob blends between walk and run
+      const walkBob = 0.025;
+      const runBob = 0.08;
+      const bobAmount = walkBob + (runBob - walkBob) * sprintBlend;
+      const bodyBob = Math.abs(Math.sin(t * 2)) * bobAmount * movementInertia;
+
       const jumpLiftBase = Math.sin(Math.min(1, jumpT) * Math.PI) * 0.08;
       const jumpLift = jumping ? jumpLiftBase * (1 + animationBoost * 0.35 + jumpBoost * 0.3) : 0;
       const crouch = -anticipate * 0.08;
       const settle = -landing * 0.06 * Math.sin((1 - landing) * Math.PI);
-      const sway = isWalking ? Math.sin(t) * (isSprinting ? 0.06 : 0.03) : 0;
+
+      // ANIMATION: Sway blends between walk and run
+      const walkSway = 0.03;
+      const runSway = 0.06;
+      const swayAmount = walkSway + (runSway - walkSway) * sprintBlend;
+      const sway = (isWalking || movementInertia > 0.01) ? Math.sin(t) * swayAmount * movementInertia : 0;
 
       // Sprint torso counter-rotation (opposite to legs for natural running motion)
-      const sprintTwist = isSprinting ? Math.sin(t) * 0.22 : 0; // Increased from 0.15 for more dynamic twist
+      // ANIMATION: Smooth blend of twist
+      const sprintTwist = Math.sin(t) * 0.22 * sprintBlend;
 
       // INTERACTION BODY MECHANICS
       const charge = interactionChargeRef?.current ?? 0;
@@ -1446,11 +1551,15 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         }
       }
 
-      bodyGroup.current.position.y = (isWalking ? runBob : breathing) + jumpLift + crouch + settle + interactionCrouch;
+      // ANIMATION: Apply inertia to body position
+      const effectiveWalking = isWalking || movementInertia > 0.01;
+      bodyGroup.current.position.y = (effectiveWalking ? bodyBob : breathing) + jumpLift + crouch + settle + interactionCrouch;
 
-      // Sprinting lean - more aggressive forward lean
-      const targetRotationX = isSprinting ? 0.42 : 0; // Increased from 0.35 for more dynamic sprint posture
-      const idleLean = !isWalking ? Math.sin(state.clock.elapsedTime * 0.6) * 0.02 : 0;
+      // ANIMATION: Forward lean blends smoothly between walk and run
+      const walkLean = 0;
+      const runLean = 0.42;
+      const targetRotationX = walkLean + (runLean - walkLean) * sprintBlend;
+      const idleLean = !effectiveWalking ? Math.sin(state.clock.elapsedTime * 0.6) * 0.02 : 0;
       const jumpTilt = jumping ? (-0.15 + jumpT * 0.2) : 0;
       const crouchTilt = anticipate * 0.22;
       const landTilt = -landing * 0.18;
@@ -1487,12 +1596,27 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     // Head lag/bob for natural independent movement
     if (headGroup.current) {
-      // Head counteracts body bob to stay more level (especially during sprint)
-      const bodyBobCompensation = isSprinting ? -0.04 : 0;
-      const headBob = isWalking ? Math.sin(t * 2) * (isSprinting ? 0.008 : 0.015) : 0;
+      // ANIMATION: Head bob blends between walk and run
+      const walkHeadBob = 0.015;
+      const runHeadBob = 0.008;
+      const headBobAmount = walkHeadBob + (runHeadBob - walkHeadBob) * sprintBlend;
+      const effectiveWalking = isWalking || movementInertia > 0.01;
+      const headBob = effectiveWalking ? Math.sin(t * 2) * headBobAmount * movementInertia : 0;
+
       // Counter body lean more during sprint for stable gaze
-      const headLag = bodyGroup.current ? bodyGroup.current.rotation.x * (isSprinting ? -0.35 : -0.2) : 0;
-      const headSway = isWalking ? Math.sin(t) * (isSprinting ? 0.01 : 0.02) : 0;
+      const walkLagFactor = -0.2;
+      const runLagFactor = -0.35;
+      const lagFactor = walkLagFactor + (runLagFactor - walkLagFactor) * sprintBlend;
+      const headLag = bodyGroup.current ? bodyGroup.current.rotation.x * lagFactor : 0;
+
+      // ANIMATION: Head sway blends
+      const walkHeadSway = 0.02;
+      const runHeadSway = 0.01;
+      const headSwayAmount = walkHeadSway + (runHeadSway - walkHeadSway) * sprintBlend;
+      const headSway = effectiveWalking ? Math.sin(t) * headSwayAmount * movementInertia : 0;
+
+      // ANIMATION: Head anticipates turn direction (look-ahead)
+      const headTurnAnticipation = turnPhase * 0.25 * turnDirection;
 
       // Head follows interaction
       const charge = interactionChargeRef?.current ?? 0;
@@ -1522,7 +1646,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       // Include age-based head forward lean (elderly have head jutting forward)
       const ageHeadLean = agePosture.headForward;
       headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headLag + headInteractionX + ageHeadLean, 0.15);
-      headGroup.current.rotation.y = THREE.MathUtils.lerp(headGroup.current.rotation.y || 0, headInteractionY, 0.12);
+      // ANIMATION: Head turns toward new direction during pivots
+      headGroup.current.rotation.y = THREE.MathUtils.lerp(headGroup.current.rotation.y || 0, headInteractionY + headTurnAnticipation, 0.15);
       headGroup.current.rotation.z = -headSway * 0.5; // Subtle opposite sway
     }
 
@@ -1844,6 +1969,38 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   <capsuleGeometry args={[0.018, 0.035, 4, 6]} />
                   <meshStandardMaterial color={headColor} roughness={0.9} />
                 </mesh>
+                {/* Henna pattern on left hand */}
+                {cosmeticEffects?.hasHenna && (
+                  <>
+                    {/* Back of hand central medallion */}
+                    <mesh position={[0, 0, -0.034]} rotation={[0.1, 0, 0]}>
+                      <circleGeometry args={[0.018, 8]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    {/* Radiating lines from medallion */}
+                    <mesh position={[0, 0.025, -0.034]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.006, 0.03]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, -0.025, -0.034]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.006, 0.03]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0.015, 0, -0.034]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.006, 0.02]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[-0.015, 0, -0.034]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.006, 0.02]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    {/* Finger tip dots */}
+                    <mesh position={[0, 0.042, -0.034]}>
+                      <circleGeometry args={[0.005, 6]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                  </>
+                )}
               </group>
             </group>
             </group>
@@ -1873,6 +2030,38 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   <capsuleGeometry args={[0.018, 0.035, 4, 6]} />
                   <meshStandardMaterial color={headColor} roughness={0.9} />
                 </mesh>
+                {/* Henna pattern on right hand */}
+                {cosmeticEffects?.hasHenna && (
+                  <>
+                    {/* Back of hand central medallion */}
+                    <mesh position={[0, 0, -0.034]} rotation={[0.1, 0, 0]}>
+                      <circleGeometry args={[0.018, 8]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    {/* Radiating lines from medallion */}
+                    <mesh position={[0, 0.025, -0.034]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.006, 0.03]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, -0.025, -0.034]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.006, 0.03]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0.015, 0, -0.034]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.006, 0.02]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[-0.015, 0, -0.034]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.006, 0.02]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    {/* Finger tip dots */}
+                    <mesh position={[0, 0.042, -0.034]}>
+                      <circleGeometry args={[0.005, 6]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                  </>
+                )}
               </group>
             </group>
             </group>
@@ -1951,6 +2140,52 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             </mesh>
           </group>
         )}
+
+        {/* Worn inventory items - rendered at attachment points */}
+        {visibleItems && visibleItems.length > 0 && !simpleLodActive && (
+          <group>
+            {visibleItems.map((itemName, idx) => {
+              const config = getWornItemConfig(itemName);
+              if (!config) return null;
+
+              // Determine attachment position based on type
+              let attachPosition: [number, number, number];
+              switch (config.attachment) {
+                case 'belt_left':
+                  attachPosition = [-0.25 + config.offset[0], 0.85 + config.offset[1], 0.15 + config.offset[2]];
+                  break;
+                case 'belt_right':
+                  attachPosition = [0.25 + config.offset[0], 0.85 + config.offset[1], 0.15 + config.offset[2]];
+                  break;
+                case 'belt_back':
+                  attachPosition = [config.offset[0], 0.9 + config.offset[1], -0.2 + config.offset[2]];
+                  break;
+                case 'shoulder':
+                  attachPosition = [0.3 + config.offset[0], 1.3 + config.offset[1], config.offset[2]];
+                  break;
+                case 'neck':
+                  attachPosition = [config.offset[0], 1.45 + config.offset[1], config.offset[2]];
+                  break;
+                case 'hand_left':
+                  attachPosition = [-0.4 + config.offset[0], 1.0 + config.offset[1], 0.2 + config.offset[2]];
+                  break;
+                default:
+                  attachPosition = [0, 0.9, 0.1];
+              }
+
+              return (
+                <group
+                  key={`worn-${idx}-${itemName}`}
+                  position={attachPosition}
+                  rotation={config.rotation}
+                >
+                  <WornItemMesh type={config.type} scale={config.scale} />
+                </group>
+              );
+            })}
+          </group>
+        )}
+
         {/* Tiraz decorative bands on upper chest/shoulders */}
         {robeHasTrim && (
           <group>
@@ -2258,6 +2493,38 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   <mesh position={[faceVariant.eyeSpacing, eyeY + 0.025, 0.194]} castShadow>
                     <boxGeometry args={[0.05, 0.006, 0.01]} />
                     <meshStandardMaterial color="#1a1a1a" roughness={1} />
+                  </mesh>
+                </>
+              )}
+              {/* Kohl eye makeup - historically accurate for Damascus, both genders */}
+              {cosmeticEffects?.hasKohl && (
+                <>
+                  {/* Upper kohl lines - thick dark lines above eyes */}
+                  <mesh position={[-faceVariant.eyeSpacing, eyeY + 0.022, 0.197]}>
+                    <planeGeometry args={[0.055, 0.01]} />
+                    <meshStandardMaterial color="#0a0a0a" roughness={1} />
+                  </mesh>
+                  <mesh position={[faceVariant.eyeSpacing, eyeY + 0.022, 0.197]}>
+                    <planeGeometry args={[0.055, 0.01]} />
+                    <meshStandardMaterial color="#0a0a0a" roughness={1} />
+                  </mesh>
+                  {/* Lower kohl lines - slightly thinner under eyes */}
+                  <mesh position={[-faceVariant.eyeSpacing, eyeY - 0.022, 0.197]}>
+                    <planeGeometry args={[0.05, 0.008]} />
+                    <meshStandardMaterial color="#0a0a0a" roughness={1} />
+                  </mesh>
+                  <mesh position={[faceVariant.eyeSpacing, eyeY - 0.022, 0.197]}>
+                    <planeGeometry args={[0.05, 0.008]} />
+                    <meshStandardMaterial color="#0a0a0a" roughness={1} />
+                  </mesh>
+                  {/* Outer corner extensions - classic kohl wing/extension */}
+                  <mesh position={[-(faceVariant.eyeSpacing + 0.032), eyeY + 0.005, 0.196]} rotation={[0, 0, 0.4]}>
+                    <planeGeometry args={[0.018, 0.006]} />
+                    <meshStandardMaterial color="#0a0a0a" roughness={1} />
+                  </mesh>
+                  <mesh position={[faceVariant.eyeSpacing + 0.032, eyeY + 0.005, 0.196]} rotation={[0, 0, -0.4]}>
+                    <planeGeometry args={[0.018, 0.006]} />
+                    <meshStandardMaterial color="#0a0a0a" roughness={1} />
                   </mesh>
                 </>
               )}
@@ -2710,6 +2977,35 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   <capsuleGeometry args={[0.02, 0.04, 4, 6]} />
                   <meshStandardMaterial color={headColor} roughness={0.9} />
                 </mesh>
+                {/* Henna pattern on left hand (male) */}
+                {cosmeticEffects?.hasHenna && (
+                  <>
+                    <mesh position={[0, 0, -0.039]} rotation={[0.1, 0, 0]}>
+                      <circleGeometry args={[0.02, 8]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, 0.028, -0.039]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.007, 0.035]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, -0.028, -0.039]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.007, 0.035]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0.017, 0, -0.039]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.007, 0.024]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[-0.017, 0, -0.039]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.007, 0.024]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, 0.048, -0.039]}>
+                      <circleGeometry args={[0.006, 6]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                  </>
+                )}
               </group>
             </group>
             </group>
@@ -2739,6 +3035,35 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   <capsuleGeometry args={[0.02, 0.04, 4, 6]} />
                   <meshStandardMaterial color={headColor} roughness={0.9} />
                 </mesh>
+                {/* Henna pattern on right hand (male) */}
+                {cosmeticEffects?.hasHenna && (
+                  <>
+                    <mesh position={[0, 0, -0.039]} rotation={[0.1, 0, 0]}>
+                      <circleGeometry args={[0.02, 8]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, 0.028, -0.039]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.007, 0.035]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, -0.028, -0.039]} rotation={[0.1, 0, 0]}>
+                      <planeGeometry args={[0.007, 0.035]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0.017, 0, -0.039]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.007, 0.024]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[-0.017, 0, -0.039]} rotation={[0.1, 0, Math.PI / 2]}>
+                      <planeGeometry args={[0.007, 0.024]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                    <mesh position={[0, 0.048, -0.039]}>
+                      <circleGeometry args={[0.006, 6]} />
+                      <meshStandardMaterial color="#6B3410" roughness={1} />
+                    </mesh>
+                  </>
+                )}
               </group>
             </group>
             </group>

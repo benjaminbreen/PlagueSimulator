@@ -8,13 +8,48 @@
 import React from 'react';
 import { getDistrictType } from '../../../types';
 import { seededRandom } from '../../../utils/procedural';
+import { BedouinTent } from '../decorations/BedouinTent';
 
-export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> = ({ mapX, mapY }) => {
+export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number; timeOfDay?: number }> = ({ mapX, mapY, timeOfDay }) => {
   const district = getDistrictType(mapX, mapY);
   if (district !== 'OUTSKIRTS_SCRUBLAND') return null;
 
   const seed = mapX * 89 + mapY * 151;
   const rand = (offset: number) => seededRandom(seed + offset);
+
+  const areaHalf = 32;
+  const trackAngle = rand(900) * Math.PI * 2;
+  const trackDir: [number, number] = [Math.cos(trackAngle), Math.sin(trackAngle)];
+  const trackPerp: [number, number] = [-trackDir[1], trackDir[0]];
+  const trackOrigin = [
+    (rand(905) - 0.5) * areaHalf * 0.9,
+    0,
+    (rand(915) - 0.5) * areaHalf * 0.9
+  ] as [number, number, number];
+  const trackPoint = (t: number, offset: number): [number, number, number] => [
+    trackOrigin[0] + trackDir[0] * t + trackPerp[0] * offset,
+    0,
+    trackOrigin[2] + trackDir[1] * t + trackPerp[1] * offset
+  ];
+  const scatterPoint = (offsetSeed: number, minRadius = 8): [number, number, number] => {
+    let attempt = 0;
+    while (attempt < 8) {
+      const x = (rand(offsetSeed + attempt * 3) - 0.5) * areaHalf * 2;
+      const z = (rand(offsetSeed + attempt * 3 + 1) - 0.5) * areaHalf * 2;
+      const d = Math.hypot(x, z);
+      if (d >= minRadius) return [x, 0, z];
+      attempt += 1;
+    }
+    const fallback = minRadius + rand(offsetSeed + 99) * (areaHalf - minRadius);
+    return [trackOrigin[0] + trackDir[0] * fallback, 0, trackOrigin[2] + trackDir[1] * fallback];
+  };
+
+  // Bedouin tent spawning (0-1 tent)
+  const hasTent = rand(600) > 0.5;
+  const tent = hasTent ? {
+    pos: trackPoint((rand(610) - 0.5) * areaHalf * 1.6, (rand(620) - 0.5) * 8),
+    seed: seed + 777
+  } : null;
 
   // 2-3 buildings max: farms, hovels, or shepherd shelters
   const buildingType = rand(5) > 0.5 ? 'farm' : 'hovel';
@@ -27,14 +62,13 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
   }> = [];
 
   for (let i = 0; i < buildingCount; i++) {
-    const angle = (i / buildingCount) * Math.PI * 2 + rand(20 + i);
-    const distance = 16 + rand(30 + i) * 6;
+    const t = (rand(20 + i) - 0.5) * areaHalf * 1.4;
+    const offset = (rand(30 + i) - 0.5) * 8 + (i === 0 ? 0 : (rand(35 + i) > 0.6 ? 7 : -7));
     const type = i === 0 ? buildingType : (rand(35 + i) > 0.6 ? 'hovel' : 'shelter');
-
     buildings.push({
-      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance],
+      pos: trackPoint(t, offset),
       size: type === 'shelter' ? [2.0, 1.8] : [3.5 + rand(40 + i) * 1.0, 3.0 + rand(45 + i) * 0.8],
-      rotation: rand(50 + i) * Math.PI * 2,
+      rotation: trackAngle + (rand(50 + i) - 0.5) * 0.6,
       type
     });
   }
@@ -43,10 +77,10 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
   const wellCount = 1 + (rand(60) > 0.6 ? 1 : 0);
   const wells: Array<{ pos: [number, number, number] }> = [];
   for (let i = 0; i < wellCount; i++) {
-    const angle = rand(70 + i) * Math.PI * 2;
-    const distance = 10 + rand(80 + i) * 8;
+    const anchor = buildings[i % buildings.length];
+    const offset = (rand(70 + i) - 0.5) * 6;
     wells.push({
-      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance]
+      pos: anchor ? trackPoint((anchor.pos[0] * trackDir[0] + anchor.pos[2] * trackDir[1]) + 3, offset) : scatterPoint(80 + i, 10)
     });
   }
 
@@ -58,14 +92,17 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
     size: number;
   }> = [];
 
+  const groveCenter = scatterPoint(95, 10);
   for (let i = 0; i < treeCount; i++) {
-    const angle = rand(100 + i) * Math.PI * 2;
-    const distance = 8 + rand(110 + i) * 16;
+    const groveBias = rand(100 + i) > 0.55;
+    const base = groveBias
+      ? [groveCenter[0] + (rand(110 + i) - 0.5) * 10, 0, groveCenter[2] + (rand(120 + i) - 0.5) * 10] as [number, number, number]
+      : scatterPoint(130 + i, 6);
     const typeRoll = rand(115 + i);
     const type = typeRoll < 0.35 ? 'oak' : typeRoll < 0.65 ? 'pistachio' : typeRoll < 0.9 ? 'carob' : 'cypress';
 
     trees.push({
-      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance],
+      pos: base,
       type,
       size: 0.7 + rand(120 + i) * 0.5
     });
@@ -75,15 +112,27 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
   const herbCount = 15 + Math.floor(rand(130) * 10); // 15-24 herb bushes
   const herbs: Array<{ pos: [number, number, number]; size: number; color: string }> = [];
   for (let i = 0; i < herbCount; i++) {
-    const angle = rand(140 + i) * Math.PI * 2;
-    const distance = rand(150 + i) * 22;
+    const base = rand(140 + i) > 0.6
+      ? trackPoint((rand(150 + i) - 0.5) * areaHalf * 1.6, (rand(160 + i) - 0.5) * 10)
+      : scatterPoint(170 + i, 10);
     const herbType = rand(155 + i);
     const color = herbType < 0.3 ? '#4a5a3a' : herbType < 0.6 ? '#5a6a4a' : herbType < 0.85 ? '#3a4a2a' : '#6a5a8a'; // Green herbs or purple lavender
 
     herbs.push({
-      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance],
+      pos: base,
       size: 0.3 + rand(160 + i) * 0.3,
       color
+    });
+  }
+
+  // Thorn scrub clumps (spiky, low shrubs)
+  const scrubCount = 8 + Math.floor(rand(165) * 8); // 8-15 clumps
+  const scrubs: Array<{ pos: [number, number, number]; size: number }> = [];
+  for (let i = 0; i < scrubCount; i++) {
+    const base = scatterPoint(175 + i, 12);
+    scrubs.push({
+      pos: base,
+      size: 0.35 + rand(180 + i) * 0.25
     });
   }
 
@@ -91,10 +140,9 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
   const grassCount = 25 + Math.floor(rand(170) * 15); // 25-40 clumps
   const grasses: Array<{ pos: [number, number, number]; size: number }> = [];
   for (let i = 0; i < grassCount; i++) {
-    const angle = rand(180 + i) * Math.PI * 2;
-    const distance = rand(190 + i) * 24;
+    const base = scatterPoint(190 + i, 6);
     grasses.push({
-      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance],
+      pos: base,
       size: 0.15 + rand(195 + i) * 0.15
     });
   }
@@ -102,12 +150,26 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
   // Rocky outcroppings and scattered stones
   const rockCount = 10 + Math.floor(rand(200) * 8); // 10-18 rocks
   const rocks: Array<{ pos: [number, number, number]; size: number }> = [];
+  const ridgeOffset = (rand(205) - 0.5) * 14;
   for (let i = 0; i < rockCount; i++) {
-    const angle = rand(210 + i) * Math.PI * 2;
-    const distance = rand(220 + i) * 20;
+    const t = (rand(210 + i) - 0.5) * areaHalf * 1.8;
+    const offset = ridgeOffset + (rand(220 + i) - 0.5) * 4;
     rocks.push({
-      pos: [Math.cos(angle) * distance, 0, Math.sin(angle) * distance],
+      pos: trackPoint(t, offset),
       size: 0.4 + rand(230 + i) * 0.8
+    });
+  }
+
+  const hasCairn = rand(560) > 0.7;
+  const cairnPos = hasCairn ? scatterPoint(565, 12) : null;
+
+  // Bone scatter (0-2 small piles)
+  const boneCount = rand(575) > 0.7 ? 2 : rand(576) > 0.4 ? 1 : 0;
+  const bones: Array<{ pos: [number, number, number]; rot: number }> = [];
+  for (let i = 0; i < boneCount; i++) {
+    bones.push({
+      pos: scatterPoint(580 + i, 14),
+      rot: rand(590 + i) * Math.PI * 2
     });
   }
 
@@ -127,6 +189,15 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
 
   return (
     <group>
+      {/* Worn track strip */}
+      <mesh
+        position={[trackOrigin[0], 0.02, trackOrigin[2]]}
+        rotation={[-Math.PI / 2, trackAngle, 0]}
+        receiveShadow
+      >
+        <planeGeometry args={[areaHalf * 2.4, 3.2]} />
+        <meshStandardMaterial color="#8a7a5a" roughness={0.95} transparent opacity={0.28} />
+      </mesh>
       {/* Buildings - farms, hovels, shepherd shelters */}
       {buildings.map((building, i) => (
         <group key={`building-${i}`} position={building.pos} rotation={[0, building.rotation, 0]}>
@@ -320,6 +391,27 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
         </mesh>
       ))}
 
+      {/* Thorn Scrub Clumps */}
+      {scrubs.map((scrub, i) => (
+        <group key={`scrub-${i}`} position={scrub.pos}>
+          {[0, 1, 2, 3].map((spike) => (
+            <mesh
+              key={`scrub-spike-${i}-${spike}`}
+              position={[
+                (rand(610 + i * 10 + spike) - 0.5) * scrub.size,
+                scrub.size * 0.2,
+                (rand(620 + i * 10 + spike) - 0.5) * scrub.size
+              ]}
+              rotation={[rand(630 + i * 10 + spike) * 0.6, rand(640 + i * 10 + spike) * Math.PI, 0]}
+              castShadow
+            >
+              <coneGeometry args={[scrub.size * 0.25, scrub.size * 0.7, 5]} />
+              <meshStandardMaterial color="#5a5e3a" roughness={0.95} />
+            </mesh>
+          ))}
+        </group>
+      ))}
+
       {/* Dry Grass Clumps */}
       {grasses.map((grass, i) => (
         <group key={`grass-${i}`} position={grass.pos}>
@@ -360,6 +452,41 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
         </mesh>
       ))}
 
+      {/* Stone Cairn */}
+      {hasCairn && cairnPos && (
+        <group position={cairnPos}>
+          {[0, 1, 2, 3].map((layer) => (
+            <mesh
+              key={`cairn-${layer}`}
+              position={[0, 0.2 + layer * 0.18, 0]}
+              rotation={[0, rand(610 + layer) * Math.PI, rand(620 + layer) * 0.1]}
+              castShadow
+            >
+              <dodecahedronGeometry args={[0.45 - layer * 0.08, 0]} />
+              <meshStandardMaterial color="#7a7466" roughness={0.97} />
+            </mesh>
+          ))}
+        </group>
+      )}
+
+      {/* Bone Scatter */}
+      {bones.map((bone, i) => (
+        <group key={`bone-${i}`} position={bone.pos} rotation={[0, bone.rot, 0]}>
+          <mesh position={[0, 0.05, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.05, 0.07, 0.35, 6]} />
+            <meshStandardMaterial color="#b6b1a3" roughness={0.92} />
+          </mesh>
+          <mesh position={[0.18, 0.03, -0.08]} rotation={[0, 0.6, 0.2]} castShadow>
+            <cylinderGeometry args={[0.04, 0.06, 0.28, 6]} />
+            <meshStandardMaterial color="#b0ab9c" roughness={0.92} />
+          </mesh>
+          <mesh position={[-0.12, 0.04, 0.1]} castShadow>
+            <sphereGeometry args={[0.08, 6, 6]} />
+            <meshStandardMaterial color="#c2bdb0" roughness={0.9} />
+          </mesh>
+        </group>
+      ))}
+
       {/* Stone Walls/Fencing */}
       {fences.map((fence, i) => (
         <group key={`fence-${i}`} position={fence.pos} rotation={[0, fence.rotation, 0]}>
@@ -390,6 +517,9 @@ export const OutskirtsScrublandDecor: React.FC<{ mapX: number; mapY: number }> =
           ))}
         </group>
       ))}
+
+      {/* Bedouin Tent */}
+      {tent && <BedouinTent position={tent.pos} seed={tent.seed} timeOfDay={timeOfDay} />}
     </group>
   );
 };

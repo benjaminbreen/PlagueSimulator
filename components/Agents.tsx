@@ -1,4 +1,4 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { CONSTANTS, AgentState, SimulationCounts, SimulationParams, BuildingMetadata, BuildingInfectionState, Obstacle, NPCStats, DistrictType, getDistrictType, PlayerActionEvent, NpcStateOverride, NPCRecord, PlayerStats } from '../types';
@@ -107,7 +107,8 @@ export const Agents: React.FC<AgentsProps> = ({
   const minVisible = params.timeOfDay >= 6 && params.timeOfDay <= 22 ? 8 : 4;
   const activeCount = Math.min(maxAgents || pool.length, Math.max(minVisible, getActiveCount(), 0));
 
-  const handleUpdate = (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, plagueMeta?: import('../types').NPCPlagueMeta) => {
+  // PERFORMANCE: Memoize handlers to prevent NPC re-renders from reference changes
+  const handleUpdate = useCallback((id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, plagueMeta?: import('../types').NPCPlagueMeta) => {
     const prev = agentRegistry.current.get(id);
     agentRegistry.current.set(id, {
       state,
@@ -142,13 +143,13 @@ export const Agents: React.FC<AgentsProps> = ({
         onNpcUpdate(id, state, pos, awareness, panic, 'outdoor', plagueMeta);
       }
     }
-  };
+  }, [onNpcUpdate]);
 
   // Wrapped handler for NPC-initiated encounters that sets global cooldown
-  const handleNPCInitiatedEncounter = (npc: { stats: NPCStats; state: AgentState }) => {
+  const handleNPCInitiatedEncounter = useCallback((npc: { stats: NPCStats; state: AgentState }) => {
     globalApproachCooldownRef.current = simTime + GLOBAL_APPROACH_COOLDOWN;
     onNPCInitiatedEncounter?.(npc);
-  };
+  }, [simTime, onNPCInitiatedEncounter]);
 
   useFrame((_, delta) => {
     hashTimerRef.current += delta;

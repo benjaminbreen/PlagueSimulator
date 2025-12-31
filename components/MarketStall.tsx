@@ -255,9 +255,9 @@ export const MarketStall: React.FC<MarketStallProps> = ({ stall, nightFactor }) 
           </mesh>
           <mesh>
             <sphereGeometry args={[0.12, 10, 10]} />
-            <meshStandardMaterial color="#ffb347" emissive="#ff7a18" emissiveIntensity={0.9 * nightFactor} />
+            <meshStandardMaterial color="#ffb347" emissive="#ff7a18" emissiveIntensity={1.6 * nightFactor} />
           </mesh>
-          <pointLight intensity={1.2 * nightFactor} distance={16} decay={2} color="#ffb347" />
+          <pointLight intensity={2.0 * nightFactor} distance={20} decay={2} color="#ffb347" />
         </group>
       )}
       {/* Wooden frame - posts */}

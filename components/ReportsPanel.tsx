@@ -3,6 +3,7 @@ import { ArrowUpDown, ChevronDown, Package, ShieldAlert, Skull } from 'lucide-re
 import { AgentState, InfectedHouseholdInfo, ItemAppearance, NPCStats, PlayerStats, SimulationParams, SimulationStats } from '../types';
 import { MoraleStats } from './Agents';
 import { GuideTab } from './HistoricalGuide';
+import { ItemIcon } from './items/ItemIcon';
 
 interface InventoryEntry {
   id: string;
@@ -454,26 +455,29 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                     <div className="text-amber-100/50 italic">No items carried.</div>
                   ) : (
                     inventoryEntries.map((item) => (
-                      <div key={item.id} className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="font-semibold text-amber-100">{item.name}</div>
-                            {onDropItem && (
-                              <button
-                                onClick={() => onDropItem({ inventoryId: item.id, itemId: item.itemId, label: item.name, appearance: item.appearance })}
-                                className="text-[9px] uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
-                              >
-                                Drop
-                              </button>
-                            )}
-                          </div>
-                          <div className="text-[10px] text-amber-100/50">{item.description}</div>
+                      <div key={item.id} className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded bg-black/40 border border-amber-500/30 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                          <ItemIcon name={item.name} size={28} />
                         </div>
-                        <div className="text-right">
-                          <div className={`text-[9px] uppercase tracking-widest ${getRarityMeta(item.rarity).color}`}>
-                            {getRarityMeta(item.rarity).label}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-semibold text-amber-100 truncate">{item.name}</div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className={`text-[9px] uppercase tracking-widest ${getRarityMeta(item.rarity).color}`}>
+                                {getRarityMeta(item.rarity).label}
+                              </span>
+                              <span className="text-[10px] font-mono text-amber-200/80">x{item.quantity}</span>
+                              {onDropItem && (
+                                <button
+                                  onClick={() => onDropItem({ inventoryId: item.id, itemId: item.itemId, label: item.name, appearance: item.appearance })}
+                                  className="text-[9px] uppercase tracking-widest text-amber-300/70 hover:text-amber-200"
+                                >
+                                  Drop
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-[11px] font-mono text-amber-200/80">x{item.quantity}</div>
+                          <div className="text-[10px] text-amber-100/50 truncate">{item.description}</div>
                         </div>
                       </div>
                     ))

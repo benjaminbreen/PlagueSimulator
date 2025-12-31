@@ -8,6 +8,156 @@ import { ContactShadow, Flame } from './primitives/Lighting';
 import { FirePit, FireSmoke } from './primitives/Fire';
 import { Spindle, DyeVat, Anvil, ToolRack, Mortar, HerbRack, MedicineShelf } from './primitives/Workshop';
 
+// Realistic staircase component with individual steps leading to upper level
+const Staircase: React.FC<{
+  position: [number, number, number];
+  rotation: [number, number, number];
+}> = ({ position, rotation }) => {
+  const woodColor = '#6a4a2a';
+  const woodDarkColor = '#4a3520';
+  const stepCount = 8;
+  const stepHeight = 0.28;
+  const stepDepth = 0.35;
+  const stepWidth = 1.8;
+  const railHeight = 0.9;
+  const railWidth = 0.06;
+
+  return (
+    <group position={position} rotation={rotation}>
+      {/* Steps */}
+      {Array.from({ length: stepCount }).map((_, i) => (
+        <group key={i} position={[0, i * stepHeight, -i * stepDepth]}>
+          {/* Step tread */}
+          <mesh position={[0, stepHeight / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[stepWidth, 0.08, stepDepth + 0.05]} />
+            <meshStandardMaterial color={woodColor} roughness={0.85} />
+          </mesh>
+          {/* Step riser */}
+          <mesh position={[0, 0, stepDepth / 2]} castShadow receiveShadow>
+            <boxGeometry args={[stepWidth, stepHeight, 0.04]} />
+            <meshStandardMaterial color={woodDarkColor} roughness={0.9} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Side stringers (support beams) */}
+      {[-1, 1].map((side) => (
+        <mesh
+          key={side}
+          position={[side * (stepWidth / 2 + 0.04), stepCount * stepHeight / 2, -stepCount * stepDepth / 2]}
+          rotation={[Math.atan2(stepCount * stepHeight, stepCount * stepDepth), 0, 0]}
+          castShadow
+          receiveShadow
+        >
+          <boxGeometry args={[0.08, Math.hypot(stepCount * stepHeight, stepCount * stepDepth), 0.15]} />
+          <meshStandardMaterial color={woodDarkColor} roughness={0.9} />
+        </mesh>
+      ))}
+
+      {/* Handrails */}
+      {[-1, 1].map((side) => (
+        <group key={`rail-${side}`}>
+          {/* Vertical posts at bottom and top */}
+          <mesh position={[side * (stepWidth / 2 + 0.04), railHeight / 2, 0.1]} castShadow>
+            <boxGeometry args={[railWidth, railHeight, railWidth]} />
+            <meshStandardMaterial color={woodDarkColor} roughness={0.85} />
+          </mesh>
+          <mesh
+            position={[
+              side * (stepWidth / 2 + 0.04),
+              stepCount * stepHeight + railHeight / 2,
+              -stepCount * stepDepth - 0.1
+            ]}
+            castShadow
+          >
+            <boxGeometry args={[railWidth, railHeight, railWidth]} />
+            <meshStandardMaterial color={woodDarkColor} roughness={0.85} />
+          </mesh>
+          {/* Angled rail connecting posts */}
+          <mesh
+            position={[
+              side * (stepWidth / 2 + 0.04),
+              stepCount * stepHeight / 2 + railHeight,
+              -stepCount * stepDepth / 2
+            ]}
+            rotation={[Math.atan2(stepCount * stepHeight, stepCount * stepDepth), 0, 0]}
+            castShadow
+          >
+            <boxGeometry args={[railWidth, Math.hypot(stepCount * stepHeight, stepCount * stepDepth) + 0.3, railWidth]} />
+            <meshStandardMaterial color={woodColor} roughness={0.8} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Upper landing platform */}
+      <mesh
+        position={[0, stepCount * stepHeight + 0.04, -stepCount * stepDepth - 0.6]}
+        castShadow
+        receiveShadow
+      >
+        <boxGeometry args={[stepWidth + 0.2, 0.1, 1.2]} />
+        <meshStandardMaterial color={woodColor} roughness={0.85} />
+      </mesh>
+
+      {/* Back wall/barrier suggesting upper level */}
+      <mesh
+        position={[0, stepCount * stepHeight + 0.6, -stepCount * stepDepth - 1.15]}
+        castShadow
+      >
+        <boxGeometry args={[stepWidth + 0.2, 1.1, 0.08]} />
+        <meshStandardMaterial color="#8a7355" roughness={0.9} />
+      </mesh>
+
+      {/* Dark opening suggesting passage to upper floor */}
+      <mesh
+        position={[0, stepCount * stepHeight + 1.4, -stepCount * stepDepth - 1.1]}
+      >
+        <planeGeometry args={[stepWidth - 0.4, 0.8]} />
+        <meshBasicMaterial color="#1a1410" />
+      </mesh>
+    </group>
+  );
+};
+
+// Simple ladder for peasant buildings
+const Ladder: React.FC<{
+  position: [number, number, number];
+  rotation: [number, number, number];
+}> = ({ position, rotation }) => {
+  const woodColor = '#7a5a3a';
+  const rungCount = 7;
+  const rungSpacing = 0.32;
+  const ladderWidth = 0.5;
+  const ladderHeight = rungCount * rungSpacing + 0.3;
+
+  return (
+    <group position={position} rotation={rotation}>
+      {/* Side rails */}
+      {[-1, 1].map((side) => (
+        <mesh
+          key={side}
+          position={[side * ladderWidth / 2, ladderHeight / 2, 0]}
+          castShadow
+        >
+          <boxGeometry args={[0.06, ladderHeight, 0.06]} />
+          <meshStandardMaterial color={woodColor} roughness={0.9} />
+        </mesh>
+      ))}
+      {/* Rungs */}
+      {Array.from({ length: rungCount }).map((_, i) => (
+        <mesh
+          key={i}
+          position={[0, 0.2 + i * rungSpacing, 0]}
+          castShadow
+        >
+          <boxGeometry args={[ladderWidth - 0.06, 0.04, 0.04]} />
+          <meshStandardMaterial color={woodColor} roughness={0.85} />
+        </mesh>
+      ))}
+    </group>
+  );
+};
+
 const InteriorHoverLabel: React.FC<{ title: string; position: [number, number, number] }> = ({ title, position }) => (
   <Html position={position} center>
     <div className="bg-black/70 border border-amber-700/50 text-amber-200 text-[10px] uppercase tracking-widest px-3 py-1 rounded-full shadow-[0_0_18px_rgba(245,158,11,0.25)] pointer-events-none">
@@ -55,12 +205,29 @@ const getPropLabelOffset = (type: InteriorPropType): [number, number, number] =>
       return [0, 1.4, 0];
     case InteriorPropType.FLOOR_LAMP:
     case InteriorPropType.LADDER:
-    case InteriorPropType.STAIRS:
     case InteriorPropType.LANTERN:
       return [0, 2.0, 0];
+    case InteriorPropType.STAIRS:
+      return [0, 3.0, 0]; // Taller for realistic staircase
     case InteriorPropType.FIRE_PIT:
     case InteriorPropType.BRAZIER:
       return [0, 1.2, 0];
+    case InteriorPropType.SPICE_DISPLAY:
+    case InteriorPropType.CERAMIC_DISPLAY:
+    case InteriorPropType.METAL_SAMPLES:
+      return [0, 1.3, 0];
+    case InteriorPropType.PERFUME_BOTTLES:
+    case InteriorPropType.JEWELRY_CASE:
+    case InteriorPropType.LEATHER_GOODS:
+      return [0, 1.1, 0];
+    case InteriorPropType.COOKING_POT:
+    case InteriorPropType.GRAIN_SACK:
+      return [0, 0.8, 0];
+    case InteriorPropType.BREAD_LOAF:
+    case InteriorPropType.FOOD_BOWL:
+    case InteriorPropType.SPICE_JAR:
+    case InteriorPropType.DATE_BASKET:
+      return [0, 0.6, 0];
     default:
       return [0, 0.9, 0];
   }
@@ -651,16 +818,29 @@ const InteriorPropMesh: React.FC<{
       );
     }
     case InteriorPropType.BEDROLL:
+      // Larger sleeping palette with proper bedding
       return (
-        <group {...common} position={anchoredPos(0.05)}>
-          <ContactShadow size={[1.4, 0.7]} />
+        <group {...common} position={anchoredPos(0.08)}>
+          <ContactShadow size={[2.6, 1.3]} />
+          {/* Main mattress/palette */}
           <mesh receiveShadow>
-            <boxGeometry args={[1.4, 0.22, 0.7]} />
-            <meshStandardMaterial color="#8c7b5a" roughness={0.9} />
+            <boxGeometry args={[2.6, 0.18, 1.3]} />
+            <meshStandardMaterial color="#7a6a4a" roughness={0.92} />
           </mesh>
-          <mesh position={[0.45, 0.16, 0]} receiveShadow>
-            <boxGeometry args={[0.3, 0.12, 0.4]} />
+          {/* Blanket/covering layer */}
+          <mesh position={[-0.15, 0.12, 0]} receiveShadow>
+            <boxGeometry args={[1.8, 0.08, 1.05]} />
+            <meshStandardMaterial color="#8c7b5a" roughness={0.88} />
+          </mesh>
+          {/* Pillow */}
+          <mesh position={[1.0, 0.18, 0]} receiveShadow>
+            <boxGeometry args={[0.45, 0.14, 0.55]} />
             <meshStandardMaterial color="#b8a27d" roughness={0.85} />
+          </mesh>
+          {/* Rolled blanket at foot */}
+          <mesh position={[-1.05, 0.14, 0]} rotation={[0, 0, Math.PI / 2]} receiveShadow>
+            <cylinderGeometry args={[0.13, 0.13, 0.9, 8]} />
+            <meshStandardMaterial color="#6a5a42" roughness={0.9} />
           </mesh>
         </group>
       );
@@ -726,20 +906,20 @@ const InteriorPropMesh: React.FC<{
       // Raised platform bed with frame and curtain posts - wealthy
       return (
         <group {...common} position={anchoredPos(0.35)}>
-          <ContactShadow size={[2.6, 1.4]} />
+          <ContactShadow size={[2.9, 1.6]} />
           {/* Raised wooden platform */}
           <mesh receiveShadow>
-            <boxGeometry args={[2.6, 0.5, 1.4]} />
+            <boxGeometry args={[2.9, 0.5, 1.6]} />
             <meshStandardMaterial color="#5a3a28" roughness={0.88} />
           </mesh>
           {/* Decorative base trim */}
           <mesh position={[0, -0.2, 0]} receiveShadow>
-            <boxGeometry args={[2.7, 0.12, 1.5]} />
+            <boxGeometry args={[3.0, 0.12, 1.7]} />
             <meshStandardMaterial color="#4a2a1a" roughness={0.9} />
           </mesh>
           {/* Mattress */}
           <mesh position={[0, 0.32, 0]} receiveShadow>
-            <boxGeometry args={[2.4, 0.18, 1.2]} />
+            <boxGeometry args={[2.6, 0.18, 1.35]} />
             <meshStandardMaterial color="#7a5a4a" roughness={0.82} />
           </mesh>
           {/* Bolster pillows */}
@@ -752,36 +932,76 @@ const InteriorPropMesh: React.FC<{
             <meshStandardMaterial color="#b8a088" roughness={0.8} />
           </mesh>
           {/* Bed posts for curtains */}
-          <mesh position={[-1.2, 0.9, -0.6]} receiveShadow castShadow>
+          <mesh position={[-1.35, 0.9, -0.7]} receiveShadow castShadow>
             <cylinderGeometry args={[0.06, 0.06, 1.4, 8]} />
             <meshStandardMaterial color="#4a2a1a" roughness={0.85} />
           </mesh>
-          <mesh position={[-1.2, 0.9, 0.6]} receiveShadow castShadow>
+          <mesh position={[-1.35, 0.9, 0.7]} receiveShadow castShadow>
             <cylinderGeometry args={[0.06, 0.06, 1.4, 8]} />
             <meshStandardMaterial color="#4a2a1a" roughness={0.85} />
           </mesh>
-          <mesh position={[1.2, 0.9, -0.6]} receiveShadow castShadow>
+          <mesh position={[1.35, 0.9, -0.7]} receiveShadow castShadow>
             <cylinderGeometry args={[0.06, 0.06, 1.4, 8]} />
             <meshStandardMaterial color="#4a2a1a" roughness={0.85} />
           </mesh>
-          <mesh position={[1.2, 0.9, 0.6]} receiveShadow castShadow>
+          <mesh position={[1.35, 0.9, 0.7]} receiveShadow castShadow>
             <cylinderGeometry args={[0.06, 0.06, 1.4, 8]} />
             <meshStandardMaterial color="#4a2a1a" roughness={0.85} />
           </mesh>
           {/* Top frame connecting posts */}
-          <mesh position={[0, 1.55, -0.6]} receiveShadow>
-            <boxGeometry args={[2.5, 0.08, 0.08]} />
+          <mesh position={[0, 1.55, -0.7]} receiveShadow>
+            <boxGeometry args={[2.8, 0.08, 0.08]} />
             <meshStandardMaterial color="#4a2a1a" roughness={0.85} />
           </mesh>
-          <mesh position={[0, 1.55, 0.6]} receiveShadow>
-            <boxGeometry args={[2.5, 0.08, 0.08]} />
+          <mesh position={[0, 1.55, 0.7]} receiveShadow>
+            <boxGeometry args={[2.8, 0.08, 0.08]} />
             <meshStandardMaterial color="#4a2a1a" roughness={0.85} />
           </mesh>
           {/* Rich blanket/coverlet */}
           <mesh position={[-0.2, 0.48, 0]} receiveShadow>
-            <boxGeometry args={[1.8, 0.08, 1.1]} />
+            <boxGeometry args={[2.0, 0.08, 1.25]} />
             <meshStandardMaterial color="#6a3a3a" roughness={0.85} />
           </mesh>
+        </group>
+      );
+    case InteriorPropType.CHILD_TOY:
+      // Simple wooden toy (wheel or animal)
+      return (
+        <group {...common} position={anchoredPos(0.05)}>
+          <ContactShadow size={[0.6, 0.6]} />
+          <mesh receiveShadow>
+            <boxGeometry args={[0.35, 0.18, 0.22]} />
+            <meshStandardMaterial color="#8a6a4b" roughness={0.9} />
+          </mesh>
+          <mesh position={[-0.15, -0.09, 0.12]} receiveShadow>
+            <cylinderGeometry args={[0.08, 0.08, 0.08, 10]} />
+            <meshStandardMaterial color="#5a3b26" roughness={0.95} />
+          </mesh>
+          <mesh position={[0.15, -0.09, 0.12]} receiveShadow>
+            <cylinderGeometry args={[0.08, 0.08, 0.08, 10]} />
+            <meshStandardMaterial color="#5a3b26" roughness={0.95} />
+          </mesh>
+        </group>
+      );
+    case InteriorPropType.CRADLE:
+      // Wooden cradle for infants
+      return (
+        <group {...common} position={anchoredPos(0.08)}>
+          <ContactShadow size={[1.4, 0.7]} />
+          <mesh receiveShadow>
+            <boxGeometry args={[1.4, 0.28, 0.7]} />
+            <meshStandardMaterial color="#6a4a2a" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 0.22, 0]} receiveShadow>
+            <boxGeometry args={[1.25, 0.18, 0.55]} />
+            <meshStandardMaterial color="#8a7a5a" roughness={0.85} />
+          </mesh>
+          {[-0.55, 0.55].map((x) => (
+            <mesh key={`rocker-${x}`} position={[x, -0.12, 0]} rotation={[0, 0, Math.PI / 2]} receiveShadow>
+              <cylinderGeometry args={[0.06, 0.06, 0.9, 10]} />
+              <meshStandardMaterial color="#4a2a1a" roughness={0.9} />
+            </mesh>
+          ))}
         </group>
       );
     case InteriorPropType.WORKBENCH:
@@ -2539,15 +2759,9 @@ const InteriorPropMesh: React.FC<{
       );
     }
     case InteriorPropType.LADDER:
+      return <Ladder position={anchoredPos(0)} rotation={rotation} />;
     case InteriorPropType.STAIRS:
-      return (
-        <group {...common} position={anchoredPos(0)}>
-          <mesh receiveShadow>
-            <boxGeometry args={[1.4, 2.2, 0.6]} />
-            <meshStandardMaterial color="#7a5a3a" roughness={0.9} />
-          </mesh>
-        </group>
-      );
+      return <Staircase position={anchoredPos(0)} rotation={rotation} />;
     case InteriorPropType.SPINDLE:
       return <Spindle position={anchoredPos(0)} rotation={rotation} />;
     case InteriorPropType.DYE_VAT:
@@ -2562,6 +2776,48 @@ const InteriorPropMesh: React.FC<{
       return <HerbRack position={anchoredPos(0)} rotation={rotation} />;
     case InteriorPropType.MEDICINE_SHELF:
       return <MedicineShelf position={anchoredPos(0)} rotation={rotation} />;
+    case InteriorPropType.TREATMENT_SHELF:
+      return (
+        <group {...common} position={anchoredPos(0)} rotation={rotation}>
+          <ContactShadow size={[1.2, 0.6]} />
+          <mesh position={[0, 0.5, 0]} receiveShadow>
+            <boxGeometry args={[1.2, 0.1, 0.35]} />
+            <meshStandardMaterial color="#6f5a44" roughness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.2, 0]} receiveShadow>
+            <boxGeometry args={[1.2, 0.08, 0.35]} />
+            <meshStandardMaterial color="#6a543f" roughness={0.9} />
+          </mesh>
+          {[-0.4, 0, 0.4].map((x, i) => (
+            <mesh key={`jar-${i}`} position={[x, 0.62, 0.02]} receiveShadow>
+              <cylinderGeometry args={[0.08, 0.1, 0.18, 10]} />
+              <meshStandardMaterial color="#8f7a63" roughness={0.75} />
+            </mesh>
+          ))}
+          <mesh position={[0.25, 0.62, -0.08]} receiveShadow>
+            <boxGeometry args={[0.3, 0.06, 0.2]} />
+            <meshStandardMaterial color="#c9b89a" roughness={0.9} />
+          </mesh>
+        </group>
+      );
+    case InteriorPropType.LECTERN:
+      return (
+        <group {...common} position={anchoredPos(0)} rotation={rotation}>
+          <ContactShadow size={[0.9, 0.7]} />
+          <mesh position={[0, 0.6, 0]} rotation={[0.2, 0, 0]} receiveShadow>
+            <boxGeometry args={[0.9, 0.06, 0.6]} />
+            <meshStandardMaterial color="#6a4f37" roughness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.3, 0]} receiveShadow>
+            <boxGeometry args={[0.2, 0.6, 0.2]} />
+            <meshStandardMaterial color="#5a4330" roughness={0.9} />
+          </mesh>
+          <mesh position={[0, 0.06, 0]} receiveShadow>
+            <boxGeometry args={[0.6, 0.08, 0.5]} />
+            <meshStandardMaterial color="#5a4330" roughness={0.9} />
+          </mesh>
+        </group>
+      );
     case InteriorPropType.ARCH_COLUMN: {
       // Decorative arch column for religious buildings - horseshoe arch style
       const columnHeight = 3.2;
@@ -2632,6 +2888,413 @@ const InteriorPropMesh: React.FC<{
         </group>
       );
     }
+
+    // ========== FOOD & KITCHEN PROPS ==========
+    case InteriorPropType.BREAD_LOAF: {
+      // Stack of traditional flatbreads (khubz)
+      const breadColor = '#c9a866';
+      const darkSpots = '#a08040';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Stack of 3-4 flatbreads */}
+          {[0, 0.03, 0.06, 0.09].map((y, i) => (
+            <mesh key={i} position={[0, y + 0.02, 0]} rotation={[0, i * 0.4, 0]} castShadow receiveShadow>
+              <cylinderGeometry args={[0.18 - i * 0.01, 0.2 - i * 0.01, 0.025, 12]} />
+              <meshStandardMaterial color={i % 2 === 0 ? breadColor : darkSpots} roughness={0.95} />
+            </mesh>
+          ))}
+          {/* Cloth beneath */}
+          <mesh position={[0, 0.005, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+            <circleGeometry args={[0.25, 12]} />
+            <meshStandardMaterial color="#f5e6d3" roughness={0.9} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case InteriorPropType.FOOD_BOWL: {
+      // Ceramic bowl with stew/lentils
+      const bowlColor = '#8b6914';
+      const foodColor = '#6b4423';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Bowl exterior */}
+          <mesh position={[0, 0.06, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.12, 0.08, 0.1, 16]} />
+            <meshStandardMaterial color={bowlColor} roughness={0.75} />
+          </mesh>
+          {/* Food inside (slightly lower) */}
+          <mesh position={[0, 0.09, 0]} receiveShadow>
+            <cylinderGeometry args={[0.1, 0.1, 0.04, 16]} />
+            <meshStandardMaterial color={foodColor} roughness={0.9} />
+          </mesh>
+          {/* Bowl rim */}
+          <mesh position={[0, 0.11, 0]} castShadow>
+            <torusGeometry args={[0.12, 0.015, 8, 16]} />
+            <meshStandardMaterial color={bowlColor} roughness={0.75} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case InteriorPropType.SPICE_JAR: {
+      // Small ceramic jar for spices with lid
+      const jarColor = '#b8956e';
+      const lidColor = '#6b4423';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Jar body */}
+          <mesh position={[0, 0.08, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.06, 0.05, 0.14, 12]} />
+            <meshStandardMaterial color={jarColor} roughness={0.8} />
+          </mesh>
+          {/* Jar neck */}
+          <mesh position={[0, 0.16, 0]} castShadow>
+            <cylinderGeometry args={[0.04, 0.05, 0.03, 12]} />
+            <meshStandardMaterial color={jarColor} roughness={0.8} />
+          </mesh>
+          {/* Lid */}
+          <mesh position={[0, 0.19, 0]} castShadow>
+            <cylinderGeometry args={[0.05, 0.04, 0.03, 12]} />
+            <meshStandardMaterial color={lidColor} roughness={0.85} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case InteriorPropType.DATE_BASKET: {
+      // Woven basket with dates
+      const basketColor = '#8b7355';
+      const dateColor = '#4a2c17';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Basket base */}
+          <mesh position={[0, 0.06, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.18, 0.14, 0.1, 16]} />
+            <meshStandardMaterial color={basketColor} roughness={0.95} />
+          </mesh>
+          {/* Basket rim */}
+          <mesh position={[0, 0.11, 0]} castShadow>
+            <torusGeometry args={[0.18, 0.02, 8, 16]} />
+            <meshStandardMaterial color={basketColor} roughness={0.95} />
+          </mesh>
+          {/* Dates pile (several small spheres) */}
+          {[
+            [0, 0.1, 0], [0.06, 0.09, 0.04], [-0.05, 0.09, -0.03],
+            [0.03, 0.12, -0.04], [-0.04, 0.11, 0.05], [0, 0.13, 0.02]
+          ].map((pos, i) => (
+            <mesh key={i} position={pos as [number, number, number]} castShadow>
+              <sphereGeometry args={[0.035, 8, 6]} />
+              <meshStandardMaterial color={dateColor} roughness={0.85} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case InteriorPropType.COOKING_POT: {
+      // Copper cooking pot on a stand
+      const copperColor = '#b87333';
+      const copperDark = '#8b4513';
+      const standColor = '#3a3a3a';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Iron tripod stand */}
+          {[0, Math.PI * 2/3, Math.PI * 4/3].map((angle, i) => (
+            <mesh
+              key={i}
+              position={[Math.sin(angle) * 0.18, 0.12, Math.cos(angle) * 0.18]}
+              rotation={[0.3 * Math.cos(angle), 0, 0.3 * Math.sin(angle)]}
+              castShadow
+            >
+              <boxGeometry args={[0.03, 0.28, 0.03]} />
+              <meshStandardMaterial color={standColor} roughness={0.9} metalness={0.3} />
+            </mesh>
+          ))}
+          {/* Pot body */}
+          <mesh position={[0, 0.28, 0]} castShadow receiveShadow>
+            <sphereGeometry args={[0.2, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.6]} />
+            <meshStandardMaterial color={copperColor} roughness={0.4} metalness={0.6} />
+          </mesh>
+          {/* Pot rim */}
+          <mesh position={[0, 0.38, 0]} castShadow>
+            <torusGeometry args={[0.15, 0.025, 8, 16]} />
+            <meshStandardMaterial color={copperDark} roughness={0.5} metalness={0.5} />
+          </mesh>
+          {/* Handles */}
+          {[-1, 1].map((side) => (
+            <mesh key={side} position={[side * 0.2, 0.32, 0]} rotation={[0, 0, side * 0.3]} castShadow>
+              <torusGeometry args={[0.05, 0.015, 6, 12, Math.PI]} />
+              <meshStandardMaterial color={copperDark} roughness={0.5} metalness={0.5} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case InteriorPropType.GRAIN_SACK: {
+      // Burlap sack of grain/flour
+      const sackColor = '#a08060';
+      const grainColor = '#d4c4a8';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Sack body (slightly lumpy) */}
+          <mesh position={[0, 0.2, 0]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.18, 0.22, 0.38, 12]} />
+            <meshStandardMaterial color={sackColor} roughness={0.95} />
+          </mesh>
+          {/* Top gathered part */}
+          <mesh position={[0, 0.42, 0]} castShadow>
+            <coneGeometry args={[0.12, 0.15, 10]} />
+            <meshStandardMaterial color={sackColor} roughness={0.95} />
+          </mesh>
+          {/* Tie at top */}
+          <mesh position={[0, 0.38, 0]} castShadow>
+            <torusGeometry args={[0.08, 0.015, 6, 12]} />
+            <meshStandardMaterial color="#5a4030" roughness={0.9} />
+          </mesh>
+          {/* Some grain spilled at base */}
+          {[0.15, -0.12, 0.08].map((x, i) => (
+            <mesh key={i} position={[x, 0.01, (i - 1) * 0.1]} receiveShadow>
+              <sphereGeometry args={[0.025 + i * 0.005, 6, 4]} />
+              <meshStandardMaterial color={grainColor} roughness={0.9} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    // ========== MERCHANT-SPECIFIC DISPLAY PROPS ==========
+    case InteriorPropType.SPICE_DISPLAY: {
+      // Elevated display of spice jars
+      const standColor = '#5a4330';
+      const jarColors = ['#c4a020', '#8b4513', '#b8860b', '#daa520', '#cd853f'];
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Wooden display stand */}
+          <mesh position={[0, 0.4, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.8, 0.04, 0.35]} />
+            <meshStandardMaterial color={standColor} roughness={0.85} />
+          </mesh>
+          {/* Stand legs */}
+          {[[-0.35, 0], [0.35, 0], [-0.35, 0.12], [0.35, 0.12]].map(([x, z], i) => (
+            <mesh key={i} position={[x, 0.19, z - 0.06]} castShadow>
+              <boxGeometry args={[0.04, 0.38, 0.04]} />
+              <meshStandardMaterial color={standColor} roughness={0.85} />
+            </mesh>
+          ))}
+          {/* Spice jars */}
+          {[-0.25, 0, 0.25].map((x, i) => (
+            <group key={i} position={[x, 0.42, 0]}>
+              <mesh position={[0, 0.06, 0]} castShadow>
+                <cylinderGeometry args={[0.07, 0.06, 0.12, 10]} />
+                <meshStandardMaterial color={jarColors[i]} roughness={0.75} />
+              </mesh>
+              <mesh position={[0, 0.13, 0]} castShadow>
+                <cylinderGeometry args={[0.05, 0.06, 0.02, 10]} />
+                <meshStandardMaterial color="#3a2a1a" roughness={0.8} />
+              </mesh>
+            </group>
+          ))}
+        </group>
+      );
+    }
+
+    case InteriorPropType.PERFUME_BOTTLES: {
+      // Glass perfume bottles on display
+      const glassColor = '#87ceeb';
+      const standColor = '#5a4330';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Display tray */}
+          <mesh position={[0, 0.03, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.5, 0.04, 0.3]} />
+            <meshStandardMaterial color={standColor} roughness={0.85} />
+          </mesh>
+          {/* Perfume bottles (3 different shapes) */}
+          {/* Tall bottle */}
+          <group position={[-0.15, 0.05, 0]}>
+            <mesh position={[0, 0.1, 0]} castShadow>
+              <cylinderGeometry args={[0.035, 0.04, 0.16, 8]} />
+              <meshStandardMaterial color={glassColor} roughness={0.1} metalness={0.1} transparent opacity={0.7} />
+            </mesh>
+            <mesh position={[0, 0.2, 0]} castShadow>
+              <sphereGeometry args={[0.02, 8, 6]} />
+              <meshStandardMaterial color="#c9a866" roughness={0.3} metalness={0.5} />
+            </mesh>
+          </group>
+          {/* Round bottle */}
+          <group position={[0, 0.05, 0]}>
+            <mesh position={[0, 0.07, 0]} castShadow>
+              <sphereGeometry args={[0.055, 10, 8]} />
+              <meshStandardMaterial color="#98d8c8" roughness={0.1} metalness={0.1} transparent opacity={0.7} />
+            </mesh>
+            <mesh position={[0, 0.14, 0]} castShadow>
+              <cylinderGeometry args={[0.015, 0.02, 0.04, 8]} />
+              <meshStandardMaterial color="#c9a866" roughness={0.3} metalness={0.5} />
+            </mesh>
+          </group>
+          {/* Flask bottle */}
+          <group position={[0.15, 0.05, 0]}>
+            <mesh position={[0, 0.06, 0]} castShadow>
+              <cylinderGeometry args={[0.02, 0.05, 0.1, 8]} />
+              <meshStandardMaterial color="#dda0dd" roughness={0.1} metalness={0.1} transparent opacity={0.7} />
+            </mesh>
+            <mesh position={[0, 0.13, 0]} castShadow>
+              <sphereGeometry args={[0.015, 6, 4]} />
+              <meshStandardMaterial color="#c9a866" roughness={0.3} metalness={0.5} />
+            </mesh>
+          </group>
+        </group>
+      );
+    }
+
+    case InteriorPropType.METAL_SAMPLES: {
+      // Metalwork display pieces
+      const copperColor = '#b87333';
+      const brassColor = '#cd9b1d';
+      const standColor = '#4a3a2a';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Display shelf */}
+          <mesh position={[0, 0.5, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.7, 0.03, 0.25]} />
+            <meshStandardMaterial color={standColor} roughness={0.85} />
+          </mesh>
+          {/* Copper plate */}
+          <mesh position={[-0.2, 0.55, 0]} rotation={[0.3, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.12, 0.12, 0.015, 16]} />
+            <meshStandardMaterial color={copperColor} roughness={0.3} metalness={0.7} />
+          </mesh>
+          {/* Brass lamp */}
+          <group position={[0.1, 0.52, 0]}>
+            <mesh position={[0, 0.04, 0]} castShadow>
+              <cylinderGeometry args={[0.04, 0.06, 0.08, 10]} />
+              <meshStandardMaterial color={brassColor} roughness={0.3} metalness={0.7} />
+            </mesh>
+            <mesh position={[0.06, 0.06, 0]} rotation={[0, 0, Math.PI/4]} castShadow>
+              <cylinderGeometry args={[0.015, 0.02, 0.06, 8]} />
+              <meshStandardMaterial color={brassColor} roughness={0.3} metalness={0.7} />
+            </mesh>
+          </group>
+          {/* Small bowl */}
+          <mesh position={[0.25, 0.55, 0]} castShadow>
+            <sphereGeometry args={[0.06, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+            <meshStandardMaterial color={copperColor} roughness={0.35} metalness={0.65} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case InteriorPropType.CERAMIC_DISPLAY: {
+      // Stacked pottery and ceramics
+      const ceramicColors = ['#d4a574', '#b8956e', '#a08060', '#c4a070'];
+      const glazeColors = ['#2e5a88', '#1a4a6a', '#3a6a4a'];
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Large amphora/vase at back */}
+          <mesh position={[0, 0.25, -0.1]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.08, 0.12, 0.45, 12]} />
+            <meshStandardMaterial color={ceramicColors[0]} roughness={0.7} />
+          </mesh>
+          <mesh position={[0, 0.5, -0.1]} castShadow>
+            <cylinderGeometry args={[0.05, 0.08, 0.08, 12]} />
+            <meshStandardMaterial color={ceramicColors[0]} roughness={0.7} />
+          </mesh>
+          {/* Medium bowls stacked */}
+          <mesh position={[-0.18, 0.06, 0.05]} castShadow receiveShadow>
+            <cylinderGeometry args={[0.12, 0.09, 0.1, 12]} />
+            <meshStandardMaterial color={glazeColors[0]} roughness={0.4} />
+          </mesh>
+          <mesh position={[-0.16, 0.14, 0.03]} rotation={[0, 0.5, 0]} castShadow>
+            <cylinderGeometry args={[0.1, 0.07, 0.08, 12]} />
+            <meshStandardMaterial color={glazeColors[1]} roughness={0.4} />
+          </mesh>
+          {/* Small cups */}
+          {[0.12, 0.22].map((x, i) => (
+            <mesh key={i} position={[x, 0.05, 0.08]} castShadow>
+              <cylinderGeometry args={[0.04, 0.035, 0.08, 10]} />
+              <meshStandardMaterial color={ceramicColors[i + 1]} roughness={0.6} />
+            </mesh>
+          ))}
+        </group>
+      );
+    }
+
+    case InteriorPropType.LEATHER_GOODS: {
+      // Leather bags and items on display
+      const leatherBrown = '#5c4033';
+      const leatherTan = '#8b6914';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Hanging leather bag */}
+          <mesh position={[0, 0.5, 0]} castShadow>
+            <boxGeometry args={[0.25, 0.3, 0.08]} />
+            <meshStandardMaterial color={leatherBrown} roughness={0.85} />
+          </mesh>
+          <mesh position={[0, 0.68, 0]} castShadow>
+            <boxGeometry args={[0.2, 0.06, 0.06]} />
+            <meshStandardMaterial color={leatherBrown} roughness={0.85} />
+          </mesh>
+          {/* Strap */}
+          <mesh position={[0.08, 0.58, 0.03]} rotation={[0, 0, -0.3]} castShadow>
+            <boxGeometry args={[0.03, 0.25, 0.01]} />
+            <meshStandardMaterial color={leatherTan} roughness={0.8} />
+          </mesh>
+          {/* Small pouch on floor */}
+          <mesh position={[-0.15, 0.08, 0.1]} castShadow receiveShadow>
+            <boxGeometry args={[0.12, 0.12, 0.06]} />
+            <meshStandardMaterial color={leatherTan} roughness={0.85} />
+          </mesh>
+          {/* Belt coil */}
+          <mesh position={[0.18, 0.04, 0.05]} rotation={[-Math.PI/2, 0, 0]} castShadow receiveShadow>
+            <torusGeometry args={[0.08, 0.015, 6, 16]} />
+            <meshStandardMaterial color={leatherBrown} roughness={0.85} />
+          </mesh>
+        </group>
+      );
+    }
+
+    case InteriorPropType.JEWELRY_CASE: {
+      // Small locked display case with jewelry
+      const woodColor = '#3a2a1a';
+      const goldColor = '#ffd700';
+      const velvetColor = '#4a1a2a';
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Case box */}
+          <mesh position={[0, 0.08, 0]} castShadow receiveShadow>
+            <boxGeometry args={[0.35, 0.12, 0.25]} />
+            <meshStandardMaterial color={woodColor} roughness={0.75} />
+          </mesh>
+          {/* Lid (slightly open) */}
+          <mesh position={[0, 0.15, -0.1]} rotation={[-0.4, 0, 0]} castShadow>
+            <boxGeometry args={[0.34, 0.02, 0.24]} />
+            <meshStandardMaterial color={woodColor} roughness={0.75} />
+          </mesh>
+          {/* Velvet interior visible */}
+          <mesh position={[0, 0.13, 0.02]} receiveShadow>
+            <boxGeometry args={[0.3, 0.02, 0.18]} />
+            <meshStandardMaterial color={velvetColor} roughness={0.95} />
+          </mesh>
+          {/* Gold items inside */}
+          <mesh position={[-0.08, 0.15, 0]} castShadow>
+            <torusGeometry args={[0.03, 0.008, 8, 16]} />
+            <meshStandardMaterial color={goldColor} roughness={0.2} metalness={0.9} />
+          </mesh>
+          <mesh position={[0.06, 0.15, 0.02]} castShadow>
+            <sphereGeometry args={[0.02, 8, 6]} />
+            <meshStandardMaterial color={goldColor} roughness={0.2} metalness={0.9} />
+          </mesh>
+          {/* Lock clasp */}
+          <mesh position={[0, 0.05, 0.13]} castShadow>
+            <boxGeometry args={[0.04, 0.03, 0.02]} />
+            <meshStandardMaterial color="#c9a866" roughness={0.3} metalness={0.7} />
+          </mesh>
+        </group>
+      );
+    }
+
     default:
       return null;
   }

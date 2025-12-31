@@ -9,11 +9,12 @@
  * - mosque: Religious buildings (periodic adhan echoes)
  * - market: Commercial areas (activity sounds)
  * - fire: Torches, hearths (crackling)
+ * - bird: Birdcage chirps (short tonal blips)
  */
 
 import { getSharedNoiseBuffer } from './synthesis/NoiseGenerators';
 
-export type PointSourceType = 'water' | 'mosque' | 'market' | 'fire';
+export type PointSourceType = 'water' | 'mosque' | 'market' | 'fire' | 'bird';
 
 export interface PointSource {
   id: string;
@@ -39,6 +40,7 @@ const SOURCE_CONFIGS: Record<PointSourceType, { maxDistance: number; volume: num
   mosque: { maxDistance: 50, volume: 0.1 },
   market: { maxDistance: 25, volume: 0.08 },
   fire: { maxDistance: 12, volume: 0.06 },
+  bird: { maxDistance: 16, volume: 0.07 },
 };
 
 export class SpatialAudioManager {
@@ -408,6 +410,8 @@ export class SpatialAudioManager {
         return this.createMosqueAmbient(destination);
       case 'market':
         return this.createMarketAmbient(destination);
+      case 'bird':
+        return this.createBirdChirps(destination);
       default:
         return [];
     }
@@ -489,6 +493,45 @@ export class SpatialAudioManager {
 
     // Initial delay
     setTimeout(scheduleDrip, Math.random() * 1000);
+  }
+
+  /**
+   * Bird chirps - short tonal blips at random intervals
+   */
+  private createBirdChirps(destination: AudioNode): AudioNode[] {
+    if (!this.ctx) return [];
+
+    const nodes: AudioNode[] = [];
+
+    const scheduleChirp = () => {
+      if (!this.ctx || !this.isRunning) return;
+
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sine';
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.06, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+
+      const base = 1900 + Math.random() * 900;
+      osc.frequency.setValueAtTime(base, now);
+      osc.frequency.exponentialRampToValueAtTime(base * 0.7, now + 0.15);
+
+      osc.connect(gain);
+      gain.connect(destination);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
+
+      const nextDelay = 700 + Math.random() * 1600;
+      setTimeout(scheduleChirp, nextDelay);
+    };
+
+    setTimeout(scheduleChirp, Math.random() * 1200);
+
+    return nodes;
   }
 
   /**

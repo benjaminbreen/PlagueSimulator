@@ -52,6 +52,10 @@ const getMerchantProfession = (type: MerchantType, rand: () => number): string =
       const titles = ['Trader', 'General Merchant', 'Market Seller', 'Goods Dealer'];
       return titles[Math.floor(rand() * titles.length)];
 
+    case MerchantType.BEDOUIN:
+      const bedouinTitles = ['Bedouin Trader', 'Desert Merchant', 'Nomad Trader'];
+      return bedouinTitles[Math.floor(rand() * bedouinTitles.length)];
+
     default:
       return 'Merchant';
   }
@@ -158,6 +162,13 @@ const generateMerchantGreeting = (
       'Looking for something? I likely have it.',
       'Fair prices and honest trade.',
       'Browse my wares - something for everyone!'
+    ],
+    [MerchantType.BEDOUIN]: [
+      'I have traveled far from the deep desert with these treasures.',
+      'My wares are not found in the common markets.',
+      'These goods crossed many sands to reach Damascus.',
+      'The desert reveals its secrets only to those who seek them.',
+      'From the ancient trade routes of my ancestors, I bring you these rarities.'
     ]
   };
 

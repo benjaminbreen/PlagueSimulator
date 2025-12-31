@@ -1,4 +1,4 @@
-import { BuildingMetadata, BuildingType, InteriorSpec, InteriorRoom, InteriorRoomType, InteriorProp, InteriorPropType, InteriorNPC, InteriorOverrides, SocialClass, NPCStats, Obstacle, getProfessionCategory, ProfessionCategory, PROFESSION_SIZE_SCALE, AgentState } from '../types';
+import { BuildingMetadata, BuildingType, InteriorSpec, InteriorFloor, InteriorRoom, InteriorRoomType, InteriorProp, InteriorPropType, InteriorNPC, InteriorOverrides, SocialClass, NPCStats, Obstacle, getProfessionCategory, ProfessionCategory, PROFESSION_SIZE_SCALE, AgentState } from '../types';
 import { generateNPCStats, seededRandom } from './procedural';
 
 const ROOM_HEIGHT = 3.4;
@@ -87,6 +87,31 @@ const defaultRoomTypes = (socialClass: SocialClass, profession: string, building
   return types.slice(0, roomCountForClass(socialClass));
 };
 
+const getFloorRoomTypes = (
+  baseTypes: InteriorRoomType[],
+  floorType: 'public' | 'private',
+  profession: string
+): InteriorRoomType[] => {
+  if (floorType === 'public') return baseTypes;
+  const prof = profession.toLowerCase();
+  const keep = baseTypes.filter((type) => (
+    type === InteriorRoomType.PRIVATE
+    || type === InteriorRoomType.STORAGE
+    || type === InteriorRoomType.WORKSHOP
+  ));
+  const needsWorkshop = /scribe|copyist|teacher|madrasa|scholar/.test(prof);
+  if (needsWorkshop && !keep.includes(InteriorRoomType.WORKSHOP)) {
+    keep.push(InteriorRoomType.WORKSHOP);
+  }
+  if (!keep.includes(InteriorRoomType.PRIVATE)) {
+    keep.unshift(InteriorRoomType.PRIVATE);
+  }
+  if (keep.length === 0) {
+    return [InteriorRoomType.PRIVATE];
+  }
+  return keep;
+};
+
 const overlaps = (a: InteriorRoom, b: InteriorRoom, padding = -0.2) => {
   const [ax, , az] = a.center;
   const [bx, , bz] = b.center;
@@ -170,13 +195,50 @@ const propTemplates: Array<{
   { room: [InteriorRoomType.HALL, InteriorRoomType.PRIVATE], type: InteriorPropType.FIRE_PIT, label: 'Cooking hearth' },
   { room: [InteriorRoomType.PRIVATE], type: InteriorPropType.SCREEN, label: 'Woven screen', minClass: SocialClass.MERCHANT },
   { room: [InteriorRoomType.HALL], type: InteriorPropType.CHAIR, label: 'Wooden chair', minClass: SocialClass.MERCHANT },
+  // Food items - appear in halls/private rooms
+  { room: [InteriorRoomType.HALL, InteriorRoomType.PRIVATE], type: InteriorPropType.FOOD_BOWL, label: 'Ceramic bowl' },
+  { room: [InteriorRoomType.HALL], type: InteriorPropType.DATE_BASKET, label: 'Basket of dates' },
+  { room: [InteriorRoomType.HALL, InteriorRoomType.STORAGE], type: InteriorPropType.WATER_JUG, label: 'Water pitcher' },
+  { room: [InteriorRoomType.STORAGE], type: InteriorPropType.GRAIN_SACK, label: 'Grain sack' },
 ];
 
-const roomPropBudget = (socialClass: SocialClass): number => {
+const roomPropBudget = (socialClass: SocialClass, profession?: string): number => {
   if (socialClass === SocialClass.NOBILITY) return 22;
   if (socialClass === SocialClass.MERCHANT) return 17;
   if (socialClass === SocialClass.CLERGY) return 13;
-  return 11;
+
+  // Further reduce for poorest professions
+  if (profession) {
+    const category = getProfessionCategory(profession);
+    if (category === 'LABORER') return 6;  // Very minimal - destitute
+    if (category === 'SERVICE') return 8;  // Slightly more
+  }
+  return 11; // Regular peasant
+};
+
+// Generate worn/damaged labels for poor homes
+const wornLabel = (baseLabel: string, socialClass: SocialClass, rand: () => number): string => {
+  if (socialClass !== SocialClass.PEASANT) return baseLabel;
+  if (rand() > 0.5) return baseLabel; // 50% chance of worn label
+
+  const wornPrefixes = ['Worn', 'Patched', 'Frayed', 'Old', 'Threadbare', 'Mended'];
+  const prefix = wornPrefixes[Math.floor(rand() * wornPrefixes.length)];
+  return `${prefix} ${baseLabel.toLowerCase()}`;
+};
+
+// Merchant type for specialized displays
+type MerchantType = 'spice' | 'textile' | 'perfume' | 'metal' | 'ceramic' | 'leather' | 'jeweler' | 'general';
+
+const getMerchantType = (profession: string): MerchantType => {
+  const prof = profession.toLowerCase();
+  if (/spice|herb|drug|apothecary/.test(prof)) return 'spice';
+  if (/cloth|textile|silk|fabric|draper|tailor/.test(prof)) return 'textile';
+  if (/perfume|incense|aromatic|attar/.test(prof)) return 'perfume';
+  if (/metal|copper|brass|gold|silver|smith/.test(prof)) return 'metal';
+  if (/potter|ceramic|tile/.test(prof)) return 'ceramic';
+  if (/leather|hide|tanner|cobbler/.test(prof)) return 'leather';
+  if (/jewel|gem|pearl/.test(prof)) return 'jeweler';
+  return 'general';
 };
 
 const roomPropBudgetByType = (room: InteriorRoom, socialClass: SocialClass): number => {
@@ -278,8 +340,8 @@ const clampToRoom = (room: InteriorRoom, pos: [number, number, number], margin =
   ];
 };
 
-// Helper to find walls that are NOT shared with adjacent rooms
-const getSharedWalls = (room: InteriorRoom, allRooms: InteriorRoom[]): ('north' | 'south' | 'east' | 'west')[] => {
+// Helper to find walls that ARE shared with adjacent rooms (interior doorways)
+export const getSharedWalls = (room: InteriorRoom, allRooms: InteriorRoom[]): ('north' | 'south' | 'east' | 'west')[] => {
   const sharedWalls: ('north' | 'south' | 'east' | 'west')[] = [];
   const [cx, , cz] = room.center;
   const halfW = room.size[0] / 2;
@@ -305,6 +367,91 @@ const getSharedWalls = (room: InteriorRoom, allRooms: InteriorRoom[]): ('north' 
     }
   });
   return sharedWalls;
+};
+
+const getInteriorDoorMap = (rooms: InteriorRoom[], entrySide: 'north' | 'south' | 'east' | 'west'): Map<string, 'north' | 'south' | 'east' | 'west' | null> => {
+  const map = new Map<string, 'north' | 'south' | 'east' | 'west' | null>();
+  rooms.forEach((room) => {
+    if (room.type === InteriorRoomType.ENTRY) {
+      map.set(room.id, entrySide);
+      return;
+    }
+    let closest: InteriorRoom | null = null;
+    let closestDist = Infinity;
+    rooms.forEach((candidate) => {
+      if (candidate.id === room.id) return;
+      const dx = candidate.center[0] - room.center[0];
+      const dz = candidate.center[2] - room.center[2];
+      const dist = Math.hypot(dx, dz);
+      if (dist < closestDist) {
+        closest = candidate;
+        closestDist = dist;
+      }
+    });
+    if (!closest) {
+      map.set(room.id, null);
+      return;
+    }
+    const dx = closest.center[0] - room.center[0];
+    const dz = closest.center[2] - room.center[2];
+    if (Math.abs(dx) > Math.abs(dz)) {
+      map.set(room.id, dx > 0 ? 'east' : 'west');
+    } else {
+      map.set(room.id, dz > 0 ? 'north' : 'south');
+    }
+  });
+  return map;
+};
+
+const adjustPropsForDoorways = (
+  props: InteriorProp[],
+  rooms: InteriorRoom[],
+  doorMap: Map<string, 'north' | 'south' | 'east' | 'west' | null>
+) => {
+  const noBlock = new Set<InteriorPropType>([
+    InteriorPropType.RUG,
+    InteriorPropType.PRAYER_RUG,
+    InteriorPropType.FLOOR_MAT,
+    InteriorPropType.FLOOR_PILLOWS,
+    InteriorPropType.CUSHION,
+    InteriorPropType.LANTERN,
+    InteriorPropType.CANDLE,
+  ]);
+  const doorClearance = 1.9;
+  const wallThreshold = 0.65;
+
+  props.forEach((prop) => {
+    if (noBlock.has(prop.type)) return;
+    const room = rooms.find((r) => r.id === prop.roomId);
+    if (!room) return;
+    const doorSide = doorMap.get(room.id);
+    if (!doorSide) return;
+
+    const [cx, , cz] = room.center;
+    const halfW = room.size[0] / 2;
+    const halfD = room.size[2] / 2;
+    const [px, py, pz] = prop.position;
+    let nextX = px;
+    let nextZ = pz;
+
+    if (doorSide === 'north' && (cz + halfD - pz) < wallThreshold && Math.abs(px - cx) < doorClearance) {
+      const sign = px >= cx ? 1 : -1;
+      nextX = cx + sign * (doorClearance + 0.6);
+    } else if (doorSide === 'south' && (pz - (cz - halfD)) < wallThreshold && Math.abs(px - cx) < doorClearance) {
+      const sign = px >= cx ? 1 : -1;
+      nextX = cx + sign * (doorClearance + 0.6);
+    } else if (doorSide === 'east' && (cx + halfW - px) < wallThreshold && Math.abs(pz - cz) < doorClearance) {
+      const sign = pz >= cz ? 1 : -1;
+      nextZ = cz + sign * (doorClearance + 0.6);
+    } else if (doorSide === 'west' && (px - (cx - halfW)) < wallThreshold && Math.abs(pz - cz) < doorClearance) {
+      const sign = pz >= cz ? 1 : -1;
+      nextZ = cz + sign * (doorClearance + 0.6);
+    }
+
+    if (nextX !== px || nextZ !== pz) {
+      prop.position = clampToRoom(room, [nextX, py, nextZ], 0.7);
+    }
+  });
 };
 
 const keepInsideOpenSide = (
@@ -339,7 +486,9 @@ const addCommercialLayout = (
   rooms: InteriorRoom[],
   profession: string,
   seed: number,
-  entrySide: 'north' | 'south' | 'east' | 'west'
+  entrySide: 'north' | 'south' | 'east' | 'west',
+  doorMap: Map<string, 'north' | 'south' | 'east' | 'west' | null>,
+  sharedWallsMap: Map<string, ('north' | 'south' | 'east' | 'west')[]>
 ) => {
   let s = seed;
   const rand = () => seededRandom(s++);
@@ -361,6 +510,19 @@ const addCommercialLayout = (
     if (side === 'south') return 'north';
     if (side === 'east') return 'west';
     return 'east';
+  };
+  const getSafeSide = (room: InteriorRoom, preferred: 'north' | 'south' | 'east' | 'west') => {
+    const blocked = new Set(sharedWallsMap.get(room.id) ?? []);
+    const doorSide = doorMap.get(room.id);
+    if (doorSide) blocked.add(doorSide);
+    if (!blocked.has(preferred)) return preferred;
+    const allSides: Array<'north' | 'south' | 'east' | 'west'> = ['north', 'south', 'east', 'west'];
+    const safe = allSides.filter((side) => !blocked.has(side));
+    return safe[0] ?? preferred;
+  };
+  const wallAnchorSafe = (room: InteriorRoom, side: 'north' | 'south' | 'east' | 'west', inset = 0.9, offset = 0) => {
+    const safeSide = getSafeSide(room, side);
+    return wallAnchor(room, safeSide, inset, offset);
   };
   const counterSide = oppositeSide(entrySide);
 
@@ -386,12 +548,12 @@ const addCommercialLayout = (
         addProp(props, cafeRoom, InteriorPropType.HOOKAH, 'Hookah', clampToRoom(cafeRoom, [basePos[0] + 1.2, 0, basePos[2] + 0.6]));
       }
     }
-    addProp(props, cafeRoom, InteriorPropType.BRAZIER, 'Charcoal brazier', clampToRoom(cafeRoom, wallAnchor(cafeRoom, counterSide, 0.7)));
+    addProp(props, cafeRoom, InteriorPropType.BRAZIER, 'Charcoal brazier', clampToRoom(cafeRoom, wallAnchorSafe(cafeRoom, counterSide, 0.7)));
     if (rand() > 0.4) {
-      addProp(props, cafeRoom, InteriorPropType.BENCH, 'Low bench', clampToRoom(cafeRoom, wallAnchor(cafeRoom, 'east', 0.7, -2.0)), [0, Math.PI / 2, 0]);
+      addProp(props, cafeRoom, InteriorPropType.BENCH, 'Low bench', clampToRoom(cafeRoom, wallAnchorSafe(cafeRoom, 'east', 0.7, -2.0)), [0, Math.PI / 2, 0]);
     }
     if (rand() > 0.3) {
-      addProp(props, cafeRoom, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(cafeRoom, wallAnchor(cafeRoom, 'west', 0.7, 1.4)), [0, Math.PI / 2, 0]);
+      addProp(props, cafeRoom, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(cafeRoom, wallAnchorSafe(cafeRoom, 'west', 0.7, 1.4)), [0, Math.PI / 2, 0]);
     }
     return;
   }
@@ -466,6 +628,64 @@ const addCommercialLayout = (
   if (profLower.includes('baker')) {
     addProp(props, hall, InteriorPropType.TRAY, 'Bread tray', clampToRoom(hall, [hall.center[0] - 0.4, 0.75, hall.center[2] - hall.size[2] / 2 + 0.9]));
     addProp(props, hall, InteriorPropType.BASKET, 'Flour baskets', clampToRoom(hall, wallAnchor(hall, 'east', 0.8, -0.6)), [0, Math.PI / 2, 0]);
+    // Baker food items
+    addProp(props, hall, InteriorPropType.BREAD_LOAF, 'Fresh flatbreads', clampToRoom(hall, [hall.center[0] + 1.2, 0.9, hall.center[2] - 0.8]));
+    addProp(props, hall, InteriorPropType.GRAIN_SACK, 'Flour sack', clampToRoom(hall, wallAnchor(hall, 'west', 0.6, 1.2)));
+  }
+
+  // Cook and food service items
+  if (profLower.includes('cook') || profLower.includes('sherbet') || profLower.includes('inn')) {
+    addProp(props, hall, InteriorPropType.COOKING_POT, 'Copper cooking pot', clampToRoom(hall, wallAnchor(hall, 'east', 1.0, -1.5)));
+    addProp(props, hall, InteriorPropType.SPICE_JAR, 'Spice jars', clampToRoom(hall, [hall.center[0] - 1.5, 0.8, hall.center[2] + 1.5]));
+    if (rand() > 0.4) {
+      addProp(props, hall, InteriorPropType.DATE_BASKET, 'Fresh dates', clampToRoom(hall, [hall.center[0] + 1.0, 0.7, hall.center[2] - 1.2]));
+    }
+  }
+
+  // Merchant-specific display items based on merchant type
+  const merchantType = getMerchantType(profession);
+  if (merchantType !== 'general') {
+    const displayRoom = entryRoom ?? hall;
+    const [dcx, , dcz] = displayRoom.center;
+
+    switch (merchantType) {
+      case 'spice':
+        addProp(props, displayRoom, InteriorPropType.SPICE_DISPLAY, 'Spice jars display', clampToRoom(displayRoom, [dcx + 1.5, 0.9, dcz - 1.0]));
+        // Enhance existing basket labels
+        props.filter(p => p.type === InteriorPropType.BASKET && p.roomId === displayRoom.id).forEach(p => p.label = 'Dried herbs basket');
+        break;
+
+      case 'textile':
+        // Enhance bolt of cloth labels
+        const fabrics = ['Damascus silk', 'Fine cotton', 'Dyed wool', 'Embroidered linen'];
+        props.filter(p => p.type === InteriorPropType.BOLT_OF_CLOTH).forEach((p, i) => {
+          p.label = fabrics[i % fabrics.length];
+        });
+        break;
+
+      case 'perfume':
+        addProp(props, displayRoom, InteriorPropType.PERFUME_BOTTLES, 'Perfume bottles', clampToRoom(displayRoom, [dcx + 1.2, 0.9, dcz - 0.8]));
+        addProp(props, displayRoom, InteriorPropType.BRAZIER, 'Incense brazier', clampToRoom(displayRoom, [dcx - 1.0, 0, dcz + 0.5]));
+        break;
+
+      case 'metal':
+        addProp(props, displayRoom, InteriorPropType.METAL_SAMPLES, 'Metalwork samples', clampToRoom(displayRoom, [dcx + 1.5, 0.8, dcz - 1.2]));
+        break;
+
+      case 'ceramic':
+        addProp(props, displayRoom, InteriorPropType.CERAMIC_DISPLAY, 'Pottery display', clampToRoom(displayRoom, [dcx + 1.8, 0, dcz - 0.5]));
+        break;
+
+      case 'leather':
+        addProp(props, displayRoom, InteriorPropType.LEATHER_GOODS, 'Leather goods', clampToRoom(displayRoom, wallAnchor(displayRoom, 'west', 0.5, -1.0)));
+        break;
+
+      case 'jeweler':
+        addProp(props, displayRoom, InteriorPropType.JEWELRY_CASE, 'Jewelry display case', clampToRoom(displayRoom, [dcx, 0.85, dcz - 0.3]));
+        // Extra lamp for jewelry viewing
+        addProp(props, displayRoom, InteriorPropType.LAMP, 'Display lamp', clampToRoom(displayRoom, [dcx + 0.5, 0.9, dcz - 0.3]));
+        break;
+    }
   }
 };
 
@@ -499,7 +719,7 @@ const placePropPosition = (
 
   const adjustForDoor = (pos: [number, number, number]): [number, number, number] => {
     if (!avoidSide) return pos;
-    const doorHalf = 1.6;
+    const doorHalf = 2.4; // Increased from 1.6 for better doorway clearance
     if (avoidSide === 'north' && Math.abs(pos[0] - cx) < doorHalf && pos[2] > cz) {
       return [pos[0] + (rand() > 0.5 ? doorHalf : -doorHalf), pos[1], pos[2]];
     }
@@ -588,12 +808,15 @@ const pickProps = (
   buildingType: BuildingType,
   profession: string,
   seed: number,
-  entrySide: 'north' | 'south' | 'east' | 'west'
+  entrySide: 'north' | 'south' | 'east' | 'west',
+  doorMap: Map<string, 'north' | 'south' | 'east' | 'west' | null>,
+  sharedWallsMap: Map<string, ('north' | 'south' | 'east' | 'west')[]>,
+  floorType: 'public' | 'private'
 ): InteriorProp[] => {
   let s = seed;
   const rand = () => seededRandom(s++);
   const props: InteriorProp[] = [];
-  const budget = Math.max(roomPropBudget(socialClass), rooms.length * 5);
+  const budget = Math.max(roomPropBudget(socialClass, profession), rooms.length * 3);
   const roomCounts = new Map<string, number>();
   const roomCaps = new Map<string, number>();
   rooms.forEach((room) => {
@@ -619,8 +842,8 @@ const pickProps = (
     InteriorPropType.HOOKAH,
   ]);
 
-  if (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY) {
-    addCommercialLayout(props, rooms, profession, seed + 17, entrySide);
+  if (floorType === 'public' && (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY)) {
+    addCommercialLayout(props, rooms, profession, seed + 17, entrySide, doorMap, sharedWallsMap);
   }
 
   if (socialClass === SocialClass.NOBILITY) {
@@ -651,7 +874,7 @@ const pickProps = (
       { room: [InteriorRoomType.HALL], type: InteriorPropType.CHAIR, label: 'Carved chair', minClass: SocialClass.MERCHANT },
     );
   }
-  if (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY) {
+  if (floorType === 'public' && (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY)) {
     if (profLower.includes('inn') || profLower.includes('sherbet')) {
       extraTemplates.push(
         { room: [InteriorRoomType.HALL], type: InteriorPropType.FLOOR_PILLOWS, label: 'Floor pillows' },
@@ -690,7 +913,17 @@ const pickProps = (
       const cap = roomCaps.get(room.id) ?? 6;
       const current = roomCounts.get(room.id) ?? 0;
       if (current >= cap) break;
-      const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
+      // For ENTRY rooms, avoid the exterior door side
+      // For other rooms, avoid any shared walls (interior doorways)
+      let avoidSide: 'north' | 'south' | 'east' | 'west' | undefined;
+      if (room.type === InteriorRoomType.ENTRY) {
+        avoidSide = entrySide;
+      } else {
+        const sharedWalls = getSharedWalls(room, rooms);
+        if (sharedWalls.length > 0) {
+          avoidSide = sharedWalls[0]; // Avoid the first shared wall (interior doorway)
+        }
+      }
       const placement = placePropPosition(template.type, room, rand, avoidSide);
 
       // Use larger margins for large props to prevent wall clipping
@@ -728,7 +961,15 @@ const pickProps = (
       || prop.type === InteriorPropType.FLOOR_LAMP
     ));
     if (!hasLight) {
-      const avoidSide = room.type === InteriorRoomType.ENTRY ? entrySide : undefined;
+      let avoidSide: 'north' | 'south' | 'east' | 'west' | undefined;
+      if (room.type === InteriorRoomType.ENTRY) {
+        avoidSide = entrySide;
+      } else {
+        const sharedWalls = getSharedWalls(room, rooms);
+        if (sharedWalls.length > 0) {
+          avoidSide = sharedWalls[0];
+        }
+      }
       const placement = placePropPosition(InteriorPropType.LAMP, room, rand, avoidSide);
       const clamped = clampToRoom(room, placement.position);
       props.push({
@@ -923,6 +1164,7 @@ const pickProps = (
       }
 
       if (hasFireSource) lanternCount = Math.max(1, lanternCount - 1);
+      lanternCount = Math.min(2, lanternCount);
 
       const existingLanterns = props.filter((prop) => prop.roomId === room.id && prop.type === InteriorPropType.LANTERN).length;
       const lanternsToAdd = Math.max(0, lanternCount - existingLanterns);
@@ -1120,13 +1362,29 @@ const applyRoomLayouts = (
   profession: string,
   socialClass: SocialClass,
   seed: number,
-  entrySide: 'north' | 'south' | 'east' | 'west'
+  entrySide: 'north' | 'south' | 'east' | 'west',
+  doorMap: Map<string, 'north' | 'south' | 'east' | 'west' | null>,
+  sharedWallsMap: Map<string, ('north' | 'south' | 'east' | 'west')[]>,
+  floorType: 'public' | 'private'
 ) => {
   let s = seed;
   const rand = () => seededRandom(s++);
   const profLower = profession.toLowerCase();
   const isCommercial = buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY || profLower.includes('merchant') || profLower.includes('shop');
   const isInnLike = profLower.includes('inn') || profLower.includes('sherbet');
+  const getSafeSide = (room: InteriorRoom, preferred: 'north' | 'south' | 'east' | 'west') => {
+    const blocked = new Set(sharedWallsMap.get(room.id) ?? []);
+    const doorSide = doorMap.get(room.id);
+    if (doorSide) blocked.add(doorSide);
+    if (!blocked.has(preferred)) return preferred;
+    const allSides: Array<'north' | 'south' | 'east' | 'west'> = ['north', 'south', 'east', 'west'];
+    const safe = allSides.filter((side) => !blocked.has(side));
+    return safe[0] ?? preferred;
+  };
+  const wallAnchorSafe = (room: InteriorRoom, side: 'north' | 'south' | 'east' | 'west', inset = 0.9, offset = 0) => {
+    const safeSide = getSafeSide(room, side);
+    return wallAnchor(room, safeSide, inset, offset);
+  };
   const oppositeSide = (side: 'north' | 'south' | 'east' | 'west') => {
     if (side === 'north') return 'south';
     if (side === 'south') return 'north';
@@ -1280,34 +1538,34 @@ const applyRoomLayouts = (
         // Add bed in corner opposite the door
         const bedSide = safeSide === 'north' ? 'south' : safeSide === 'south' ? 'north' : safeSide === 'east' ? 'west' : 'east';
         if (socialClass === SocialClass.NOBILITY) {
-          upsertProp(props, room, InteriorPropType.LOW_BED, 'Low wooden bed', clampToRoom(room, wallAnchor(room, bedSide, 1.1, 0.8)));
+          upsertProp(props, room, InteriorPropType.LOW_BED, 'Low wooden bed', clampToRoom(room, wallAnchorSafe(room, bedSide, 1.1, 0.8)));
         } else if (socialClass === SocialClass.MERCHANT || socialClass === SocialClass.CLERGY) {
-          upsertProp(props, room, InteriorPropType.BEDROLL, 'Sleeping pallet', clampToRoom(room, wallAnchor(room, bedSide, 0.9, 0.8)));
+          upsertProp(props, room, InteriorPropType.BEDROLL, 'Sleeping pallet', clampToRoom(room, wallAnchorSafe(room, bedSide, 0.9, 0.8)));
         } else if (profCategory === 'LABORER' || profCategory === 'SERVICE') {
-          upsertProp(props, room, InteriorPropType.SLEEPING_MAT, 'Sleeping mat', clampToRoom(room, wallAnchor(room, bedSide, 0.9, 0.8)));
+          upsertProp(props, room, InteriorPropType.SLEEPING_MAT, 'Sleeping mat', clampToRoom(room, wallAnchorSafe(room, bedSide, 0.9, 0.8)));
         } else {
-          upsertProp(props, room, InteriorPropType.BEDROLL, 'Sleeping pallet', clampToRoom(room, wallAnchor(room, bedSide, 0.9, 0.8)));
+          upsertProp(props, room, InteriorPropType.BEDROLL, 'Sleeping pallet', clampToRoom(room, wallAnchorSafe(room, bedSide, 0.9, 0.8)));
         }
 
         // Profession-specific props for single-room dwellings
         switch (profCategory) {
           case 'ARTISAN':
-            upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', clampToRoom(room, wallAnchor(room, safeSide, 1.0, -0.8)));
+            upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', clampToRoom(room, wallAnchorSafe(room, safeSide, 1.0, -0.8)));
             break;
           case 'AGRICULTURAL':
-            upsertProp(props, room, InteriorPropType.PRODUCE_BASKET, 'Produce basket', clampToRoom(room, wallAnchor(room, safeSide, 0.6, -0.6)));
+            upsertProp(props, room, InteriorPropType.PRODUCE_BASKET, 'Produce basket', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.6, -0.6)));
             break;
           case 'TRANSPORT':
-            upsertProp(props, room, InteriorPropType.ROPE_COIL, 'Rope coil', clampToRoom(room, wallAnchor(room, safeSide, 0.5, -0.5)));
+            upsertProp(props, room, InteriorPropType.ROPE_COIL, 'Rope coil', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.5, -0.5)));
             break;
           default:
             break;
         }
       }
 
-      upsertProp(props, room, InteriorPropType.FLOOR_MAT, 'Woven floor mat', clampToRoom(room, wallAnchor(room, safeSide, 1.4, 0)));
-      upsertProp(props, room, InteriorPropType.CHEST, 'Storage chest', clampToRoom(room, wallAnchor(room, safeSide, 0.8, -0.8)));
-      upsertProp(props, room, InteriorPropType.LAMP, 'Oil lamp', clampToRoom(room, wallAnchor(room, safeSide, 0.8, 0.6)));
+      upsertProp(props, room, InteriorPropType.FLOOR_MAT, 'Woven floor mat', clampToRoom(room, wallAnchorSafe(room, safeSide, 1.4, 0)));
+      upsertProp(props, room, InteriorPropType.CHEST, 'Storage chest', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.8, -0.8)));
+      upsertProp(props, room, InteriorPropType.LAMP, 'Oil lamp', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.8, 0.6)));
       return;
     }
     if (room.type === InteriorRoomType.PRIVATE) {
@@ -1323,46 +1581,104 @@ const applyRoomLayouts = (
       const workWall = remainingWalls.find(w => w === 'west' && w !== chestWall) ?? remainingWalls.find(w => w !== chestWall) ?? 'west';
       const decorWall = remainingWalls.find(w => w === 'north' && w !== chestWall && w !== workWall) ?? remainingWalls.find(w => w !== chestWall && w !== workWall) ?? 'north';
 
+      const sleepProps = new Set<InteriorPropType>([
+        InteriorPropType.RAISED_BED,
+        InteriorPropType.LOW_BED,
+        InteriorPropType.BEDROLL,
+        InteriorPropType.SLEEPING_MAT
+      ]);
+      const canPlaceSleepProp = (pos: [number, number, number], minDist = 1.9) => {
+        const roomBeds = props.filter((prop) => prop.roomId === room.id && sleepProps.has(prop.type));
+        return roomBeds.every((prop) => {
+          const dx = pos[0] - prop.position[0];
+          const dz = pos[2] - prop.position[2];
+          return Math.hypot(dx, dz) >= minDist;
+        });
+      };
+
       // Choose bed type based on social class
       if (socialClass === SocialClass.NOBILITY) {
-        upsertProp(props, room, InteriorPropType.RAISED_BED, 'Raised bed with curtains', clampToRoom(room, wallAnchor(room, bedWall, 1.4, 0)));
+        upsertProp(props, room, InteriorPropType.RAISED_BED, 'Raised bed with curtains', clampToRoom(room, wallAnchorSafe(room, bedWall, 1.4, 0)));
       } else if (socialClass === SocialClass.MERCHANT || socialClass === SocialClass.CLERGY) {
-        upsertProp(props, room, InteriorPropType.LOW_BED, 'Low wooden bed', clampToRoom(room, wallAnchor(room, bedWall, 1.1, 0)));
+        upsertProp(props, room, InteriorPropType.LOW_BED, 'Low wooden bed', clampToRoom(room, wallAnchorSafe(room, bedWall, 1.1, 0)));
       } else if (profCategory === 'LABORER' || profCategory === 'SERVICE') {
-        upsertProp(props, room, InteriorPropType.SLEEPING_MAT, 'Sleeping mat', clampToRoom(room, wallAnchor(room, bedWall, 0.9, 0)));
+        upsertProp(props, room, InteriorPropType.SLEEPING_MAT, 'Sleeping mat', clampToRoom(room, wallAnchorSafe(room, bedWall, 0.9, 0)));
       } else {
-        upsertProp(props, room, InteriorPropType.BEDROLL, 'Sleeping pallet', clampToRoom(room, wallAnchor(room, bedWall, 0.9, 0)));
+        upsertProp(props, room, InteriorPropType.BEDROLL, 'Sleeping pallet', clampToRoom(room, wallAnchorSafe(room, bedWall, 0.9, 0)));
+      }
+
+      // Sleeping clusters for private upper rooms (family sleeping near primary bed)
+      if (floorType === 'private') {
+        const clusterRoll = rand();
+        const clusterCount = clusterRoll > 0.7 ? 2 : clusterRoll > 0.35 ? 1 : 0;
+        const lateralSide = bedWall === 'north' || bedWall === 'south' ? 'east' : 'north';
+        for (let i = 0; i < clusterCount; i += 1) {
+          const offset = i === 0 ? 1.8 : -1.8;
+          const clusterType = socialClass === SocialClass.NOBILITY
+            ? InteriorPropType.BEDROLL
+            : socialClass === SocialClass.MERCHANT || socialClass === SocialClass.CLERGY
+              ? InteriorPropType.BEDROLL
+              : InteriorPropType.SLEEPING_MAT;
+          const clusterLabel = clusterType === InteriorPropType.BEDROLL ? 'Sleeping pallet' : 'Sleeping mat';
+          const clusterPos = clampToRoom(room, wallAnchorSafe(room, lateralSide, 1.1, offset));
+          if (canPlaceSleepProp(clusterPos)) {
+            upsertProp(props, room, clusterType, clusterLabel, clusterPos);
+          }
+        }
       }
 
       // Basic furniture - place against a safe wall
-      upsertProp(props, room, InteriorPropType.CHEST, 'Storage chest', clampToRoom(room, wallAnchor(room, chestWall, 0.8, -0.6)));
+      upsertProp(props, room, InteriorPropType.CHEST, 'Storage chest', clampToRoom(room, wallAnchorSafe(room, chestWall, 0.8, -0.6)));
+
+      // Wash basin for personal rooms
+      upsertProp(props, room, InteriorPropType.WATER_BASIN, 'Wash basin', clampToRoom(room, wallAnchorSafe(room, workWall, 0.7, 0.4)));
+
+      if (floorType === 'private') {
+        const householdFactor = Math.min(1, rooms.length / 3);
+        const baseToyChance = socialClass === SocialClass.NOBILITY
+          ? 0.4
+          : socialClass === SocialClass.MERCHANT || socialClass === SocialClass.CLERGY
+            ? 0.3
+            : 0.18;
+        const toyChance = baseToyChance * (0.7 + householdFactor);
+        const hasToy = rand() < toyChance;
+        if (hasToy) {
+          upsertProp(props, room, InteriorPropType.CHILD_TOY, 'Wooden toy', clampToRoom(room, [room.center[0] + (rand() - 0.5) * 1.2, 0, room.center[2] + (rand() - 0.5) * 1.2]));
+        }
+        if ((socialClass === SocialClass.NOBILITY || socialClass === SocialClass.MERCHANT || socialClass === SocialClass.CLERGY) && (hasToy || rand() < 0.35)) {
+          const cradlePos = clampToRoom(room, wallAnchorSafe(room, decorWall, 0.8, 0.4));
+          if (canPlaceSleepProp(cradlePos, 1.6)) {
+            upsertProp(props, room, InteriorPropType.CRADLE, 'Wooden cradle', cradlePos);
+          }
+        }
+      }
 
       // Profession-specific props - use safe walls
       switch (profCategory) {
         case 'ARTISAN':
-          upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', clampToRoom(room, wallAnchor(room, workWall, 1.0, 0)));
-          upsertProp(props, room, InteriorPropType.TOOL_RACK, 'Tool rack', clampToRoom(room, wallAnchor(room, decorWall, 0.6, -0.8)));
+          upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', clampToRoom(room, wallAnchorSafe(room, workWall, 1.0, 0)));
+          upsertProp(props, room, InteriorPropType.TOOL_RACK, 'Tool rack', clampToRoom(room, wallAnchorSafe(room, decorWall, 0.6, -0.8)));
           break;
         case 'MILITARY':
-          upsertProp(props, room, InteriorPropType.WEAPON_RACK, 'Weapon rack', clampToRoom(room, wallAnchor(room, workWall, 0.8, 0)));
+          upsertProp(props, room, InteriorPropType.WEAPON_RACK, 'Weapon rack', clampToRoom(room, wallAnchorSafe(room, workWall, 0.8, 0)));
           break;
         case 'SCHOLARLY':
-          upsertProp(props, room, InteriorPropType.DESK, 'Writing desk', clampToRoom(room, wallAnchor(room, workWall, 0.9, 0)));
-          upsertProp(props, room, InteriorPropType.BOOKS, 'Manuscripts', clampToRoom(room, wallAnchor(room, decorWall, 0.6, 0.6)));
+          upsertProp(props, room, InteriorPropType.DESK, 'Writing desk', clampToRoom(room, wallAnchorSafe(room, workWall, 0.9, 0)));
+          upsertProp(props, room, InteriorPropType.BOOKS, 'Manuscripts', clampToRoom(room, wallAnchorSafe(room, decorWall, 0.6, 0.6)));
           upsertProp(props, room, InteriorPropType.PRAYER_RUG, 'Prayer rug', clampToRoom(room, [room.center[0], 0, room.center[2]]));
           break;
         case 'AGRICULTURAL':
-          upsertProp(props, room, InteriorPropType.PRODUCE_BASKET, 'Produce basket', clampToRoom(room, wallAnchor(room, workWall, 0.6, 0.4)));
-          upsertProp(props, room, InteriorPropType.TOOL_RACK, 'Garden tools', clampToRoom(room, wallAnchor(room, decorWall, 0.6, -0.6)));
+          upsertProp(props, room, InteriorPropType.PRODUCE_BASKET, 'Produce basket', clampToRoom(room, wallAnchorSafe(room, workWall, 0.6, 0.4)));
+          upsertProp(props, room, InteriorPropType.TOOL_RACK, 'Garden tools', clampToRoom(room, wallAnchorSafe(room, decorWall, 0.6, -0.6)));
           break;
         case 'TRANSPORT':
-          upsertProp(props, room, InteriorPropType.ROPE_COIL, 'Rope coil', clampToRoom(room, wallAnchor(room, workWall, 0.5, 0)));
-          upsertProp(props, room, InteriorPropType.CRATE, 'Travel chest', clampToRoom(room, wallAnchor(room, decorWall, 0.7, 0.5)));
+          upsertProp(props, room, InteriorPropType.ROPE_COIL, 'Rope coil', clampToRoom(room, wallAnchorSafe(room, workWall, 0.5, 0)));
+          upsertProp(props, room, InteriorPropType.CRATE, 'Travel chest', clampToRoom(room, wallAnchorSafe(room, decorWall, 0.7, 0.5)));
           break;
         case 'LABORER':
         case 'SERVICE':
           // Minimal furnishings - just water jug
-          upsertProp(props, room, InteriorPropType.WATER_JUG, 'Water jug', clampToRoom(room, wallAnchor(room, workWall, 0.4, 0)));
+          upsertProp(props, room, InteriorPropType.WATER_JUG, 'Water jug', clampToRoom(room, wallAnchorSafe(room, workWall, 0.4, 0)));
           break;
         default:
           // Default: prayer rug for others
@@ -1371,7 +1687,7 @@ const applyRoomLayouts = (
 
       // Wall hanging for wealthier classes - use a safe wall
       if (socialClass !== SocialClass.PEASANT) {
-        upsertProp(props, room, InteriorPropType.WALL_HANGING, 'Wall hanging', clampToRoom(room, wallAnchor(room, decorWall, 0.2, 0)));
+        upsertProp(props, room, InteriorPropType.WALL_HANGING, 'Wall hanging', clampToRoom(room, wallAnchorSafe(room, decorWall, 0.2, 0)));
       }
       return;
     }
@@ -1379,19 +1695,19 @@ const applyRoomLayouts = (
       const safeWalls = getSafeWalls(room);
       const deskWall = safeWalls.find(w => w === 'north') ?? safeWalls[0] ?? 'north';
       const shelfWall = safeWalls.find(w => w === 'west' && w !== deskWall) ?? safeWalls.find(w => w !== deskWall) ?? 'west';
-      upsertProp(props, room, InteriorPropType.DESK, 'Work desk', clampToRoom(room, wallAnchor(room, deskWall, 0.9, 0)));
+      upsertProp(props, room, InteriorPropType.DESK, 'Work desk', clampToRoom(room, wallAnchorSafe(room, deskWall, 0.9, 0)));
       upsertProp(props, room, InteriorPropType.CHAIR, 'Work chair', clampToRoom(room, [room.center[0], 0, room.center[2] - room.size[2] / 2 + 2.0]), [0, 0, 0]);
       upsertProp(props, room, InteriorPropType.BOOKS, 'Manuscripts', clampToRoom(room, [room.center[0], 0, room.center[2] - room.size[2] / 2 + 1.8]));
       upsertProp(props, room, InteriorPropType.INK_SET, 'Ink set', clampToRoom(room, [room.center[0] + 0.4, 0, room.center[2] - room.size[2] / 2 + 1.8]));
-      upsertProp(props, room, InteriorPropType.SHELF, 'Wall shelf', clampToRoom(room, wallAnchor(room, shelfWall, 0.7, -0.4)));
+      upsertProp(props, room, InteriorPropType.SHELF, 'Wall shelf', clampToRoom(room, wallAnchorSafe(room, shelfWall, 0.7, -0.4)));
       return;
     }
     if (room.type === InteriorRoomType.STORAGE) {
       const safeWalls = getSafeWalls(room);
       const crateWall = safeWalls.find(w => w === 'east') ?? safeWalls[0] ?? 'east';
       const amphoraWall = safeWalls.find(w => w === 'south' && w !== crateWall) ?? safeWalls.find(w => w !== crateWall) ?? 'south';
-      upsertProp(props, room, InteriorPropType.CRATE, 'Stacked crates', clampToRoom(room, wallAnchor(room, crateWall, 0.9, 0.6)));
-      upsertProp(props, room, InteriorPropType.AMPHORA, 'Amphorae', clampToRoom(room, wallAnchor(room, amphoraWall, 0.8, -0.6)));
+      upsertProp(props, room, InteriorPropType.CRATE, 'Stacked crates', clampToRoom(room, wallAnchorSafe(room, crateWall, 0.9, 0.6)));
+      upsertProp(props, room, InteriorPropType.AMPHORA, 'Amphorae', clampToRoom(room, wallAnchorSafe(room, amphoraWall, 0.8, -0.6)));
       return;
     }
     if (room.type === InteriorRoomType.COURTYARD) {
@@ -1402,7 +1718,7 @@ const applyRoomLayouts = (
       return;
     }
     if (room.type === InteriorRoomType.HALL) {
-      if (isCommercial && !isInnLike) {
+      if (floorType === 'public' && isCommercial && !isInnLike) {
         const counterSide = oppositeSide(entrySide);
 
         // Position counter more centrally with space behind for shopkeeper
@@ -1437,17 +1753,17 @@ const applyRoomLayouts = (
           room,
           InteriorPropType.DISPLAY,
           'Display shelf',
-          clampToRoom(room, wallAnchor(room, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4)),
+          clampToRoom(room, wallAnchorSafe(room, displaySide, 0.7, rand() > 0.5 ? 1.4 : -1.4)),
           displayRot
         );
         const counterTopY = 1.18;
         upsertProp(props, room, InteriorPropType.SCALE, 'Balance scale', clampToRoom(room, [counterPos[0] - 0.5, counterTopY, counterPos[2] + 0.12]));
         upsertProp(props, room, InteriorPropType.LEDGER, 'Account ledger', clampToRoom(room, [counterPos[0] + 0.5, counterTopY, counterPos[2] + 0.12]));
-        upsertProp(props, room, InteriorPropType.BASKET, 'Market baskets', clampToRoom(room, wallAnchor(room, 'west', 0.8, 1.2)));
+        upsertProp(props, room, InteriorPropType.BASKET, 'Market baskets', clampToRoom(room, wallAnchorSafe(room, 'west', 0.8, 1.2)));
         return;
       }
       // Civic/school/medical buildings get office furnishings, not cooking equipment
-      if (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL) {
+      if (floorType === 'public' && (buildingType === BuildingType.CIVIC || buildingType === BuildingType.SCHOOL || buildingType === BuildingType.MEDICAL)) {
         const [rcx, , rcz] = room.center;
         const halfW = room.size[0] / 2;
         const halfD = room.size[2] / 2;
@@ -1472,16 +1788,36 @@ const applyRoomLayouts = (
         // Rug in front of desk
         upsertProp(props, room, InteriorPropType.RUG, 'Persian rug', clampToRoom(room, [rcx, 0, rcz - halfD * 0.2]));
         // Shelf on side wall
-        upsertProp(props, room, InteriorPropType.SHELF, shelfLabel, clampToRoom(room, wallAnchor(room, 'west', 0.6, 0)), faceIntoRoom('west'));
+        upsertProp(props, room, InteriorPropType.SHELF, shelfLabel, clampToRoom(room, wallAnchorSafe(room, 'west', 0.6, 0)), faceIntoRoom('west'));
         // Brazier for warmth (not cooking) in corner
         upsertProp(props, room, InteriorPropType.BRAZIER, 'Warming brazier', clampToRoom(room, [rcx + halfW * 0.6, 0, rcz - halfD * 0.5]));
+
+        if (buildingType === BuildingType.SCHOOL) {
+          // Student seating and study surfaces
+          upsertProp(props, room, InteriorPropType.BENCH, 'Student bench', clampToRoom(room, [rcx - halfW * 0.2, 0, rcz - halfD * 0.2]), faceIntoRoom('north'));
+          upsertProp(props, room, InteriorPropType.BENCH, 'Student bench', clampToRoom(room, [rcx + halfW * 0.2, 0, rcz - halfD * 0.2]), faceIntoRoom('north'));
+          upsertProp(props, room, InteriorPropType.LOW_TABLE, 'Study table', clampToRoom(room, [rcx, 0, rcz - halfD * 0.05]));
+          upsertProp(props, room, InteriorPropType.FLOOR_MAT, 'Woven floor mat', clampToRoom(room, [rcx - 0.8, 0, rcz - halfD * 0.45]));
+          upsertProp(props, room, InteriorPropType.LECTERN, 'Reading stand', clampToRoom(room, [rcx + halfW * 0.2, 0, rcz - halfD * 0.45]), faceIntoRoom('north'));
+        }
+
+        if (buildingType === BuildingType.MEDICAL) {
+          // Clinic tools and patient care props
+          upsertProp(props, room, InteriorPropType.MEDICINE_SHELF, 'Medicine shelf', clampToRoom(room, wallAnchorSafe(room, 'east', 0.6, 0.4)), faceIntoRoom('east'));
+          upsertProp(props, room, InteriorPropType.TREATMENT_SHELF, 'Treatment shelf', clampToRoom(room, wallAnchorSafe(room, 'west', 0.6, -0.2)), faceIntoRoom('west'));
+          upsertProp(props, room, InteriorPropType.MORTAR, 'Mortar & pestle', clampToRoom(room, [rcx - 0.2, 0.82, rcz - halfD * 0.1]));
+          upsertProp(props, room, InteriorPropType.HERB_RACK, 'Herb rack', clampToRoom(room, wallAnchorSafe(room, 'north', 0.6, -0.8)), faceIntoRoom('north'));
+          upsertProp(props, room, InteriorPropType.WATER_BASIN, 'Wash basin', clampToRoom(room, wallAnchorSafe(room, 'south', 0.7, 0.6)));
+          upsertProp(props, room, InteriorPropType.BEDROLL, 'Patient bedroll', clampToRoom(room, [rcx + halfW * 0.1, 0, rcz - halfD * 0.55]));
+          upsertProp(props, room, InteriorPropType.SCREEN, 'Privacy screen', clampToRoom(room, [rcx + halfW * 0.25, 0, rcz - halfD * 0.35]), faceIntoRoom('west'));
+        }
         return;
       }
       // Regular residential HALL rooms
       upsertProp(props, room, InteriorPropType.FIRE_PIT, 'Cooking hearth', clampToRoom(room, [room.center[0] + 1.5, 0, room.center[2] + 0.6]));
-      upsertProp(props, room, InteriorPropType.WATER_BASIN, 'Water basin', clampToRoom(room, wallAnchor(room, 'east', 0.9, -0.8)));
-      upsertProp(props, room, InteriorPropType.EWER, 'Water ewer', clampToRoom(room, wallAnchor(room, 'east', 0.8, -0.4)));
-      upsertProp(props, room, InteriorPropType.SHELF, 'Wall shelf', clampToRoom(room, wallAnchor(room, 'north', 0.7, 0)));
+      upsertProp(props, room, InteriorPropType.WATER_BASIN, 'Water basin', clampToRoom(room, wallAnchorSafe(room, 'east', 0.9, -0.8)));
+      upsertProp(props, room, InteriorPropType.EWER, 'Water ewer', clampToRoom(room, wallAnchorSafe(room, 'east', 0.8, -0.4)));
+      upsertProp(props, room, InteriorPropType.SHELF, 'Wall shelf', clampToRoom(room, wallAnchorSafe(room, 'north', 0.7, 0)));
       if (socialClass !== SocialClass.PEASANT) {
         upsertProp(props, room, InteriorPropType.RUG, 'Wool rug', clampToRoom(room, [room.center[0] - 1.0, 0, room.center[2] - 0.8]));
       }
@@ -1587,7 +1923,47 @@ const createNPCs = (
     state: AgentState.HEALTHY,
   });
 
-  if (socialClass !== SocialClass.PEASANT && rand() > 0.6) {
+  if (building.type === BuildingType.SCHOOL) {
+    const studentCount = 3 + Math.floor(rand() * 2); // 3-4 students
+    const seatProp = findProp([InteriorPropType.BENCH, InteriorPropType.LOW_TABLE, InteriorPropType.FLOOR_MAT, InteriorPropType.LECTERN]);
+    for (let i = 0; i < studentCount; i += 1) {
+      const studentStats = generateNPCStats(seed + 60 + i * 5);
+      studentStats.profession = 'Student';
+      studentStats.socialClass = rand() > 0.7 ? SocialClass.MERCHANT : SocialClass.CLERGY;
+      studentStats.age = 10 + Math.floor(rand() * 12);
+      const studentPos = placeByProp(seatProp, otherRoom, [0.4, 0, 0.3]);
+      npcs.push({
+        id: `npc-student-${building.id}-${i}`,
+        role: 'student',
+        position: studentPos,
+        rotation: [0, Math.PI, 0],
+        stats: studentStats,
+        state: AgentState.HEALTHY,
+      });
+    }
+  }
+
+  if (building.type === BuildingType.MEDICAL) {
+    const patientCount = 2 + Math.floor(rand() * 2); // 2-3 patients
+    const bedProp = findProp([InteriorPropType.BEDROLL, InteriorPropType.FLOOR_MAT, InteriorPropType.CUSHION]);
+    for (let i = 0; i < patientCount; i += 1) {
+      const patientStats = generateNPCStats(seed + 90 + i * 6);
+      patientStats.profession = 'Patient';
+      patientStats.socialClass = rand() > 0.55 ? SocialClass.PEASANT : SocialClass.MERCHANT;
+      patientStats.age = 14 + Math.floor(rand() * 50);
+      const patientPos = placeByProp(bedProp, otherRoom, [0.3, 0, 0.2]);
+      npcs.push({
+        id: `npc-patient-${building.id}-${i}`,
+        role: 'patient',
+        position: patientPos,
+        rotation: [0, rand() * Math.PI * 2, 0],
+        stats: patientStats,
+        state: AgentState.HEALTHY,
+      });
+    }
+  }
+
+  if (building.type !== BuildingType.SCHOOL && building.type !== BuildingType.MEDICAL && socialClass !== SocialClass.PEASANT && rand() > 0.6) {
     const guestStats: NPCStats = generateNPCStats(seed + 29);
     const seatProp = findProp([InteriorPropType.BENCH, InteriorPropType.CHAIR, InteriorPropType.FLOOR_PILLOWS, InteriorPropType.LOW_TABLE]);
     const cookProp = findProp([InteriorPropType.FIRE_PIT, InteriorPropType.BRAZIER]);
@@ -1650,7 +2026,6 @@ export const generateInteriorSpec = (
   seed: number,
   overrides?: InteriorOverrides
 ): InteriorSpec => {
-  let s = seed;
   const socialClass = inferSocialClass(building);
   const profession = building.ownerProfession;
   const sizeScale = building.sizeScale ?? 1;
@@ -1680,235 +2055,359 @@ export const generateInteriorSpec = (
   if (building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL) {
     baseRoomTypes = baseRoomTypes.slice(0, 2);
   }
-  const roomCount = overrides?.roomCount ?? baseRoomTypes.length;
-  let size = resolveRoomSize(socialClass, sizeScale, building.type, building.storyCount, profession);
-  if (isShopStall) {
-    size = Math.max(8, size * 0.8);
-  }
-
   const entrySide = building.doorSide === 0 ? 'north' : building.doorSide === 1 ? 'south' : building.doorSide === 2 ? 'east' : 'west';
-  const openSide: 'north' | 'south' | 'east' | 'west' | null = building.type === BuildingType.CIVIC
-    || building.type === BuildingType.RELIGIOUS
-    || building.type === BuildingType.SCHOOL
-    || building.type === BuildingType.MEDICAL
-    ? null
-    : entrySide;
-  const rooms = placeRooms(s, baseRoomTypes.slice(0, roomCount), size);
-  s += 50;
-  const props = pickProps(rooms, socialClass, building.type, profession, s, entrySide);
-  applyRoomLayouts(props, rooms, building.type, profession, socialClass, s + 31, entrySide);
-  s += 80;
-  const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? rooms[0];
-  const hasLightSource = props.some((prop) => prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.LANTERN);
-  const wallHeight = Math.max(3.0, Math.min(5.2, 3.1 + sizeScale * 0.9 + (
-    building.type === BuildingType.CIVIC
-    || building.type === BuildingType.RELIGIOUS
-    || building.type === BuildingType.SCHOOL
-    || building.type === BuildingType.MEDICAL
-      ? 0.4
-      : 0
-  )));
-  // Place ladder on perpendicular wall to entry (so all 4 directions are possible)
-  const ladderSide: 'north' | 'south' | 'east' | 'west' =
-    entrySide === 'north' ? 'east' :
-    entrySide === 'south' ? 'west' :
-    entrySide === 'east' ? 'north' : 'south';
   const isMultiStory = (building.sizeScale ?? 1) > 1.15
     || building.type === BuildingType.CIVIC
     || building.type === BuildingType.RELIGIOUS
     || building.type === BuildingType.SCHOOL
     || building.type === BuildingType.MEDICAL;
-  const orientOffset = (offset: [number, number, number]): [number, number, number] => {
-    if (entrySide === 'north') return [offset[0], offset[1], -Math.abs(offset[2])];
-    if (entrySide === 'south') return [offset[0], offset[1], Math.abs(offset[2])];
-    if (entrySide === 'east') return [-Math.abs(offset[0]), offset[1], offset[2]];
-    return [Math.abs(offset[0]), offset[1], offset[2]];
-  };
-  const ensureEntryProp = (type: InteriorPropType, label: string, offset: [number, number, number]) => {
-    if (props.some((prop) => prop.type === type)) return;
-    const adjusted = orientOffset(offset);
-    const clamped = clampToRoom(entryRoom, [entryRoom.center[0] + adjusted[0], 0, entryRoom.center[2] + adjusted[2]]);
-    props.push({
-      id: `prop-${type.toLowerCase()}-${building.id}`,
-      type,
-      roomId: entryRoom.id,
-      position: clamped,
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
-      label,
-    });
-  };
-  if (!isShopStall && isMultiStory) {
-    const stairType = socialClass === SocialClass.PEASANT ? InteriorPropType.LADDER : InteriorPropType.STAIRS;
-    if (!props.some((prop) => prop.type === stairType)) {
-      const stairPos = clampToRoom(
-        entryRoom,
-        wallAnchor(entryRoom, ladderSide, 0.7, ladderSide === 'north' || ladderSide === 'south' ? 0.6 : -0.6)
-      );
-      const stairRot: [number, number, number] = ladderSide === 'east'
-        ? [0, -Math.PI / 2, 0]
-        : ladderSide === 'west'
-          ? [0, Math.PI / 2, 0]
-          : ladderSide === 'south'
-            ? [0, Math.PI, 0]
-            : [0, 0, 0];
-      props.push({
-        id: `prop-${stairType.toLowerCase()}-${building.id}`,
-        type: stairType,
-        roomId: entryRoom.id,
-        position: stairPos,
-        rotation: stairRot,
-        scale: [1, 1, 1],
-        label: stairType === InteriorPropType.LADDER ? 'Wooden ladder' : 'Stairway',
-      });
-    }
-  }
-  if (!isShopStall) {
-    ensureEntryProp(InteriorPropType.FLOOR_MAT, 'Woven floor mat', [0.4, 0, 0.4]);
-    ensureEntryProp(InteriorPropType.CHEST, 'Storage chest', [-1.6, 0, 1.2]);
-    ensureEntryProp(InteriorPropType.LOW_TABLE, 'Low table', [1.2, 0, -0.6]);
-    ensureEntryProp(InteriorPropType.CUSHION, 'Cushion', [1.6, 0, 0.2]);
-  }
-  ensureEntryProp(InteriorPropType.LAMP, 'Oil lamp', [-0.8, 0, -0.8]);
 
-  const addLantern = () => {
-    const lanternRoom = building.type === BuildingType.CIVIC
+  const buildFloor = (level: number, floorType: 'public' | 'private', includeExteriorDoor: boolean) => {
+    let localSeed = seed + level * 997;
+    let roomTypes = getFloorRoomTypes(baseRoomTypes, floorType, profession);
+    if (floorType === 'private') {
+      roomTypes = roomTypes.filter((type) => type !== InteriorRoomType.ENTRY);
+    }
+    let roomCount = overrides?.roomCount ?? roomTypes.length;
+    if (floorType === 'private') {
+      roomCount = Math.min(roomCount, 2);
+    }
+    let size = resolveRoomSize(socialClass, sizeScale, building.type, building.storyCount, profession);
+    if (floorType === 'private') {
+      size = size * 0.9;
+    }
+    if (isShopStall && floorType === 'public') {
+      size = Math.max(8, size * 0.8);
+    }
+
+    const openSide: 'north' | 'south' | 'east' | 'west' | null = (floorType === 'public'
+      && (building.type !== BuildingType.CIVIC && building.type !== BuildingType.RELIGIOUS && building.type !== BuildingType.SCHOOL && building.type !== BuildingType.MEDICAL))
+      ? entrySide
+      : null;
+
+    const rooms = placeRooms(localSeed, roomTypes.slice(0, roomCount), size);
+    localSeed += 50;
+    const interiorDoorMap = getInteriorDoorMap(rooms, entrySide);
+    const sharedWallsMap = new Map<string, ('north' | 'south' | 'east' | 'west')[]>(
+      rooms.map((room) => [room.id, getSharedWalls(room, rooms)])
+    );
+    const props = pickProps(rooms, socialClass, building.type, profession, localSeed, entrySide, interiorDoorMap, sharedWallsMap, floorType);
+    applyRoomLayouts(props, rooms, building.type, profession, socialClass, localSeed + 31, entrySide, interiorDoorMap, sharedWallsMap, floorType);
+    adjustPropsForDoorways(props, rooms, interiorDoorMap);
+    localSeed += 80;
+
+    const entryRoom = rooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? rooms[0];
+    const hasLightSource = props.some((prop) => prop.type === InteriorPropType.LAMP || prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.LANTERN);
+    const wallHeight = Math.max(3.0, Math.min(5.2, 3.1 + sizeScale * 0.9 + (
+      building.type === BuildingType.CIVIC
       || building.type === BuildingType.RELIGIOUS
       || building.type === BuildingType.SCHOOL
       || building.type === BuildingType.MEDICAL
-      ? rooms.find((room) => room.type === InteriorRoomType.HALL || room.type === InteriorRoomType.ENTRY)
-      : rooms.find((room) => room.type === InteriorRoomType.PRIVATE || room.type === InteriorRoomType.ENTRY);
-    if (!lanternRoom) return;
-    const hasLantern = props.some((prop) => prop.roomId === lanternRoom.id && prop.type === InteriorPropType.LANTERN);
-    if (hasLantern) return;
-    const corner = entrySide === 'north'
-      ? 'se'
-      : entrySide === 'south'
-        ? 'ne'
-        : entrySide === 'east'
-          ? 'sw'
-          : 'se';
-    // Position lantern well inside room (inset 1.5 from corner), at a lower height for visibility
-    const lanternHeight = Math.min(wallHeight - 0.8, 2.4);  // Lower, more visible height
-    const pos = cornerAnchor(lanternRoom, corner, 1.5, lanternHeight);
-    props.push({
-      id: `prop-lantern-${building.id}`,
-      type: InteriorPropType.LANTERN,
-      roomId: lanternRoom.id,
-      position: clampToRoom(lanternRoom, pos, 1.2),  // Use larger margin to keep inside walls
-      rotation: [0, 0, 0],
-      scale: [3, 3, 3],  // Larger scale for more prominent appearance
-      label: 'Hanging lantern',
-    });
-  };
+        ? 0.4
+        : 0
+    )));
 
-  if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL || building.type === BuildingType.RESIDENTIAL) {
-    addLantern();
-  }
-  if (!hasLightSource) {
-    props.push({
-      id: `prop-lamp-${building.id}`,
-      type: InteriorPropType.LAMP,
-      roomId: entryRoom.id,
-      position: [entryRoom.center[0] + 0.6, 0, entryRoom.center[2] - 0.4],
-      rotation: [0, 0, 0],
-      scale: [1, 1, 1],
-      label: 'Oil lamp',
-    });
-  }
-  const npcs = createNPCs(building, socialClass, rooms, props, s);
+    if (floorType === 'public') {
+      // Place ladder/stairs in a corner, avoiding entry side and shared walls (interior doorways)
+      const sharedWalls = getSharedWalls(entryRoom, rooms);
+      const allSides: ('north' | 'south' | 'east' | 'west')[] = ['north', 'south', 'east', 'west'];
+      const safeWalls = allSides.filter(side => side !== entrySide && !sharedWalls.includes(side));
+      const ladderSide: 'north' | 'south' | 'east' | 'west' = safeWalls.length > 0
+        ? safeWalls[0]
+        : (entrySide === 'north' ? 'east' : entrySide === 'south' ? 'west' : entrySide === 'east' ? 'north' : 'south');
+      const cornerOffset = safeWalls.length >= 2
+        ? (safeWalls.includes('east') ? 1 : safeWalls.includes('west') ? -1 : 0)
+        : (ladderSide === 'north' || ladderSide === 'south' ? 0.8 : 0);
+      if (!isShopStall && isMultiStory) {
+        const entryMinDim = Math.min(entryRoom.size[0], entryRoom.size[2]);
+        const preferLadder = socialClass === SocialClass.PEASANT || entryMinDim < 10.5;
+        const stairType = preferLadder ? InteriorPropType.LADDER : InteriorPropType.STAIRS;
+        if (!props.some((prop) => prop.type === stairType)) {
+          const stairRun = stairType === InteriorPropType.STAIRS ? 3.4 : 0.8;
+          const axisLength = (ladderSide === 'north' || ladderSide === 'south')
+            ? entryRoom.size[2]
+            : entryRoom.size[0];
+          const stairInset = Math.max(1.2, Math.min(stairRun + 0.6, axisLength - 1.2));
+          const cornerPos = cornerOffset * (entryRoom.size[0] * 0.25);
+          const basePos = wallAnchor(entryRoom, ladderSide, stairInset, cornerPos);
+          const stairPos = clampToRoom(entryRoom, basePos, 1.2);
+          const stairRot: [number, number, number] = faceIntoRoom(ladderSide);
+          props.push({
+            id: `prop-${stairType.toLowerCase()}-${building.id}`,
+            type: stairType,
+            roomId: entryRoom.id,
+            position: stairPos,
+            rotation: stairRot,
+            scale: [1, 1, 1],
+            label: stairType === InteriorPropType.LADDER ? 'Wooden ladder' : 'Stairway',
+          });
+        }
+      }
 
-  // Final clamp to ensure props never fall outside their room bounds.
-  props.forEach((prop) => {
-    const room = rooms.find((candidate) => candidate.id === prop.roomId);
-    if (!room) return;
-    prop.position = clampToRoom(room, prop.position, 0.8);
-    if (room.type === InteriorRoomType.ENTRY) {
-      prop.position = keepInsideOpenSide(room, prop.position, openSide, 2.0);
+      if (!isShopStall) {
+        const orientOffset = (offset: [number, number, number]): [number, number, number] => {
+          if (entrySide === 'north') return [offset[0], offset[1], -Math.abs(offset[2])];
+          if (entrySide === 'south') return [offset[0], offset[1], Math.abs(offset[2])];
+          if (entrySide === 'east') return [-Math.abs(offset[0]), offset[1], offset[2]];
+          return [Math.abs(offset[0]), offset[1], offset[2]];
+        };
+        const ensureEntryProp = (type: InteriorPropType, label: string, offset: [number, number, number]) => {
+          if (props.some((prop) => prop.type === type)) return;
+          const adjusted = orientOffset(offset);
+          const clamped = clampToRoom(entryRoom, [entryRoom.center[0] + adjusted[0], 0, entryRoom.center[2] + adjusted[2]]);
+          props.push({
+            id: `prop-${type.toLowerCase()}-${building.id}`,
+            type,
+            roomId: entryRoom.id,
+            position: clamped,
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
+            label,
+          });
+        };
+        ensureEntryProp(InteriorPropType.FLOOR_MAT, 'Woven floor mat', [0.4, 0, 0.4]);
+        ensureEntryProp(InteriorPropType.CHEST, 'Storage chest', [-1.6, 0, 1.2]);
+        ensureEntryProp(InteriorPropType.LOW_TABLE, 'Low table', [1.2, 0, -0.6]);
+        ensureEntryProp(InteriorPropType.CUSHION, 'Cushion', [1.6, 0, 0.2]);
+        ensureEntryProp(InteriorPropType.LAMP, 'Oil lamp', [-0.8, 0, -0.8]);
+      }
     }
-  });
 
-  if (overrides?.extraProps) {
-    overrides.extraProps.forEach((extra, index) => {
-      const room = rooms[index % rooms.length];
+    const addLantern = () => {
+      const lanternRoom = building.type === BuildingType.CIVIC
+        || building.type === BuildingType.RELIGIOUS
+        || building.type === BuildingType.SCHOOL
+        || building.type === BuildingType.MEDICAL
+        ? rooms.find((room) => room.type === InteriorRoomType.HALL || room.type === InteriorRoomType.ENTRY)
+        : rooms.find((room) => room.type === InteriorRoomType.PRIVATE || room.type === InteriorRoomType.ENTRY);
+      if (!lanternRoom) return;
+      const roomLanterns = props.filter((prop) => prop.roomId === lanternRoom.id && prop.type === InteriorPropType.LANTERN).length;
+      if (roomLanterns >= 2) return;
+      const corner = entrySide === 'north'
+        ? 'se'
+        : entrySide === 'south'
+          ? 'ne'
+          : entrySide === 'east'
+            ? 'sw'
+            : 'se';
+      const lanternHeight = Math.min(wallHeight - 0.8, 2.4);
+      const pos = cornerAnchor(lanternRoom, corner, 1.5, lanternHeight);
       props.push({
-        id: extra.id ?? `prop-extra-${index}`,
-        type: extra.type,
-        roomId: extra.roomId ?? room.id,
-        position: extra.position ?? room.center,
-        rotation: extra.rotation ?? [0, 0, 0],
-        scale: extra.scale ?? [1, 1, 1],
-        label: extra.label ?? extra.type,
-        tags: extra.tags,
+        id: `prop-lantern-${building.id}-${level}`,
+        type: InteriorPropType.LANTERN,
+        roomId: lanternRoom.id,
+        position: clampToRoom(lanternRoom, pos, 1.2),
+        rotation: [0, 0, 0],
+        scale: [3, 3, 3],
+        label: 'Hanging lantern',
       });
-    });
-  }
+    };
 
-  // Final safety pass: ensure every prop is tied to a valid room and clamped.
-  props.forEach((prop) => {
-    let room = rooms.find((candidate) => candidate.id === prop.roomId);
-    if (!room) {
-      room = entryRoom;
-      prop.roomId = entryRoom.id;
-      prop.position = [...entryRoom.center] as [number, number, number];
+    const isLargeOrWealthyResidence = building.type === BuildingType.RESIDENTIAL && (
+      socialClass === SocialClass.NOBILITY ||
+      socialClass === SocialClass.MERCHANT ||
+      socialClass === SocialClass.CLERGY ||
+      sizeScale > 1.1
+    );
+    if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL || isLargeOrWealthyResidence) {
+      addLantern();
     }
-
-    // Check for NaN or invalid positions and reset to room center
-    // Use stricter bounds (1.2x room size) to catch props that are way outside
-    if (isNaN(prop.position[0]) || isNaN(prop.position[2]) ||
-        Math.abs(prop.position[0] - room.center[0]) > room.size[0] * 1.2 ||
-        Math.abs(prop.position[2] - room.center[2]) > room.size[2] * 1.2) {
-      prop.position = [...room.center] as [number, number, number];
-    }
-
-    const needsExtraInset = prop.type === InteriorPropType.RUG
-      || prop.type === InteriorPropType.PRAYER_RUG
-      || prop.type === InteriorPropType.FLOOR_MAT
-      || prop.type === InteriorPropType.FIRE_PIT
-      || prop.type === InteriorPropType.BRAZIER
-      || prop.type === InteriorPropType.DESK;
-    const margin = needsExtraInset ? 1.2 : 0.8;
-    prop.position = clampToRoom(room, prop.position, margin);
-    if (room.type === InteriorRoomType.ENTRY) {
-      prop.position = keepInsideOpenSide(room, prop.position, openSide, 2.0);
-    }
-  });
-
-  if (overrides?.extraNPCs) {
-    overrides.extraNPCs.forEach((extra, index) => {
-      const stats = extra.stats ?? generateNPCStats(seed + 101 + index);
-      npcs.push({
-        id: extra.id ?? `npc-extra-${index}`,
-        role: extra.role,
-        position: extra.position ?? [0, 0, 0],
-        rotation: extra.rotation ?? [0, 0, 0],
-        stats,
-        state: extra.state ?? AgentState.HEALTHY,
+    if (!hasLightSource && entryRoom) {
+      props.push({
+        id: `prop-lamp-${building.id}-${level}`,
+        type: InteriorPropType.LAMP,
+        roomId: entryRoom.id,
+        position: [entryRoom.center[0] + 0.6, 0, entryRoom.center[2] - 0.4],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        label: 'Oil lamp',
       });
-    });
-  }
+    }
 
-  if (process.env.NODE_ENV !== 'production') {
-    const issues: string[] = [];
+    const npcs = floorType === 'public' ? createNPCs(building, socialClass, rooms, props, localSeed) : [];
+
     props.forEach((prop) => {
       const room = rooms.find((candidate) => candidate.id === prop.roomId);
-      if (!room) {
-        issues.push(`${prop.id} missing room ${prop.roomId}`);
-        return;
-      }
-      const [cx, , cz] = room.center;
-      const halfW = room.size[0] / 2 - 0.4;
-      const halfD = room.size[2] / 2 - 0.4;
-      const dx = Math.abs(prop.position[0] - cx);
-      const dz = Math.abs(prop.position[2] - cz);
-      if (dx > halfW || dz > halfD) {
-        issues.push(`${prop.id} outside ${room.id} (${dx.toFixed(2)}, ${dz.toFixed(2)})`);
+      if (!room) return;
+      prop.position = clampToRoom(room, prop.position, 0.8);
+      if (room.type === InteriorRoomType.ENTRY) {
+        prop.position = keepInsideOpenSide(room, prop.position, openSide, 2.0);
       }
     });
-    if (issues.length) {
-      console.warn(`[interior] placement issues for ${building.id}`, issues);
+
+    if (floorType === 'public' && overrides?.extraProps) {
+      overrides.extraProps.forEach((extra, index) => {
+        const room = rooms[index % rooms.length];
+        props.push({
+          id: extra.id ?? `prop-extra-${index}`,
+          type: extra.type,
+          roomId: extra.roomId ?? room.id,
+          position: extra.position ?? room.center,
+          rotation: extra.rotation ?? [0, 0, 0],
+          scale: extra.scale ?? [1, 1, 1],
+          label: extra.label ?? extra.type,
+          tags: extra.tags,
+        });
+      });
+    }
+
+    props.forEach((prop) => {
+      let room = rooms.find((candidate) => candidate.id === prop.roomId);
+      if (!room) {
+        room = entryRoom;
+        prop.roomId = entryRoom.id;
+        prop.position = [...entryRoom.center] as [number, number, number];
+      }
+      if (isNaN(prop.position[0]) || isNaN(prop.position[2]) ||
+          Math.abs(prop.position[0] - room.center[0]) > room.size[0] * 1.2 ||
+          Math.abs(prop.position[2] - room.center[2]) > room.size[2] * 1.2) {
+        prop.position = [...room.center] as [number, number, number];
+      }
+      const needsExtraInset = prop.type === InteriorPropType.RUG
+        || prop.type === InteriorPropType.PRAYER_RUG
+        || prop.type === InteriorPropType.FLOOR_MAT
+        || prop.type === InteriorPropType.FIRE_PIT
+        || prop.type === InteriorPropType.BRAZIER
+        || prop.type === InteriorPropType.DESK;
+      const margin = needsExtraInset ? 1.2 : 0.8;
+      prop.position = clampToRoom(room, prop.position, margin);
+      if (room.type === InteriorRoomType.ENTRY) {
+        prop.position = keepInsideOpenSide(room, prop.position, openSide, 2.0);
+      }
+    });
+
+    if (floorType === 'public' && overrides?.extraNPCs) {
+      overrides.extraNPCs.forEach((extra, index) => {
+        const stats = extra.stats ?? generateNPCStats(seed + 101 + index);
+        npcs.push({
+          id: extra.id ?? `npc-extra-${index}`,
+          role: extra.role,
+          position: extra.position ?? [0, 0, 0],
+          rotation: extra.rotation ?? [0, 0, 0],
+          stats,
+          state: extra.state ?? AgentState.HEALTHY,
+        });
+      });
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      const issues: string[] = [];
+      props.forEach((prop) => {
+        const room = rooms.find((candidate) => candidate.id === prop.roomId);
+        if (!room) {
+          issues.push(`${prop.id} missing room ${prop.roomId}`);
+          return;
+        }
+        const [cx, , cz] = room.center;
+        const halfW = room.size[0] / 2 - 0.4;
+        const halfD = room.size[2] / 2 - 0.4;
+        const dx = Math.abs(prop.position[0] - cx);
+        const dz = Math.abs(prop.position[2] - cz);
+        if (dx > halfW || dz > halfD) {
+          issues.push(`${prop.id} outside ${room.id} (${dx.toFixed(2)}, ${dz.toFixed(2)})`);
+        }
+      });
+      if (issues.length) {
+        console.warn(`[interior] placement issues for ${building.id}`, issues);
+      }
+    }
+
+    const floorPrefix = `floor-${level}-`;
+    props.forEach((prop) => {
+      if (!prop.id.startsWith(floorPrefix)) {
+        prop.id = `${floorPrefix}${prop.id}`;
+      }
+    });
+
+    const floorSpec: InteriorSpec = {
+      id: `interior-${building.id}-floor-${level}`,
+      buildingId: building.id,
+      buildingType: building.type,
+      seed: localSeed,
+      socialClass,
+      profession,
+      exteriorDoorSide: includeExteriorDoor ? building.doorSide : undefined,
+      wallHeight,
+      rooms,
+      props,
+      npcs,
+      narratorState: {
+        buildingId: building.id,
+        roomCount: rooms.length,
+        socialClass,
+        profession,
+        rooms: [],
+        objects: [],
+        npcs: [],
+      },
+    };
+    floorSpec.narratorState = buildNarratorState(floorSpec);
+
+    return {
+      level,
+      floorType,
+      seed: localSeed,
+      rooms,
+      props,
+      npcs,
+      wallHeight,
+      exteriorDoorSide: includeExteriorDoor ? building.doorSide : undefined,
+      narratorState: floorSpec.narratorState,
+    };
+  };
+
+  const floor0 = buildFloor(0, 'public', true);
+  let floor1: InteriorFloor | null = null;
+  if (isMultiStory) {
+    floor1 = buildFloor(1, 'private', false);
+    const stair = floor0.props.find((prop) => prop.type === InteriorPropType.STAIRS || prop.type === InteriorPropType.LADDER);
+    if (stair) {
+      floor1.props.push({
+        id: `floor-1-prop-stair-landing-${building.id}`,
+        type: stair.type,
+        roomId: floor1.rooms[0]?.id ?? stair.roomId,
+        position: [...stair.position],
+        rotation: [...stair.rotation],
+        scale: [1, 1, 1],
+        label: 'Stair Landing',
+      });
     }
   }
+
+  const floors = floor1 ? [floor0, floor1] : [floor0];
+  // Cap lanterns: max 2 per room, max 4 per building
+  const applyLanternCaps = (floorsToCap: InteriorFloor[]) => {
+    let totalLanterns = 0;
+    floorsToCap.forEach((floor) => {
+      const roomCounts = new Map<string, number>();
+      floor.props = floor.props.filter((prop) => {
+        if (prop.type !== InteriorPropType.LANTERN) return true;
+        const roomCount = roomCounts.get(prop.roomId) ?? 0;
+        if (roomCount >= 2 || totalLanterns >= 4) return false;
+        roomCounts.set(prop.roomId, roomCount + 1);
+        totalLanterns += 1;
+        return true;
+      });
+    });
+  };
+  applyLanternCaps(floors);
+  floors.forEach((floor) => {
+    const floorSpec: InteriorSpec = {
+      id: `interior-${building.id}-floor-${floor.level}`,
+      buildingId: building.id,
+      buildingType: building.type,
+      seed: floor.seed,
+      socialClass,
+      profession,
+      exteriorDoorSide: floor.exteriorDoorSide,
+      wallHeight: floor.wallHeight,
+      rooms: floor.rooms,
+      props: floor.props,
+      npcs: floor.npcs,
+      narratorState: floor.narratorState,
+    };
+    floor.narratorState = buildNarratorState(floorSpec);
+  });
 
   const spec: InteriorSpec = {
     id: `interior-${building.id}`,
@@ -1918,21 +2417,13 @@ export const generateInteriorSpec = (
     socialClass,
     profession,
     exteriorDoorSide: building.doorSide,
-    wallHeight,
-    rooms,
-    props,
-    npcs,
-    narratorState: {
-      buildingId: building.id,
-      roomCount: rooms.length,
-      socialClass,
-      profession,
-      rooms: [],
-      objects: [],
-      npcs: [],
-    },
+    wallHeight: floor0.wallHeight,
+    rooms: floor0.rooms,
+    props: floor0.props,
+    npcs: floor0.npcs,
+    narratorState: floor0.narratorState,
+    floors,
   };
-  spec.narratorState = buildNarratorState(spec);
   return spec;
 };
 

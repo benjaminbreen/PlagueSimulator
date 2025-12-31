@@ -26,6 +26,7 @@ interface AppShellProps {
   showMerchantModal: boolean;
   nearMerchant: MerchantNPC | null;
   onCloseMerchant: () => void;
+  onTriggerMerchant?: () => void;  // Mobile/touch trigger for trading
   onPurchase: (item: MerchantItem, quantity: number) => void;
   onSell: (item: PlayerItem, quantity: number) => void;
   showGuideModal: boolean;
@@ -34,7 +35,14 @@ interface AppShellProps {
   interiorInfo: string | null;
   sceneMode: 'outdoor' | 'interior';
   nearSpeakableNpc: any | null;
+  onTriggerSpeakToNpc?: () => void;  // Mobile/touch trigger for speaking to NPC
   nearChest: { id: string; label: string; position: [number, number, number]; locationName: string } | null;
+  onTriggerOpenChest?: () => void;   // Mobile/touch trigger for opening chest
+  nearStairs: { id: string; label: string; position: [number, number, number]; type: import('../types').InteriorPropType } | null;
+  stairsPromptLabel: string | null;
+  onTriggerUseStairs?: () => void;
+  nearBirdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null;
+  onTriggerOpenBirdcage?: () => void;
   showEncounterModal: boolean;
   showPlayerModal: boolean;
   showEnterModalActive: boolean;
@@ -70,6 +78,7 @@ export const AppShell = React.memo(({
   showMerchantModal,
   nearMerchant,
   onCloseMerchant,
+  onTriggerMerchant,
   onPurchase,
   onSell,
   showGuideModal,
@@ -78,7 +87,14 @@ export const AppShell = React.memo(({
   interiorInfo,
   sceneMode,
   nearSpeakableNpc,
+  onTriggerSpeakToNpc,
   nearChest,
+  onTriggerOpenChest,
+  nearStairs,
+  stairsPromptLabel,
+  onTriggerUseStairs,
+  nearBirdcage,
+  onTriggerOpenBirdcage,
   showEncounterModal,
   showPlayerModal,
   showEnterModalActive,
@@ -219,25 +235,59 @@ export const AppShell = React.memo(({
         </div>
       )}
 
-      {/* Merchant Interaction Prompt */}
+      {/* Merchant Interaction Prompt - clickable for mobile */}
       {!observeMode && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && (
-        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
-          Press <span className="font-bold text-amber-400">E</span> to trade with {nearMerchant.stats.name}
-        </div>
+        <button
+          onClick={onTriggerMerchant}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[E]</span>
+          Trade with {nearMerchant.stats.name}
+        </button>
       )}
 
-      {/* NPC Speak Prompt (only when no merchant nearby) */}
+      {/* NPC Speak Prompt - clickable for mobile (only when no merchant nearby) */}
       {!observeMode && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
-        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
-          Press <span className="font-bold text-amber-400">E</span> to speak to {nearSpeakableNpc.stats.name}
-        </div>
+        <button
+          onClick={onTriggerSpeakToNpc}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[E]</span>
+          Speak to {nearSpeakableNpc.stats.name}
+        </button>
       )}
 
-      {/* Chest Interaction Prompt (both interior and outdoor) */}
+      {/* Chest Interaction Prompt - clickable for mobile (both interior and outdoor) */}
       {!observeMode && nearChest && (
-        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-none animate-pulse">
-          Press <span className="font-bold text-amber-400">O</span> to open {nearChest.label}
-        </div>
+        <button
+          onClick={onTriggerOpenChest}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[O]</span>
+          Open {nearChest.label}
+        </button>
+      )}
+
+      {/* Stairs/Ladder Interaction Prompt - interior only */}
+      {!observeMode && sceneMode === 'interior' && nearStairs && !nearChest && !nearBirdcage && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
+        <button
+          onClick={onTriggerUseStairs}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[E]</span>
+          {stairsPromptLabel ?? 'Use stairs'}
+        </button>
+      )}
+
+      {/* Birdcage Interaction Prompt */}
+      {!observeMode && nearBirdcage && !nearChest && (
+        <button
+          onClick={onTriggerOpenBirdcage}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[O]</span>
+          Open {nearBirdcage.label}
+        </button>
       )}
 
       <ObserveController

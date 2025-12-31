@@ -2,7 +2,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { MoraleStats } from './components/Agents';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, PlagueType, SocialClass } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, InteriorPropType, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, PlagueType, SocialClass } from './types';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
@@ -71,6 +71,7 @@ function App() {
   const [interiorSpec, setInteriorSpec] = useState<InteriorSpec | null>(null);
   const [interiorNarrator, setInteriorNarrator] = useState<InteriorNarratorState | null>(null);
   const [interiorBuilding, setInteriorBuilding] = useState<BuildingMetadata | null>(null);
+  const [activeInteriorFloor, setActiveInteriorFloor] = useState(0);
   const {
     selectedNpc,
     setSelectedNpc,
@@ -105,6 +106,8 @@ function App() {
   });
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
   const [nearChest, setNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
+  const [nearBirdcage, setNearBirdcage] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
+  const [nearStairs, setNearStairs] = useState<{ id: string; label: string; position: [number, number, number]; type: InteriorPropType } | null>(null);
   const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
   const [worldFlags, setWorldFlags] = useState<Record<string, boolean | number | string>>(() => {
     try {
@@ -135,6 +138,8 @@ function App() {
   const [climbablePrompt, setClimbablePrompt] = useState<string | null>(null);
   const [isClimbing, setIsClimbing] = useState(false);
   const climbInputRef = useRef<'up' | 'down' | 'cancel' | null>(null);
+  const pickupTriggerRef = useRef<boolean>(false);  // Mobile/touch trigger for pickup
+  const climbTriggerRef = useRef<boolean>(false);   // Mobile/touch trigger for initiating climb
   const [pickupToast, setPickupToast] = useState<{ message: string; id: number } | null>(null);
   const r3fRef = useRef<{ camera: THREE.Camera | null; gl: THREE.WebGLRenderer | null }>({ camera: null, gl: null });
   const dropRaycaster = useMemo(() => new THREE.Raycaster(), []);
@@ -178,6 +183,8 @@ function App() {
       setInteriorSpec(null);
       setInteriorNarrator(null);
       setInteriorBuilding(null);
+      setActiveInteriorFloor(0);
+      setNearStairs(null);
       return;
     }
     const district = interiorBuilding.district ?? getDistrictType(params.mapX, params.mapY);
@@ -198,6 +205,8 @@ function App() {
     setInteriorSpec(null);
     setInteriorNarrator(null);
     setInteriorBuilding(null);
+    setActiveInteriorFloor(0);
+    setNearStairs(null);
   }, [getDistrictScale, interiorBuilding, params.mapX, params.mapY]);
 
   // Calculate infected households for epidemic report
@@ -364,8 +373,10 @@ function App() {
         { id: 'start-twine', quantity: 1 },
         { id: 'start-linen-scrap', quantity: 2 },
         { id: 'start-olives', quantity: 2 },
-        { id: 'start-dried-figs', quantity: 2 },
-        { id: 'start-candle-stub', quantity: 1 }
+        { id: 'start-chickpeas', quantity: 2 },
+        { id: 'start-candle-stub', quantity: 1 },
+        { id: 'start-sandals', quantity: 1 },
+        { id: 'start-copper-amulet', quantity: 1 }
       );
     } else if (stats.socialClass === SocialClass.MERCHANT) {
       classBasics.push(
@@ -373,68 +384,133 @@ function App() {
         { id: 'start-candles', quantity: 1 },
         { id: 'start-satchel', quantity: 1 },
         { id: 'start-dates', quantity: 2 },
-        { id: 'start-olives', quantity: 2 }
+        { id: 'start-olives', quantity: 2 },
+        { id: 'start-coin-purse', quantity: 1 },
+        { id: 'start-sandals', quantity: 1 },
+        { id: 'start-prayer-beads', quantity: 1 }
       );
     } else if (stats.socialClass === SocialClass.CLERGY) {
       classBasics.push(
         { id: 'start-prayer-rug', quantity: 1 },
         { id: 'start-incense', quantity: 1 },
         { id: 'start-manuscript', quantity: 1 },
-        { id: 'start-candles', quantity: 1 }
+        { id: 'start-candles', quantity: 1 },
+        { id: 'start-prayer-beads', quantity: 1 },
+        { id: 'start-writing-reed', quantity: 2 },
+        { id: 'start-soap', quantity: 1 }
       );
     } else if (stats.socialClass === SocialClass.NOBILITY) {
       classBasics.push(
         { id: 'start-satchel', quantity: 1 },
         { id: 'start-perfume', quantity: 1 },
         { id: 'start-rose-water', quantity: 1 },
-        { id: 'start-olives', quantity: 2 }
+        { id: 'start-pistachios', quantity: 2 },
+        { id: 'start-sugar', quantity: 1 },
+        { id: 'start-kohl-container', quantity: 1 },
+        { id: 'start-soap', quantity: 1 }
       );
     }
 
     const genderBasics: Array<{ id: string; quantity: number }> = [];
     if (stats.gender === 'Female') {
-      genderBasics.push({ id: 'start-headscarf', quantity: 1 });
+      genderBasics.push(
+        { id: 'start-headscarf', quantity: 1 },
+        { id: 'start-kohl', quantity: 1 },
+        { id: 'start-henna', quantity: 1 }
+      );
     } else {
-      genderBasics.push({ id: 'start-belt-sash', quantity: 1 });
+      genderBasics.push(
+        { id: 'start-belt-sash', quantity: 1 },
+        { id: 'start-kohl', quantity: 1 }
+      );
     }
 
     const professionBasics: Array<{ id: string; quantity: number }> = [];
     if (stats.profession.match(/Merchant|Trader|Draper|Textile|Weaver|Dyer|Carpenter/i)) {
-      professionBasics.push({ id: 'start-linen-cloth', quantity: 1 });
+      professionBasics.push(
+        { id: 'start-linen-cloth', quantity: 1 },
+        { id: 'start-indigo', quantity: 1 }
+      );
     }
-    if (stats.profession.match(/Apothecary|Herbalist|Midwife/i)) {
+    if (stats.profession.match(/Apothecary|Herbalist|Hakim/i)) {
       professionBasics.push(
         { id: 'start-mint', quantity: 2 },
-        { id: 'start-cumin', quantity: 1 },
-        { id: 'start-honey', quantity: 1 }
+        { id: 'start-aloe', quantity: 1 },
+        { id: 'start-honey', quantity: 1 },
+        { id: 'start-myrrh', quantity: 1 }
       );
     }
-    if (stats.profession.match(/Coppersmith|Metalsmith/i)) {
+    if (stats.profession.match(/Midwife|Washer of the Dead/i)) {
+      professionBasics.push(
+        { id: 'start-burial-shroud', quantity: 1 },
+        { id: 'start-camphor', quantity: 1 },
+        { id: 'start-soap', quantity: 1 }
+      );
+    }
+    if (stats.profession.match(/Henna Artist|Matchmaker/i)) {
+      professionBasics.push(
+        { id: 'start-henna', quantity: 2 },
+        { id: 'start-kohl', quantity: 1 },
+        { id: 'start-rose-water', quantity: 1 }
+      );
+    }
+    if (stats.profession.match(/Coppersmith|Metalsmith|Blacksmith|Goldsmith/i)) {
       professionBasics.push(
         { id: 'start-bronze-bell', quantity: 1 },
-        { id: 'start-iron-nails', quantity: 2 }
+        { id: 'start-iron-nails', quantity: 2 },
+        { id: 'start-iron-key', quantity: 1 }
       );
     }
-    if (stats.profession.match(/Guard|Soldier|Officer/i)) {
-      professionBasics.push({ id: 'item-merchant-metalsmith-0', quantity: 1 });
+    if (stats.profession.match(/Guard|Soldier|Officer|Mamluk/i)) {
+      professionBasics.push(
+        { id: 'start-dagger', quantity: 1 },
+        { id: 'start-waterskin', quantity: 1 }
+      );
     }
-    if (stats.profession.match(/Bread Seller|Water-Carrier|Porter|Servant/i)) {
-      professionBasics.push({ id: 'start-waterskin', quantity: 1 });
+    if (stats.profession.match(/Bread Seller|Water-Carrier|Porter|Servant|Cook|Innkeeper/i)) {
+      professionBasics.push(
+        { id: 'start-waterskin', quantity: 1 },
+        { id: 'start-sesame-oil', quantity: 1 }
+      );
+    }
+    if (stats.profession.match(/Imam|Muezzin|Qadi|Sufi|Scholar|Scribe/i)) {
+      professionBasics.push(
+        { id: 'start-writing-reed', quantity: 3 },
+        { id: 'start-manuscript', quantity: 1 },
+        { id: 'start-prayer-beads', quantity: 1 }
+      );
+    }
+    if (stats.profession.match(/Silk|Spice|Grain|Commercial Agent|Funduq/i)) {
+      professionBasics.push(
+        { id: 'start-pistachios', quantity: 1 },
+        { id: 'start-pepper', quantity: 1 },
+        { id: 'start-satchel', quantity: 1 }
+      );
+    }
+    if (stats.profession.match(/Barber/i)) {
+      professionBasics.push(
+        { id: 'start-soap', quantity: 1 },
+        { id: 'start-aloe', quantity: 1 }
+      );
     }
 
-    pickUnique(classBasics, Math.max(2, Math.min(4, classBasics.length)));
-    pickUnique(genderBasics, Math.min(1, genderBasics.length));
-    pickUnique(professionBasics, Math.min(3, professionBasics.length));
+    pickUnique(classBasics, Math.max(3, Math.min(5, classBasics.length)));
+    pickUnique(genderBasics, Math.min(2, genderBasics.length));
+    pickUnique(professionBasics, Math.min(4, professionBasics.length));
 
-    if (startingInventory.length < 3) {
+    if (startingInventory.length < 4) {
       pickUnique(
         [
           { id: 'start-dates', quantity: 2 },
           { id: 'start-olives', quantity: 2 },
           { id: 'start-dried-figs', quantity: 2 },
-          { id: 'start-apricots', quantity: 2 }
+          { id: 'start-apricots', quantity: 2 },
+          { id: 'start-chickpeas', quantity: 2 },
+          { id: 'start-pomegranate', quantity: 1 },
+          { id: 'start-prayer-beads', quantity: 1 },
+          { id: 'start-soap', quantity: 1 }
         ],
-        3 - startingInventory.length
+        4 - startingInventory.length
       );
     }
 
@@ -477,6 +553,12 @@ function App() {
   }, []);
   const handleClimbInput = useCallback((dir: 'up' | 'down' | 'cancel') => {
     climbInputRef.current = dir;
+  }, []);
+  const handleTriggerPickup = useCallback(() => {
+    pickupTriggerRef.current = true;
+  }, []);
+  const handleTriggerClimb = useCallback(() => {
+    climbTriggerRef.current = true;
   }, []);
   const handleResetFollowingState = useCallback(() => setIsFollowingAfterDismissal(false), []);
   const handleDismissToast = useCallback((id: string) => {
@@ -691,14 +773,31 @@ function App() {
     // Generate random loot for the chest (1-3 items)
     const numItems = 1 + Math.floor(Math.random() * 3);
     const possibleItems = [
+      // Common items
       { itemId: 'chest-silver-coin', itemName: 'Silver Dirham', rarity: 'common' as const, category: 'CURRENCY' },
-      { itemId: 'chest-gold-coin', itemName: 'Gold Dinar', rarity: 'uncommon' as const, category: 'CURRENCY' },
-      { itemId: 'chest-silk-cloth', itemName: 'Silk Fabric', rarity: 'uncommon' as const, category: 'TEXTILE' },
       { itemId: 'chest-incense', itemName: 'Frankincense', rarity: 'common' as const, category: 'APOTHECARY' },
-      { itemId: 'chest-spice', itemName: 'Precious Spices', rarity: 'uncommon' as const, category: 'TRADER' },
-      { itemId: 'chest-jewelry', itemName: 'Silver Bracelet', rarity: 'rare' as const, category: 'METALSMITH' },
       { itemId: 'chest-medicine', itemName: 'Medicinal Herbs', rarity: 'common' as const, category: 'APOTHECARY' },
       { itemId: 'chest-scroll', itemName: 'Parchment Scroll', rarity: 'common' as const, category: 'SCHOLARLY' },
+      { itemId: 'start-soap', itemName: 'Aleppo Soap', rarity: 'common' as const, category: 'TRADER' },
+      { itemId: 'start-sesame-oil', itemName: 'Sesame Oil', rarity: 'common' as const, category: 'TRADER' },
+      { itemId: 'start-copper-amulet', itemName: 'Copper Amulet', rarity: 'common' as const, category: 'METALSMITH' },
+      { itemId: 'start-iron-key', itemName: 'Iron Key', rarity: 'common' as const, category: 'METALSMITH' },
+      { itemId: 'start-prayer-beads', itemName: 'Prayer Beads', rarity: 'common' as const, category: 'TRADER' },
+      { itemId: 'start-kohl', itemName: 'Kohl Powder', rarity: 'common' as const, category: 'APOTHECARY' },
+      { itemId: 'start-henna', itemName: 'Henna Powder', rarity: 'common' as const, category: 'APOTHECARY' },
+      // Uncommon items
+      { itemId: 'chest-gold-coin', itemName: 'Gold Dinar', rarity: 'uncommon' as const, category: 'CURRENCY' },
+      { itemId: 'chest-silk-cloth', itemName: 'Silk Fabric', rarity: 'uncommon' as const, category: 'TEXTILE' },
+      { itemId: 'chest-spice', itemName: 'Precious Spices', rarity: 'uncommon' as const, category: 'TRADER' },
+      { itemId: 'start-indigo', itemName: 'Indigo Dye Cake', rarity: 'uncommon' as const, category: 'TEXTILE' },
+      { itemId: 'start-pistachios', itemName: 'Pistachio Nuts', rarity: 'uncommon' as const, category: 'TRADER' },
+      { itemId: 'start-sugar', itemName: 'Sugar Loaf', rarity: 'uncommon' as const, category: 'TRADER' },
+      { itemId: 'start-myrrh', itemName: 'Myrrh Resin', rarity: 'uncommon' as const, category: 'APOTHECARY' },
+      { itemId: 'start-kohl-container', itemName: 'Silver Kohl Container', rarity: 'uncommon' as const, category: 'METALSMITH' },
+      // Rare items
+      { itemId: 'chest-jewelry', itemName: 'Silver Bracelet', rarity: 'rare' as const, category: 'METALSMITH' },
+      { itemId: 'start-compass', itemName: 'Geometric Compass', rarity: 'rare' as const, category: 'METALSMITH' },
+      { itemId: 'start-perfume', itemName: 'Musk Perfume', rarity: 'rare' as const, category: 'APOTHECARY' },
     ];
 
     const items: Array<{ itemId: string; itemName: string; rarity: 'common' | 'uncommon' | 'rare'; category: string }> = [];
@@ -725,6 +824,86 @@ function App() {
     setNearChest(null);
   }, [setLootModalData]);
 
+  const handleOpenBirdcage = useCallback((birdcage: { id: string; label: string; position: [number, number, number]; locationName: string }) => {
+    setLootModalData({
+      type: 'chest',
+      sourceObjectName: birdcage.label,
+      sourceLocation: birdcage.locationName,
+      items: [{
+        itemId: 'caged-songbird',
+        itemName: 'Caged Songbird',
+        rarity: 'uncommon',
+        category: 'ANIMAL'
+      }],
+      isTheft: true
+    });
+
+    setNearBirdcage(null);
+  }, [setLootModalData]);
+
+  // Mobile/touch trigger for speaking to NPC (equivalent to pressing E)
+  const handleTriggerSpeakToNpc = useCallback(() => {
+    if (nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+      setSelectedNpc(nearSpeakableNpc);
+      setIsNPCInitiatedEncounter(false);
+      setIsFollowingAfterDismissal(false);
+      tryTriggerEvent({
+        when: 'npcApproach',
+        targetType: 'npcProfession',
+        targetId: nearSpeakableNpc.stats.profession,
+        contextOverrides: {
+          npc: {
+            id: nearSpeakableNpc.stats.id,
+            name: nearSpeakableNpc.stats.name,
+            profession: nearSpeakableNpc.stats.profession,
+            socialClass: nearSpeakableNpc.stats.socialClass,
+            disposition: nearSpeakableNpc.stats.disposition,
+            panic: nearSpeakableNpc.stats.panicLevel,
+            religion: nearSpeakableNpc.stats.religion
+          }
+        },
+        source: 'player'
+      });
+      setShowEncounterModal(true);
+    }
+  }, [nearSpeakableNpc, nearMerchant, showEncounterModal, showMerchantModal, showEnterModal, showPlayerModal, tryTriggerEvent]);
+
+  // Mobile/touch trigger for trading with merchant (equivalent to pressing E near merchant)
+  const handleTriggerMerchant = useCallback(() => {
+    if (nearMerchant && !showMerchantModal && !showEncounterModal) {
+      setShowMerchantModal(true);
+      tryTriggerEvent({
+        when: 'merchantOpen',
+        targetType: 'merchantAny',
+        targetId: 'any',
+        source: 'environment'
+      });
+    }
+  }, [nearMerchant, showMerchantModal, showEncounterModal, tryTriggerEvent]);
+
+  // Mobile/touch trigger for opening chest (equivalent to pressing O)
+  const handleTriggerOpenChest = useCallback(() => {
+    if (nearChest && !lootModalData && !showMerchantModal && !showEncounterModal) {
+      handleOpenChest(nearChest);
+    }
+  }, [nearChest, lootModalData, showMerchantModal, showEncounterModal, handleOpenChest]);
+
+  const handleTriggerOpenBirdcage = useCallback(() => {
+    if (nearBirdcage && !lootModalData && !showMerchantModal && !showEncounterModal) {
+      handleOpenBirdcage(nearBirdcage);
+    }
+  }, [nearBirdcage, lootModalData, showMerchantModal, showEncounterModal, handleOpenBirdcage]);
+
+  const handleTriggerUseStairs = useCallback(() => {
+    if (sceneMode !== 'interior' || !interiorSpec || !nearStairs) return;
+    const floors = interiorSpec.floors ?? [];
+    if (floors.length < 2) return;
+    const nextFloor = activeInteriorFloor === 0 ? 1 : 0;
+    setActiveInteriorFloor(nextFloor);
+    setInteriorNarrator(floors[nextFloor]?.narratorState ?? interiorSpec.narratorState);
+    setNearStairs(null);
+  }, [sceneMode, interiorSpec, nearStairs, activeInteriorFloor]);
+
   // Global Key Listener for Interaction
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -733,6 +912,12 @@ function App() {
         setInteriorSpec(null);
         setInteriorNarrator(null);
         setInteriorBuilding(null);
+        setActiveInteriorFloor(0);
+        setNearStairs(null);
+        return;
+      }
+      if (e.key === 'e' && sceneMode === 'interior' && nearStairs && !lootModalData && !showMerchantModal && !showEncounterModal && !showEnterModal && !showPlayerModal) {
+        handleTriggerUseStairs();
         return;
       }
       if (e.key === 'Enter' && sceneMode === 'outdoor' && nearBuilding && nearBuilding.isOpen && !showEnterModal) {
@@ -780,6 +965,10 @@ function App() {
       if (e.key === 'o' && nearChest && !lootModalData && !showMerchantModal && !showEncounterModal) {
         handleOpenChest(nearChest);
       }
+      // Open birdcage with 'O' key when near a birdcage
+      if (e.key === 'o' && !nearChest && nearBirdcage && !lootModalData && !showMerchantModal && !showEncounterModal) {
+        handleOpenBirdcage(nearBirdcage);
+      }
       if (e.key === '4' && selectedNpc && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
         e.preventDefault();
         setIsNPCInitiatedEncounter(false); // Player-initiated, not NPC
@@ -816,7 +1005,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, lootModalData, handleOpenChest]);
+  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, nearBirdcage, lootModalData, handleOpenChest, handleOpenBirdcage, nearStairs, handleTriggerUseStairs]);
 
   // Push trigger function
   const triggerPush = useCallback(() => {
@@ -1402,7 +1591,7 @@ function App() {
     const spec = generateInteriorSpec(building, seed);
     const registry = ensureTileRegistry(tileBuildings);
     if (registry) {
-      spec.npcs = spec.npcs.map((npc) => {
+      const syncedNpcs = spec.npcs.map((npc) => {
         const record = registry.npcMap.get(npc.id);
         if (!record) return npc;
         record.location = 'interior';
@@ -1413,10 +1602,16 @@ function App() {
           plagueMeta: record.plagueMeta
         };
       });
+      spec.npcs = syncedNpcs;
+      if (spec.floors?.[0]) {
+        spec.floors[0].npcs = syncedNpcs;
+      }
     }
     setInteriorSpec(spec);
-    setInteriorNarrator(spec.narratorState);
+    setInteriorNarrator(spec.floors?.[0]?.narratorState ?? spec.narratorState);
     setInteriorBuilding(building);
+    setActiveInteriorFloor(0);
+    setNearStairs(null);
     lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
     setNearBuilding(null);
     setSceneMode('interior');
@@ -1581,6 +1776,8 @@ function App() {
       return;
     }
 
+    const isBirdcageTheft = lootModalData?.sourceObjectName === 'Birdcage' && lootModalData.isTheft;
+
     // Check inventory space
     const currentInventorySize = playerStats.inventory.reduce((sum, i) => sum + i.quantity, 0);
     if (currentInventorySize + items.length > playerStats.maxInventorySlots) {
@@ -1621,6 +1818,13 @@ function App() {
       };
     });
 
+    if (isBirdcageTheft) {
+      setPlayerStats(prev => ({
+        ...prev,
+        reputation: Math.max(0, prev.reputation - 2)
+      }));
+    }
+
     // Show toast
     const itemNames = items.map(i => i.itemName).join(', ');
     setToastMessages(prev => [...prev, {
@@ -1631,7 +1835,17 @@ function App() {
 
     // Close modal
     setLootModalData(null);
-  }, [playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
+
+    if (isBirdcageTheft) {
+      const eventRoll = seededRandom(playerSeed + Math.floor(stats.simTime) * 7 + items.length * 11);
+      const eventId = eventRoll < 0.34
+        ? 'event_birdcage_theft_scolded'
+        : eventRoll < 0.67
+          ? 'event_birdcage_theft_neighbor'
+          : 'event_birdcage_theft_patrol';
+      handleTriggerConversationEvent(eventId);
+    }
+  }, [handleTriggerConversationEvent, lootModalData, playerSeed, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
 
   const handleLootDecline = useCallback(() => {
     setLootModalData(null);
@@ -1704,6 +1918,7 @@ function App() {
     const ownerName = building?.ownerName ?? 'Resident';
     const profession = building?.ownerProfession ?? interiorSpec.profession;
     const type = building?.type ?? interiorSpec.buildingType;
+    const activeFloor = interiorSpec.floors?.[activeInteriorFloor];
     const lowerProf = profession.toLowerCase();
     let placeLabel = getBuildingLabel(type);
     if (type === BuildingType.COMMERCIAL) {
@@ -1711,10 +1926,24 @@ function App() {
       else if (lowerProf.includes('khan') || lowerProf.includes('caravanserai')) placeLabel = 'Caravanserai';
       else placeLabel = 'Shop';
     }
-    const guestCount = Math.max(0, interiorSpec.npcs.filter((npc) => npc.role !== 'owner').length);
-    const guestLabel = guestCount === 0 ? 'No other customers present' : `Other customers present: ${guestCount}`;
+    const activeNpcs = activeFloor?.npcs ?? interiorSpec.npcs;
+    const guestCount = Math.max(0, activeNpcs.filter((npc) => npc.role !== 'owner').length);
+    const guestLabel = activeFloor?.floorType === 'private'
+      ? 'Private upper rooms'
+      : guestCount === 0
+        ? 'No other customers present'
+        : `Other customers present: ${guestCount}`;
     return `${placeLabel} of ${ownerName} in the ${location} district. ${guestLabel}.`;
-  }, [sceneMode, interiorSpec, interiorBuilding, params.mapX, params.mapY]);
+  }, [sceneMode, interiorSpec, interiorBuilding, params.mapX, params.mapY, activeInteriorFloor]);
+
+  const stairsPromptLabel = useMemo(() => {
+    if (!nearStairs) return null;
+    const goingUp = activeInteriorFloor === 0;
+    if (nearStairs.type === InteriorPropType.LADDER) {
+      return goingUp ? 'Climb up' : 'Climb down';
+    }
+    return goingUp ? 'Go upstairs' : 'Go downstairs';
+  }, [nearStairs, activeInteriorFloor]);
 
   // Get nearby NPCs for the Historical Guide context
   const nearbyNPCs = useMemo(() => {
@@ -1785,6 +2014,8 @@ function App() {
     climbablePrompt,
     isClimbing,
     onClimbInput: handleClimbInput,
+    onTriggerPickup: handleTriggerPickup,
+    onTriggerClimb: handleTriggerClimb,
     pickupToast: pickupToast?.message ?? null,
     currentWeather,
     pushCharge,
@@ -1834,6 +2065,8 @@ function App() {
     currentWeather,
     devSettings,
     handleClimbInput,
+    handleTriggerPickup,
+    handleTriggerClimb,
     handleConversationResult,
     handleDebugEvent,
     handleDropItem,
@@ -1910,6 +2143,8 @@ function App() {
     onClimbablePrompt: setClimbablePrompt,
     onClimbingStateChange: setIsClimbing,
     climbInputRef,
+    pickupTriggerRef,
+    climbTriggerRef,
     onPickupItem: handlePickupItem,
     onWeatherUpdate: setCurrentWeather,
     onPushCharge: setPushCharge,
@@ -1931,8 +2166,11 @@ function App() {
     observeMode,
     gameLoading,
     mapEntrySpawn,
+    activeFloorIndex: activeInteriorFloor,
     onExitInterior: exitInterior,
     onNearChest: setNearChest,
+    onNearStairs: setNearStairs,
+    onNearBirdcage: setNearBirdcage,
     onShowLootModal: handleShowLootModal,
     performanceMonitor: performanceMonitorConfig
   }), [
@@ -1958,6 +2196,7 @@ function App() {
     handlePlayerStartMove,
     handleShowLootModal,
     handleStatsUpdate,
+    activeInteriorFloor,
     interiorSpec,
     mapEntrySpawn,
     exitInterior,
@@ -1973,6 +2212,8 @@ function App() {
     setMinimapData,
     setNearBuilding,
     setNearChest,
+    setNearStairs,
+    setNearBirdcage,
     setNearMerchant,
     setNearSpeakableNpc,
     setPickupPrompt,
@@ -2010,6 +2251,7 @@ function App() {
         showMerchantModal={showMerchantModal}
         nearMerchant={nearMerchant}
         onCloseMerchant={() => setShowMerchantModal(false)}
+        onTriggerMerchant={handleTriggerMerchant}
         onPurchase={handlePurchase}
         onSell={handleSell}
         showGuideModal={showGuideModal}
@@ -2021,7 +2263,14 @@ function App() {
         interiorInfo={interiorInfo}
         sceneMode={sceneMode}
         nearSpeakableNpc={nearSpeakableNpc}
+        onTriggerSpeakToNpc={handleTriggerSpeakToNpc}
         nearChest={nearChest}
+        onTriggerOpenChest={handleTriggerOpenChest}
+        nearStairs={nearStairs}
+        stairsPromptLabel={stairsPromptLabel}
+        onTriggerUseStairs={handleTriggerUseStairs}
+        nearBirdcage={nearBirdcage}
+        onTriggerOpenBirdcage={handleTriggerOpenBirdcage}
         showEncounterModal={showEncounterModal}
         showPlayerModal={showPlayerModal}
         showEnterModalActive={showEnterModal}

@@ -19,11 +19,11 @@ export const Flame: React.FC<{ position: [number, number, number]; size: number;
   );
 };
 
-const contactShadowMaterial = new THREE.MeshStandardMaterial({
-  color: '#3b2f24',
+const contactShadowMaterial = new THREE.MeshBasicMaterial({
+  color: '#22180f',
   transparent: true,
-  opacity: 0.25,
-  roughness: 1
+  opacity: 0.32,
+  depthWrite: false
 });
 
 export const ContactShadow: React.FC<{ size: [number, number]; y?: number }> = ({ size, y = 0.02 }) => (
