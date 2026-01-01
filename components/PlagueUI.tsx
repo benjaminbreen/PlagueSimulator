@@ -42,7 +42,7 @@ export const PlagueUI: React.FC<PlagueUIProps> = ({
     <>
       {/* Plague Symptom Notification Toast */}
       {plagueNotification && (
-        <div className="absolute top-24 left-1/2 -translate-x-1/2 z-[150] animate-in fade-in slide-in-from-top duration-500">
+        <div className="absolute bottom-38 left-1/2 -translate-x-1/2 z-[150] animate-in fade-in slide-in-from-bottom duration-500">
           <div className="bg-gradient-to-r from-red-950/95 via-red-900/95 to-red-950/95 border border-red-700/50 px-6 py-3 rounded-lg shadow-2xl backdrop-blur-sm">
             <p className="text-red-200 text-sm italic tracking-wide text-center">
               {plagueNotification}

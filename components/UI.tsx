@@ -120,6 +120,8 @@ interface UIProps {
     lastScheduleMs: number;
     lastScheduleSimTime: number;
   };
+  /** Callback to trigger entering a building (same as pressing Enter) */
+  onTriggerEnterBuilding?: () => void;
 }
 
 interface InventoryEntry {
@@ -558,7 +560,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug, onTriggerEnterBuilding }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -1125,48 +1127,68 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           const infectionState = buildingInfection?.[nearBuilding.id];
           const isInfected = infectionState?.status === 'infected' || infectionState?.status === 'deceased';
           const isDeceased = infectionState?.status === 'deceased';
+          const canEnter = nearBuilding.isOpen && onTriggerEnterBuilding;
 
           return (
-            <div className={`backdrop-blur-lg p-3 rounded-xl shadow-2xl w-full transition-all duration-300 animate-in fade-in slide-in-from-top-4 pointer-events-auto ${
-              isInfected
-                ? 'bg-red-950/80 border-2 border-red-500/60'
-                : 'bg-black/60 border border-amber-600/30'
-            }`}>
+            <div
+              onClick={canEnter ? onTriggerEnterBuilding : undefined}
+              className={`backdrop-blur-lg p-2 sm:p-3 rounded-lg sm:rounded-xl shadow-2xl w-full transition-all duration-300 animate-in fade-in slide-in-from-top-4 pointer-events-auto ${
+                isInfected
+                  ? 'bg-red-950/80 border-2 border-red-500/60'
+                  : 'bg-black/60 border border-amber-600/30'
+              } ${canEnter ? 'cursor-pointer hover:bg-black/70 hover:border-amber-500/50' : ''}`}
+            >
               {/* Plague warning banner */}
               {isInfected && (
-                <div className={`flex items-center justify-center gap-2 mb-2 py-1.5 rounded-lg ${
+                <div className={`flex items-center justify-center gap-2 mb-1.5 sm:mb-2 py-1 sm:py-1.5 rounded-lg ${
                   isDeceased ? 'bg-red-900/60' : 'bg-red-800/50'
                 } animate-pulse`}>
-                  <span className="text-red-200 font-black text-xs uppercase tracking-[0.2em]">
+                  <span className="text-red-200 font-black text-[10px] sm:text-xs uppercase tracking-[0.15em] sm:tracking-[0.2em]">
                     {isDeceased ? '☠ DEATH HOUSE ☠' : '⚠ PLAGUE HOUSE ⚠'}
                   </span>
                 </div>
               )}
 
-              <div className="flex justify-between items-start mb-1">
-                <h3 className={`font-bold text-[10px] historical-font tracking-tight uppercase ${
-                  isInfected ? 'text-red-300' : 'text-amber-400'
-                }`}>
-                  {getBuildingTypeLabel(nearBuilding.type)}
-                </h3>
-                <Info size={12} className={isInfected ? 'text-red-400/50' : 'text-amber-600/50'} />
-              </div>
-
-              <div className="flex flex-col gap-1.5">
-                <div className={`flex items-center gap-2 ${isInfected ? 'text-red-100' : 'text-amber-100'}`}>
-                  <User size={10} className={isInfected ? 'text-red-400/70' : 'text-amber-500/70'} />
-                  <span className="text-xs font-semibold">{nearBuilding.ownerName}</span>
-                  <span className={`text-[10px] ${isInfected ? 'text-red-100/50' : 'text-amber-100/50'}`}>Age {nearBuilding.ownerAge}</span>
-                </div>
-                <div className="flex items-center gap-2 pl-4">
-                  <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded border font-bold ${
-                    isInfected
-                      ? 'text-red-300/80 bg-red-950/50 border-red-700/30'
-                      : 'text-amber-400/80 bg-amber-950/50 border-amber-900/30'
+              <div className="flex justify-between items-center gap-2">
+                {/* Left side: Building info */}
+                <div className="flex flex-col min-w-0">
+                  <h3 className={`font-bold text-[9px] sm:text-[10px] historical-font tracking-tight uppercase ${
+                    isInfected ? 'text-red-300' : 'text-amber-400'
                   }`}>
-                    {nearBuilding.ownerProfession}
-                  </span>
+                    {getBuildingTypeLabel(nearBuilding.type)}
+                  </h3>
+                  <div className={`flex items-center gap-1.5 sm:gap-2 flex-wrap ${isInfected ? 'text-red-100' : 'text-amber-100'}`}>
+                    <User size={10} className={`hidden sm:block ${isInfected ? 'text-red-400/70' : 'text-amber-500/70'}`} />
+                    <span className="text-[11px] sm:text-xs font-semibold truncate">{nearBuilding.ownerName}</span>
+                    <span className={`text-[9px] sm:text-[10px] ${isInfected ? 'text-red-100/50' : 'text-amber-100/50'}`}>Age {nearBuilding.ownerAge}</span>
+                    <span className={`text-[8px] sm:text-[9px] uppercase tracking-wider px-1 sm:px-1.5 py-0.5 rounded border font-bold ${
+                      isInfected
+                        ? 'text-red-300/80 bg-red-950/50 border-red-700/30'
+                        : 'text-amber-400/80 bg-amber-950/50 border-amber-900/30'
+                    }`}>
+                      {nearBuilding.ownerProfession}
+                    </span>
+                  </div>
                 </div>
+
+                {/* Right side: Enter prompt */}
+                {canEnter && (
+                  <div
+                    className="flex-shrink-0 px-2 sm:px-3 py-1 sm:py-1.5 rounded-md border border-amber-500/40 bg-amber-900/30"
+                    style={{
+                      boxShadow: '0 0 12px rgba(251, 191, 36, 0.3), inset 0 0 8px rgba(251, 191, 36, 0.1)'
+                    }}
+                  >
+                    <span
+                      className="text-[9px] sm:text-[10px] text-amber-200 font-bold uppercase tracking-wider whitespace-nowrap"
+                      style={{
+                        textShadow: '0 0 8px rgba(251, 191, 36, 0.8), 0 0 16px rgba(251, 191, 36, 0.5)'
+                      }}
+                    >
+                      <span className="hidden sm:inline">Press </span>RETURN<span className="hidden sm:inline"> to enter</span>
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           );

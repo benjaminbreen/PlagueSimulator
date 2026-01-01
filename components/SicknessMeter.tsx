@@ -139,17 +139,6 @@ export const SicknessMeter: React.FC<SicknessMeterProps> = ({
         </div>
       ) : null}
 
-      {/* Survival Chance (only when infected) */}
-      {plague.state === AgentState.INFECTED && (
-        <div className="flex items-center justify-between text-[9px] border-t border-white/10 pt-1.5 mt-0.5">
-          <span className={`${colors.text} opacity-60`}>
-            Survival: {plague.survivalChance}%
-          </span>
-          <span className={`${colors.text} opacity-60`}>
-            Click for details
-          </span>
-        </div>
-      )}
     </button>
   );
 };

@@ -242,24 +242,52 @@ export const MarketStall: React.FC<MarketStallProps> = ({ stall, nightFactor }) 
 
   return (
     <group position={position} rotation={[0, rotationRadians, 0]}>
-      {/* Torch lighting at night */}
-      {nightFactor > 0.05 && (
-        <group position={[sizeConfig.width / 2 + 0.25, sizeConfig.awningHeight - 0.2, sizeConfig.depth / 2]}>
-          <mesh position={[0, -0.18, -0.08]} castShadow>
-            <cylinderGeometry args={[0.03, 0.05, 0.36, 8]} />
-            <meshStandardMaterial color="#3b2a1a" roughness={0.9} />
-          </mesh>
-          <mesh position={[0, -0.3, -0.16]} castShadow>
-            <boxGeometry args={[0.08, 0.08, 0.3]} />
-            <meshStandardMaterial color="#5a3b26" roughness={0.9} />
-          </mesh>
-          <mesh>
-            <sphereGeometry args={[0.12, 10, 10]} />
-            <meshStandardMaterial color="#ffb347" emissive="#ff7a18" emissiveIntensity={1.6 * nightFactor} />
-          </mesh>
-          <pointLight intensity={2.0 * nightFactor} distance={20} decay={2} color="#ffb347" />
-        </group>
-      )}
+      {/* Colored glass lantern lighting at night */}
+      {nightFactor > 0.05 && (() => {
+        // Simple lantern colors - mostly traditional amber/gold with occasional pink/green
+        const lanternColors = [
+          { glass: '#ffb347', light: '#ff7a18', name: 'amber' },      // Warm amber (most common)
+          { glass: '#ffaa44', light: '#ff8822', name: 'gold' },       // Golden yellow (common)
+          { glass: '#ffc870', light: '#ffaa40', name: 'pale gold' },  // Pale gold (common)
+          { glass: '#ff9966', light: '#ff6633', name: 'orange' },     // Orange amber (common)
+          { glass: '#44ffaa', light: '#22dd88', name: 'jade' },       // Jade green (rare)
+          { glass: '#ff88aa', light: '#ff5588', name: 'rose' }        // Rose pink (rare)
+        ];
+        const colorIndex = Math.floor(seededRandom(propSeed + 999) * lanternColors.length);
+        const lanternColor = lanternColors[colorIndex];
+
+        return (
+          <group position={[sizeConfig.width / 2 + 0.25, sizeConfig.awningHeight - 0.2, sizeConfig.depth / 2]}>
+            {/* Brass holder */}
+            <mesh position={[0, -0.18, -0.08]} castShadow>
+              <cylinderGeometry args={[0.03, 0.05, 0.36, 8]} />
+              <meshStandardMaterial color="#3b2a1a" roughness={0.9} />
+            </mesh>
+            <mesh position={[0, -0.3, -0.16]} castShadow>
+              <boxGeometry args={[0.08, 0.08, 0.3]} />
+              <meshStandardMaterial color="#5a3b26" roughness={0.9} />
+            </mesh>
+            {/* Colored glass globe */}
+            <mesh>
+              <sphereGeometry args={[0.12, 10, 10]} />
+              <meshStandardMaterial
+                color={lanternColor.glass}
+                emissive={lanternColor.light}
+                emissiveIntensity={1.6 * nightFactor}
+                transparent
+                opacity={0.85}
+              />
+            </mesh>
+            {/* Colored light emission */}
+            <pointLight
+              intensity={2.0 * nightFactor}
+              distance={20}
+              decay={2}
+              color={lanternColor.light}
+            />
+          </group>
+        );
+      })()}
       {/* Wooden frame - posts */}
       <mesh position={[-sizeConfig.width/2, sizeConfig.height/2, -sizeConfig.depth/2]} castShadow>
         <boxGeometry args={[0.12, sizeConfig.height, 0.12]} />

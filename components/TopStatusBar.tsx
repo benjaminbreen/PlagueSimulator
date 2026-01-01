@@ -60,13 +60,13 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
     >
       {/* Left: Title - clickable for About modal */}
       <button
-        className="flex flex-col items-start hover:opacity-80 transition-opacity"
+        className="group flex flex-col items-start transition-all duration-300"
         onClick={(e) => { e.stopPropagation(); onOpenAbout(); }}
       >
-        <h1 className="text-sm md:text-xl font-bold text-amber-500 historical-font tracking-tighter leading-none">
+        <h1 className="text-sm md:text-xl font-bold text-amber-500 historical-font tracking-tighter leading-none transition-all duration-300 group-hover:text-amber-400 group-hover:tracking-tight group-hover:drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]">
           PLAGUE SIMULATOR
         </h1>
-        <span className="text-[8px] md:text-[10px] text-amber-200/50 uppercase tracking-[0.2em] md:tracking-[0.3em] font-light">DAMASCUS 1348</span>
+        <span className="text-[8px] md:text-[10px] text-amber-200/50 uppercase tracking-[0.2em] md:tracking-[0.3em] font-light transition-all duration-300 group-hover:text-amber-200/70 group-hover:tracking-[0.25em] md:group-hover:tracking-[0.4em]">DAMASCUS 1348</span>
       </button>
 
       {/* Mobile: Ultra-compact center controls */}

@@ -2054,7 +2054,12 @@ function App() {
     onNavigateToHousehold: handleNavigateToHousehold,
     onDropItem: handleDropItem,
     onDropItemAtScreen: handleDropItemAtScreen,
-    perfDebug
+    perfDebug,
+    onTriggerEnterBuilding: () => {
+      if (nearBuilding?.isOpen && !showEnterModal) {
+        setShowEnterModal(true);
+      }
+    }
   }), [
     actionSlots,
     activeEvent,
@@ -2108,6 +2113,7 @@ function App() {
     setShowPlayerModal,
     showDemographicsOverlay,
     showEncounterModal,
+    showEnterModal,
     showPlayerModal,
     stats.simTime,
     stats,

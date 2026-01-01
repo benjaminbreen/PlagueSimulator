@@ -2098,14 +2098,20 @@ const InteriorPropMesh: React.FC<{
       const bodyHeight = 0.6 + rand() * 0.2;
       const bodyRadius = 0.35 + rand() * 0.15;
 
-      // Colored glass palette - rich Damascus colors
+      // Colored glass palette - expanded Damascus glassware colors
       const glassColors = [
-        { color: '#4a7a9a', emissive: '#3a6a8a' }, // Deep blue
-        { color: '#7a4a6a', emissive: '#6a3a5a' }, // Purple
-        { color: '#8a5a3a', emissive: '#7a4a2a' }, // Amber
-        { color: '#4a7a5a', emissive: '#3a6a4a' }, // Green
-        { color: '#9a4a4a', emissive: '#8a3a3a' }, // Ruby red
-        { color: '#6a6a8a', emissive: '#5a5a7a' }, // Indigo
+        { color: '#5a9ac8', emissive: '#4a8ab8' }, // Bright azure blue
+        { color: '#3a8a6a', emissive: '#2a7a5a' }, // Emerald green
+        { color: '#c85a7a', emissive: '#b84a6a' }, // Rose pink
+        { color: '#8a5aaa', emissive: '#7a4a9a' }, // Amethyst purple
+        { color: '#d89a4a', emissive: '#c88a3a' }, // Warm amber gold
+        { color: '#4ac8aa', emissive: '#3ab89a' }, // Turquoise cyan
+        { color: '#aa4a5a', emissive: '#9a3a4a' }, // Deep ruby red
+        { color: '#5a6aaa', emissive: '#4a5a9a' }, // Sapphire blue
+        { color: '#c8aa5a', emissive: '#b89a4a' }, // Golden yellow
+        { color: '#6aaa5a', emissive: '#5a9a4a' }, // Spring green
+        { color: '#aa5a9a', emissive: '#9a4a8a' }, // Magenta violet
+        { color: '#5aaaaa', emissive: '#4a9a9a' }, // Seafoam aqua
       ];
 
       // Randomize glass color per lantern
