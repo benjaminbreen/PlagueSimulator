@@ -14,6 +14,7 @@ const BIOME_TO_DISTRICT: Record<string, string> = {
   'market': 'market-district',
   'marketplace': 'market-district',
   'suq': 'market-district',
+  'souq': 'market-district',
   // Religious areas
   'umayyad': 'religious-district',
   'mosque': 'religious-district',
@@ -30,25 +31,52 @@ const BIOME_TO_DISTRICT: Record<string, string> = {
   'hovels': 'slums',
   'poor': 'slums',
   'slum': 'slums',
-  // Civic/citadel
-  'citadel': 'residential-quarter',
-  'mamluk': 'residential-quarter',
-  'civic': 'residential-quarter',
-  // Specific quarters
-  'yahud': 'residential-quarter',
-  'jewish': 'residential-quarter',
-  'nasara': 'residential-quarter',
-  'christian': 'residential-quarter',
-  'bab sharqi': 'caravanserai',
-  'eastern': 'caravanserai',
+  // Citadel/Mamluk fortress (now has dedicated entry)
+  'citadel': 'citadel',
+  'mamluk': 'citadel',
+  'civic': 'citadel',
+  'fortress': 'citadel',
+  // Jewish Quarter (dedicated entry)
+  'yahud': 'jewish-quarter',
+  'jewish': 'jewish-quarter',
+  // Christian Quarter (dedicated entry)
+  'nasara': 'christian-quarter',
+  'christian': 'christian-quarter',
+  // Eastern Gate (dedicated entry)
+  'bab sharqi': 'eastern-gate',
+  'eastern gate': 'eastern-gate',
+  // Straight Street (dedicated entry)
+  'straight street': 'straight-street',
+  'via recta': 'straight-street',
   // Trade areas
   'caravanserai': 'caravanserai',
   'khan': 'caravanserai',
-  // Rural/outskirts
-  'ghouta': 'residential-quarter',
-  'farmland': 'residential-quarter',
-  'desert': 'caravanserai',
-  'outskirts': 'caravanserai',
+  'silk market': 'caravanserai',
+  // Mountain/shrine areas (dedicated entry)
+  'qasiyun': 'mountain-shrine',
+  'qassioun': 'mountain-shrine',
+  'mountain': 'mountain-shrine',
+  'shrine': 'mountain-shrine',
+  // Rural/farmland (dedicated entry)
+  'ghouta': 'ghouta-farmland',
+  'farmland': 'ghouta-farmland',
+  'rural': 'ghouta-farmland',
+  'orchard': 'ghouta-farmland',
+  // Desert outskirts (dedicated entry)
+  'desert': 'desert-outskirts',
+  'outskirts': 'desert-outskirts',
+  'badiya': 'desert-outskirts',
+  'syrian desert': 'desert-outskirts',
+  // Southern areas
+  'midan': 'market-district',
+  'southern gate': 'market-district',
+  'hauran': 'caravanserai',
+  // Generic residential (fallback)
+  'residential': 'residential-quarter',
+  'alleys': 'slums',
+  'narrow alleys': 'slums',
+  'roadside': 'caravanserai',
+  'scrubland': 'desert-outskirts',
 };
 
 /**

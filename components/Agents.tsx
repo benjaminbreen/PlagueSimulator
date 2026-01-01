@@ -56,7 +56,7 @@ export const Agents: React.FC<AgentsProps> = ({
   buildingInfection,
   obstacles = [],
   obstacleHash = null,
-  maxAgents = 30,
+  maxAgents = 12,
   agentHashRef: externalAgentHashRef,
   impactMapRef,
   playerRef,

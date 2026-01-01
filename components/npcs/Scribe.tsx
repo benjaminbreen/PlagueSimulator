@@ -5,7 +5,7 @@
  */
 
 import React, { useRef, useMemo, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { NPCStats, SocialClass, AgentState } from '../../types';
@@ -31,6 +31,10 @@ export const Scribe: React.FC<ScribeProps> = ({
   const animTime = useRef(0);
   const writingPhase = useRef(0);
   const [hovered, setHovered] = useState(false);
+  const { camera } = useThree();
+
+  // PERFORMANCE: Reuse position vector
+  const positionVec = useMemo(() => new THREE.Vector3(position[0], position[1] + 1, position[2]), [position]);
 
   const isNight = timeOfDay >= 19 || timeOfDay < 5;
 
@@ -69,16 +73,22 @@ export const Scribe: React.FC<ScribeProps> = ({
     };
   }, [position]);
 
-  // Enhanced animate writing motion with more variation
+  // Enhanced animate writing motion with more variation and distance-based LOD
   useFrame((state, delta) => {
     animTime.current += delta;
     const time = animTime.current;
+
+    // PERFORMANCE: Check distance for LOD
+    const dist = camera.position.distanceTo(positionVec);
+    const isClose = dist < 30;
+
+    // Only animate when player is close enough to notice
+    if (!isClose) return;
 
     // Writing cycle - dip pen, write, pause, repeat (slower for realism)
     writingPhase.current = (time * 0.5) % 5; // 5 second cycle
     const isDipping = writingPhase.current < 0.6;
     const isWriting = writingPhase.current >= 0.6 && writingPhase.current < 3.8;
-    const isPaused = writingPhase.current >= 3.8;
 
     // Head movement - more detailed focus behavior with natural sway
     if (headRef.current) {

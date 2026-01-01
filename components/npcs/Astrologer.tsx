@@ -5,7 +5,7 @@
  */
 
 import React, { useRef, useMemo, useState } from 'react';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { NPCStats, SocialClass, AgentState } from '../../types';
@@ -27,6 +27,10 @@ export const Astrologer: React.FC<AstrologerProps> = ({
   const headRef = useRef<THREE.Group>(null);
   const animTime = useRef(0);
   const [hovered, setHovered] = useState(false);
+  const { camera } = useThree();
+
+  // PERFORMANCE: Reuse position vector
+  const positionVec = useMemo(() => new THREE.Vector3(position[0], position[1] + 1, position[2]), [position]);
 
   const isNight = timeOfDay >= 19 || timeOfDay < 5;
 
@@ -65,10 +69,17 @@ export const Astrologer: React.FC<AstrologerProps> = ({
     };
   }, [position]);
 
-  // Simplified animations
+  // Simplified animations with distance-based LOD
   useFrame((state, delta) => {
     animTime.current += delta;
     const time = animTime.current;
+
+    // PERFORMANCE: Check distance for LOD
+    const dist = camera.position.distanceTo(positionVec);
+    const isClose = dist < 30;
+
+    // Only animate when player is close enough to notice
+    if (!isClose) return;
 
     // Astrolabe rotation - consulting the instrument
     if (astrolabeRef.current) {

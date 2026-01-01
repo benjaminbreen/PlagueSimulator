@@ -87,7 +87,7 @@ export const GuideModal: React.FC<GuideModalProps> = ({
   const relatedEntries = selectedEntry ? getRelatedEntries(selectedEntry) : [];
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center" style={{ paddingTop: 'env(safe-area-inset-top, 0px)', paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/90 backdrop-blur-sm"
@@ -95,7 +95,7 @@ export const GuideModal: React.FC<GuideModalProps> = ({
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-6xl h-[90vh] mx-4 bg-gradient-to-b from-stone-900 to-stone-950 rounded-xl border border-amber-800/50 shadow-2xl overflow-hidden flex flex-col">
+      <div className="relative w-full max-w-6xl max-h-[90vh] mx-4 bg-gradient-to-b from-stone-900 to-stone-950 rounded-xl border border-amber-800/50 shadow-2xl overflow-hidden flex flex-col">
         {/* Header with integrated search */}
         <div className="flex items-center justify-between px-6 py-3 border-b border-amber-900/40 bg-black/40">
           <div className="flex items-center gap-3">
@@ -141,7 +141,7 @@ export const GuideModal: React.FC<GuideModalProps> = ({
 
             <button
               onClick={onClose}
-              className="p-2 rounded-lg hover:bg-amber-900/30 transition-colors"
+              className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-amber-900/30 transition-colors"
             >
               <X size={20} className="text-amber-400" />
             </button>

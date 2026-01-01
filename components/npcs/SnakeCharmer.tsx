@@ -39,6 +39,11 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
   // Animation state
   const animTime = useRef(0);
 
+  // PERFORMANCE: Reuse these objects instead of creating new ones each frame
+  const dummyObject = useMemo(() => new THREE.Object3D(), []);
+  const positionVec = useMemo(() => new THREE.Vector3(position[0], position[1] + 1, position[2]), [position]);
+  const distanceRef = useRef(100);
+
   // Procedurally generated NPC stats
   const npcStats = useMemo<NPCStats>(() => {
     const seed = position[0] * 1000 + position[2];
@@ -70,23 +75,27 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
       goalOfDay: 'Charm snakes and offer blessings',
       heldItem: 'none',
       headwearStyle: 'turban',
-      accessories: ['Prayer beads', 'Incense burner', 'Al-nāy flute']
+      accessories: ['Incense burner', 'Al-nāy flute']
     };
   }, [position]);
 
-  // Animate sufi and snake
+  // Animate sufi and snake with distance-based LOD
   useFrame((state, delta) => {
     if (!groupRef.current) return;
 
     animTime.current += delta;
     const time = animTime.current;
 
-    const dist = camera.position.distanceTo(
-      new THREE.Vector3(position[0], position[1] + 1, position[2])
-    );
+    // PERFORMANCE: Reuse vector instead of creating new one
+    const dist = camera.position.distanceTo(positionVec);
+    distanceRef.current = dist;
     onApproach?.(dist);
 
-    // Sufi body breathing and swaying
+    // LOD: Skip expensive animations when far away
+    const isClose = dist < 25;
+    const isMedium = dist < 40;
+
+    // Sufi body breathing and swaying (always animate - cheap)
     if (sufiBodyRef.current) {
       const breathe = Math.sin(time * 1.5) * 0.03;
       const sway = Math.sin(time * 0.8) * 0.04;
@@ -94,7 +103,7 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
       sufiBodyRef.current.rotation.z = sway;
     }
 
-    // Sufi head subtle movement
+    // Sufi head subtle movement (always animate - cheap)
     if (sufiHeadRef.current) {
       const headTilt = Math.sin(time * 0.6) * 0.08;
       const headTurn = Math.sin(time * 0.4) * 0.1;
@@ -102,31 +111,29 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
       sufiHeadRef.current.rotation.y = headTurn;
     }
 
-    // Snake sinuous movement - longer, more graceful (scaled down to half size)
+    // Snake sinuous movement
     if (snakeRef.current) {
       const primaryWave = Math.sin(time * 1.3) * 0.11;
       const rise = Math.sin(time * 0.7) * 0.2;
       snakeRef.current.rotation.z = primaryWave;
       snakeRef.current.position.y = 0.25 + rise;
 
-      // Animate individual snake segments
-      snakeRef.current.children.forEach((child, i) => {
-        if (child instanceof THREE.Group || child instanceof THREE.Mesh) {
-          const segmentPhase = time * 1.2 + i * 0.3;
-          const segmentSway = Math.sin(segmentPhase) * 0.12;
-          const segmentTwist = Math.sin(segmentPhase * 0.5) * 0.15;
-
+      // LOD: Only animate individual snake segments when close
+      if (isClose) {
+        const children = snakeRef.current.children;
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
           if (child.rotation) {
-            child.rotation.z = segmentSway;
-            child.rotation.y = segmentTwist;
+            const segmentPhase = time * 1.2 + i * 0.3;
+            child.rotation.z = Math.sin(segmentPhase) * 0.12;
+            child.rotation.y = Math.sin(segmentPhase * 0.5) * 0.15;
           }
         }
-      });
+      }
     }
 
-    // Incense smoke animation
-    if (incenseSmokeRef.current) {
-      const dummy = new THREE.Object3D();
+    // LOD: Only animate smoke when medium distance or closer
+    if (incenseSmokeRef.current && isMedium) {
       const count = incenseSmokeRef.current.count;
 
       for (let i = 0; i < count; i++) {
@@ -136,10 +143,10 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
         const z = Math.cos(t * Math.PI * 3) * 0.08;
         const scale = (1 - t) * 0.15;
 
-        dummy.position.set(x, y, z);
-        dummy.scale.setScalar(scale);
-        dummy.updateMatrix();
-        incenseSmokeRef.current.setMatrixAt(i, dummy.matrix);
+        dummyObject.position.set(x, y, z);
+        dummyObject.scale.setScalar(scale);
+        dummyObject.updateMatrix();
+        incenseSmokeRef.current.setMatrixAt(i, dummyObject.matrix);
       }
       incenseSmokeRef.current.instanceMatrix.needsUpdate = true;
     }
@@ -767,48 +774,6 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
                 depthWrite={false}
               />
             </instancedMesh>
-          </group>
-        </group>
-
-        {/* Prayer beads (tasbih) - 33 beads */}
-        <group position={[0.55, 0.025, -0.45]}>
-          {Array.from({ length: 33 }).map((_, i) => {
-            const angle = (i / 33) * Math.PI * 2;
-            const r = 0.15;
-            const beadColor = i % 11 === 0 ? colors.turbanBand : '#4a3a2a';
-            return (
-              <group
-                key={`bead-${i}`}
-                position={[Math.cos(angle) * r, 0.01, Math.sin(angle) * r]}
-              >
-                <mesh castShadow>
-                  <sphereGeometry args={[0.018, 6, 6]} />
-                  <meshStandardMaterial color={beadColor} roughness={0.5} />
-                </mesh>
-                {i < 32 && (
-                  <mesh
-                    position={[
-                      Math.cos(angle + Math.PI / 33) * 0.08,
-                      0,
-                      Math.sin(angle + Math.PI / 33) * 0.08
-                    ]}
-                    rotation={[0, angle + Math.PI / 2, 0]}
-                  >
-                    <cylinderGeometry args={[0.003, 0.003, 0.09, 4]} />
-                    <meshStandardMaterial color="#2a2a2a" roughness={0.9} />
-                  </mesh>
-                )}
-              </group>
-            );
-          })}
-          {/* Tassel */}
-          <group position={[0, 0, 0.15]}>
-            {Array.from({ length: 5 }).map((_, i) => (
-              <mesh key={`tassel-${i}`} position={[(i - 2) * 0.015, -0.05, 0]}>
-                <cylinderGeometry args={[0.002, 0.004, 0.08, 4]} />
-                <meshStandardMaterial color={colors.turbanBand} roughness={0.7} />
-              </mesh>
-            ))}
           </group>
         </group>
 

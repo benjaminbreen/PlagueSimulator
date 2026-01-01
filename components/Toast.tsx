@@ -21,8 +21,8 @@ export const Toast: React.FC<ToastProps> = ({ messages, onDismiss }) => {
         setVisibleMessages((prev) => new Set(prev).add(msg.id));
       }, 50);
 
-      // Auto-dismiss after duration
-      const duration = msg.duration ?? 5000;
+      // Auto-dismiss after duration (shorter on mobile)
+      const duration = msg.duration ?? 4000;
       const timer = setTimeout(() => {
         setVisibleMessages((prev) => {
           const next = new Set(prev);
@@ -39,26 +39,54 @@ export const Toast: React.FC<ToastProps> = ({ messages, onDismiss }) => {
 
   if (messages.length === 0) return null;
 
+  // Limit visible toasts on mobile (max 2)
+  const displayMessages = messages.slice(-2);
+
   return (
-    <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-3 pointer-events-none max-w-[90vw]">
-      {messages.map((msg) => (
-        <div
-          key={msg.id}
-          className={`
-            bg-black/95 text-[#f4e4c1] px-6 py-4 rounded-lg
-            font-serif text-base leading-relaxed
-            shadow-lg border border-amber-900/30
-            text-center max-w-2xl
-            transition-all duration-300 ease-out
-            ${visibleMessages.has(msg.id)
-              ? 'opacity-100 translate-y-0'
-              : 'opacity-0 translate-y-5'
-            }
-          `}
-        >
-          {msg.message}
-        </div>
-      ))}
-    </div>
+    <>
+      {/* Mobile: Top position, more compact */}
+      <div className="md:hidden fixed top-16 left-1/2 -translate-x-1/2 z-[10000] flex flex-col gap-2 pointer-events-none w-[calc(100%-2rem)] max-w-sm">
+        {displayMessages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`
+              bg-black/90 text-amber-100 px-4 py-2.5 rounded-lg
+              text-sm leading-snug
+              shadow-lg border border-amber-800/40
+              text-center
+              transition-all duration-300 ease-out
+              ${visibleMessages.has(msg.id)
+                ? 'opacity-100 translate-y-0'
+                : 'opacity-0 -translate-y-3'
+              }
+            `}
+          >
+            {msg.message}
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop: Bottom position, original styling */}
+      <div className="hidden md:flex fixed bottom-20 left-1/2 -translate-x-1/2 z-[10000] flex-col gap-3 pointer-events-none max-w-[90vw]">
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`
+              bg-black/95 text-[#f4e4c1] px-6 py-4 rounded-lg
+              font-serif text-base leading-relaxed
+              shadow-lg border border-amber-900/30
+              text-center max-w-2xl
+              transition-all duration-300 ease-out
+              ${visibleMessages.has(msg.id)
+                ? 'opacity-100 translate-y-0'
+                : 'opacity-0 translate-y-5'
+              }
+            `}
+          >
+            {msg.message}
+          </div>
+        ))}
+      </div>
+    </>
   );
 };

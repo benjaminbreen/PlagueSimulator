@@ -53,6 +53,59 @@ const findNearestBuilding = (
   return nearest;
 };
 
+// Helper function to find nearest obstacle to a position (for edge-following)
+// OPTIMIZED: Iterates spatial hash buckets directly to avoid array allocations
+const findNearestObstacle = (
+  pos: THREE.Vector3,
+  obstacles: Obstacle[],
+  hash: SpatialHash<Obstacle> | null
+): Obstacle | null => {
+  const OBSTACLE_HASH_MIN = 32;
+  let nearest: Obstacle | null = null;
+  let minDistSq = Infinity;
+
+  // Use spatial hash if available - iterate buckets directly (no intermediate arrays)
+  if (hash && obstacles.length >= OBSTACLE_HASH_MIN) {
+    const { cellSize, buckets } = hash;
+    const maxRadius = hash.maxRadius ?? 0;
+    const searchRadius = 10; // Search within 10 units
+    const cellRange = Math.max(1, Math.ceil((searchRadius + maxRadius) / cellSize));
+    const ix = Math.floor(pos.x / cellSize);
+    const iz = Math.floor(pos.z / cellSize);
+
+    for (let dxCell = -cellRange; dxCell <= cellRange; dxCell++) {
+      for (let dzCell = -cellRange; dzCell <= cellRange; dzCell++) {
+        const key = `${ix + dxCell},${iz + dzCell}`;
+        const bucket = buckets.get(key);
+        if (!bucket) continue;
+
+        for (const obs of bucket) {
+          const dx = pos.x - obs.position[0];
+          const dz = pos.z - obs.position[2];
+          const distSq = dx * dx + dz * dz;
+          if (distSq < minDistSq) {
+            minDistSq = distSq;
+            nearest = obs;
+          }
+        }
+      }
+    }
+  } else {
+    // Fallback: iterate all obstacles (rare case with few obstacles)
+    for (const obs of obstacles) {
+      const dx = pos.x - obs.position[0];
+      const dz = pos.z - obs.position[2];
+      const distSq = dx * dx + dz * dz;
+      if (distSq < minDistSq) {
+        minDistSq = distSq;
+        nearest = obs;
+      }
+    }
+  }
+
+  return nearest;
+};
+
 // Localized miasma effect around corpses
 const CorpseMiasma: React.FC = memo(() => {
   const groupRef = useRef<THREE.Group>(null);
@@ -279,19 +332,23 @@ export const NPC: React.FC<NPCProps> = memo(({
     playerOffset: new THREE.Vector3(),
     playerNormal: new THREE.Vector3(),
     playerPush: new THREE.Vector3(),
-    playerTargetPush: new THREE.Vector3()
+    playerTargetPush: new THREE.Vector3(),
+    exitOffset: new THREE.Vector3(), // For building exit position calculation
+    threatCenter: new THREE.Vector3(), // For panic escape calculation
+    escapeDir: new THREE.Vector3(), // For panic escape direction
+    actionPos: new THREE.Vector3() // For player action response
   });
-  const avoidanceRotations = useMemo(
-    () => ([
-      { cos: Math.cos(Math.PI / 2), sin: Math.sin(Math.PI / 2) },       // 90° left
-      { cos: Math.cos(-Math.PI / 2), sin: Math.sin(-Math.PI / 2) },     // 90° right
-      { cos: Math.cos(Math.PI / 3), sin: Math.sin(Math.PI / 3) },       // 60° left
-      { cos: Math.cos(-Math.PI / 3), sin: Math.sin(-Math.PI / 3) },     // 60° right
-      { cos: Math.cos(2 * Math.PI / 3), sin: Math.sin(2 * Math.PI / 3) },   // 120° left
-      { cos: Math.cos(-2 * Math.PI / 3), sin: Math.sin(-2 * Math.PI / 3) }  // 120° right
-    ]),
-    []
-  );
+  // Enhanced 12-angle avoidance with adaptive probe distance
+  const avoidanceRotations = useMemo(() => {
+    const angles = [30, 60, 90, 120, 150, 180]; // Degrees, will mirror for left/right
+    return angles.flatMap(deg => {
+      const rad = (deg * Math.PI) / 180;
+      return [
+        { cos: Math.cos(rad), sin: Math.sin(rad), distance: deg <= 90 ? 2.5 : 4.0 },   // Right
+        { cos: Math.cos(-rad), sin: Math.sin(-rad), distance: deg <= 90 ? 2.5 : 4.0 }  // Left
+      ];
+    });
+  }, []);
 
   // PERFORMANCE: Cache speed modifiers (only recalculate when hour or state changes)
   const cachedSpeedRef = useRef(2.0);
@@ -310,7 +367,14 @@ export const NPC: React.FC<NPCProps> = memo(({
   // STUCK DETECTION: Jiggle counter to detect NPCs vibrating against walls
   const lastPositionRef = useRef(position.clone());
   const stuckFramesRef = useRef(0);
-  const STUCK_THRESHOLD = 90; // ~1.5 seconds at 60fps
+  const STUCK_THRESHOLD = 30; // ~0.5 seconds at 60fps (reduced for faster stuck recovery)
+
+  // EDGE-FOLLOWING: Tangential movement when all probe angles fail
+  const edgeFollowingRef = useRef(false);
+  const edgeFollowStartTimeRef = useRef(0);
+  const edgeTangentRef = useRef(new THREE.Vector3());
+  // Randomize duration per NPC to prevent synchronized exits (performance optimization)
+  const edgeFollowDurationRef = useRef(0.7 + Math.random() * 0.6); // 0.7-1.3 seconds
 
   const colors = useMemo(() => {
     switch (stats.socialClass) {
@@ -495,18 +559,19 @@ export const NPC: React.FC<NPCProps> = memo(({
         .filter(a => a.id !== stats.id && (a.state === AgentState.INFECTED || a.state === AgentState.DECEASED));
 
       if (threats.length > 0) {
-        // Calculate escape direction (opposite of threat centroid)
-        const threatCenter = new THREE.Vector3();
-        threats.forEach(t => threatCenter.add(t.pos));
-        threatCenter.divideScalar(threats.length);
+        // PERFORMANCE: Reuse temp vectors instead of creating new ones
+        const temps = movementTempsRef.current;
+        temps.threatCenter.set(0, 0, 0);
+        threats.forEach(t => temps.threatCenter.add(t.pos));
+        temps.threatCenter.divideScalar(threats.length);
 
-        const escapeDir = currentPosRef.current.clone().sub(threatCenter).normalize();
+        temps.escapeDir.copy(currentPosRef.current).sub(temps.threatCenter).normalize();
         const escapeDistance = 15 + Math.random() * 10;
 
         currentTargetRef.current.set(
-          currentPosRef.current.x + escapeDir.x * escapeDistance,
+          currentPosRef.current.x + temps.escapeDir.x * escapeDistance,
           0,
-          currentPosRef.current.z + escapeDir.z * escapeDistance
+          currentPosRef.current.z + temps.escapeDir.z * escapeDistance
         );
         targetBuildingRef.current = null;
         return;
@@ -619,19 +684,20 @@ export const NPC: React.FC<NPCProps> = memo(({
           let attempts = 0;
           const MAX_ATTEMPTS = 8;
 
+          const temps = movementTempsRef.current;
           while (!exitPos && attempts < MAX_ATTEMPTS) {
-            const testPos = doorPos.clone().add(
-              new THREE.Vector3(
-                (Math.random() - 0.5) * 3,
-                0,
-                (Math.random() - 0.5) * 3
-              ).normalize().multiplyScalar(1.5 + Math.random() * 1.0)
-            );
+            // PERFORMANCE: Reuse temp vector instead of creating new ones
+            temps.exitOffset.set(
+              (Math.random() - 0.5) * 3,
+              0,
+              (Math.random() - 0.5) * 3
+            ).normalize().multiplyScalar(1.5 + Math.random() * 1.0);
+            temps.tryPos.copy(doorPos).add(temps.exitOffset);
 
             // Validate: not inside building, not blocked by obstacles
-            if (!isBlockedByBuildings(testPos, buildings, 0.5, buildingHash || undefined) &&
-                !isBlockedByObstacles(testPos, obstacles, 0.5, obstacleHash || undefined)) {
-              exitPos = testPos;
+            if (!isBlockedByBuildings(temps.tryPos, buildings, 0.5, buildingHash || undefined) &&
+                !isBlockedByObstacles(temps.tryPos, obstacles, 0.5, obstacleHash || undefined)) {
+              exitPos = temps.tryPos.clone(); // Clone only when we find a valid position
             }
             attempts++;
           }
@@ -747,7 +813,7 @@ export const NPC: React.FC<NPCProps> = memo(({
         const step = temps.step.copy(dir).multiplyScalar(speed * simDelta);
         const nextPos = temps.nextPos.copy(currentPosRef.current).add(step);
 
-        // PERFORMANCE & BEHAVIOR: Multi-angle obstacle avoidance (6 directions instead of 2)
+        // PERFORMANCE & BEHAVIOR: Multi-angle obstacle avoidance (12 directions with adaptive distance)
         if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined) || isBlockedByObstacles(nextPos, obstacles, 0.5, obstacleHash || undefined)) {
           let foundPath = false;
           if (!isFar) {
@@ -757,7 +823,7 @@ export const NPC: React.FC<NPCProps> = memo(({
                 dir.x * rot.cos - dir.z * rot.sin,
                 0,
                 dir.x * rot.sin + dir.z * rot.cos
-              ).normalize().multiplyScalar(1.8); // Increased from 0.6 to actually clear obstacles
+              ).normalize().multiplyScalar(rot.distance); // Adaptive distance: 2.5 for shallow angles, 4.0 for wide angles
 
               const tryPos = temps.tryPos.copy(currentPosRef.current).add(rotatedDir);
 
@@ -771,11 +837,57 @@ export const NPC: React.FC<NPCProps> = memo(({
             }
           }
 
-          // Only retarget if all 6 directions are blocked (truly stuck)
+          // EDGE-FOLLOWING: If all probe angles failed, enter edge-following mode
           if (!foundPath) {
-            pickNewTarget(dir, true); // Pass direction to avoid and isStuck=true
-            retargetTimerRef.current = 0;
-            nextRetargetRef.current = 3 + Math.random() * 5;
+            if (!edgeFollowingRef.current) {
+              // ENTER EDGE-FOLLOWING MODE
+              edgeFollowingRef.current = true;
+              edgeFollowStartTimeRef.current = 0;
+
+              // Calculate tangent: perpendicular to obstacle direction
+              // Find nearest obstacle to determine normal
+              const nearestObstacle = findNearestObstacle(currentPosRef.current, obstacles, obstacleHash);
+              if (nearestObstacle) {
+                const toObstacle = temps.offset.set(
+                  nearestObstacle.position[0] - currentPosRef.current.x,
+                  0,
+                  nearestObstacle.position[2] - currentPosRef.current.z
+                ).normalize();
+
+                // Tangent is 90° rotation of normal (choose left or right based on target)
+                const targetDir = temps.dir.copy(currentTargetRef.current).sub(currentPosRef.current).normalize();
+                const cross = toObstacle.x * targetDir.z - toObstacle.z * targetDir.x;
+                const tangentAngle = cross > 0 ? Math.PI / 2 : -Math.PI / 2;
+
+                edgeTangentRef.current.set(
+                  toObstacle.x * Math.cos(tangentAngle) - toObstacle.z * Math.sin(tangentAngle),
+                  0,
+                  toObstacle.x * Math.sin(tangentAngle) + toObstacle.z * Math.cos(tangentAngle)
+                );
+              }
+            }
+
+            // FOLLOW EDGE: Move along tangent
+            edgeFollowStartTimeRef.current += simDelta;
+            const edgeStep = temps.step.copy(edgeTangentRef.current).multiplyScalar(speed * simDelta);
+            const edgeNextPos = temps.nextPos.copy(currentPosRef.current).add(edgeStep);
+
+            // Check if edge path is clear
+            if (!isBlockedByBuildings(edgeNextPos, buildings, 0.5, buildingHash || undefined) &&
+                !isBlockedByObstacles(edgeNextPos, obstacles, 0.5, obstacleHash || undefined)) {
+              currentPosRef.current.copy(edgeNextPos);
+            }
+
+            // Exit edge-following after randomized duration OR if we cleared the obstacle
+            if (edgeFollowStartTimeRef.current > edgeFollowDurationRef.current) {
+              edgeFollowingRef.current = false;
+              pickNewTarget(dir, true); // Retarget with stuck flag
+              retargetTimerRef.current = 0;
+              nextRetargetRef.current = 3 + Math.random() * 5;
+            }
+          } else {
+            // Successfully found path - exit edge-following mode
+            edgeFollowingRef.current = false;
           }
         } else {
           currentPosRef.current.copy(nextPos);
@@ -1084,8 +1196,9 @@ export const NPC: React.FC<NPCProps> = memo(({
 
     // 3c. PLAYER ACTION RESPONSE
     if (actionEvent && actionEvent.timestamp > lastActionTimestampRef.current) {
-      const actionPos = new THREE.Vector3(actionEvent.position[0], actionEvent.position[1], actionEvent.position[2]);
-      const distToAction = currentPosRef.current.distanceTo(actionPos);
+      // PERFORMANCE: Reuse temp vector
+      temps.actionPos.set(actionEvent.position[0], actionEvent.position[1], actionEvent.position[2]);
+      const distToAction = currentPosRef.current.distanceTo(temps.actionPos);
 
       // Only respond if within action radius
       if (distToAction <= actionEvent.radius) {
@@ -1098,7 +1211,7 @@ export const NPC: React.FC<NPCProps> = memo(({
           panicRef.current = Math.min(100, panicRef.current + (15 + Math.random() * 10) * panicMod);
 
           // Set target to flee away from player
-          const escapeDir = currentPosRef.current.clone().sub(actionPos).normalize();
+          const escapeDir = currentPosRef.current.clone().sub(temps.actionPos).normalize();
           const escapeDistance = 12 + Math.random() * 8;
           currentTargetRef.current.set(
             currentPosRef.current.x + escapeDir.x * escapeDistance,
@@ -1116,9 +1229,9 @@ export const NPC: React.FC<NPCProps> = memo(({
           // 40% chance to gather toward player
           if (Math.random() < 0.4) {
             currentTargetRef.current.set(
-              actionPos.x + (Math.random() - 0.5) * 4,
+              temps.actionPos.x + (Math.random() - 0.5) * 4,
               0,
-              actionPos.z + (Math.random() - 0.5) * 4
+              temps.actionPos.z + (Math.random() - 0.5) * 4
             );
             targetBuildingRef.current = null;
           }
@@ -1489,7 +1602,20 @@ export const NPC: React.FC<NPCProps> = memo(({
 
       {showDemographicsOverlay && displayState !== AgentState.DECEASED && (
         <Html transform={false} position={[0, 2.9, 0]} center>
-          <div className={`rounded-md px-3 py-2 text-[12px] text-amber-100/80 backdrop-blur-sm shadow-lg pointer-events-none border ${
+          {/* Mobile: Ultra-compact - just health status indicator */}
+          <div className="md:hidden">
+            <div className={`rounded-full px-2 py-1 text-[10px] font-bold pointer-events-none ${
+              displayState === AgentState.INFECTED
+                ? 'bg-red-600/90 text-white shadow-[0_0_12px_rgba(239,68,68,0.6)]'
+                : displayState === AgentState.INCUBATING
+                  ? 'bg-yellow-500/90 text-black shadow-[0_0_10px_rgba(251,191,36,0.5)]'
+                  : 'bg-black/70 text-amber-200/80 border border-amber-800/40'
+            }`}>
+              {displayState === AgentState.INFECTED ? '☠' : displayState === AgentState.INCUBATING ? '⚠' : stats.profession.slice(0, 8)}
+            </div>
+          </div>
+          {/* Desktop: Full demographics overlay */}
+          <div className={`hidden md:block rounded-md px-3 py-2 text-[12px] text-amber-100/80 backdrop-blur-sm shadow-lg pointer-events-none border ${
             displayState === AgentState.INFECTED
               ? 'bg-black/85 border-red-500/80 shadow-[0_0_18px_rgba(239,68,68,0.55)]'
               : displayState === AgentState.INCUBATING

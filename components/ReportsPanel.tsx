@@ -84,8 +84,8 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
   playerInfected
 }) => {
   return (
-    <div className="self-end md:self-start mt-12 md:mt-0 w-full md:w-[420px]">
-      <div className="bg-black/80 backdrop-blur-md p-4 rounded-lg border border-amber-800/50 shadow-lg pointer-events-auto">
+    <div className="self-end md:self-start mt-0 md:mt-0 w-full md:w-[420px]">
+      <div className="bg-black/80 md:backdrop-blur-md p-3 md:p-4 rounded-none md:rounded-lg border-0 md:border border-amber-800/50 shadow-lg pointer-events-auto">
         <div
           className={`flex items-center justify-between ${reportsPanelCollapsed ? '' : 'mb-3 border-b border-amber-900/40 pb-2'} cursor-pointer select-none group`}
           onClick={() => setReportsPanelCollapsed(!reportsPanelCollapsed)}
@@ -137,7 +137,7 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
           </div>
         </div>
 
-        <div className={`overflow-hidden transition-all duration-300 ease-out ${reportsPanelCollapsed ? 'max-h-0 opacity-0' : 'max-h-[600px] opacity-100'}`}>
+        <div className={`overflow-hidden transition-all duration-300 ease-out ${reportsPanelCollapsed ? 'max-h-0 opacity-0' : 'max-h-[70vh] md:max-h-[600px] opacity-100 overflow-y-auto'}`}>
           {reportTab === 'epidemic' ? (
             <div className="space-y-4">
               <div>
@@ -209,9 +209,9 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
 
                 <div className="space-y-3">
                   <div>
-                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                      <span className="font-bold">Plague Awareness</span>
-                      <span className="font-mono">{Math.round(moraleStats.avgAwareness)}%</span>
+                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-wide">
+                      <span className="font-semibold">Plague Awareness</span>
+                      <span className="font-mono text-amber-200/90">{Math.round(moraleStats.avgAwareness)}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                       <div
@@ -222,9 +222,9 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                   </div>
 
                   <div>
-                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                      <span className="font-bold">Public Panic</span>
-                      <span className="font-mono">{Math.round(moraleStats.avgPanic)}%</span>
+                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-wide">
+                      <span className="font-semibold">Public Panic</span>
+                      <span className="font-mono text-amber-200/90">{Math.round(moraleStats.avgPanic)}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                       <div
@@ -254,7 +254,7 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                   className="flex items-center justify-between cursor-pointer select-none group"
                   onClick={() => setAlchemistTableCollapsed(!alchemistTableCollapsed)}
                 >
-                  <span className="historical-font text-amber-500 text-xs uppercase tracking-widest">Alchemist's Table</span>
+                  <span className="historical-font text-amber-500 text-xs uppercase tracking-widest">Epidemiology Mode</span>
                   <div className="flex items-center gap-2">
                     <span className="text-[9px] text-amber-100/30 italic group-hover:text-amber-100/50 transition-colors">
                       {alchemistTableCollapsed ? 'Click to expand' : 'Click to collapse'}
@@ -269,9 +269,9 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                 <div className={`overflow-hidden transition-all duration-300 ease-out ${alchemistTableCollapsed ? 'max-h-0 opacity-0' : 'max-h-[300px] opacity-100 mt-3 pt-3 border-t border-white/10'}`}>
                   <div className="space-y-4">
                     <div>
-                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                        <span className="flex items-center gap-1 font-bold"><Skull size={10} /> Contact Virulence</span>
-                        <span className="font-mono">{Math.round(params.infectionRate * 100)}%</span>
+                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-wide">
+                        <span className="flex items-center gap-1 font-semibold"><Skull size={10} /> Contact Virulence</span>
+                        <span className="font-mono text-amber-200/90">{Math.round(params.infectionRate * 100)}%</span>
                       </div>
                       <input
                         type="range"
@@ -283,9 +283,9 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                     </div>
 
                     <div>
-                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                        <span className="flex items-center gap-1 font-bold">Sanitation Protocol</span>
-                        <span className="font-mono">{Math.round(params.hygieneLevel * 100)}%</span>
+                      <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-wide">
+                        <span className="flex items-center gap-1 font-semibold">Sanitation Protocol</span>
+                        <span className="font-mono text-amber-200/90">{Math.round(params.hygieneLevel * 100)}%</span>
                       </div>
                       <input
                         type="range"
@@ -348,9 +348,9 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                      <span className="font-bold">Health</span>
-                      <span className="font-mono">{Math.round(playerStats.health)}%</span>
+                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-wide">
+                      <span className="font-semibold">Health</span>
+                      <span className="font-mono text-amber-200/90">{Math.round(playerStats.health)}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                       <div
@@ -360,9 +360,9 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                     </div>
                   </div>
                   <div>
-                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-tighter">
-                      <span className="font-bold">Reputation</span>
-                      <span className="font-mono">{Math.round(playerStats.reputation)}%</span>
+                    <div className="flex justify-between text-[10px] mb-1 text-amber-100/80 uppercase tracking-wide">
+                      <span className="font-semibold">Reputation</span>
+                      <span className="font-mono text-amber-200/90">{Math.round(playerStats.reputation)}%</span>
                     </div>
                     <div className="w-full h-1.5 bg-gray-700/50 rounded-full overflow-hidden">
                       <div

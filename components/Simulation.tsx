@@ -26,6 +26,7 @@ import { SkyGradient } from './SkyGradient';
 import { AmbientAudio, SpatialSource } from './AmbientAudio';
 import { getBirdcagePlacements } from './environment/buildings/BirdcageSystem';
 import { getFarmlandLandmarks } from './environment/districts/OutskirtsFarmlandDecor';
+import { getCitadelLandmarks } from './environment/landmarks/CitadelComplex';
 import { SnakeCharmer } from './npcs/SnakeCharmer';
 import { FluteMusic } from './audio/FluteMusic';
 import { Astrologer } from './npcs/Astrologer';
@@ -1804,7 +1805,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     let randCounter = 0;
     const rand = () => seededRandom(seed + randCounter++ * 137);
 
-    const stallCount = isOutskirts ? 1 : district === 'CARAVANSERAI' ? 6 : 1 + Math.floor(rand() * 3); // 1-3 stalls
+    const stallCount = isOutskirts ? 1 : district === 'CARAVANSERAI' ? 4 : 1 + Math.floor(rand() * 2); // 1-2 stalls (reduced for performance)
     const stalls: MarketStallData[] = [];
 
     // Available stall types
@@ -2873,6 +2874,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
                 return (dx * dx + dz * dz) <= maxDistSq;
               })
               .slice(0, 12)
+            : district === 'CIVIC'
+            ? getCitadelLandmarks()
+              .filter((lm) => {
+                const dx = lm.x - pos.x;
+                const dz = lm.z - pos.z;
+                return (dx * dx + dz * dz) <= maxDistSq;
+              })
+              .slice(0, 12)
             : [];
 
           onMinimapUpdate({
@@ -3075,7 +3084,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           buildingInfection={buildingInfection}
           obstacles={obstacles}
           obstacleHash={obstacleHash}
-          maxAgents={20}
+          maxAgents={12}
           agentHashRef={agentHashRef}
           impactMapRef={impactMapRef}
           playerRef={playerRef}

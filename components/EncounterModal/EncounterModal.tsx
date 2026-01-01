@@ -516,21 +516,21 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
           </div>
           <button
             onClick={handleClose}
-            className="p-1.5 hover:bg-white/10 rounded-full transition-all duration-200 text-amber-100/50 hover:text-amber-100 hover:rotate-90"
+            className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition-all duration-200 text-amber-100/50 hover:text-amber-100 hover:rotate-90 -mr-1"
             title="Close (ESC)"
           >
-            <X size={18} />
+            <X size={20} />
           </button>
         </div>
 
         {/* Main Content - Two Column Layout */}
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden min-h-0">
 
-          {/* Left Column - Portrait & Info */}
-          <div className="w-full md:w-72 lg:w-80 border-b md:border-b-0 md:border-r border-amber-900/30 bg-black/20 flex flex-col flex-shrink-0">
+          {/* Left Column - Portrait & Info - ORDER REVERSED ON MOBILE for better UX */}
+          <div className="w-full md:w-72 lg:w-80 border-b md:border-b-0 md:border-r border-amber-900/30 bg-black/20 flex flex-col flex-shrink-0 order-2 md:order-1 max-h-[35vh] md:max-h-none overflow-hidden">
 
-            {/* Portrait Container */}
-            <div className="relative h-40 sm:h-48 md:h-64 bg-gradient-to-b from-amber-950/30 to-black/50 overflow-hidden">
+            {/* Portrait Container - smaller on mobile */}
+            <div className="relative h-28 sm:h-36 md:h-64 bg-gradient-to-b from-amber-950/30 to-black/50 overflow-hidden flex-shrink-0">
               {/* Ambient glow behind portrait */}
               <div className={`absolute inset-0 bg-gradient-radial from-amber-900/20 via-transparent to-transparent transition-opacity duration-1000 ${
                 isLoading ? 'opacity-100' : 'opacity-40'
@@ -572,22 +572,42 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
               <div className="absolute bottom-2 right-2 w-4 h-4 border-b-2 border-r-2 border-amber-600/40" />
             </div>
 
-            {/* NPC Info Panel */}
-            <div className="flex-1 p-2 sm:p-3 space-y-2 sm:space-y-3 overflow-y-auto min-h-0">
-              {/* Name with fade-in */}
-              <div className={`text-center pt-2 pb-3 border-b border-amber-900/30 transition-all duration-500 delay-100 ${
+            {/* NPC Info Panel - Compact on mobile */}
+            <div className="flex-1 p-2 sm:p-3 space-y-1 sm:space-y-3 overflow-y-auto min-h-0">
+              {/* Name with fade-in - more compact on mobile */}
+              <div className={`text-center py-1 sm:pt-2 sm:pb-3 border-b border-amber-900/30 transition-all duration-500 delay-100 ${
                 isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}>
-                <h2 className="text-lg sm:text-xl historical-font text-amber-100 tracking-wide">
+                <h2 className="text-base sm:text-xl historical-font text-amber-100 tracking-wide">
                   {npc.name}
                 </h2>
-                <p className="text-[11px] text-amber-500/70 mt-1 uppercase tracking-widest">
-                  {npc.gender} • {npc.age} years
+                <p className="text-[10px] sm:text-[11px] text-amber-500/70 mt-0.5 uppercase tracking-widest">
+                  {npc.profession} • {npc.gender}, {npc.age}
                 </p>
               </div>
 
-              {/* Profession & Class with staggered fade-in */}
-              <div className={`space-y-2 transition-all duration-500 delay-200 ${
+              {/* Mobile: Compact inline stats */}
+              <div className="flex md:hidden flex-wrap gap-1 justify-center py-1">
+                <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                  npc.socialClass === SocialClass.NOBILITY ? 'bg-purple-900/40 text-purple-300' :
+                  npc.socialClass === SocialClass.CLERGY ? 'bg-blue-900/40 text-blue-300' :
+                  npc.socialClass === SocialClass.MERCHANT ? 'bg-amber-900/40 text-amber-300' :
+                  'bg-stone-800/40 text-stone-300'
+                }`}>{npc.socialClass}</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                  npc.religion === 'Sunni Islam' ? 'bg-amber-900/40 text-amber-200' :
+                  npc.religion === 'Jewish' ? 'bg-emerald-900/40 text-emerald-200' :
+                  'bg-stone-800/40 text-stone-300'
+                }`}>{npc.religion}</span>
+                <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                  npc.panicLevel > 60 ? 'bg-red-900/40 text-red-300' :
+                  npc.panicLevel > 40 ? 'bg-amber-900/40 text-amber-300' :
+                  'bg-emerald-900/40 text-emerald-300'
+                }`}>{npc.mood}</span>
+              </div>
+
+              {/* Desktop: Full Profession & Class with staggered fade-in */}
+              <div className={`hidden md:block space-y-2 transition-all duration-500 delay-200 ${
                 isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}>
                 <div className="flex items-center justify-between">
@@ -625,8 +645,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                 </div>
               </div>
 
-              {/* Mood & Mental State with animated bars */}
-              <div className={`pt-3 border-t border-amber-900/30 space-y-2 transition-all duration-500 delay-300 ${
+              {/* Mood & Mental State with animated bars - hidden on mobile */}
+              <div className={`hidden md:block pt-3 border-t border-amber-900/30 space-y-2 transition-all duration-500 delay-300 ${
                 isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}>
                 <div className="flex items-center justify-between">
@@ -685,9 +705,9 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                 </div>
               </div>
 
-              {/* Goal of Day */}
+              {/* Goal of Day - hidden on mobile */}
               {npc.goalOfDay && (
-                <div className={`pt-3 border-t border-amber-900/30 transition-all duration-500 delay-400 ${
+                <div className={`hidden md:block pt-3 border-t border-amber-900/30 transition-all duration-500 delay-400 ${
                   isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
                 }`}>
                   <span className="text-[11px] text-amber-100/40 uppercase tracking-widest block mb-1">Today's Goal</span>
@@ -699,8 +719,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
             </div>
           </div>
 
-          {/* Right Column - Conversation Panel */}
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          {/* Right Column - Conversation Panel - SHOWS FIRST ON MOBILE */}
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden order-1 md:order-2">
 
             {/* Tabs with sliding indicator */}
             <div className="flex border-b border-amber-900/30 bg-black/20 relative">
@@ -823,7 +843,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                   </button>
                 )}
 
-                {/* Input Area */}
+                {/* Input Area - keyboard avoidance for iOS */}
                 <div className="p-2 sm:p-3 border-t border-amber-900/30 bg-black/30 flex-shrink-0">
                   <div className="flex gap-2">
                     <input
@@ -832,9 +852,15 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                       value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
                       onKeyDown={handleKeyDown}
+                      onFocus={() => {
+                        // Scroll input into view when keyboard appears on iOS
+                        setTimeout(() => {
+                          inputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 300);
+                      }}
                       placeholder={pendingAction === 'end_conversation' ? 'They have ended the conversation...' : 'Ask your question...'}
                       disabled={isLoading || pendingAction === 'end_conversation'}
-                      className="flex-1 bg-stone-900/80 border border-amber-900/30 rounded-lg px-4 py-2.5 text-sm text-amber-100 placeholder-amber-100/30 focus:outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/20 focus:shadow-[0_0_15px_rgba(251,191,36,0.15)] transition-all duration-200 disabled:opacity-50"
+                      className="flex-1 bg-stone-900/80 border border-amber-900/30 rounded-lg px-3 py-3 text-base text-amber-100 placeholder-amber-100/30 focus:outline-none focus:border-amber-500/60 focus:ring-2 focus:ring-amber-500/20 focus:shadow-[0_0_15px_rgba(251,191,36,0.15)] transition-all duration-200 disabled:opacity-50"
                     />
                     <button
                       onClick={handleSend}

@@ -49,7 +49,7 @@ export const EventModal: React.FC<EventModalProps> = ({ event, playerStats, onCh
 
   return (
     <div className="absolute inset-0 z-[120] flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200 pointer-events-auto">
-      <div className="w-full max-w-2xl bg-gradient-to-b from-black/90 via-black/80 to-black/90 border border-amber-800/50 rounded-2xl shadow-[0_30px_80px_rgba(0,0,0,0.6)] overflow-hidden">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto bg-gradient-to-b from-black/90 via-black/80 to-black/90 border border-amber-800/50 rounded-2xl shadow-[0_30px_80px_rgba(0,0,0,0.6)] overflow-hidden">
         <div className="px-6 py-5 border-b border-amber-900/40 bg-gradient-to-r from-amber-950/40 via-black/60 to-amber-950/40">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.4em] text-amber-500/60">

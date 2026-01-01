@@ -39,6 +39,7 @@ import { MapModal } from './MapModal';
 import { PlayerDossierModal } from './PlayerDossierModal';
 import { SettingsModal } from './SettingsModal';
 import { ReportsPanel } from './ReportsPanel';
+import { AboutModal } from './AboutModal';
 
 interface UIProps {
   params: SimulationParams;
@@ -134,7 +135,7 @@ interface InventoryEntry {
   appearance?: ItemAppearance;
 }
 
-const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void; onToggle: () => void }> = ({ data, sceneMode, onClose, onToggle }) => {
+const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void; onToggle: () => void; isNight?: boolean }> = ({ data, sceneMode, onClose, onToggle, isNight = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [minimapSize, setMinimapSize] = useState(() => (window.innerWidth < 640 ? 150 : 220));
 
@@ -452,8 +453,16 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       </div>
       <div
         onClick={onToggle}
-        className="mt-2 text-[9px] uppercase tracking-[0.3em] text-amber-200/60 text-center cursor-pointer hover:text-amber-100 transition-colors"
-        style={{ textShadow: '0 2px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)' }}
+        className={`mt-2 text-[9px] uppercase tracking-[0.3em] text-center cursor-pointer transition-all duration-200 ${
+          isNight
+            ? 'text-amber-200/60 hover:text-amber-100'
+            : 'text-amber-100 hover:text-white'
+        }`}
+        style={{
+          textShadow: isNight
+            ? '0 2px 4px rgba(0,0,0,0.8), 0 0 8px rgba(0,0,0,0.6)'
+            : '0 1px 2px rgba(0,0,0,0.9), 0 0 4px rgba(0,0,0,0.7)'
+        }}
       >
         {districtLabel}
       </div>
@@ -551,6 +560,7 @@ const NpcPortrait: React.FC<{
 
 export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug }) => {
   const [showSettings, setShowSettings] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [showWeather, setShowWeather] = useState(false);
   const [reportTab, setReportTab] = useState<'epidemic' | 'player' | 'guide'>('epidemic');
@@ -977,6 +987,18 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [params.cameraMode]);
 
+  // Command+P / Ctrl+P to toggle performance panel
+  useEffect(() => {
+    const handlePerfPanelToggle = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'p') {
+        e.preventDefault();
+        setDevSettings(prev => ({ ...prev, showPerfPanel: !prev.showPerfPanel }));
+      }
+    };
+    window.addEventListener('keydown', handlePerfPanelToggle);
+    return () => window.removeEventListener('keydown', handlePerfPanelToggle);
+  }, [setDevSettings]);
+
   useEffect(() => {
     showPerspectiveMenu(false);
     return () => {
@@ -997,6 +1019,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           sceneMode={sceneMode}
           onClose={() => setMinimapVisible(false)}
           onToggle={() => setMinimapMode('overworld')}
+          isNight={params.timeOfDay <= 6 || params.timeOfDay >= 18}
         />
       )}
       {minimapVisible && minimapMode === 'overworld' && (
@@ -1007,6 +1030,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           sceneMode={sceneMode}
           onToggle={() => setMinimapMode('local')}
           onTravelRequest={handleTravelRequest}
+          isNight={params.timeOfDay <= 6 || params.timeOfDay >= 18}
         />
       )}
       
@@ -1027,6 +1051,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         onToggleMobilePerspectiveMenu={() => setShowMobilePerspectiveMenu(prev => !prev)}
         showSettings={showSettings}
         onToggleSettings={() => setShowSettings(!showSettings)}
+        onOpenAbout={() => setShowAbout(true)}
       />
 
       <MobilePerspectiveMenu
@@ -1037,44 +1062,42 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
       />
 
       {/* CENTER LOCATION PILLS */}
-      <div className="absolute top-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-full max-w-xs md:max-w-md pointer-events-none">
-        {/* Mobile toggle buttons row */}
-        <div className="md:hidden flex items-center gap-2 pointer-events-auto">
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 w-[calc(100%-2rem)] max-w-xs md:max-w-md pointer-events-none px-2">
+        {/* Mobile toggle buttons row - 44px touch targets */}
+        <div className="md:hidden flex items-center justify-center gap-2 pointer-events-auto w-full max-w-[340px]">
           {/* Left button - Reports Panel */}
           <button
             onClick={() => setMobileReportsPanelVisible(!mobileReportsPanelVisible)}
-            className={`p-2.5 rounded-full border shadow-lg transition-all active:scale-95 ${
+            className={`w-11 h-11 rounded-full border shadow-lg transition-all active:scale-95 flex-shrink-0 flex items-center justify-center ${
               mobileReportsPanelVisible
-                ? 'bg-amber-600 border-amber-500 text-white'
-                : 'bg-black/70 border-amber-600/40 text-amber-500 hover:bg-black/90'
+                ? 'bg-amber-600/90 border-amber-500 text-white'
+                : 'bg-black/40 border-amber-600/30 text-amber-500'
             }`}
             title="Toggle Reports"
           >
             <FileText size={18} />
           </button>
 
-          {/* Center - Map button */}
+          {/* Center - Map button - truncates location name */}
           <button
             onClick={() => setShowMap(true)}
-            className="bg-black/60 hover:bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-amber-600/40 text-amber-500 shadow-xl flex items-center gap-2 transition-all group active:scale-95"
+            className="bg-black/40 backdrop-blur-md px-3 h-11 rounded-full border border-amber-600/30 text-amber-500 shadow-lg flex items-center gap-1.5 transition-all active:scale-95 min-w-0 flex-1 max-w-[180px]"
           >
-            <div className="bg-amber-500/10 p-1 rounded-full group-hover:bg-amber-500/20 transition-colors">
+            <div className="bg-amber-500/10 p-1.5 rounded-full flex-shrink-0">
               <MapIcon size={14} />
             </div>
-            <div className="flex flex-col items-start leading-none">
-              <span className="historical-font text-[10px] whitespace-nowrap tracking-wider font-bold">
-                {getLocationLabel(params.mapX, params.mapY)}
-              </span>
-            </div>
+            <span className="historical-font text-[10px] tracking-wider font-bold truncate">
+              {getLocationLabel(params.mapX, params.mapY)}
+            </span>
           </button>
 
           {/* Right button - Narrator Panel */}
           <button
             onClick={() => setMobileNarratorVisible(!mobileNarratorVisible)}
-            className={`p-2.5 rounded-full border shadow-lg transition-all active:scale-95 ${
+            className={`w-11 h-11 rounded-full border shadow-lg transition-all active:scale-95 flex-shrink-0 flex items-center justify-center ${
               mobileNarratorVisible
-                ? 'bg-amber-600 border-amber-500 text-white'
-                : 'bg-black/70 border-amber-600/40 text-amber-500 hover:bg-black/90'
+                ? 'bg-amber-600/90 border-amber-500 text-white'
+                : 'bg-black/40 border-amber-600/30 text-amber-500'
             }`}
             title="Toggle Narrator"
           >
@@ -1085,7 +1108,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         {/* Desktop - Original map button */}
         <button
           onClick={() => setShowMap(true)}
-          className="hidden md:flex bg-black/60 hover:bg-black/80 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/40 text-amber-500 shadow-xl items-center gap-3 pointer-events-auto transition-all group active:scale-95"
+          className="hidden md:flex bg-black/40 hover:bg-black/55 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/30 text-amber-500 shadow-lg items-center gap-3 pointer-events-auto transition-all group active:scale-95"
         >
           <div className="bg-amber-500/10 p-1 rounded-full group-hover:bg-amber-500/20 transition-colors">
             <MapIcon size={14} />
@@ -1174,28 +1197,58 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
       {/* FLOATING WINDOWS */}
       <div className={`flex flex-col flex-1 justify-between p-4 md:p-6 transition-all duration-500 ${params.uiMinimized ? 'opacity-0 scale-95 pointer-events-none translate-y-4' : 'opacity-100 scale-100'}`}>
-        {/* Reports Panel - Hidden by default on mobile, slides in from left */}
-        <div className={`
-          fixed md:relative top-0 left-0 h-full md:h-auto z-50 md:z-auto
-          transition-transform duration-300 ease-out
-          md:transform-none md:opacity-100
-          ${mobileReportsPanelVisible ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
-        `}>
-          {/* Mobile backdrop */}
+        {/* Reports Panel - Hidden by default on mobile, slides in from left with swipe-to-dismiss */}
+        <div
+          className={`
+            fixed md:relative top-0 left-0 h-full md:h-auto z-50 md:z-auto
+            w-[85vw] max-w-[360px] md:w-auto md:max-w-none
+            transition-transform duration-300 ease-out
+            md:transform-none md:opacity-100
+            ${mobileReportsPanelVisible ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
+          `}
+          onTouchStart={(e) => {
+            const touch = e.touches[0];
+            (e.currentTarget as any)._touchStartX = touch.clientX;
+            (e.currentTarget as any)._touchStartY = touch.clientY;
+          }}
+          onTouchEnd={(e) => {
+            const startX = (e.currentTarget as any)._touchStartX;
+            const startY = (e.currentTarget as any)._touchStartY;
+            if (startX === undefined) return;
+            const touch = e.changedTouches[0];
+            const deltaX = touch.clientX - startX;
+            const deltaY = Math.abs(touch.clientY - startY);
+            // Swipe left to close (negative deltaX, mostly horizontal)
+            if (deltaX < -80 && deltaY < 50) {
+              setMobileReportsPanelVisible(false);
+            }
+          }}
+        >
+          {/* Mobile backdrop - proper z-index for click handling */}
           {mobileReportsPanelVisible && (
             <div
-              className="md:hidden fixed inset-0 bg-black/50 -z-10"
-              onClick={() => setMobileReportsPanelVisible(false)}
+              className="md:hidden fixed inset-0 bg-black/60"
+              style={{ zIndex: -1 }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMobileReportsPanelVisible(false);
+              }}
             />
           )}
-          {/* Mobile close button */}
-          <button
-            onClick={() => setMobileReportsPanelVisible(false)}
-            className="md:hidden absolute top-4 right-4 z-10 p-2 rounded-full bg-black/80 border border-amber-600/40 text-amber-500"
-          >
-            <X size={20} />
-          </button>
-          <div className="h-full md:h-auto overflow-y-auto md:overflow-visible bg-black/95 md:bg-transparent pt-16 md:pt-0">
+          {/* Mobile swipe hint + close button */}
+          <div className="md:hidden absolute top-4 right-3 z-[60] flex items-center gap-2">
+            <span className="text-[9px] text-amber-400/60 uppercase tracking-wider">← swipe</span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setMobileReportsPanelVisible(false);
+              }}
+              className="p-2 rounded-full bg-amber-600 border border-amber-500 text-white shadow-lg active:scale-95 transition-transform"
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="h-full md:h-auto overflow-y-auto md:overflow-visible bg-black/95 md:bg-transparent pt-14 pb-8 md:pt-0 md:pb-0 max-h-screen">
             <ReportsPanel
               reportTab={reportTab}
               setReportTab={setReportTab}
@@ -1335,52 +1388,104 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </div>
         )}
 
-        {/* Pickup Prompt - clickable for mobile */}
-        {pickupPrompt && (
-          <button
-            onClick={onTriggerPickup}
-            className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2.5 rounded-full border border-amber-700/50 text-amber-200 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(245,158,11,0.25)] pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none"
-          >
-            <span className="flex items-center gap-2">
-              <span className="hidden md:inline opacity-60">[SHIFT]</span>
+        {/* Mobile: Unified contextual prompt - with safe area */}
+        <div className="md:hidden absolute bottom-safe left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto" style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}>
+          {/* Pickup Prompt */}
+          {pickupPrompt && !isClimbing && (
+            <button
+              onClick={onTriggerPickup}
+              className="bg-amber-600/90 backdrop-blur-md px-5 py-3 rounded-xl border border-amber-500/70 text-white text-xs font-medium shadow-lg active:scale-95 transition-all touch-manipulation select-none"
+            >
               {pickupPrompt}
-            </span>
-          </button>
-        )}
-        {/* Climb Prompt - clickable for mobile */}
-        {climbablePrompt && !pickupPrompt && !isClimbing && (
-          <button
-            onClick={onTriggerClimb}
-            className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2.5 rounded-full border border-sky-700/50 text-sky-200 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(56,189,248,0.25)] pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none"
-          >
-            <span className="flex items-center gap-2">
-              <span className="hidden md:inline opacity-60">[C]</span>
+            </button>
+          )}
+          {/* Climb Prompt */}
+          {climbablePrompt && !pickupPrompt && !isClimbing && (
+            <button
+              onClick={onTriggerClimb}
+              className="bg-sky-600/90 backdrop-blur-md px-5 py-3 rounded-xl border border-sky-500/70 text-white text-xs font-medium shadow-lg active:scale-95 transition-all touch-manipulation select-none"
+            >
               {climbablePrompt}
-            </span>
-          </button>
-        )}
-
-        {/* Climbing Controls - shows when actively climbing */}
-        {isClimbing && (
-          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2">
-            {/* Climbing status with keyboard hint */}
-            <div className="bg-black/80 backdrop-blur-md px-4 py-1.5 rounded-full border border-sky-500/50 text-sky-300 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(56,189,248,0.3)]">
-              Climbing <span className="text-sky-400/60 ml-1">(↑/↓ keys)</span>
-            </div>
-            {/* Arrow controls for mobile - hold to climb continuously */}
-            <div className="flex flex-col items-center gap-1">
+            </button>
+          )}
+          {/* Climbing Controls - simplified for mobile */}
+          {isClimbing && (
+            <div className="flex items-center gap-2 bg-black/70 backdrop-blur-md rounded-full p-2 border border-sky-500/50">
               <button
-                className="w-12 h-12 bg-black/70 backdrop-blur-md rounded-lg border border-sky-500/50 text-sky-300 flex items-center justify-center active:bg-sky-900/50 active:scale-95 transition-all touch-manipulation shadow-lg select-none"
+                className="w-10 h-10 rounded-full bg-sky-600/80 text-white flex items-center justify-center active:scale-95 transition-all touch-manipulation"
                 onPointerDown={(e) => { e.preventDefault(); onClimbInput?.('up'); }}
                 onPointerUp={() => onClimbInput?.(null as any)}
                 onPointerLeave={() => onClimbInput?.(null as any)}
-                onPointerCancel={() => onClimbInput?.(null as any)}
               >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
                 </svg>
               </button>
-              <div className="flex gap-1">
+              <button
+                className="w-10 h-10 rounded-full bg-sky-600/80 text-white flex items-center justify-center active:scale-95 transition-all touch-manipulation"
+                onPointerDown={(e) => { e.preventDefault(); onClimbInput?.('down'); }}
+                onPointerUp={() => onClimbInput?.(null as any)}
+                onPointerLeave={() => onClimbInput?.(null as any)}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              <button
+                className="px-3 py-2 rounded-full bg-red-600/80 text-white text-[10px] uppercase font-medium active:scale-95 transition-all touch-manipulation"
+                onClick={() => onClimbInput?.('cancel')}
+              >
+                Done
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Desktop: Original prompts */}
+        <div className="hidden md:block">
+          {/* Pickup Prompt */}
+          {pickupPrompt && (
+            <button
+              onClick={onTriggerPickup}
+              className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2.5 rounded-full border border-amber-700/50 text-amber-200 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(245,158,11,0.25)] pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none"
+            >
+              <span className="flex items-center gap-2">
+                <span className="opacity-60">[SHIFT]</span>
+                {pickupPrompt}
+              </span>
+            </button>
+          )}
+          {/* Climb Prompt */}
+          {climbablePrompt && !pickupPrompt && !isClimbing && (
+            <button
+              onClick={onTriggerClimb}
+              className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-4 py-2.5 rounded-full border border-sky-700/50 text-sky-200 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(56,189,248,0.25)] pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none"
+            >
+              <span className="flex items-center gap-2">
+                <span className="opacity-60">[C]</span>
+                {climbablePrompt}
+              </span>
+            </button>
+          )}
+
+          {/* Climbing Controls - desktop */}
+          {isClimbing && (
+            <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-auto">
+              <div className="bg-black/80 backdrop-blur-md px-4 py-1.5 rounded-full border border-sky-500/50 text-sky-300 text-[10px] uppercase tracking-widest shadow-[0_0_20px_rgba(56,189,248,0.3)]">
+                Climbing <span className="text-sky-400/60 ml-1">(↑/↓ keys)</span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  className="w-12 h-12 bg-black/70 backdrop-blur-md rounded-lg border border-sky-500/50 text-sky-300 flex items-center justify-center active:bg-sky-900/50 active:scale-95 transition-all touch-manipulation shadow-lg select-none"
+                  onPointerDown={(e) => { e.preventDefault(); onClimbInput?.('up'); }}
+                  onPointerUp={() => onClimbInput?.(null as any)}
+                  onPointerLeave={() => onClimbInput?.(null as any)}
+                  onPointerCancel={() => onClimbInput?.(null as any)}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                  </svg>
+                </button>
                 <button
                   className="w-12 h-12 bg-black/70 backdrop-blur-md rounded-lg border border-sky-500/50 text-sky-300 flex items-center justify-center active:bg-sky-900/50 active:scale-95 transition-all touch-manipulation shadow-lg select-none"
                   onPointerDown={(e) => { e.preventDefault(); onClimbInput?.('down'); }}
@@ -1392,16 +1497,16 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
                 </button>
+                <button
+                  className="mt-1 px-4 py-1.5 bg-black/70 backdrop-blur-md rounded-full border border-red-500/50 text-red-300 text-[9px] uppercase tracking-wider active:bg-red-900/50 active:scale-95 transition-all touch-manipulation shadow-lg"
+                  onClick={() => onClimbInput?.('cancel')}
+                >
+                  Cancel (C)
+                </button>
               </div>
-              <button
-                className="mt-1 px-4 py-1.5 bg-black/70 backdrop-blur-md rounded-full border border-red-500/50 text-red-300 text-[9px] uppercase tracking-wider active:bg-red-900/50 active:scale-95 transition-all touch-manipulation shadow-lg"
-                onClick={() => onClimbInput?.('cancel')}
-              >
-                Cancel (C)
-              </button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
         {pickupToast && (
           <div
             className={`absolute bottom-36 left-1/2 -translate-x-1/2 px-6 py-2 rounded-full border text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_30px_rgba(245,158,11,0.35)] backdrop-blur-md ${
@@ -1785,6 +1890,11 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             onDropItemAtScreen={onDropItemAtScreen}
           />
       )}
+
+      <AboutModal
+        isOpen={showAbout}
+        onClose={() => setShowAbout(false)}
+      />
     </div>
   );
 };

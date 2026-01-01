@@ -899,6 +899,126 @@ The mosque itself was magnificent, incorporating the former Cathedral of St. Joh
     relatedEntries: ['imam', 'qadi', 'sufi-shaykh', 'scholar', 'sunni-islam'],
     tags: ['religious', 'prestigious', 'scholarly'],
   },
+  {
+    id: 'citadel',
+    category: 'districts',
+    title: 'The Citadel',
+    subtitle: 'Mamluk Fortress',
+    shortDescription: 'The imposing military fortress dominating Damascus, seat of Mamluk power and symbol of military authority.',
+    fullDescription: `The Citadel of Damascus (Qal'at Dimashq) stood as the military and administrative heart of the city. Originally built on Roman foundations, it was extensively rebuilt by Saladin and the Ayyubids, then maintained by the Mamluks as their seat of power.
+
+The massive walls, towers, and gates housed the governor's residence, military barracks, armories, and administrative offices. The citadel represented the might of the sultanate—a fortress within the city.`,
+    historicalContext: `Under Mamluk rule, the citadel housed the na'ib (viceroy) who governed Damascus on behalf of the Cairo sultan. The Mamluk military elite—slave-soldiers who had risen to rule—maintained their distinct identity here. The citadel was both protection and symbol of foreign military rule over the Arab population.`,
+    inGameRelevance: `The Citadel area has military NPCs: soldiers, guards, military officials. It's the center of Mamluk authority. During plague, this is where quarantine orders originate and where the governor struggles to maintain order.`,
+    wikipediaSearchTerm: 'Citadel of Damascus',
+    relatedEntries: ['soldier', 'mamluk-system'],
+    tags: ['military', 'government', 'mamluk'],
+  },
+  {
+    id: 'jewish-quarter',
+    category: 'districts',
+    title: 'Jewish Quarter',
+    subtitle: 'Al-Yahud',
+    shortDescription: 'The ancient Jewish neighborhood with its synagogues, where Damascus\'s Jewish community has lived for millennia.',
+    fullDescription: `The Jewish Quarter of Damascus was one of the oldest continuously inhabited Jewish neighborhoods in the world. Jews had lived in Damascus since antiquity, maintaining their religious and cultural traditions through successive empires.
+
+The quarter featured synagogues, ritual baths, and the homes of Jewish merchants, artisans, and scholars. While legally dhimmis (protected non-Muslims), Jews occupied important economic niches, especially in banking, textile trade, and medicine.`,
+    historicalContext: `Damascus's Jewish community traced its origins to biblical times. Under Islamic rule, Jews enjoyed protected status but faced restrictions: distinctive dress, limited building heights, special taxes. Despite these constraints, the community thrived, producing noted scholars and maintaining connections with Jewish communities across the Mediterranean.`,
+    inGameRelevance: `The Jewish Quarter has Jewish NPCs with distinct dress and customs. Jewish merchants and physicians are important community members. During plague, the quarter may face scapegoating as outsiders seek someone to blame.`,
+    wikipediaSearchTerm: 'History of the Jews in Syria',
+    relatedEntries: ['jewish', 'money-changer', 'physician'],
+    tags: ['minority', 'religious', 'commercial'],
+  },
+  {
+    id: 'christian-quarter',
+    category: 'districts',
+    title: 'Christian Quarter',
+    subtitle: 'Al-Nasara',
+    shortDescription: 'Home to Damascus\'s diverse Christian communities—Orthodox, Melkite, Armenian, and others.',
+    fullDescription: `The Christian Quarter housed Damascus's substantial Christian population, a mix of communities with different liturgies and traditions: Melkite (Greek Catholic), Orthodox, Armenian, and others. Churches and monasteries dotted the neighborhood.
+
+Christians, like Jews, held dhimmi status. Many worked as merchants, artisans, and in professions like medicine. Some served as translators and intermediaries with European traders.`,
+    historicalContext: `Damascus had been Christian before Islam, and substantial communities remained. The conversion of the great cathedral into the Umayyad Mosque symbolized the religious transformation, but Christians continued to worship freely. Monasteries preserved ancient texts and traditions.`,
+    inGameRelevance: `The Christian Quarter has Orthodox, Armenian, and other Christian NPCs. Churches and monasteries are important locations. Christian merchants may have European trade connections. Wine sellers are exclusively Christian.`,
+    wikipediaSearchTerm: 'Christianity in Syria',
+    relatedEntries: ['eastern-orthodox', 'armenian', 'wine-seller'],
+    tags: ['minority', 'religious', 'diverse'],
+  },
+  {
+    id: 'mountain-shrine',
+    category: 'districts',
+    title: 'Mount Qasiyun',
+    subtitle: 'Sacred Mountain',
+    shortDescription: 'The mountain overlooking Damascus, dotted with shrines and caves sacred to multiple faiths.',
+    fullDescription: `Mount Qasiyun rises above Damascus to the northwest, its slopes dotted with shrines, caves, and holy sites. Islamic tradition held that Abraham had prayed here, and a cave was identified as where Cain slew Abel. Sufi lodges and hermitages clustered on the mountainside.
+
+The views over Damascus were spectacular, and the cooler mountain air made it a refuge from summer heat. Orchards and gardens terraced the lower slopes.`,
+    historicalContext: `Qasiyun was sacred to multiple traditions. Muslims, Christians, and Jews all found holy sites here. The mountain represented the spiritual dimension overlooking the worldly city below. Pilgrims climbed to pray at shrines and seek blessings.`,
+    inGameRelevance: `The mountain area has shrines, hermits, and Sufi practitioners. It's a place of spiritual retreat and pilgrimage. The terrain is hilly with gardens and orchards. Views reveal the city's geography.`,
+    wikipediaSearchTerm: 'Mount Qasioun',
+    relatedEntries: ['sufi-shaykh', 'pilgrim'],
+    tags: ['religious', 'nature', 'sacred'],
+  },
+  {
+    id: 'ghouta-farmland',
+    category: 'districts',
+    title: 'The Ghouta',
+    subtitle: 'Garden Oasis',
+    shortDescription: 'The famous orchards and gardens surrounding Damascus, fed by the Barada River.',
+    fullDescription: `The Ghouta was Damascus's green belt—a vast oasis of orchards, gardens, and farms irrigated by the Barada River and its channels. Apricots, figs, pomegranates, and vegetables grew in abundance. The Ghouta fed the city and made Damascus famous for its fruits.
+
+Villages dotted the farmland, home to peasants who worked the land. The contrast between the green Ghouta and the surrounding desert was striking—Damascus was literally an oasis.`,
+    historicalContext: `Medieval travelers marveled at the Ghouta's fertility. The irrigation system dated to antiquity and was carefully maintained. The orchards provided not just food but recreation—Damascenes picnicked among the gardens. During plague, rural areas might seem safer, drawing refugees from the city.`,
+    inGameRelevance: `The Ghouta has farmers, orchards, and rural villages. It's less crowded than the city and may have lower disease transmission. Peasant NPCs work the land. Food supplies for the city come from here.`,
+    wikipediaSearchTerm: 'Ghouta',
+    relatedEntries: ['farmer', 'peasant'],
+    tags: ['rural', 'agriculture', 'nature'],
+  },
+  {
+    id: 'desert-outskirts',
+    category: 'districts',
+    title: 'Syrian Desert',
+    subtitle: 'The Badiya',
+    shortDescription: 'The vast desert stretching east from Damascus, home to Bedouin tribes and caravan routes.',
+    fullDescription: `East of Damascus, the irrigated oasis gave way to the Syrian Desert—the Badiya. This was Bedouin territory, where nomadic tribes moved with their flocks following ancient patterns. Caravans crossed the desert on routes to Iraq and beyond.
+
+The desert was harsh but not empty. Bedouin knew its water sources, shelters, and dangers. They served as guides, guards, or raiders depending on circumstances and payment.`,
+    historicalContext: `The relationship between city and desert was complex. Damascus depended on Bedouin for desert trade; Bedouin needed the city's markets. Mamluks struggled to control the tribes. During crises, Bedouin might raid weakened settlements—or flee to the desert to escape plague.`,
+    inGameRelevance: `The desert outskirts have Bedouin NPCs with distinct culture. Caravans arrive from the east. The sparse population means lower disease risk but also fewer resources. It's possible to flee into the desert.`,
+    wikipediaSearchTerm: 'Syrian Desert',
+    relatedEntries: ['bedouin', 'caravanserai'],
+    tags: ['desert', 'nomadic', 'frontier'],
+  },
+  {
+    id: 'straight-street',
+    category: 'districts',
+    title: 'Straight Street',
+    subtitle: 'Via Recta',
+    shortDescription: 'The ancient Roman road running east-west through Damascus, mentioned in the Bible.',
+    fullDescription: `Straight Street (Suq al-Tawil or Via Recta) was the ancient Roman main street, running east-west through the old city. The Bible mentions it as where Paul stayed after his conversion. In the medieval period, it remained a major commercial artery.
+
+The street was lined with shops and residences, a mix of Muslim and Christian neighborhoods. Its Roman origins were still visible in the city's layout, though much had been rebuilt over centuries.`,
+    historicalContext: `The Via Recta dated to Roman Damascus, when it was a grand colonnaded avenue. By the 14th century, the colonnade was long gone, but the street remained important. For Christians, its biblical associations made it a pilgrimage site—tradition marked the house of Judas where Paul stayed.`,
+    inGameRelevance: `Straight Street is a major thoroughfare connecting different quarters. It's busy with traffic and commerce. The mix of religions and ethnicities is high here. It's a good route for travel but also for disease transmission.`,
+    wikipediaSearchTerm: 'Via Recta, Damascus',
+    relatedEntries: ['eastern-orthodox', 'market-district'],
+    tags: ['historic', 'commercial', 'mixed'],
+  },
+  {
+    id: 'eastern-gate',
+    category: 'districts',
+    title: 'Bab Sharqi',
+    subtitle: 'Eastern Gate',
+    shortDescription: 'The ancient eastern gate of Damascus, where caravans from the desert enter the city.',
+    fullDescription: `Bab Sharqi (the Eastern Gate) was one of the original Roman gates of Damascus, still standing and in use. Through this gate came caravans from Palmyra, Baghdad, and the east. It marked the boundary between city and desert, civilization and wilderness.
+
+The area around the gate bustled with caravanserais, stables, and businesses serving travelers. It was where news from the east first arrived—and potentially where diseases from distant lands entered.`,
+    historicalContext: `The gate dated to Roman times and had been rebuilt and modified over centuries. Straight Street led directly from Bab Sharqi to the city center. The eastern trade routes brought silks, spices, and luxuries—but also carried plague along the same paths goods traveled.`,
+    inGameRelevance: `Bab Sharqi is where eastern travelers enter. It has caravanserais, foreign merchants, and news from abroad. This is a potential entry point for plague arriving via trade routes. Guard NPCs control access.`,
+    wikipediaSearchTerm: 'Bab Sharqi',
+    relatedEntries: ['caravanserai', 'silk-merchant', 'soldier'],
+    tags: ['gate', 'trade', 'frontier'],
+  },
 ];
 
 // ============================================================================

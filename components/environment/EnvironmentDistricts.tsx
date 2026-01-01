@@ -63,7 +63,7 @@ export const EnvironmentDistricts: React.FC<EnvironmentDistrictsProps> = ({
     <MarketplaceDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
     <BirdFlock mapX={mapX} mapY={mapY} center={[0, 7, 0]} count={5} bounds={22} />
     <WealthyGarden mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} buildingPositions={buildingPositions} />
-    <CitadelComplex mapX={mapX} mapY={mapY} />
+    <CitadelComplex mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} playerPosition={playerPosition} />
     <HovelsDecor mapX={mapX} mapY={mapY} buildingPositions={buildingPositions} />
     <OutskirtsFarmlandDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
     <OutskirtsDesertDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />

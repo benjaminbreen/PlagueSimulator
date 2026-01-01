@@ -66,7 +66,7 @@ export const MerchantModal: React.FC<MerchantModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="text-amber-500 hover:text-amber-400 transition-colors p-2 hover:bg-white/5 rounded"
+            className="w-10 h-10 flex items-center justify-center text-amber-500 hover:text-amber-400 transition-colors hover:bg-white/10 rounded-full -mr-1"
           >
             <X size={20} />
           </button>

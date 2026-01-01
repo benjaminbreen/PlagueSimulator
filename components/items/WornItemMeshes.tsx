@@ -15,7 +15,6 @@ export type WornItemType =
   | 'key'
   | 'writing_reed'
   | 'hemp_rope'
-  | 'candles'
   | 'bronze_bell'
   | 'herb_bundle'
   | 'medicine_pouch'
@@ -133,16 +132,6 @@ export const getWornItemConfig = (itemName: string): WornItemConfig | null => {
       scale: 0.35,
       offset: [-0.15, -0.05, -0.08],
       rotation: [Math.PI / 2, 0, 0]
-    };
-  }
-
-  if (name.includes('candle')) {
-    return {
-      type: 'candles',
-      attachment: 'belt_left',
-      scale: 0.32,
-      offset: [-0.18, 0.05, 0.08],
-      rotation: [0, 0, 0.1]
     };
   }
 
@@ -526,31 +515,6 @@ const WornHempRope: React.FC<{ scale: number }> = ({ scale }) => (
   </group>
 );
 
-// Bundle of candles tucked in sash
-const WornCandles: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Cloth wrap */}
-    <mesh position={[0, 0, 0]} castShadow>
-      <boxGeometry args={[0.12, 0.35, 0.1]} />
-      <meshStandardMaterial color="#c4a882" roughness={0.9} />
-    </mesh>
-    {/* Candle tops visible */}
-    {[-0.02, 0.02].map((x, i) => (
-      <mesh key={i} position={[x, 0.2, 0]} castShadow>
-        <cylinderGeometry args={[0.025, 0.025, 0.12, 8]} />
-        <meshStandardMaterial color="#f5e6c8" roughness={0.7} />
-      </mesh>
-    ))}
-    {/* Wicks */}
-    {[-0.02, 0.02].map((x, i) => (
-      <mesh key={i} position={[x, 0.27, 0]} castShadow>
-        <cylinderGeometry args={[0.005, 0.005, 0.03, 6]} />
-        <meshStandardMaterial color="#2a2a2a" roughness={0.9} />
-      </mesh>
-    ))}
-  </group>
-);
-
 // Bronze bell hanging from belt
 const WornBronzeBell: React.FC<{ scale: number }> = ({ scale }) => (
   <group scale={scale}>
@@ -745,8 +709,6 @@ export const WornItemMesh: React.FC<{
       return <WornWritingReed scale={scale} />;
     case 'hemp_rope':
       return <WornHempRope scale={scale} />;
-    case 'candles':
-      return <WornCandles scale={scale} />;
     case 'bronze_bell':
       return <WornBronzeBell scale={scale} />;
     case 'herb_bundle':

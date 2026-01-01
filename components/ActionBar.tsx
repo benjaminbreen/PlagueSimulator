@@ -89,12 +89,12 @@ const ActionButton: React.FC<ActionButtonProps> = ({
         disabled={!isReady}
         className={`
           relative w-14 h-14 rounded-lg
-          bg-black/80 backdrop-blur-md
+          bg-black/50 backdrop-blur-md
           border transition-all duration-200
           flex flex-col items-center justify-center gap-0.5
           ${isReady
-            ? 'border-amber-700/60 hover:border-amber-500/80 hover:bg-amber-900/30 cursor-pointer'
-            : 'border-gray-700/40 cursor-not-allowed opacity-60'}
+            ? 'border-amber-700/40 hover:border-amber-500/60 hover:bg-amber-900/20 cursor-pointer'
+            : 'border-gray-700/30 cursor-not-allowed opacity-60'}
           ${isReady ? 'hover:scale-105 active:scale-95' : ''}
         `}
       >
@@ -177,8 +177,8 @@ const PushButton: React.FC<PushButtonProps> = ({ onTrigger }) => {
         onClick={onTrigger}
         className="
           relative w-14 h-14 rounded-lg
-          bg-black/80 backdrop-blur-md
-          border border-amber-700/60 hover:border-amber-500/80 hover:bg-amber-900/30
+          bg-black/50 backdrop-blur-md
+          border border-amber-700/40 hover:border-amber-500/60 hover:bg-amber-900/20
           transition-all duration-200
           flex flex-col items-center justify-center gap-0.5
           hover:scale-105 active:scale-95 cursor-pointer
@@ -242,6 +242,39 @@ export const ActionBar: React.FC<ActionBarProps> = ({
   const [dragging, setDragging] = useState(false);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [narratorVisible, setNarratorVisible] = useState(false);
+
+  // Mobile collapsed state - auto-collapse after inactivity
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  const autoCollapseTimerRef = React.useRef<number | null>(null);
+
+  // Auto-collapse after 5 seconds of inactivity on mobile
+  React.useEffect(() => {
+    if (mobileExpanded) {
+      if (autoCollapseTimerRef.current) {
+        window.clearTimeout(autoCollapseTimerRef.current);
+      }
+      autoCollapseTimerRef.current = window.setTimeout(() => {
+        setMobileExpanded(false);
+      }, 5000);
+    }
+    return () => {
+      if (autoCollapseTimerRef.current) {
+        window.clearTimeout(autoCollapseTimerRef.current);
+      }
+    };
+  }, [mobileExpanded]);
+
+  // Reset timer on any action
+  const resetAutoCollapse = () => {
+    if (autoCollapseTimerRef.current) {
+      window.clearTimeout(autoCollapseTimerRef.current);
+    }
+    if (mobileExpanded) {
+      autoCollapseTimerRef.current = window.setTimeout(() => {
+        setMobileExpanded(false);
+      }, 5000);
+    }
+  };
 
   const itemsToShow = inventoryItems.slice(0, 8);
   const slots = [...itemsToShow];
@@ -342,7 +375,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({
   }, [narratorMessage, narratorOpen]);
 
   return (
-    <div className="fixed bottom-6 right-6 z-40 pointer-events-auto">
+    <div className="fixed bottom-safe-sm md:bottom-6 right-4 md:right-6 z-40 pointer-events-auto">
       {dragging && dragItemRef.current && dragPosition && (
         <div
           className="fixed z-[120] pointer-events-none"
@@ -355,9 +388,9 @@ export const ActionBar: React.FC<ActionBarProps> = ({
       )}
       {/* Narrator Panel - Desktop: normal behavior, Mobile: controlled by toggle */}
       <div className={`
-        absolute bottom-72 right-0 mb-3 flex flex-col items-end gap-4
-        transition-all duration-300
-        ${mobileNarratorVisible ? 'translate-x-0 opacity-100' : 'md:translate-x-0 md:opacity-100 translate-x-full opacity-0 pointer-events-none md:pointer-events-auto'}
+        absolute bottom-64 md:bottom-72 right-2 md:right-0 mb-3 flex flex-col items-end gap-4
+        transition-all duration-300 z-40
+        ${mobileNarratorVisible ? 'translate-x-0 opacity-100' : 'md:translate-x-0 md:opacity-100 translate-x-[calc(100%+1rem)] opacity-0 pointer-events-none md:pointer-events-auto'}
       `}>
         {/* On desktop, show when narratorMessage/narratorOpen. On mobile, show when mobileNarratorVisible */}
         {((narratorMessage || narratorOpen) || mobileNarratorVisible) && (
@@ -373,14 +406,12 @@ export const ActionBar: React.FC<ActionBarProps> = ({
       </div>
       <div
         className={`
-          absolute bottom-24 right-0 w-[320px] md:w-[360px]
-          max-w-[92vw]
+          absolute bottom-20 md:bottom-24 right-0 w-[280px] md:w-[360px]
+          max-w-[85vw]
           rounded-2xl border border-amber-700/40
           bg-black/85 backdrop-blur-lg shadow-2xl
           transition-all duration-200 origin-bottom-right
           ${showInventory ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-3 pointer-events-none'}
-          md:right-0 md:translate-x-0
-          right-1/2 translate-x-1/2
         `}
       >
         <div className="px-4 py-3 border-b border-amber-800/40 flex items-center justify-between">
@@ -431,7 +462,67 @@ export const ActionBar: React.FC<ActionBarProps> = ({
           })}
         </div>
       </div>
-      <div className="flex gap-2">
+      {/* Mobile: Collapsed toggle button - 44px minimum touch targets */}
+      <div className="md:hidden">
+        {!mobileExpanded ? (
+          <button
+            onClick={() => setMobileExpanded(true)}
+            className="w-14 h-14 rounded-full bg-amber-600/90 backdrop-blur-md border border-amber-500 text-white flex items-center justify-center shadow-lg active:scale-95 transition-all"
+          >
+            <Package size={22} />
+          </button>
+        ) : (
+          <div className="flex gap-1 items-center bg-black/70 backdrop-blur-md rounded-full p-1 border border-amber-800/40">
+            {/* Push Button - Hotkey 1 */}
+            {onTriggerPush && (
+              <button
+                onClick={() => { onTriggerPush(); resetAutoCollapse(); }}
+                className="w-11 h-11 rounded-full bg-black/80 border border-amber-700/60 text-amber-400 flex items-center justify-center active:scale-95 transition-all"
+              >
+                <Hand size={18} />
+              </button>
+            )}
+            {/* Inventory Button */}
+            <button
+              onClick={() => { setShowInventory((prev) => !prev); resetAutoCollapse(); }}
+              className="w-11 h-11 rounded-full bg-black/80 border border-amber-700/60 text-amber-400 flex items-center justify-center active:scale-95 transition-all"
+            >
+              <Package size={18} />
+            </button>
+            {/* Action Slots */}
+            <button
+              onClick={() => { onTriggerAction(actionSlots.slot1); resetAutoCollapse(); }}
+              className="w-11 h-11 rounded-full bg-black/80 border border-amber-700/60 text-amber-400 flex items-center justify-center active:scale-95 transition-all"
+            >
+              {getActionIcon(PLAYER_ACTIONS[actionSlots.slot1].icon, 18)}
+            </button>
+            <button
+              onClick={() => { onTriggerAction(actionSlots.slot2); resetAutoCollapse(); }}
+              className="w-11 h-11 rounded-full bg-black/80 border border-amber-700/60 text-amber-400 flex items-center justify-center active:scale-95 transition-all"
+            >
+              {getActionIcon(PLAYER_ACTIONS[actionSlots.slot2].icon, 18)}
+            </button>
+            <button
+              onClick={() => { onTriggerAction(actionSlots.slot3); resetAutoCollapse(); }}
+              className="w-11 h-11 rounded-full bg-black/80 border border-amber-700/60 text-amber-400 flex items-center justify-center active:scale-95 transition-all"
+            >
+              {getActionIcon(PLAYER_ACTIONS[actionSlots.slot3].icon, 18)}
+            </button>
+            {/* Close button */}
+            <button
+              onClick={() => setMobileExpanded(false)}
+              className="w-9 h-9 rounded-full bg-stone-800/80 border border-stone-600/40 text-stone-400 flex items-center justify-center active:scale-95 transition-all ml-0.5"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Desktop: Full action bar */}
+      <div className="hidden md:flex gap-2">
         {/* Push Button - Hotkey 1 */}
         {onTriggerPush && <PushButton onTrigger={onTriggerPush} />}
 
@@ -441,10 +532,10 @@ export const ActionBar: React.FC<ActionBarProps> = ({
             onClick={() => setShowInventory((prev) => !prev)}
             className={`
               relative w-14 h-14 rounded-lg
-              bg-black/80 backdrop-blur-md
+              bg-black/50 backdrop-blur-md
               border transition-all duration-200
               flex flex-col items-center justify-center gap-0.5
-              border-amber-700/60 hover:border-amber-500/80 hover:bg-amber-900/30
+              border-amber-700/40 hover:border-amber-500/60 hover:bg-amber-900/20
               hover:scale-105 active:scale-95
             `}
           >
@@ -505,8 +596,8 @@ export const ActionBar: React.FC<ActionBarProps> = ({
         />
       </div>
 
-      {/* Label */}
-      <div className="text-center mt-1.5">
+      {/* Label - desktop only */}
+      <div className="hidden md:block text-center mt-1.5">
         <span className="text-[8px] text-amber-600/40 uppercase tracking-[0.2em]">Actions</span>
       </div>
     </div>

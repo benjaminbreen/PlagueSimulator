@@ -81,8 +81,8 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                 </button>
               ))}
             </div>
-            <button onClick={onClose} className="text-amber-400 hover:text-amber-300">
-              <X size={24} />
+            <button onClick={onClose} className="w-11 h-11 flex items-center justify-center rounded-full text-amber-400 hover:text-amber-300 hover:bg-amber-900/30 transition-colors -mr-2">
+              <X size={22} />
             </button>
           </div>
         </div>

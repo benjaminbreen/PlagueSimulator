@@ -2,13 +2,47 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Damascus 1348: Plague Simulator</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Lato:wght@400;700&family=Fraunces:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
+      /* Base styles */
       body { margin: 0; padding: 0; overflow: hidden; background-color: #000; font-family: 'Lato', sans-serif; }
       h1, h2, h3, .historical-font { font-family: 'Cinzel', serif; }
+
+      /* iOS Safe Area CSS Variables */
+      :root {
+        --safe-area-inset-top: env(safe-area-inset-top, 0px);
+        --safe-area-inset-right: env(safe-area-inset-right, 0px);
+        --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-area-inset-left: env(safe-area-inset-left, 0px);
+      }
+
+      /* Utility classes for safe areas */
+      .safe-top { padding-top: env(safe-area-inset-top, 0px); }
+      .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+      .safe-left { padding-left: env(safe-area-inset-left, 0px); }
+      .safe-right { padding-right: env(safe-area-inset-right, 0px); }
+      .safe-all {
+        padding-top: env(safe-area-inset-top, 0px);
+        padding-right: env(safe-area-inset-right, 0px);
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        padding-left: env(safe-area-inset-left, 0px);
+      }
+
+      /* Bottom positioning with safe area */
+      .bottom-safe { bottom: calc(1rem + env(safe-area-inset-bottom, 0px)); }
+      .bottom-safe-sm { bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px)); }
+
+      /* Prevent iOS text size adjustment */
+      html { -webkit-text-size-adjust: 100%; }
+
+      /* Better touch behavior */
+      * { -webkit-tap-highlight-color: transparent; }
+      button, a, [role="button"] { touch-action: manipulation; }
     </style>
   <script type="importmap">
 {

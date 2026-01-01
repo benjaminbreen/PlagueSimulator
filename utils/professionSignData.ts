@@ -350,18 +350,6 @@ export const PROFESSION_SIGN_MAP: Record<string, ProfessionSign> = {
     scale: 1.1
   },
 
-  'Apothecary': {
-    type: 'mounted',
-    geometry: 'mortar',
-    color: '#8b7355', // Stone mortar
-    metalness: 0,
-    roughness: 0.9,
-    secondaryColor: '#228b22', // Green healing symbol
-    bracketOffset: 0,
-    heightOffset: 0.85,
-    scale: 1.2
-  },
-
   'Perfumer': {
     type: 'hanging',
     geometry: 'censer',
@@ -419,30 +407,6 @@ export const PROFESSION_SIGN_MAP: Record<string, ProfessionSign> = {
     bracketOffset: 0,
     heightOffset: 0.85,
     scale: 1.1
-  },
-
-  // ==================== HOSPITALITY ====================
-
-  'Khan Warden': {
-    type: 'mounted',
-    geometry: 'medallion',
-    color: '#8b6f47', // Carved wood
-    metalness: 0,
-    roughness: 0.85,
-    bracketOffset: 0,
-    heightOffset: 0.9,
-    scale: 1.2
-  },
-
-  'Caravanserai Keeper': {
-    type: 'mounted',
-    geometry: 'medallion',
-    color: '#8b6f47', // Carved wood camel
-    metalness: 0,
-    roughness: 0.85,
-    bracketOffset: 0,
-    heightOffset: 0.9,
-    scale: 1.3
   },
 };
 

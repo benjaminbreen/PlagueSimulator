@@ -61,12 +61,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     <div className="absolute inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center pointer-events-auto p-6 md:p-10 animate-in fade-in zoom-in-95">
       <button
         onClick={onClose}
-        className="absolute top-6 right-6 p-4 text-amber-500 hover:text-amber-400"
+        className="absolute right-4 md:right-6 w-11 h-11 flex items-center justify-center rounded-full text-amber-500 hover:text-amber-400 hover:bg-white/10 transition-colors"
+        style={{ top: 'calc(1rem + env(safe-area-inset-top, 0px))' }}
       >
-        <X size={32} />
+        <X size={28} />
       </button>
 
-      <div className="max-w-3xl w-full bg-black/60 border border-amber-900/40 rounded-xl shadow-2xl p-6 md:p-10">
+      <div className="max-w-3xl w-full max-h-[90vh] overflow-y-auto bg-black/60 border border-amber-900/40 rounded-xl shadow-2xl p-6 md:p-10">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-amber-900/30 pb-4">
           <div>
             <h2 className="historical-font text-3xl md:text-4xl text-amber-500 tracking-tighter">DAMASCUS 1348</h2>

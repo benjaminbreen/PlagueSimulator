@@ -51,9 +51,9 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
             <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Damascus Map — 1348</h4>
             <button
               onClick={onClose}
-              className="p-1.5 hover:bg-white/10 rounded transition-colors text-amber-100/50 hover:text-amber-100"
+              className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition-colors text-amber-100/50 hover:text-amber-100 -mr-1"
             >
-              <X size={16} />
+              <X size={20} />
             </button>
           </div>
 

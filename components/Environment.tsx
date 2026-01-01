@@ -11,7 +11,7 @@ import { PushableObject } from '../utils/pushables';
 import { LaundryLine, getCatenaryPoint } from '../utils/laundry';
 import { HangingCarpet } from '../utils/hangingCarpets';
 import { bakeBoxAO, bakeBoxAO_TallBuilding, bakeBoxAO_Civic } from '../utils/vertexAO';
-import { CACHED_STRIPE_TEXTURES } from '../utils/environment/textures';
+import { CACHED_STRIPE_TEXTURES, CACHED_MEDICAL_PATTERN, CACHED_CIVIC_PATTERN } from '../utils/environment/textures';
 import { getWoodTexture } from '../utils/environment/wood';
 import { getDoorStyle } from '../utils/environment/doorStyle';
 import {
@@ -1005,6 +1005,88 @@ const Building: React.FC<{
               </group>
             );
           })}
+        </group>
+      )}
+
+      {/* DECORATIVE PATTERN BAND - Islamic geometric patterns below colored stripes */}
+      {/* Uses cached textures for zero performance impact - only 4 meshes total */}
+      {professionArchitecture.hasMedicalStripes && CACHED_MEDICAL_PATTERN && (
+        <group>
+          {/* Pattern band at 25% height (below the green/white stripes which start at 32%) */}
+          {(() => {
+            const bandY = -finalHeight / 2 + finalHeight * 0.25;
+            const bandHeight = finalHeight * 0.12; // Thicker band for visibility
+            const repeatX = Math.max(1, finalBuildingSize / 1.5); // Larger pattern repeat
+            // Set texture repeat before rendering
+            if (CACHED_MEDICAL_PATTERN) {
+              CACHED_MEDICAL_PATTERN.repeat.set(repeatX, 1);
+              CACHED_MEDICAL_PATTERN.needsUpdate = true;
+            }
+            return (
+              <>
+                {/* North face */}
+                <mesh position={[0, bandY, finalBuildingSize / 2 + 0.02]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_MEDICAL_PATTERN} roughness={0.7} />
+                </mesh>
+                {/* South face */}
+                <mesh position={[0, bandY, -finalBuildingSize / 2 - 0.02]} rotation={[0, Math.PI, 0]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_MEDICAL_PATTERN} roughness={0.7} />
+                </mesh>
+                {/* East face */}
+                <mesh position={[finalBuildingSize / 2 + 0.02, bandY, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_MEDICAL_PATTERN} roughness={0.7} />
+                </mesh>
+                {/* West face */}
+                <mesh position={[-finalBuildingSize / 2 - 0.02, bandY, 0]} rotation={[0, -Math.PI / 2, 0]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_MEDICAL_PATTERN} roughness={0.7} />
+                </mesh>
+              </>
+            );
+          })()}
+        </group>
+      )}
+
+      {/* CIVIC PATTERN BAND - Kufic-inspired calligraphy pattern */}
+      {professionArchitecture.hasCivicStripes && CACHED_CIVIC_PATTERN && (
+        <group>
+          {(() => {
+            const bandY = -finalHeight / 2 + finalHeight * 0.18;
+            const bandHeight = finalHeight * 0.10; // Thicker band
+            const repeatX = Math.max(1, finalBuildingSize / 1.8);
+            // Set texture repeat
+            if (CACHED_CIVIC_PATTERN) {
+              CACHED_CIVIC_PATTERN.repeat.set(repeatX, 1);
+              CACHED_CIVIC_PATTERN.needsUpdate = true;
+            }
+            return (
+              <>
+                {/* North face */}
+                <mesh position={[0, bandY, finalBuildingSize / 2 + 0.02]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_CIVIC_PATTERN} roughness={0.75} />
+                </mesh>
+                {/* South face */}
+                <mesh position={[0, bandY, -finalBuildingSize / 2 - 0.02]} rotation={[0, Math.PI, 0]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_CIVIC_PATTERN} roughness={0.75} />
+                </mesh>
+                {/* East face */}
+                <mesh position={[finalBuildingSize / 2 + 0.02, bandY, 0]} rotation={[0, Math.PI / 2, 0]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_CIVIC_PATTERN} roughness={0.75} />
+                </mesh>
+                {/* West face */}
+                <mesh position={[-finalBuildingSize / 2 - 0.02, bandY, 0]} rotation={[0, -Math.PI / 2, 0]} receiveShadow>
+                  <planeGeometry args={[finalBuildingSize, bandHeight]} />
+                  <meshStandardMaterial map={CACHED_CIVIC_PATTERN} roughness={0.75} />
+                </mesh>
+              </>
+            );
+          })()}
         </group>
       )}
 
@@ -2352,7 +2434,8 @@ export const Buildings: React.FC<{
     let seed = (mapX * 100) + mapY + sessionSeed; // Include session seed for procedural variation
     const roadCorridors: Array<{ axis: 'x' | 'z'; halfWidth: number }> = [];
     if (mapX === 0) roadCorridors.push({ axis: 'x', halfWidth: 2.0 });
-    if (mapY === 0) roadCorridors.push({ axis: 'z', halfWidth: 2.0 });
+    // North-south road (Z-axis) removed from marketplace - only show on other cells along mapY=0
+    if (mapY === 0 && mapX !== 0) roadCorridors.push({ axis: 'z', halfWidth: 2.0 });
     if (mapX === 2 && mapY <= 2 && mapY >= -1) roadCorridors.push({ axis: 'x', halfWidth: 1.5 });
     if (mapX === 1 && mapY <= -2) roadCorridors.push({ axis: 'x', halfWidth: 1.5 });
     const isInRoadCorridor = (x: number, z: number, halfSize: number) =>
@@ -2877,7 +2960,8 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
 
   // Drag detection for click-to-move (prevent camera drag from triggering movement)
   const pointerDownPosRef = useRef<{ x: number; y: number } | null>(null);
-  const DRAG_THRESHOLD = 5; // pixels - movement beyond this is considered a drag
+  // Higher threshold on mobile to account for finger movement vs precise mouse clicks
+  const DRAG_THRESHOLD = typeof window !== 'undefined' && window.innerWidth < 768 ? 15 : 5;
 
   // Calculate heat intensity for shimmer effect (peak at midday)
   const time = timeOfDay ?? 12;
@@ -2962,7 +3046,8 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
   const roadCorridors = useMemo(() => {
     const corridors: Array<{ axis: 'x' | 'z'; halfWidth: number }> = [];
     if (mapX === 0) corridors.push({ axis: 'x', halfWidth: 2.0 });
-    if (mapY === 0) corridors.push({ axis: 'z', halfWidth: 2.0 });
+    // North-south road (Z-axis) removed from marketplace - only show on other cells along mapY=0
+    if (mapY === 0 && mapX !== 0) corridors.push({ axis: 'z', halfWidth: 2.0 });
     if (mapX === 2 && mapY <= 2 && mapY >= -1) corridors.push({ axis: 'x', halfWidth: 1.5 });
     if (mapX === 1 && mapY <= -2) corridors.push({ axis: 'x', halfWidth: 1.5 });
     return corridors;
@@ -3112,6 +3197,9 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
     });
   }, [blotchTexture, overlayColor, overlayOpacity]);
 
+  // Calculate night factor for road darkening
+  const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
+
   const roadMaterial = useMemo(() => (
     new THREE.MeshStandardMaterial({
       color: '#8b7a62',
@@ -3125,6 +3213,13 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
       polygonOffsetUnits: -1
     })
   ), []);
+
+  // Update road material color based on time of day
+  const baseRoadColorRef = useRef(new THREE.Color('#8b7a62'));
+  const nightTintRef = useRef(new THREE.Color('#3a4555'));
+  useFrame(() => {
+    roadMaterial.color.copy(baseRoadColorRef.current).lerp(nightTintRef.current, nightFactor * 0.6);
+  });
 
   return (
     <group>

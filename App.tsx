@@ -290,10 +290,9 @@ function App() {
     }
   }, [worldFlags]);
 
-  // Initial loading screen - gives assets time to load before revealing game
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setGameLoading(false), 2500);
-    return () => window.clearTimeout(timeout);
+  // Handler for starting the game from loading screen
+  const handleStartGame = useCallback(() => {
+    setGameLoading(false);
   }, []);
 
   const handleForceNpcState = useCallback((id: string, state: AgentState) => {
@@ -2233,6 +2232,7 @@ function App() {
         observeMode={observeMode}
         transitioning={transitioning}
         gameLoading={gameLoading}
+        onStartGame={handleStartGame}
         uiProps={uiProps}
         performanceIndicator={{
           show: !observeMode && performanceDegraded && !indicatorDismissed,

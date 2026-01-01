@@ -31,14 +31,14 @@ const MAJOR_DISTRICTS = new Set<DistrictType>([
   'BAB_SHARQI',
   'OUTSKIRTS_FARMLAND',
   'OUTSKIRTS_DESERT',
-  'OUTSKIRTS_SCRUBLAND'
+  'OUTSKIRTS_SCRUBLAND',
+  'RESIDENTIAL',
+  'ROADSIDE',
+  'ALLEYS'
 ]);
 
-const INTERSTITIAL_DISTRICTS = new Set<DistrictType>([
-  'ALLEYS',
-  'RESIDENTIAL',
-  'ROADSIDE'
-]);
+// These districts render slightly smaller/dimmer but still visible
+const INTERSTITIAL_DISTRICTS = new Set<DistrictType>([]);
 
 export const getDistrictLabel = (district: DistrictType) => {
   switch (district) {

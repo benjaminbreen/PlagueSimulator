@@ -60,20 +60,20 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({ timeOfDay, currentWe
 
   return (
     <div
-      className="absolute inset-0 z-[60] flex items-center justify-center p-4 pointer-events-auto animate-in fade-in duration-200"
+      className="absolute inset-0 z-[60] flex items-center justify-center p-3 md:p-4 pointer-events-auto animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div
-        className="max-w-md w-full bg-black/80 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl relative overflow-hidden"
+        className="max-w-md w-full bg-black/80 backdrop-blur-md border border-amber-800/50 rounded-lg shadow-2xl relative overflow-hidden max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-4 border-b border-amber-900/40">
+        <div className="flex items-center justify-between p-3 md:p-4 border-b border-amber-900/40">
           <h4 className="text-[10px] text-amber-500/60 uppercase tracking-[0.3em] font-bold">Weather Report</h4>
           <button
             onClick={onClose}
-            className="p-1.5 hover:bg-white/10 rounded transition-colors text-amber-100/50 hover:text-amber-100"
+            className="w-10 h-10 flex items-center justify-center hover:bg-white/10 rounded-full transition-colors text-amber-100/50 hover:text-amber-100 -mr-1"
           >
-            <X size={16} />
+            <X size={20} />
           </button>
         </div>
 

@@ -89,13 +89,13 @@ export const LootModal: React.FC<LootModalProps> = ({
   const HeaderIcon = headerIcon;
 
   return (
-    <div className="absolute inset-0 z-[130] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200 pointer-events-auto">
+    <div className="absolute inset-0 z-[130] flex items-center justify-center p-3 md:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200 pointer-events-auto">
       <div
-        className="w-full max-w-md bg-gradient-to-b from-stone-900/95 via-stone-900/90 to-stone-950/95 border border-amber-800/40 rounded-2xl shadow-[0_30px_80px_rgba(0,0,0,0.7)] overflow-hidden animate-in zoom-in-95 duration-300"
+        className="w-full max-w-md bg-gradient-to-b from-stone-900/95 via-stone-900/90 to-stone-950/95 border border-amber-800/40 rounded-2xl shadow-[0_30px_80px_rgba(0,0,0,0.7)] overflow-hidden animate-in zoom-in-95 duration-300 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="px-5 py-4 border-b border-amber-900/30 bg-gradient-to-r from-amber-950/30 via-transparent to-amber-950/30">
+        <div className="px-4 md:px-5 py-3 md:py-4 border-b border-amber-900/30 bg-gradient-to-r from-amber-950/30 via-transparent to-amber-950/30">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-[10px] uppercase tracking-[0.3em] text-amber-500/60">
               <HeaderIcon size={12} className="text-amber-500/70" />
@@ -103,9 +103,9 @@ export const LootModal: React.FC<LootModalProps> = ({
             </div>
             <button
               onClick={onClose}
-              className="p-1 rounded-md text-amber-100/40 hover:text-amber-100/80 hover:bg-amber-900/30 transition-colors"
+              className="w-10 h-10 flex items-center justify-center rounded-full text-amber-100/40 hover:text-amber-100/80 hover:bg-amber-900/30 transition-colors -mr-1"
             >
-              <X size={16} />
+              <X size={20} />
             </button>
           </div>
           <h2 className="mt-2 text-xl text-amber-100 font-semibold tracking-tight">

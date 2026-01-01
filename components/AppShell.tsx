@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { UI } from './UI';
 import { MerchantModal } from './MerchantModal';
 import { GuideModal } from './HistoricalGuide';
@@ -8,10 +8,23 @@ import { PlagueUI } from './PlagueUI';
 import { Toast, ToastMessage } from './Toast';
 import { BuildingMetadata, MerchantNPC, MerchantItem, PlayerItem } from '../types';
 
+// Format time of day to readable string
+const formatTimeOfDay = (hour: number): string => {
+  if (hour >= 5 && hour < 7) return 'dawn';
+  if (hour >= 7 && hour < 10) return 'early morning';
+  if (hour >= 10 && hour < 12) return 'late morning';
+  if (hour >= 12 && hour < 14) return 'midday';
+  if (hour >= 14 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 19) return 'dusk';
+  if (hour >= 19 && hour < 21) return 'evening';
+  return 'night';
+};
+
 interface AppShellProps {
   observeMode: boolean;
   transitioning: boolean;
   gameLoading: boolean;
+  onStartGame: () => void;
   uiProps: React.ComponentProps<typeof UI>;
   performanceIndicator: {
     show: boolean;
@@ -69,6 +82,7 @@ export const AppShell = React.memo(({
   observeMode,
   transitioning,
   gameLoading,
+  onStartGame,
   uiProps,
   performanceIndicator,
   showEnterModal,
@@ -117,6 +131,21 @@ export const AppShell = React.memo(({
   onLootDecline,
   onLootClose
 }: AppShellProps) => {
+  const [showAbout, setShowAbout] = useState(false);
+
+  // Allow Enter key to start game from loading screen
+  useEffect(() => {
+    if (!gameLoading) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onStartGame();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [gameLoading, onStartGame]);
+
   return (
     <>
       <div
@@ -131,31 +160,173 @@ export const AppShell = React.memo(({
           gameLoading ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <h1 className="text-5xl md:text-7xl text-amber-100/90 tracking-[0.25em] font-light mb-4"
+        <h1 className="text-5xl md:text-7xl text-amber-100/90 tracking-[0.25em] font-light mb-4 animate-[fadeIn_1s_ease-out_forwards]"
             style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
           DAMASCUS
         </h1>
-        <p className="text-2xl md:text-3xl text-amber-200/60 tracking-[0.5em] font-light"
+        <p className="text-2xl md:text-3xl text-amber-200/60 tracking-[0.5em] font-light animate-[fadeIn_1s_ease-out_forwards]"
            style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
           1348
         </p>
-        <div className="mt-12 w-24 h-[1px] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent" />
+        <div className="mt-8 w-24 h-[1px] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent animate-[fadeIn_1s_ease-out_0.5s_forwards]"
+             style={{ opacity: 0 }} />
+
+        {/* Contextual introduction - staggered fade-in */}
+        {uiProps.playerStats && (
+          <div className="mt-8 max-w-lg text-center px-6">
+            <p className="text-amber-200/70 text-sm md:text-base leading-relaxed animate-[fadeIn_1s_ease-out_1s_forwards]"
+               style={{ fontFamily: 'Lato, Georgia, serif', opacity: 0 }}>
+              It is {formatTimeOfDay(uiProps.params?.timeOfDay ?? 12)} in the{' '}
+              <span className="text-amber-100">Al-Buzuriyah Souq</span> of Damascus.
+            </p>
+            <p className="text-amber-200/70 text-sm md:text-base leading-relaxed mt-3 animate-[fadeIn_1s_ease-out_2s_forwards]"
+               style={{ fontFamily: 'Lato, Georgia, serif', opacity: 0 }}>
+              You are <span className="text-amber-100">{uiProps.playerStats.name}</span>,{' '}
+              a {uiProps.playerStats.profession.toLowerCase()},{' '}
+              aged {uiProps.playerStats.age} years.
+            </p>
+            <p className="text-amber-200/80 text-lg md:text-xl mt-6 italic animate-[fadeIn_1s_ease-out_3s_forwards]"
+               style={{
+                 fontFamily: 'Lato, Georgia, serif',
+                 opacity: 0
+               }}>
+              It is the year of the <span className="plague-word">plague</span>...
+            </p>
+
+            {/* Begin button */}
+            <button
+              onClick={onStartGame}
+              className="mt-8 px-8 py-3 bg-transparent border border-amber-600/50 text-amber-200/90 rounded-full tracking-[0.2em] uppercase text-sm hover:bg-amber-900/30 hover:border-amber-500/70 transition-all duration-300 animate-[fadeIn_1s_ease-out_4s_forwards]"
+              style={{ fontFamily: 'Cinzel, Georgia, serif', opacity: 0 }}
+            >
+              Begin My Day
+            </button>
+          </div>
+        )}
+
+        {/* About button at bottom */}
+        <button
+          onClick={() => setShowAbout(!showAbout)}
+          className="absolute bottom-6 text-amber-200/40 text-xs tracking-widest hover:text-amber-200/70 transition-colors animate-[fadeIn_1s_ease-out_5s_forwards]"
+          style={{ opacity: 0 }}
+        >
+          About
+        </button>
+
+        {/* About text box */}
+        {showAbout && (
+          <div
+            className="absolute bottom-14 bg-black/80 border border-amber-700/30 rounded-lg px-6 py-4 max-w-md text-center backdrop-blur-sm animate-[fadeIn_0.3s_ease-out_forwards]"
+          >
+            <p className="text-amber-200/80 text-sm leading-relaxed" style={{ fontFamily: 'Lato, Georgia, serif' }}>
+              This is the beta version of an educational history simulation game designed by Benjamin Breen at UC Santa Cruz for use in teaching the history of medicine.
+            </p>
+            <button
+              onClick={() => setShowAbout(false)}
+              className="mt-3 text-amber-300/60 text-xs hover:text-amber-200 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        )}
+
+        {/* Keyframes for fade-in and plague animations */}
+        <style>{`
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+
+          @keyframes plagueReveal {
+            0% {
+              opacity: 0;
+              transform: scale(1);
+              text-shadow: none;
+              filter: blur(3px);
+              color: rgb(180, 140, 100);
+            }
+            30% {
+              opacity: 0.7;
+              filter: blur(1px);
+              color: rgb(200, 100, 80);
+            }
+            60% {
+              opacity: 1;
+              transform: scale(1.06);
+              filter: blur(0);
+              color: rgb(220, 80, 70);
+              text-shadow:
+                0 0 12px rgba(255, 80, 80, 0.9),
+                0 0 25px rgba(200, 50, 50, 0.7),
+                0 0 40px rgba(160, 30, 30, 0.5),
+                0 0 60px rgba(120, 20, 20, 0.3);
+            }
+            100% {
+              opacity: 1;
+              transform: scale(1.04);
+              filter: blur(0);
+              color: rgb(220, 70, 60);
+              text-shadow:
+                0 0 10px rgba(220, 60, 60, 0.8),
+                0 0 20px rgba(180, 40, 40, 0.6),
+                0 0 35px rgba(140, 25, 25, 0.4),
+                0 0 50px rgba(100, 15, 15, 0.2);
+            }
+          }
+
+          @keyframes plagueFlicker {
+            0%, 100% {
+              text-shadow:
+                0 0 10px rgba(220, 60, 60, 0.8),
+                0 0 20px rgba(180, 40, 40, 0.6),
+                0 0 35px rgba(140, 25, 25, 0.4);
+              transform: scale(1.04);
+            }
+            20% {
+              text-shadow:
+                0 0 14px rgba(255, 90, 70, 0.9),
+                0 0 28px rgba(210, 55, 55, 0.75),
+                0 0 45px rgba(170, 35, 35, 0.55);
+              transform: scale(1.055);
+            }
+            40% {
+              text-shadow:
+                0 0 8px rgba(190, 45, 45, 0.7),
+                0 0 16px rgba(150, 30, 30, 0.5),
+                0 0 28px rgba(110, 18, 18, 0.3);
+              transform: scale(1.025);
+            }
+            60% {
+              text-shadow:
+                0 0 15px rgba(250, 85, 75, 0.95),
+                0 0 30px rgba(200, 50, 50, 0.7),
+                0 0 50px rgba(160, 30, 30, 0.5);
+              transform: scale(1.065);
+            }
+            80% {
+              text-shadow:
+                0 0 9px rgba(200, 50, 50, 0.75),
+                0 0 18px rgba(160, 35, 35, 0.55),
+                0 0 32px rgba(120, 20, 20, 0.35);
+              transform: scale(1.035);
+            }
+          }
+
+          .plague-word {
+            display: inline-block;
+            animation:
+              plagueReveal 1.5s ease-out 3.5s forwards,
+              plagueFlicker 3s ease-in-out 5s infinite;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+          }
+        `}</style>
       </div>
 
       {!observeMode && (
         <UI {...uiProps} />
       )}
 
-      {/* Subtle Performance Indicator - only shows when adjusting, click to dismiss */}
-      {!observeMode && performanceIndicator.show && (
-        <div
-          className="absolute top-2 right-2 bg-black/60 text-yellow-400 text-xs px-3 py-1.5 rounded-md border border-yellow-600/30 backdrop-blur-sm font-mono z-50 cursor-pointer hover:bg-black/80 transition-colors"
-          onClick={performanceIndicator.onDismiss}
-          title="Click to dismiss"
-        >
-          ⚡ Adaptive Quality Active {performanceIndicator.shadowsDisabled && '(shadows off)'}
-        </div>
-      )}
 
       {/* Building Interaction Modal */}
       {!observeMode && showEnterModal && nearBuilding && (

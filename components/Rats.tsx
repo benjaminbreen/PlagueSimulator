@@ -30,6 +30,9 @@ const tempTailOffset = new THREE.Vector3();
 const tempEarOffsetL = new THREE.Vector3();
 const tempEarOffsetR = new THREE.Vector3();
 const upAxis = new THREE.Vector3(0, 1, 0);
+// Temp vectors for rat AI calculations
+const tempWanderDir = new THREE.Vector3();
+const tempToCenter = new THREE.Vector3();
 
 export type RatState = 'idle' | 'wander' | 'flee';
 
@@ -144,16 +147,16 @@ export class Rat {
       if (this.state === 'idle') {
         this.state = 'wander';
         this.stateTimer = 3 + Math.random() * 5;
-        // Pick a new wander direction, prefer edges
-        const toCenter = this.position.clone().normalize();
-        const wanderDir = new THREE.Vector3(
+        // PERFORMANCE: Reuse temp vectors instead of creating new ones
+        tempToCenter.copy(this.position).normalize();
+        tempWanderDir.set(
           Math.random() - 0.5,
           0,
           Math.random() - 0.5
         ).normalize();
         // Bias away from center
-        wanderDir.add(toCenter.multiplyScalar(0.3)).normalize();
-        this.targetVelocity.copy(wanderDir).multiplyScalar(SPEED_WANDER);
+        tempWanderDir.add(tempToCenter.multiplyScalar(0.3)).normalize();
+        this.targetVelocity.copy(tempWanderDir).multiplyScalar(SPEED_WANDER);
       } else {
         this.state = 'idle';
         this.stateTimer = 1 + Math.random() * 3;
