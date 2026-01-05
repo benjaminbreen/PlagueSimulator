@@ -212,6 +212,8 @@ interface NPCProps {
   globalApproachCooldownRef?: React.MutableRefObject<number>;
   /** NPC role - used for family member indicators */
   role?: string;
+  /** Family relationship type for floating label */
+  familyRelationship?: 'spouse' | 'child' | 'parent' | 'sibling';
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
@@ -246,7 +248,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   showDemographicsOverlay = false,
   npcStateOverride,
   globalApproachCooldownRef,
-  role
+  role,
+  familyRelationship
 }) => {
   const ENABLE_SIMPLE_LOD = true;
   const SIMPLE_LOD_DISTANCE = 60;
@@ -442,13 +445,24 @@ export const NPC: React.FC<NPCProps> = memo(({
       accent = stats.robeAccentColor ?? (isOfficer ? '#b59b6a' : '#8b5e3c');
       headwear = stats.headwearColor ?? (isOfficer ? '#8b2e2e' : '#3a3a3a');
     }
-    // Fabric roughness varies by social class: wealthy=silk (smooth), merchant=fine cotton, common=coarse linen
+    // Fabric roughness varies by social class: wealthy=silk (smooth, sheen), merchant=linen (moderate), common=coarse cotton (matte)
     const scarfRoughness =
-      stats.socialClass === 'wealthy' || stats.socialClass === 'elite' ? 0.7 :
-      stats.socialClass === 'merchant' || stats.socialClass === 'artisan' ? 0.85 :
-      0.95;
-    return { skin, scarf, scarfRoughness, robe, accent, hair, headwear };
-  }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, stats.socialClass, idSeed]);
+      stats.socialClass === 'wealthy' || stats.socialClass === 'elite' ? 0.35 :  // Silk - smooth with visible sheen
+      stats.socialClass === 'merchant' || stats.socialClass === 'artisan' ? 0.80 :  // Linen - moderate texture
+      0.95;  // Coarse cotton - matte finish
+
+    // Pattern properties
+    const scarfPattern = stats.headscarfPattern || 'none';
+    const scarfAccent = stats.headscarfAccentColor || scarf;
+    const garmentType = stats.headwearGarmentType || 'hijab';
+    const turbanPattern = stats.turbanPattern || 'none';
+    const turbanAccent = stats.turbanAccentColor || headwear;
+
+    // Embroidery for wealthy women (tiraz panels - decorative gold/silver bands)
+    const hasEmbroidery = (stats.socialClass === 'wealthy' || stats.socialClass === 'elite') && stats.gender === 'Female';
+
+    return { skin, scarf, scarfRoughness, scarfPattern, scarfAccent, garmentType, turbanPattern, turbanAccent, robe, accent, hair, headwear, hasEmbroidery };
+  }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, stats.socialClass, stats.gender, stats.headscarfPattern, stats.headscarfAccentColor, stats.headwearGarmentType, stats.turbanPattern, stats.turbanAccentColor, idSeed]);
 
   // Apply mourning colors if NPC's building has deceased residents
   const mourningAdjustedColors = useMemo(() => {
@@ -1451,6 +1465,30 @@ export const NPC: React.FC<NPCProps> = memo(({
           <meshBasicMaterial color="#20b2aa" transparent opacity={0.65} side={2} />
         </mesh>
       )}
+      {/* Floating family label - Sims-style marker */}
+      {role === 'family' && familyRelationship && distanceFromCameraRef.current < 25 && (
+        <Html
+          position={[0, 2.8, 0]}
+          center
+          style={{ pointerEvents: 'none' }}
+        >
+          <div className="px-2 py-1 bg-gradient-to-b from-pink-500 to-pink-600 text-white text-[10px] font-bold uppercase tracking-wider rounded-full shadow-lg border border-pink-300/50 whitespace-nowrap animate-pulse"
+               style={{
+                 textShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                 boxShadow: '0 2px 8px rgba(236,72,153,0.5), 0 0 12px rgba(236,72,153,0.3)'
+               }}>
+            ♥ {familyRelationship === 'spouse'
+                ? (stats.gender === 'Male' ? 'HUSBAND' : 'WIFE')
+                : familyRelationship === 'child'
+                  ? (stats.gender === 'Male' ? 'SON' : 'DAUGHTER')
+                  : familyRelationship === 'parent'
+                    ? (stats.gender === 'Male' ? 'FATHER' : 'MOTHER')
+                    : familyRelationship === 'sibling'
+                      ? (stats.gender === 'Male' ? 'BROTHER' : 'SISTER')
+                      : 'FAMILY'}
+          </div>
+        </Html>
+      )}
         <group ref={impactGroupRef} position={[0, 2.6, 0]} visible={false}>
           <mesh>
             <cylinderGeometry args={[0.05, 0.05, 0.35, 8]} />
@@ -1493,7 +1531,14 @@ export const NPC: React.FC<NPCProps> = memo(({
           hairStyle={stats.hairStyle}
           headwearStyle={stats.headwearStyle}
           headscarfStyle={stats.headscarfStyle}
+          headscarfPattern={appearance.scarfPattern}
+          headscarfAccentColor={appearance.scarfAccent}
+          headwearGarmentType={appearance.garmentType}
+          hasEmbroidery={appearance.hasEmbroidery}
+          turbanPattern={appearance.turbanPattern}
+          turbanAccentColor={appearance.turbanAccent}
           facialHair={stats.facialHair}
+          facialHairColor={stats.facialHairColor}
           sleeveCoverage={stats.sleeveCoverage}
           footwearStyle={stats.footwearStyle}
           footwearColor={stats.footwearColor}

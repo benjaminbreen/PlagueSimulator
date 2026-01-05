@@ -101,7 +101,7 @@ export const BoundaryHeadingIndicator: React.FC<{
           <meshStandardMaterial color="#ffd38a" emissive="#ffcc70" emissiveIntensity={0.8} />
         </mesh>
       </group>
-      <Html transform={false} position={[0, 0.8, 0]} center>
+      <Html transform={false} position={[0, 0.8, 0]} center zIndexRange={[10, 0]}>
         <div
           className="pointer-events-none select-none whitespace-nowrap rounded-full border border-amber-300/70 bg-black/80 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-amber-100 shadow-[0_0_18px_rgba(252,211,77,0.35)]"
           style={{ opacity }}

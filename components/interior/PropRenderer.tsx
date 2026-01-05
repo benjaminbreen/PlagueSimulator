@@ -1914,6 +1914,9 @@ const InteriorPropMesh: React.FC<{
         </group>
       );
     case InteriorPropType.LAMP: {
+      // Use prop's Y position if it's on a surface (Y > 0.3), otherwise place on floor
+      const lampY = prop.position[1] > 0.3 ? prop.position[1] : 0;
+
       // PEASANT class gets a simple clay oil lamp - terracotta dish with wick
       if (socialClass === SocialClass.PEASANT) {
         const clayColor = '#8b5a3c'; // Terracotta
@@ -1921,7 +1924,7 @@ const InteriorPropMesh: React.FC<{
         const oilColor = '#3a3520'; // Dark oil residue
 
         return (
-          <group {...common} position={anchoredPos(0.1)}>
+          <group {...common} position={anchoredPos(lampY)}>
             <ContactShadow size={[0.25, 0.25]} />
 
             {/* Dim point light - poor quality oil gives weak light */}
@@ -1975,7 +1978,7 @@ const InteriorPropMesh: React.FC<{
       const glassColor = '#d8e8f0';
 
       return (
-        <group {...common} position={anchoredPos(0.2)}>
+        <group {...common} position={anchoredPos(lampY)}>
           <ContactShadow size={[0.4, 0.4]} />
 
           {/* Point light for actual illumination */}
@@ -2082,16 +2085,20 @@ const InteriorPropMesh: React.FC<{
         </group>
       );
     }
-    case InteriorPropType.CANDLE:
+    case InteriorPropType.CANDLE: {
+      // Use prop's Y position if on a surface, otherwise floor level
+      const candleY = prop.position[1] > 0.3 ? prop.position[1] : 0;
       return (
-        <group {...common} position={anchoredPos(prop.position[1] > 0 ? prop.position[1] : 0.05)}>
-          <mesh receiveShadow>
+        <group {...common} position={anchoredPos(candleY)}>
+          {/* Candle stick - offset up by half height so bottom sits on surface */}
+          <mesh position={[0, 0.1, 0]} receiveShadow castShadow>
             <cylinderGeometry args={[0.06, 0.06, 0.2, 8]} />
             <meshStandardMaterial color="#d8c7a2" roughness={0.7} />
           </mesh>
-          <Flame position={[0, 0.2, 0]} size={0.06} color="#ffd7a1" emissive="#ff8b2e" />
+          <Flame position={[0, 0.3, 0]} size={0.06} color="#ffd7a1" emissive="#ff8b2e" />
         </group>
       );
+    }
     case InteriorPropType.FLOOR_LAMP: {
       // Standing floor oil lamp - tall version of the tabletop lamp
       const brassColor = '#b8860b';

@@ -497,6 +497,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
       if (observeMode) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.target as HTMLElement | null)?.isContentEditable) return;
       const k = e.key.toLowerCase();
       if (!audioCtxRef.current) {
         const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
@@ -539,6 +541,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     };
     const up = (e: KeyboardEvent) => {
       if (observeMode) return;
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.target as HTMLElement | null)?.isContentEditable) return;
       const k = e.key.toLowerCase();
       if (k === 'arrowup') setKeys(prev => ({ ...prev, up: false }));
       if (k === 'arrowdown') setKeys(prev => ({ ...prev, down: false }));
@@ -3194,6 +3198,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             headwearStyle={playerStats?.headwearStyle}
             headscarfStyle={playerStats?.headscarfStyle}
             facialHair={playerStats?.facialHair}
+            facialHairColor={playerStats?.facialHairColor}
             sleeveCoverage={playerStats?.sleeveCoverage}
             footwearStyle={playerStats?.footwearStyle}
             footwearColor={playerStats?.footwearColor}

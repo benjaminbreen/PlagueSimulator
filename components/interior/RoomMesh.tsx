@@ -102,7 +102,8 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
   }), []);
 
   const wallForSide = (side: Side, width: number) => {
-    const hasDoor = side === interiorDoorSide || side === exteriorDoorSide;
+    // Check all door sources: single interior door, exterior door, and multiple interior doors from adjacency
+    const hasDoor = side === interiorDoorSide || side === exteriorDoorSide || interiorDoorSides.includes(side);
     if (!hasDoor) {
       return <boxGeometry args={[width, height, thickness]} />;
     }

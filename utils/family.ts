@@ -127,7 +127,8 @@ function generateFamilyMemberStats(
   }
 
   // Generate base NPC stats, then override with family-consistent values
-  const baseStats = generateNPCStats(seed, player.socialClass, {
+  // Pass gender in context so visual appearance matches
+  const baseStats = generateNPCStats(seed, {
     districtType: undefined,
     gender: memberGender,
   });

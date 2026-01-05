@@ -1007,10 +1007,17 @@ const pickProps = (
     }
   }
 
+  // Check if this is an inn/caravanserai (guest rooms get minimal furniture via applyRoomLayouts)
+  const profLowerCase = profession.toLowerCase();
+  const isInnBuilding = profLowerCase.includes('inn') || profLowerCase.includes('funduq') || profLowerCase.includes('khan') || profLowerCase.includes('wakala') || profLowerCase.includes('caravanserai');
+
   rooms.forEach((room) => {
     // Skip narrow corridors (inn hallways) - they shouldn't have furniture
     // Hallway width is 2.8, normal halls are 4.5+
     if (room.type === InteriorRoomType.HALL && room.size[0] < 3.5) return;
+
+    // Skip inn guest rooms (PRIVATE rooms in inns) - they get minimal furniture in applyRoomLayouts
+    if (room.type === InteriorRoomType.PRIVATE && isInnBuilding && floorType === 'private') return;
 
     const candidates = [...propTemplates, ...extraTemplates].filter((template) => {
       if (!template.room.includes(room.type)) return false;
@@ -1252,6 +1259,9 @@ const pickProps = (
   rooms.forEach((room) => {
     // Skip narrow corridors (inn hallways) - they shouldn't have furniture/lighting
     if (room.type === InteriorRoomType.HALL && room.size[0] < 3.5) return;
+
+    // Skip inn guest rooms - they already get a single lamp in applyRoomLayouts
+    if (room.type === InteriorRoomType.PRIVATE && isInnBuilding && floorType === 'private') return;
 
     const hasFireSource = props.some((prop) => prop.roomId === room.id && (
       prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.FIRE_PIT
@@ -1753,6 +1763,28 @@ const applyRoomLayouts = (
         });
       };
 
+      // Check if this is an inn/caravanserai guest room - they get minimal, sparse furnishing
+      const profLower = profession.toLowerCase();
+      const isInnRoom = floorType === 'private' && (profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai'));
+
+      // INN GUEST ROOMS: Minimal furnishing only
+      if (isInnRoom) {
+        // Simple bed - bedroll for basic inns, low bed for nicer ones
+        const isNicerInn = profLower.includes('funduq') || profLower.includes('khan');
+        if (isNicerInn) {
+          upsertProp(props, room, InteriorPropType.LOW_BED, 'Low wooden bed', clampToRoom(room, wallAnchorSafe(room, bedWall, 1.1, 0)));
+        } else {
+          upsertProp(props, room, InteriorPropType.BEDROLL, 'Sleeping pallet', clampToRoom(room, wallAnchorSafe(room, bedWall, 0.9, 0)));
+        }
+        // Essential furniture only: desk, chair, wash basin
+        upsertProp(props, room, InteriorPropType.DESK, 'Writing desk', clampToRoom(room, wallAnchorSafe(room, workWall, 0.9, -0.8)));
+        upsertProp(props, room, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(room, wallAnchorSafe(room, workWall, 0.6, -1.2)));
+        upsertProp(props, room, InteriorPropType.WATER_BASIN, 'Wash basin', clampToRoom(room, wallAnchorSafe(room, chestWall, 0.7, 0.4)));
+        // Single oil lamp - placed on desk surface
+        upsertProp(props, room, InteriorPropType.LAMP, 'Oil lamp', clampToRoom(room, wallAnchorSafe(room, workWall, 0.9, -0.5)), [0, 0, 0], [1, 1, 1], 0.85);
+        return; // Skip all other furniture for inn rooms
+      }
+
       // Choose bed type based on social class
       if (socialClass === SocialClass.NOBILITY) {
         upsertProp(props, room, InteriorPropType.RAISED_BED, 'Raised bed with curtains', clampToRoom(room, wallAnchorSafe(room, bedWall, 1.4, 0)));
@@ -1814,14 +1846,6 @@ const applyRoomLayouts = (
 
       // Wash basin for personal rooms
       upsertProp(props, room, InteriorPropType.WATER_BASIN, 'Wash basin', clampToRoom(room, wallAnchorSafe(room, workWall, 0.7, 0.4)));
-
-      // INN GUEST ROOMS: Add desk and chair for guests
-      const profLower = profession.toLowerCase();
-      const isInnRoom = floorType === 'private' && (profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai'));
-      if (isInnRoom) {
-        upsertProp(props, room, InteriorPropType.DESK, 'Writing desk', clampToRoom(room, wallAnchorSafe(room, workWall, 0.9, -0.8)));
-        upsertProp(props, room, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(room, wallAnchorSafe(room, workWall, 0.6, -1.2)));
-      }
 
       if (floorType === 'private') {
         const householdFactor = Math.min(1, rooms.length / 3);

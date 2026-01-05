@@ -18,6 +18,7 @@ import { createRugTexture, createNoiseTexture, createPlankTexture, createWallTex
 import { FlickerLight } from './interior/primitives/Lighting';
 import { InteriorPropRenderer } from './interior/PropRenderer';
 import InteriorRoomMesh from './interior/RoomMesh';
+import { NarratorHighlightRing } from './NarratorHighlightRing';
 
 interface InteriorSceneProps {
   spec: InteriorSpec;
@@ -41,12 +42,17 @@ interface InteriorSceneProps {
   activeFloorIndex?: number;
   onNearbyMerchant?: (merchant: { npc: InteriorNPC; merchantData: InteriorMerchantData } | null) => void;
   onNearRoofHatch?: (hatch: { id: string; position: [number, number, number] } | null) => void;
+  narratorHighlight?: {
+    position: [number, number, number];
+    startedAt: number;
+    expiresAt: number;
+  } | null;
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0, onNearbyMerchant, onNearRoofHatch }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0, onNearbyMerchant, onNearRoofHatch, narratorHighlight }) => {
   const { scene, gl } = useThree();
   // Tap-to-move state for interior
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
@@ -1705,6 +1711,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       <directionalLight position={[entryRoom.center[0] + 2, 4.2, entryRoom.center[2] - 1]} intensity={isDay ? 0.28 : 0.16} color="#f4d9b2" />
       {!isDay && (
         <FlickerLight position={[entryRoom.center[0], 2.4, entryRoom.center[2]]} intensity={0.8} color="#f0c07d" distance={18} decay={2} flicker={0.08} />
+      )}
+      {narratorHighlight && (
+        <NarratorHighlightRing
+          position={narratorHighlight.position}
+          startedAt={narratorHighlight.startedAt}
+          expiresAt={narratorHighlight.expiresAt}
+        />
       )}
       <ImpactPuffs puffsRef={impactPuffsRef} />
       {lampProps.map((prop) => {

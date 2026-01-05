@@ -489,7 +489,7 @@ export const AppShell = React.memo(({
       )}
 
       {/* Merchant Interaction Prompt - clickable for mobile */}
-      {!observeMode && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && (
+      {!observeMode && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && !showEncounterModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerMerchant}
           className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"

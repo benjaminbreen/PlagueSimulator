@@ -10,7 +10,8 @@ import {
   ConversationSummary,
   EncounterContext,
   getLocationLabel,
-  AgentState
+  AgentState,
+  FamilyRelationship
 } from '../../types';
 import { ConversationImpact } from '../../utils/friendliness';
 import { MoraleStats } from '../Agents';
@@ -245,6 +246,7 @@ const AnimatedPortrait: React.FC<{
         robeAccentColor={isDeceased ? "#c8d8e8" : npc.robeAccentColor}
         hairColor={isDeceased ? "#e0e5ec" : npc.hairColor}
         facialHair={npc.facialHair}
+        facialHairColor={isDeceased ? "#e0e5ec" : npc.facialHairColor}
         gender={npc.gender}
         scale={[1, 1, 1]}
         robeHasTrim={npc.robeHasTrim}
@@ -327,6 +329,24 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   isFollowingAfterDismissal = false
 }) => {
   const isDeceased = npcState === AgentState.DECEASED;
+
+  // Check if this NPC is a family member
+  const familyMember = player.familyMembers?.find(fm => fm.npcId === npc.id);
+  const isFamilyMember = !!familyMember;
+  const familyRelationship = familyMember?.relationship;
+
+  // Get display text for relationship
+  const getRelationshipLabel = (relationship: FamilyRelationship | undefined): string => {
+    if (!relationship) return '';
+    switch (relationship) {
+      case 'spouse': return player.gender === 'Male' ? 'YOUR WIFE' : 'YOUR HUSBAND';
+      case 'child': return 'YOUR CHILD';
+      case 'parent': return 'YOUR PARENT';
+      case 'sibling': return 'YOUR SIBLING';
+      default: return 'FAMILY';
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<'conversation' | 'history'>('conversation');
   const [inputValue, setInputValue] = useState('');
   const [isVisible, setIsVisible] = useState(false);
@@ -587,6 +607,12 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
             <div className={`hidden sm:flex items-center gap-2 transition-all duration-500 delay-200 ${
               isVisible ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'
             }`}>
+              {/* Family member badge - prominent! */}
+              {isFamilyMember && (
+                <span className="text-[12px] px-3 py-0.5 rounded-full bg-pink-600/60 text-pink-100 border border-pink-400/40 font-semibold tracking-wide shadow-[0_0_12px_rgba(236,72,153,0.3)] animate-pulse">
+                  ♥ {getRelationshipLabel(familyRelationship)}
+                </span>
+              )}
               <span className={`text-[12px] px-2 py-0.5 rounded-full transition-colors duration-300 ${
                 npc.panicLevel > 60 ? 'bg-red-900/40 text-red-300' :
                 npc.panicLevel > 40 ? 'bg-amber-900/40 text-amber-300' :
@@ -669,9 +695,15 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
               <div className={`text-center py-1 sm:pt-2 sm:pb-3 border-b border-amber-900/30 transition-all duration-500 delay-100 ${
                 isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}>
-                <h2 className={`text-base sm:text-xl historical-font tracking-wide ${isDeceased ? 'text-cyan-200' : 'text-amber-100'}`}>
+                <h2 className={`text-base sm:text-xl historical-font tracking-wide ${isDeceased ? 'text-cyan-200' : isFamilyMember ? 'text-pink-100' : 'text-amber-100'}`}>
                   {npc.name} {isDeceased && <span className="text-cyan-300/80">(Deceased)</span>}
                 </h2>
+                {/* Prominent family relationship label */}
+                {isFamilyMember && (
+                  <p className="text-[11px] sm:text-[12px] text-pink-300 mt-1 font-semibold uppercase tracking-widest">
+                    ♥ {getRelationshipLabel(familyRelationship)} ♥
+                  </p>
+                )}
                 <p className="text-[10px] sm:text-[11px] text-amber-500/70 mt-0.5 uppercase tracking-widest">
                   {npc.profession} • {npc.gender}, {npc.age}
                 </p>
@@ -679,6 +711,12 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
 
               {/* Mobile: Compact inline stats */}
               <div className="flex md:hidden flex-wrap gap-1 justify-center py-1">
+                {/* Family badge on mobile */}
+                {isFamilyMember && (
+                  <span className="text-[9px] px-2 py-0.5 rounded bg-pink-600/60 text-pink-100 font-semibold">
+                    ♥ FAMILY
+                  </span>
+                )}
                 <span className={`text-[9px] px-1.5 py-0.5 rounded ${
                   npc.socialClass === SocialClass.NOBILITY ? 'bg-purple-900/40 text-purple-300' :
                   npc.socialClass === SocialClass.CLERGY ? 'bg-blue-900/40 text-blue-300' :

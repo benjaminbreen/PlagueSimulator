@@ -150,8 +150,14 @@ export interface NPCStats {
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
   hairColor?: string;
   facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
+  facialHairColor?: string;
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
   headscarfStyle?: 'veiled' | 'full' | 'modest';
+  headscarfPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  headscarfAccentColor?: string;
+  headwearGarmentType?: 'khimar' | 'milhafa' | 'hijab';
+  turbanPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  turbanAccentColor?: string;
   headwearColor?: string;
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
@@ -204,8 +210,14 @@ export interface FamilyMember {
     hairStyle?: 'short' | 'medium' | 'long' | 'covered';
     headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
     headscarfStyle?: 'veiled' | 'full' | 'modest';
+    headscarfPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+    headscarfAccentColor?: string;
+    headwearGarmentType?: 'khimar' | 'milhafa' | 'hijab';
+    turbanPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+    turbanAccentColor?: string;
     headwearColor?: string;
     facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
+    facialHairColor?: string;
   };
 }
 
@@ -243,7 +255,15 @@ export interface PlayerStats {
   robeOverwrap: boolean;
   robePattern: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric';
   hairStyle: 'short' | 'medium' | 'long' | 'covered';
+  facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
+  facialHairColor?: string;
   headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
+  headscarfStyle?: 'veiled' | 'full' | 'modest';
+  headscarfPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  headscarfAccentColor?: string;
+  headwearGarmentType?: 'khimar' | 'milhafa' | 'hijab';
+  turbanPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  turbanAccentColor?: string;
   sleeveCoverage: 'full' | 'lower' | 'none';
   footwearStyle: 'sandals' | 'shoes' | 'bare';
   footwearColor: string;
@@ -756,6 +776,11 @@ export interface ItemAppearance {
   accentColor?: string;
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
   headscarfStyle?: 'veiled' | 'full' | 'modest';
+  headscarfPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  headscarfAccentColor?: string;
+  headwearGarmentType?: 'khimar' | 'milhafa' | 'hijab';
+  turbanPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  turbanAccentColor?: string;
   robeHasSash?: boolean;
   robeHasTrim?: boolean;
   robeHemBand?: boolean;
@@ -783,6 +808,7 @@ export interface MiniMapData {
   buildings: Array<{ x: number; z: number; type: BuildingType; size: number; doorSide: number }>;
   npcs: Array<{ x: number; z: number; state: AgentState }>;
   specialNPCs: Array<{ x: number; z: number; type: SpecialNPCType }>;
+  merchants?: Array<{ x: number; z: number; name?: string; profession?: string }>;
   landmarks?: Array<{ x: number; z: number; label: string }>;
   playerHome?: { x: number; z: number }; // Player's home position (if on this tile)
   district: DistrictType;

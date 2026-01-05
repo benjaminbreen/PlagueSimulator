@@ -70,6 +70,7 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
   const [attributesView, setAttributesView] = useState<'radar' | 'bars'>('radar');
   const [hoveredAttribute, setHoveredAttribute] = useState<string | null>(null);
   const [hoveredHumor, setHoveredHumor] = useState<string | null>(null);
+  const [appearanceExpanded, setAppearanceExpanded] = useState(false);
 
   // Attribute definitions with gameplay descriptions
   const attributeInfo: Record<string, {
@@ -900,7 +901,15 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
 
               {/* Bottom Row: Appearance */}
               <div className="rounded-xl border border-white/10 bg-white/5 p-5 backdrop-blur">
-                <div className="text-[10px] uppercase tracking-widest text-amber-400/70 mb-3">Appearance</div>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-[10px] uppercase tracking-widest text-amber-400/70">Appearance</div>
+                  <button
+                    className="text-[9px] uppercase tracking-widest text-amber-300/80 hover:text-amber-200 transition-colors"
+                    onClick={() => setAppearanceExpanded((prev) => !prev)}
+                  >
+                    {appearanceExpanded ? 'Collapse' : 'Expand'}
+                  </button>
+                </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
                     <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Skin</span>
@@ -929,6 +938,43 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                     </div>
                   </button>
                 </div>
+                {appearanceExpanded && (
+                  <div className="mt-4 border-t border-white/10 pt-4 text-[11px] text-amber-100/80 space-y-1">
+                    <div>Gender: {playerStats.gender}</div>
+                    <div>Age: {playerStats.age}</div>
+                    <div>Height: {playerStats.height.toFixed(2)}</div>
+                    <div>Weight: {playerStats.weight.toFixed(2)}</div>
+                    <div>Skin tone: {playerStats.skinTone}</div>
+                    <div>Hair style: {playerStats.hairStyle}</div>
+                    <div>Hair color: {playerStats.hairColor}</div>
+                    <div>Facial hair: {playerStats.facialHair ?? 'none'}</div>
+                    <div>Headwear style: {playerStats.headwearStyle}</div>
+                    <div>Headwear color: {playerStats.headwearColor}</div>
+                    <div>Headwear garment: {playerStats.headwearGarmentType ?? 'none'}</div>
+                    <div>Headscarf style: {playerStats.headscarfStyle ?? 'none'}</div>
+                    <div>Headscarf pattern: {playerStats.headscarfPattern ?? 'none'}</div>
+                    <div>Headscarf accent: {playerStats.headscarfAccentColor ?? 'none'}</div>
+                    <div>Turban pattern: {playerStats.turbanPattern ?? 'none'}</div>
+                    <div>Turban accent: {playerStats.turbanAccentColor ?? 'none'}</div>
+                    <div>Robe base: {playerStats.robeBaseColor}</div>
+                    <div>Robe accent: {playerStats.robeAccentColor}</div>
+                    <div>Robe pattern: {playerStats.robePattern}</div>
+                    <div>Robe pattern scale: {playerStats.robePatternScale?.toFixed(2) ?? 'n/a'}</div>
+                    <div>Robe trim: {playerStats.robeHasTrim ? 'yes' : 'no'}</div>
+                    <div>Robe hem band: {playerStats.robeHemBand ? 'yes' : 'no'}</div>
+                    <div>Robe sash: {playerStats.robeHasSash ? 'yes' : 'no'}</div>
+                    <div>Robe sleeves: {playerStats.robeSleeves ? 'yes' : 'no'}</div>
+                    <div>Robe overwrap: {playerStats.robeOverwrap ? 'yes' : 'no'}</div>
+                    <div>Robe spread: {playerStats.robeSpread.toFixed(2)}</div>
+                    <div>Sash pattern: {playerStats.sashPattern ?? 'none'}</div>
+                    <div>Sleeve coverage: {playerStats.sleeveCoverage}</div>
+                    <div>Footwear: {playerStats.footwearStyle}</div>
+                    <div>Footwear color: {playerStats.footwearColor}</div>
+                    <div>Footwear description: {playerStats.footwearDescription}</div>
+                    <div>Accessories: {playerStats.accessories.length ? playerStats.accessories.join(', ') : 'none'}</div>
+                    <div>Clothing items: {playerStats.clothing.length ? playerStats.clothing.join(', ') : 'none'}</div>
+                  </div>
+                )}
               </div>
             </div>
           )}

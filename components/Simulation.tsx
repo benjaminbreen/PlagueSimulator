@@ -35,6 +35,7 @@ import { exposePlayerToPlague } from '../utils/plague';
 import { InfectedBuildingMarkers } from './environment/InfectedBuildingMarkers';
 import { PlayerHomeMarker } from './environment/PlayerHomeMarker';
 import { BoundaryHeadingIndicator } from './BoundaryHeadingIndicator';
+import { NarratorHighlightRing } from './NarratorHighlightRing';
 
 interface SimulationProps {
   params: SimulationParams;
@@ -106,6 +107,11 @@ interface SimulationProps {
   onNearBirdcage?: (birdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
   /** Callback when player is on rooftop near a roof hatch */
   onNearRooftopHatch?: (hatch: { buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null) => void;
+  narratorHighlight?: {
+    position: [number, number, number];
+    startedAt: number;
+    expiresAt: number;
+  } | null;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -1234,7 +1240,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch, narratorHighlight }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -2916,6 +2922,20 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             }
           }
 
+          const merchants: MiniMapData['merchants'] = [];
+          allMerchants.forEach((merchant) => {
+            const dx = merchant.position[0] - pos.x;
+            const dz = merchant.position[2] - pos.z;
+            if ((dx * dx + dz * dz) <= maxDistSq) {
+              merchants.push({
+                x: merchant.position[0],
+                z: merchant.position[2],
+                name: merchant.stats.name,
+                profession: merchant.stats.profession
+              });
+            }
+          });
+
           const landmarks: MiniMapData['landmarks'] = district === 'OUTSKIRTS_FARMLAND'
             ? getFarmlandLandmarks(params.mapX, params.mapY)
               .filter((lm) => {
@@ -2950,6 +2970,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             buildings,
             npcs,
             specialNPCs,
+            merchants,
             landmarks,
             playerHome,
             district,
@@ -3034,6 +3055,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
       {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#c5ddf5', 0.004]} />}
       {devSettings.showClouds && <CloudLayer weather={weather} timeOfDay={params.timeOfDay} />}
+
+      {narratorHighlight && (
+        <NarratorHighlightRing
+          position={narratorHighlight.position}
+          startedAt={narratorHighlight.startedAt}
+          expiresAt={narratorHighlight.expiresAt}
+        />
+      )}
 
       <WorldEnvironment
         mapX={params.mapX}

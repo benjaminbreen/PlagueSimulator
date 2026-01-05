@@ -52,6 +52,7 @@ export const useNarration = (mapX: number, mapY: number, timeOfDay: number) => {
     narratorKey,
     narratorHistory,
     narratorOpen,
-    setNarratorOpen
+    setNarratorOpen,
+    pushNarration
   };
 };

@@ -229,7 +229,9 @@ function createClimbable(
  * Calculate building height (must match Environment.tsx Building component logic exactly)
  */
 function calculateBuildingHeight(building: BuildingMetadata, district: DistrictType): number {
-  return getBuildingHeight(building, district);
+  const baseHeight = getBuildingHeight(building, district);
+  const { heightMultiplier } = getBuildingMultipliers(building);
+  return baseHeight * heightMultiplier;
 }
 
 /**
@@ -419,10 +421,7 @@ export function calculateRooftopHatchPosition(
  * Check if a building qualifies for a rooftop hatch (must be multi-story)
  */
 export function buildingCanHaveRooftopHatch(building: BuildingMetadata): boolean {
-  return (building.sizeScale ?? 1) > 1.15
-    || building.type === BuildingType.CIVIC
-    || building.type === BuildingType.RELIGIOUS
-    || building.type === BuildingType.SCHOOL;
+  return (building.storyCount ?? 1) >= 2;
 }
 
 /**
@@ -436,7 +435,8 @@ export function isOnRooftop(
   const districtScale = getDistrictScale(district);
   for (const building of buildings) {
     // Include district scale to match actual rendered building size
-    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
+    const { footprintScale } = getBuildingMultipliers(building);
+    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1) * footprintScale;
     const halfSize = buildingSize / 2;
     const [bx, , bz] = building.position;
     const roofHeight = calculateBuildingHeight(building, district);
@@ -476,7 +476,8 @@ export function getRoofHeightAt(
   const districtScale = getDistrictScale(district);
   for (const building of buildings) {
     // Include district scale to match actual rendered building size
-    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
+    const { footprintScale } = getBuildingMultipliers(building);
+    const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1) * footprintScale;
     const halfSize = buildingSize / 2;
     const [bx, , bz] = building.position;
 
@@ -511,7 +512,8 @@ export function isNearRoofEdge(
 ): boolean {
   const districtScale = getDistrictScale(district);
   // Include district scale to match actual rendered building size
-  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
+  const { footprintScale } = getBuildingMultipliers(building);
+  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1) * footprintScale;
   const halfSize = buildingSize / 2;
   const [bx, , bz] = building.position;
 

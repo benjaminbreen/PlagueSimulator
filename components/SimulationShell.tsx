@@ -74,6 +74,11 @@ interface SimulationShellProps {
       category: string;
     }>;
   }) => void;
+  narratorHighlight?: {
+    position: [number, number, number];
+    startedAt: number;
+    expiresAt: number;
+  } | null;
   performanceMonitor: {
     lastPerfChangeRef: React.MutableRefObject<number>;
     shadowsDisabledByPerf: React.MutableRefObject<boolean>;
@@ -145,6 +150,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   onNearBirdcage,
   onNearRooftopHatch,
   onShowLootModal,
+  narratorHighlight,
   performanceMonitor
 }) => {
   return (
@@ -247,6 +253,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onNearChest={onNearChest}
             onNearBirdcage={onNearBirdcage}
             onNearRooftopHatch={onNearRooftopHatch}
+            narratorHighlight={narratorHighlight}
           />
         )}
         {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -271,6 +278,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onNearChest={onNearChest}
             onNearStairs={onNearStairs}
             onNearRoofHatch={onNearRoofHatch}
+            narratorHighlight={narratorHighlight}
             onNearbyMerchant={(merchant) => {
               if (!merchant) {
                 onNearMerchant(null);

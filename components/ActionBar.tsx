@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerStats, ItemAppearance } from '../types';
 import { AlertTriangle, Heart, Eye, Sparkles, Coins, Cross, Package, Hand } from 'lucide-react';
-import { NarratorPanel } from './NarratorPanel';
+import { NarratorHighlightEntry, NarratorPanel } from './NarratorPanel';
 import { NarratorInput } from './NarratorInput';
 import { ItemIcon } from './items/ItemIcon';
 
@@ -17,6 +17,13 @@ interface ActionBarProps {
   narratorOpen?: boolean;
   onToggleNarrator?: (open: boolean) => void;
   mobileNarratorVisible?: boolean;
+  onNarratorSubmit?: (query: string) => void;
+  narratorLoading?: boolean;
+  narratorHighlights?: {
+    entries: NarratorHighlightEntry[];
+  };
+  onNarratorHighlightSelect?: (entry: NarratorHighlightEntry) => void;
+  onOpenTransparency?: () => void;
   inventoryItems: Array<{
     id: string;
     itemId: string;
@@ -233,6 +240,11 @@ export const ActionBar: React.FC<ActionBarProps> = ({
   narratorOpen = false,
   onToggleNarrator,
   mobileNarratorVisible = false,
+  onNarratorSubmit,
+  narratorLoading = false,
+  narratorHighlights,
+  onNarratorHighlightSelect,
+  onOpenTransparency,
   inventoryItems,
   onOpenItemModal,
   onDropItemAtScreen
@@ -243,6 +255,9 @@ export const ActionBar: React.FC<ActionBarProps> = ({
   const [dragging, setDragging] = useState(false);
   const [dragPosition, setDragPosition] = useState<{ x: number; y: number } | null>(null);
   const [narratorVisible, setNarratorVisible] = useState(false);
+  const [narratorQuery, setNarratorQuery] = useState('');
+  const [narratorIdle, setNarratorIdle] = useState(false);
+  const narratorIdleTimeoutRef = React.useRef<number | null>(null);
 
   // Mobile collapsed state - auto-collapse after inactivity
   const [mobileExpanded, setMobileExpanded] = useState(false);
@@ -351,6 +366,48 @@ export const ActionBar: React.FC<ActionBarProps> = ({
     });
   }, [narratorMessage, narratorOpen]);
 
+  const markNarratorInteraction = useCallback(() => {
+    setNarratorIdle(false);
+    if (narratorIdleTimeoutRef.current) {
+      window.clearTimeout(narratorIdleTimeoutRef.current);
+    }
+    narratorIdleTimeoutRef.current = window.setTimeout(() => {
+      if (!narratorOpen && !narratorLoading) {
+        setNarratorIdle(true);
+      }
+    }, 20000);
+  }, [narratorLoading, narratorOpen]);
+
+  React.useEffect(() => {
+    markNarratorInteraction();
+    return () => {
+      if (narratorIdleTimeoutRef.current) {
+        window.clearTimeout(narratorIdleTimeoutRef.current);
+      }
+    };
+  }, [markNarratorInteraction, narratorMessage]);
+
+  const handleNarratorSubmit = useCallback(() => {
+    const trimmed = narratorQuery.trim();
+    if (!trimmed || narratorLoading) return;
+    onToggleNarrator?.(true);
+    onNarratorSubmit?.(trimmed);
+    setNarratorQuery('');
+    markNarratorInteraction();
+  }, [markNarratorInteraction, narratorLoading, narratorQuery, onNarratorSubmit, onToggleNarrator]);
+
+  const handleNarratorOpen = useCallback(() => {
+    onToggleNarrator?.(true);
+    markNarratorInteraction();
+  }, [markNarratorInteraction, onToggleNarrator]);
+
+  const handleNarratorChange = useCallback((value: string) => {
+    setNarratorQuery(value);
+    markNarratorInteraction();
+  }, [markNarratorInteraction]);
+
+  const narratorMuted = narratorIdle && !narratorOpen && !narratorLoading;
+
   return (
     <div className="fixed bottom-safe-sm md:bottom-6 right-4 md:right-6 z-40 pointer-events-auto">
       {dragging && dragItemRef.current && dragPosition && (
@@ -365,11 +422,20 @@ export const ActionBar: React.FC<ActionBarProps> = ({
       )}
       {/* Narrator Panel - Desktop: normal behavior, Mobile: controlled by toggle */}
       <div className={`
-        absolute bottom-64 md:bottom-72 right-2 md:right-0 mb-3 flex flex-col items-end gap-4
-        transition-all duration-300 z-40
+        absolute bottom-36 md:bottom-44 right-2 md:right-0 mb-3 flex flex-col-reverse items-end gap-3
+        transition-all duration-700 ease-out z-40
         ${mobileNarratorVisible ? 'translate-x-0 opacity-100' : 'md:translate-x-0 md:opacity-100 translate-x-[calc(100%+1rem)] opacity-0 pointer-events-none md:pointer-events-auto'}
+        ${narratorMuted ? 'opacity-10 translate-y-2 blur-[0.5px]' : 'opacity-100 translate-y-0'}
       `}>
         {/* On desktop, show when narratorMessage/narratorOpen. On mobile, show when mobileNarratorVisible */}
+        <NarratorInput
+          onOpen={handleNarratorOpen}
+          value={narratorQuery}
+          onChange={handleNarratorChange}
+          onSubmit={handleNarratorSubmit}
+          disabled={narratorLoading}
+          isLoading={narratorLoading}
+        />
         {((narratorMessage || narratorOpen) || mobileNarratorVisible) && (
           <NarratorPanel
             visible={narratorVisible}
@@ -377,13 +443,16 @@ export const ActionBar: React.FC<ActionBarProps> = ({
             message={narratorMessage || narratorHistory[narratorHistory.length - 1] || ''}
             narratorOpen={narratorOpen}
             narratorHistory={narratorHistory}
+            highlights={narratorHighlights}
+            onHighlightSelect={onNarratorHighlightSelect}
+            onOpenTransparency={onOpenTransparency}
           />
         )}
-        <NarratorInput onOpen={() => onToggleNarrator?.(true)} />
       </div>
       <div
         className={`
-          absolute bottom-16 md:bottom-16 right-0 w-[280px] md:w-[360px]
+          absolute bottom-16 right-0 w-[280px] md:w-[360px]
+          md:bottom-0 md:right-full md:mr-3
           max-w-[85vw]
           rounded-2xl border border-amber-700/40
           bg-black/85 backdrop-blur-lg shadow-2xl
@@ -502,9 +571,6 @@ export const ActionBar: React.FC<ActionBarProps> = ({
 
       {/* Desktop: Full action bar */}
       <div className="hidden md:flex gap-2">
-        {/* Push Button - Hotkey 1 */}
-        {onTriggerPush && <PushButton onTrigger={onTriggerPush} />}
-
         {/* Inventory Button - Hotkey 2 */}
         <div className="relative group">
           <button
@@ -543,6 +609,9 @@ export const ActionBar: React.FC<ActionBarProps> = ({
             </p>
           </div>
         </div>
+
+        {/* Push Button - Hotkey 1 */}
+        {onTriggerPush && <PushButton onTrigger={onTriggerPush} />}
 
         {/* Action Slot 1 - Hotkey 3 */}
         <ActionButton

@@ -280,8 +280,8 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
         <cylinderGeometry args={[3.0, 3.4, 1.1, 20, 1, true]} />
         <meshStandardMaterial color="#6a5040" roughness={0.9} side={THREE.BackSide} />
       </mesh>
-      {/* Basin rim */}
-      <mesh position={[0, 1.15, 0]} castShadow receiveShadow>
+      {/* Basin rim - rotated to lie flat horizontally */}
+      <mesh position={[0, 1.15, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow receiveShadow>
         <torusGeometry args={[3.5, 0.12, 8, 24]} />
         <meshStandardMaterial color="#b79e7f" roughness={0.8} />
       </mesh>
@@ -321,14 +321,14 @@ export const CentralWell: React.FC<{ mapX: number, mapY: number; timeOfDay?: num
         );
       })}
 
-      {/* Inner tile border ring */}
-      <mesh position={[0, 1.125, 0]} castShadow>
+      {/* Inner tile border ring - rotated to lie flat */}
+      <mesh position={[0, 1.125, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
         <torusGeometry args={[2.95, 0.06, 6, 32]} />
         <meshStandardMaterial color="#1a4a6a" roughness={0.5} metalness={0.1} />
       </mesh>
 
-      {/* Outer tile border ring */}
-      <mesh position={[0, 1.125, 0]} castShadow>
+      {/* Outer tile border ring - rotated to lie flat */}
+      <mesh position={[0, 1.125, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
         <torusGeometry args={[3.38, 0.06, 6, 32]} />
         <meshStandardMaterial color="#1a4a6a" roughness={0.5} metalness={0.1} />
       </mesh>

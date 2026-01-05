@@ -31,6 +31,8 @@ import { buildObservePrompt } from './utils/observeContext';
 import { useObserveMode } from './hooks/useObserveMode';
 import { useOverworldPath } from './hooks/useOverworldPath';
 import { useEventSystem } from './hooks/useEventSystem';
+import { NarratorContext } from './utils/narratorPrompt';
+import { NarratorHighlightEntry } from './components/NarratorPanel';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -120,6 +122,12 @@ function App() {
   const [nearRoofHatch, setNearRoofHatch] = useState<{ id: string; position: [number, number, number] } | null>(null);
   const [nearRooftopHatch, setNearRooftopHatch] = useState<{ buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null>(null);
   const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
+  const [narratorHighlight, setNarratorHighlight] = useState<{
+    position: [number, number, number];
+    startedAt: number;
+    expiresAt: number;
+  } | null>(null);
+  const narratorHighlightTimerRef = useRef<number | null>(null);
   const [worldFlags, setWorldFlags] = useState<Record<string, boolean | number | string>>(() => {
     try {
       const raw = localStorage.getItem('worldFlags');
@@ -429,18 +437,14 @@ function App() {
         { id: 'start-olives', quantity: 2 },
         { id: 'start-chickpeas', quantity: 2 },
         { id: 'start-candle-stub', quantity: 1 },
-        { id: 'start-sandals', quantity: 1 },
         { id: 'start-copper-amulet', quantity: 1 }
       );
     } else if (stats.socialClass === SocialClass.MERCHANT) {
       classBasics.push(
         { id: 'start-waterskin', quantity: 1 },
-        { id: 'start-candles', quantity: 1 },
-        { id: 'start-satchel', quantity: 1 },
         { id: 'start-dates', quantity: 2 },
         { id: 'start-olives', quantity: 2 },
         { id: 'start-coin-purse', quantity: 1 },
-        { id: 'start-sandals', quantity: 1 },
         { id: 'start-prayer-beads', quantity: 1 }
       );
     } else if (stats.socialClass === SocialClass.CLERGY) {
@@ -448,33 +452,26 @@ function App() {
         { id: 'start-prayer-rug', quantity: 1 },
         { id: 'start-incense', quantity: 1 },
         { id: 'start-manuscript', quantity: 1 },
-        { id: 'start-candles', quantity: 1 },
         { id: 'start-prayer-beads', quantity: 1 },
-        { id: 'start-writing-reed', quantity: 2 },
-        { id: 'start-soap', quantity: 1 }
+        { id: 'start-writing-reed', quantity: 2 }
       );
     } else if (stats.socialClass === SocialClass.NOBILITY) {
       classBasics.push(
-        { id: 'start-satchel', quantity: 1 },
         { id: 'start-perfume', quantity: 1 },
         { id: 'start-rose-water', quantity: 1 },
         { id: 'start-pistachios', quantity: 2 },
-        { id: 'start-sugar', quantity: 1 },
-        { id: 'start-kohl-container', quantity: 1 },
-        { id: 'start-soap', quantity: 1 }
+        { id: 'start-kohl-container', quantity: 1 }
       );
     }
 
     const genderBasics: Array<{ id: string; quantity: number }> = [];
     if (stats.gender === 'Female') {
       genderBasics.push(
-        { id: 'start-headscarf', quantity: 1 },
         { id: 'start-kohl', quantity: 1 },
         { id: 'start-henna', quantity: 1 }
       );
     } else {
       genderBasics.push(
-        { id: 'start-belt-sash', quantity: 1 },
         { id: 'start-kohl', quantity: 1 }
       );
     }
@@ -548,24 +545,32 @@ function App() {
       );
     }
 
-    pickUnique(classBasics, Math.max(3, Math.min(5, classBasics.length)));
-    pickUnique(genderBasics, Math.min(2, genderBasics.length));
-    pickUnique(professionBasics, Math.min(4, professionBasics.length));
+    // Pick 1-3 class items (reduced from 3-5)
+    const classItemCount = Math.floor(1 + rand() * 3); // 1-3 items
+    pickUnique(classBasics, Math.min(classItemCount, classBasics.length));
 
-    if (startingInventory.length < 4) {
+    // Pick 0-1 gender items (cosmetics only)
+    const genderItemCount = rand() > 0.5 ? 1 : 0;
+    pickUnique(genderBasics, Math.min(genderItemCount, genderBasics.length));
+
+    // Pick 0-2 profession items (reduced from 0-4)
+    const professionItemCount = Math.floor(rand() * 3); // 0-2 items
+    pickUnique(professionBasics, Math.min(professionItemCount, professionBasics.length));
+
+    // Ensure minimum of 1 item, maximum of 5
+    if (startingInventory.length === 0) {
+      // Always have at least one item
       pickUnique(
         [
           { id: 'start-dates', quantity: 2 },
           { id: 'start-olives', quantity: 2 },
-          { id: 'start-dried-figs', quantity: 2 },
-          { id: 'start-apricots', quantity: 2 },
-          { id: 'start-chickpeas', quantity: 2 },
-          { id: 'start-pomegranate', quantity: 1 },
-          { id: 'start-prayer-beads', quantity: 1 },
-          { id: 'start-soap', quantity: 1 }
+          { id: 'start-prayer-beads', quantity: 1 }
         ],
-        4 - startingInventory.length
+        1
       );
+    } else if (startingInventory.length > 5) {
+      // Trim to max 5 items
+      startingInventory.length = 5;
     }
 
     return {
@@ -639,6 +644,25 @@ function App() {
   const handleResetFollowingState = useCallback(() => setIsFollowingAfterDismissal(false), []);
   const handleDismissToast = useCallback((id: string) => {
     setToastMessages((prev) => prev.filter((msg) => msg.id !== id));
+  }, []);
+  const handleNarratorHighlight = useCallback((entry: NarratorHighlightEntry) => {
+    if (!entry.position) return;
+    const startedAt = Date.now();
+    const expiresAt = startedAt + 5000;
+    setNarratorHighlight({ position: entry.position, startedAt, expiresAt });
+    if (narratorHighlightTimerRef.current) {
+      window.clearTimeout(narratorHighlightTimerRef.current);
+    }
+    narratorHighlightTimerRef.current = window.setTimeout(() => {
+      setNarratorHighlight(null);
+    }, 5000);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (narratorHighlightTimerRef.current) {
+        window.clearTimeout(narratorHighlightTimerRef.current);
+      }
+    };
   }, []);
 
   const {
@@ -1069,6 +1093,8 @@ function App() {
   // Global Key Listener for Interaction
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.target as HTMLElement | null)?.isContentEditable) return;
       if (sceneMode === 'interior' && e.key === 'Escape') {
         setSceneMode('outdoor');
         setInteriorSpec(null);
@@ -1280,6 +1306,7 @@ function App() {
     const handleActionKey = (e: KeyboardEvent) => {
       // Don't trigger if typing in an input or modal is open
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.target as HTMLElement | null)?.isContentEditable) return;
       if (showMerchantModal || showEnterModal || showPlayerModal || showEncounterModal) return;
       if (sceneMode !== 'outdoor') return;
 
@@ -1586,6 +1613,297 @@ function App() {
     };
     return labels[districtType] ?? 'the street';
   }, []);
+
+  const getNarratorContext = useCallback((): NarratorContext => {
+    const playerPos = playerPositionRef.current;
+    const districtType = getDistrictType(params.mapX, params.mapY);
+    const districtLabel = formatDistrictName(districtType);
+    const locationLabel = getLocationLabel(params.mapX, params.mapY);
+    const tileKey = getTileKey(params.mapX, params.mapY);
+    const registry = tileRegistriesRef.current.get(tileKey);
+    const npcRecords = registry ? Array.from(registry.npcMap.values()) : [];
+    const npcRadius = 18;
+    const specialNpcRadius = 26;
+    const buildingRadius = 34;
+    const objectRadius = 14;
+
+    const distanceFor = (pos: [number, number, number]) => {
+      const dx = pos[0] - playerPos.x;
+      const dz = pos[2] - playerPos.z;
+      return Math.hypot(dx, dz);
+    };
+    const directionFor = (pos: [number, number, number]) => calculateDirection(playerPos.x, playerPos.z, pos[0], pos[2]);
+
+    const nearbyBuildings = sceneMode === 'outdoor'
+      ? tileBuildings
+          .map((building) => {
+            const detail = building.ownerName
+              ? `${building.ownerName}, ${building.ownerProfession}`
+              : building.ownerProfession;
+            const distance = distanceFor(building.position);
+            return {
+              label: getBuildingLabel(building.type),
+              detail,
+              direction: directionFor(building.position),
+              distance,
+              id: building.id,
+              kind: 'building' as const,
+              position: building.position
+            };
+          })
+          .filter((item) => item.distance <= buildingRadius)
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 4)
+      : [];
+
+    const recentNpcWindow = 0.5;
+    const nearbyNpcs = sceneMode === 'outdoor'
+      ? npcRecords
+          .map((record) => {
+            const activity = npcActivityRef.current.get(record.id);
+            const location = activity?.location ?? record.location;
+            if (location !== 'outdoor') return null;
+            if (activity && stats.simTime - activity.lastSimTime > recentNpcWindow) return null;
+            const posVec = activity?.lastPos;
+            const position: [number, number, number] = posVec
+              ? [posVec.x, posVec.y, posVec.z]
+              : record.lastOutdoorPos;
+            const familyMember = record.role === 'family'
+              ? playerStats.familyMembers.find(m => m.npcId === record.id)
+              : null;
+            const detail = familyMember
+              ? `your ${getRelationshipLabel(familyMember.relationship, familyMember.gender).toLowerCase()}`
+              : record.stats.profession;
+            const distance = distanceFor(position);
+            return {
+              label: record.stats.name,
+              detail,
+              direction: directionFor(position),
+              distance,
+              id: record.id,
+              kind: familyMember ? 'family' as const : 'npc' as const,
+              position
+            };
+          })
+          .filter((item): item is { label: string; detail: string; direction: string; distance: number } => Boolean(item))
+          .filter((item) => item.distance <= npcRadius)
+          .sort((a, b) => a.distance - b.distance)
+          .slice(0, 6)
+      : [];
+
+    const specialNpcLabels: Record<import('./types').SpecialNPCType, { label: string; detail: string }> = {
+      SUFI_MYSTIC: { label: 'snake charmer', detail: 'Sufi mystic' },
+      ASTROLOGER: { label: 'astrologer', detail: 'celestial scholar' },
+      SCRIBE: { label: 'scribe', detail: 'calligrapher' }
+    };
+    const specialNpcs = sceneMode === 'outdoor' && minimapData?.specialNPCs
+      ? minimapData.specialNPCs
+          .map((npc) => {
+            const info = specialNpcLabels[npc.type];
+            const pos: [number, number, number] = [npc.x, 0, npc.z];
+            const distance = distanceFor(pos);
+            return {
+              label: info.label,
+              detail: info.detail,
+              direction: directionFor(pos),
+              distance,
+              id: npc.type,
+              kind: 'special' as const,
+              position: pos
+            };
+          })
+          .filter((item) => item.distance <= specialNpcRadius)
+      : [];
+
+    const merchantNpcs = sceneMode === 'outdoor' && minimapData?.merchants
+      ? minimapData.merchants
+          .map((merchant) => {
+            const pos: [number, number, number] = [merchant.x, 0, merchant.z];
+            const distance = distanceFor(pos);
+            return {
+              label: merchant.name ?? 'merchant',
+              detail: merchant.profession ?? 'merchant',
+              direction: directionFor(pos),
+              distance,
+              id: merchant.name ?? undefined,
+              kind: 'merchant' as const,
+              position: pos
+            };
+          })
+          .filter((item) => item.distance <= npcRadius)
+      : [];
+
+    if (sceneMode === 'outdoor' && nearMerchant) {
+      const distance = distanceFor(nearMerchant.position);
+      if (distance <= npcRadius) {
+        merchantNpcs.unshift({
+          label: nearMerchant.stats.name,
+          detail: nearMerchant.stats.profession,
+          direction: directionFor(nearMerchant.position),
+          distance,
+          id: nearMerchant.id,
+          kind: 'merchant' as const,
+          position: nearMerchant.position
+        });
+      }
+    }
+
+    if (sceneMode === 'outdoor' && nearSpeakableNpc) {
+      const activity = npcActivityRef.current.get(nearSpeakableNpc.stats.id);
+      if (activity?.lastPos) {
+        const position: [number, number, number] = [activity.lastPos.x, activity.lastPos.y, activity.lastPos.z];
+        const distance = distanceFor(position);
+        if (distance <= npcRadius) {
+          merchantNpcs.unshift({
+            label: nearSpeakableNpc.stats.name,
+            detail: nearSpeakableNpc.stats.profession,
+            direction: directionFor(position),
+            distance,
+            id: nearSpeakableNpc.stats.id,
+            kind: 'npc' as const,
+            position
+          });
+        }
+      }
+    }
+
+    const interiorFloor = sceneMode === 'interior'
+      ? (interiorSpec?.floors?.[activeInteriorFloor] ?? interiorSpec ?? null)
+      : null;
+    const interiorNpcs = sceneMode === 'interior' && interiorFloor
+      ? interiorFloor.npcs
+          .map((npc) => {
+            const distance = distanceFor(npc.position);
+            return {
+              label: npc.stats.name,
+              detail: npc.stats.profession,
+              direction: directionFor(npc.position),
+              distance,
+              id: npc.id,
+              kind: 'interior-npc' as const,
+              position: npc.position
+            };
+          })
+          .filter((item) => item.distance <= npcRadius)
+      : [];
+    const interiorObjects = sceneMode === 'interior' && interiorFloor
+      ? interiorFloor.props
+          .map((prop) => {
+            const distance = distanceFor(prop.position);
+            return {
+              label: prop.label,
+              direction: directionFor(prop.position),
+              distance,
+              id: prop.id,
+              kind: 'interior-prop' as const,
+              position: prop.position
+            };
+          })
+          .filter((item) => item.distance <= objectRadius)
+      : [];
+
+    const nearbyObjects = [
+      nearChest ? { label: nearChest.label, position: nearChest.position } : null,
+      nearBirdcage ? { label: nearBirdcage.label, position: nearBirdcage.position } : null,
+      nearStairs ? { label: nearStairs.label, position: nearStairs.position } : null,
+      nearRoofHatch ? { label: 'Roof hatch', position: nearRoofHatch.position } : null,
+      nearRooftopHatch ? { label: 'Rooftop hatch', position: nearRooftopHatch.position } : null
+    ]
+      .filter((entry): entry is { label: string; position: [number, number, number] } => Boolean(entry))
+      .map((entry) => {
+        const distance = distanceFor(entry.position);
+        return {
+          label: entry.label,
+          direction: directionFor(entry.position),
+          distance,
+          kind: 'object' as const,
+          position: entry.position
+        };
+      })
+      .filter((item) => item.distance <= objectRadius)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 4);
+
+    const interiorInfo = sceneMode === 'interior' && interiorBuilding
+      ? `${getBuildingLabel(interiorBuilding.type)} of ${interiorBuilding.ownerProfession} ${interiorBuilding.ownerName}`
+      : null;
+
+    const nearbyDistricts = (() => {
+      const offsets: Array<[number, number, string]> = [
+        [0, 1, 'north'],
+        [1, 0, 'east'],
+        [0, -1, 'south'],
+        [-1, 0, 'west'],
+        [1, 1, 'northeast'],
+        [1, -1, 'southeast'],
+        [-1, -1, 'southwest'],
+        [-1, 1, 'northwest']
+      ];
+      return offsets.map(([dx, dy, direction]) => {
+        const mapX = params.mapX + dx;
+        const mapY = params.mapY + dy;
+        const districtType = getDistrictType(mapX, mapY);
+        return {
+          direction,
+          district: formatDistrictName(districtType),
+          biome: getBiomeForDistrict(districtType),
+          locationLabel: getLocationLabel(mapX, mapY),
+          mapX,
+          mapY
+        };
+      });
+    })();
+
+    return {
+      sceneMode,
+      mapX: params.mapX,
+      mapY: params.mapY,
+      district: districtLabel,
+      locationLabel,
+      nearbyDistricts,
+      timeOfDay: params.timeOfDay,
+      weather: currentWeather,
+      player: {
+        name: playerStats.name,
+        profession: playerStats.profession,
+        socialClass: playerStats.socialClass,
+        healthStatus: playerStats.healthStatus,
+        plagueState: playerStats.plague?.state ?? 'unknown',
+        wealth: playerStats.wealth,
+        reputation: playerStats.reputation,
+        currency: playerStats.currency
+      },
+      nearbyBuildings,
+      nearbyNpcs: sceneMode === 'interior'
+        ? interiorNpcs.slice(0, 6)
+        : [...specialNpcs, ...merchantNpcs, ...nearbyNpcs].sort((a, b) => a.distance - b.distance).slice(0, 6),
+      nearbyObjects: sceneMode === 'interior'
+        ? [...interiorObjects, ...nearbyObjects].sort((a, b) => a.distance - b.distance).slice(0, 4)
+        : nearbyObjects,
+      interiorInfo
+    };
+  }, [
+    activeInteriorFloor,
+    currentWeather,
+    getBuildingLabel,
+    interiorBuilding,
+    interiorSpec,
+    minimapData,
+    nearMerchant,
+    nearSpeakableNpc,
+    nearBirdcage,
+    nearChest,
+    nearRoofHatch,
+    nearRooftopHatch,
+    nearStairs,
+    params.mapX,
+    params.mapY,
+    params.timeOfDay,
+    playerStats,
+    sceneMode,
+    stats.simTime,
+    tileBuildings
+  ]);
 
   const buildNpcActivityLabel = useCallback((location: 'outdoor' | 'interior', isMoving: boolean) => {
     if (location === 'interior') {
@@ -2919,6 +3237,8 @@ function App() {
     onDropItem: handleDropItem,
     onDropItemAtScreen: handleDropItemAtScreen,
     onConsumeItem: handleConsumeItem,
+    getNarratorContext,
+    onNarratorHighlight: handleNarratorHighlight,
     perfDebug,
     onTriggerEnterBuilding: () => {
       if (nearBuilding && !showEnterModal) {
@@ -2951,6 +3271,8 @@ function App() {
     handleDropItem,
     handleDropItemAtScreen,
     handleConsumeItem,
+    getNarratorContext,
+    handleNarratorHighlight,
     handleFastTravel,
     handleForceAllNpcState,
     handleForceNpcState,
@@ -3061,6 +3383,7 @@ function App() {
     onNearBirdcage: setNearBirdcage,
     onNearRooftopHatch: setNearRooftopHatch,
     onShowLootModal: handleShowLootModal,
+    narratorHighlight,
     performanceMonitor: performanceMonitorConfig
   }), [
     actionEvent,
@@ -3093,6 +3416,7 @@ function App() {
     observeMode,
     outdoorNpcPool,
     params,
+    narratorHighlight,
     performanceMonitorConfig,
     playerStats,
     selectedBuildingId,

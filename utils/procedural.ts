@@ -499,33 +499,75 @@ const hslToHex = (h: number, s: number, l: number): string => {
 
 /**
  * Apply age-based graying to hair color
- * Hair begins graying around 35, with full gray by ~70
+ * Hair begins graying around 35, with noticeable gray by 50s
  */
 export const getAgedHairColor = (baseHairColor: string, age: number, rand: () => number): string => {
+  if (age < 35) return baseHairColor;
+
+  const hsl = hexToHSL(baseHairColor);
+
+  // Graying starts at 35, becomes noticeable in 40s, significant in 50s+
+  let grayProgress = 0;
+  if (age >= 35 && age < 45) {
+    // Early salt-and-pepper: 0-25% gray by 45
+    grayProgress = ((age - 35) / 10) * 0.25;
+  } else if (age >= 45 && age < 55) {
+    // Noticeable graying: 25-55% by 55
+    grayProgress = 0.25 + ((age - 45) / 10) * 0.30;
+  } else if (age >= 55 && age < 65) {
+    // Significant gray: 55-80% by 65
+    grayProgress = 0.55 + ((age - 55) / 10) * 0.25;
+  } else if (age >= 65) {
+    // Mostly gray to white: 80-100% by 75+
+    grayProgress = 0.80 + Math.min(0.20, ((age - 65) / 10) * 0.20);
+  }
+
+  // Add some individual variation (some people gray faster/slower)
+  const variation = (rand() - 0.5) * 0.12;
+  grayProgress = Math.max(0, Math.min(1, grayProgress + variation));
+
+  // Desaturate fully and lighten to silver/white
+  const newS = hsl.s * (1 - grayProgress * 0.95); // Almost fully desaturate
+  const newL = hsl.l + grayProgress * (72 - hsl.l); // Lighten toward silver ~72%
+
+  return hslToHex(hsl.h, newS, newL);
+};
+
+/**
+ * Apply age-based graying to facial hair color
+ * Beards typically gray earlier and more noticeably than head hair
+ */
+export const getAgedFacialHairColor = (baseHairColor: string, age: number, rand: () => number): string => {
   if (age < 30) return baseHairColor;
 
   const hsl = hexToHSL(baseHairColor);
 
-  // Early graying starts at 30, accelerates after 45
+  // Facial hair grays earlier and faster than head hair
   let grayProgress = 0;
-  if (age >= 30 && age < 45) {
-    // Slow graying: 0-20% gray by 45
-    grayProgress = ((age - 30) / 15) * 0.2;
-  } else if (age >= 45 && age < 60) {
-    // Medium graying: 20-60% by 60
-    grayProgress = 0.2 + ((age - 45) / 15) * 0.4;
-  } else if (age >= 60) {
-    // Full graying: 60-100% by 75+
-    grayProgress = 0.6 + Math.min(0.4, ((age - 60) / 15) * 0.4);
+  if (age >= 30 && age < 40) {
+    // Early salt-and-pepper at temples/beard: 0-20% by 40
+    grayProgress = ((age - 30) / 10) * 0.20;
+  } else if (age >= 40 && age < 50) {
+    // Noticeable salt-and-pepper: 20-45% by 50
+    grayProgress = 0.20 + ((age - 40) / 10) * 0.25;
+  } else if (age >= 50 && age < 60) {
+    // Significant gray: 45-70% by 60
+    grayProgress = 0.45 + ((age - 50) / 10) * 0.25;
+  } else if (age >= 60 && age < 70) {
+    // Mostly gray: 70-90% by 70
+    grayProgress = 0.70 + ((age - 60) / 10) * 0.20;
+  } else if (age >= 70) {
+    // Full white: 90-100%
+    grayProgress = 0.90 + Math.min(0.10, ((age - 70) / 10) * 0.10);
   }
 
-  // Add some individual variation (some people gray faster/slower)
+  // Individual variation - facial hair graying is more variable
   const variation = (rand() - 0.5) * 0.15;
   grayProgress = Math.max(0, Math.min(1, grayProgress + variation));
 
-  // Desaturate and lighten
-  const newS = hsl.s * (1 - grayProgress * 0.9); // Almost fully desaturate
-  const newL = hsl.l + grayProgress * (65 - hsl.l); // Lighten toward ~65%
+  // Desaturate to gray/white - facial hair tends toward silver-white
+  const newS = hsl.s * (1 - grayProgress * 0.98);
+  const newL = hsl.l + grayProgress * (78 - hsl.l); // Lighter target for white beard
 
   return hslToHex(hsl.h, newS, newL);
 };
@@ -1243,11 +1285,222 @@ const applyJewishOccupationalWeighting = (
   return pool;
 };
 
-export const generateNPCStats = (seed: number, context?: { districtType?: DistrictType }): NPCStats => {
+type HeadwearPick = {
+  desc: string;
+  color: string;
+  garmentType?: 'khimar' | 'milhafa' | 'hijab';
+  pattern?: 'none' | 'band' | 'stripe' | 'geometric' | 'simple';
+  accent?: string;
+};
+
+const buildHeadwearPick = (
+  rand: () => number,
+  gender: 'Male' | 'Female',
+  headwearStyle: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none',
+  flags: { isReligiousLeader: boolean; isSoldier: boolean; isOfficer: boolean },
+  socialClass?: SocialClass,
+  religion?: Religion
+): HeadwearPick => {
+  if (gender === 'Female') {
+    // Historical Mamluk color restrictions for dhimmi (non-Muslim) women
+    // Muslims wore white, Christians blue, Jews yellow, Samaritans red
+    const isChristian = religion === 'Eastern Orthodox' || religion === 'Syriac Orthodox' || religion === 'Armenian Apostolic';
+    const isJewish = religion === 'Jewish';
+    const isSamaritan = religion === 'Samaritan';
+    const isMuslim = !isChristian && !isJewish && !isSamaritan;
+
+    // Expanded female headwear with variety by social class and garment type
+    const isWealthy = socialClass === SocialClass.NOBILITY || socialClass === SocialClass.ELITE;
+    const isMerchant = socialClass === SocialClass.MERCHANT || socialClass === SocialClass.ARTISAN;
+
+    // Period-accurate color palettes based on Mamluk dyes and religious restrictions
+    let muslimColors = {
+      white: '#f4efe6',      // undyed white (most common)
+      cream: '#e8dfcf',      // natural linen
+      paleBeige: '#d6c2a4',  // natural cotton
+      beige: '#c7b08c',      // light tan
+      tan: '#b89968',        // medium tan
+      brown: '#8b7355',      // natural brown
+      darkBrown: '#7b5a4a',  // dark linen
+      indigo: '#3f5d7a',     // expensive indigo (wealthy only)
+      deepBlue: '#5a6b7a',   // medium indigo
+      crimson: '#a03342',    // very expensive (nobility only)
+      madderRed: '#8b2e2e'   // madder red (wealthy)
+    };
+
+    let christianColors = {
+      lightBlue: '#7a8fa8',  // mandated Christian blue
+      mediumBlue: '#5a6b7a', // deeper blue
+      deepBlue: '#4a5d7a',   // rich blue
+      indigo: '#3f5d7a'      // indigo
+    };
+
+    let jewishColors = {
+      paleYellow: '#e3d2ad', // light saffron
+      saffron: '#d4b85c',    // mandated Jewish yellow
+      golden: '#c8a040',     // rich golden yellow
+      amber: '#c2a878'       // amber yellow
+    };
+
+    let samaritanColors = {
+      lightRed: '#a8635c',   // light red
+      red: '#8b4a42',        // mandated Samaritan red
+      deepRed: '#7a3a32',    // deep red
+      crimson: '#a03342'     // crimson
+    };
+
+    const options: HeadwearPick[] = [];
+
+    // Build options based on religion
+    if (isMuslim) {
+      // Muslim women - white/natural colors predominate, with expensive dyes for wealthy
+      options.push(
+        // Khimar options (structured, tight wrapping)
+        { desc: 'white linen khimar', color: muslimColors.white, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'cream khimar with simple band', color: muslimColors.cream, garmentType: 'khimar', pattern: 'band', accent: muslimColors.white },
+        { desc: 'pale khimar with subtle weave', color: muslimColors.paleBeige, garmentType: 'khimar', pattern: 'simple', accent: muslimColors.cream },
+        { desc: 'beige khimar in natural linen', color: muslimColors.beige, garmentType: 'khimar', pattern: 'none' },
+
+        // Milhafa options (flowing, North African style)
+        { desc: 'white cotton milhafa', color: muslimColors.white, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'flowing milhafa in cream', color: muslimColors.cream, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'natural linen milhafa', color: muslimColors.paleBeige, garmentType: 'milhafa', pattern: 'simple', accent: muslimColors.white },
+
+        // Hijab options (simple, contemporary style)
+        { desc: 'white headscarf', color: muslimColors.white, garmentType: 'hijab', pattern: 'none' },
+        { desc: 'cream linen headscarf', color: muslimColors.cream, garmentType: 'hijab', pattern: 'none' },
+        { desc: 'modest headscarf with band', color: muslimColors.paleBeige, garmentType: 'hijab', pattern: 'band', accent: muslimColors.white }
+      );
+    } else if (isChristian) {
+      // Christian women - must wear BLUE by Mamluk law
+      options.push(
+        { desc: 'blue linen khimar', color: christianColors.lightBlue, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'deep blue khimar', color: christianColors.deepBlue, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'blue khimar with pale band', color: christianColors.mediumBlue, garmentType: 'khimar', pattern: 'band', accent: christianColors.lightBlue },
+        { desc: 'indigo khimar', color: christianColors.indigo, garmentType: 'khimar', pattern: 'simple', accent: christianColors.lightBlue },
+        { desc: 'blue cotton milhafa', color: christianColors.lightBlue, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'deep blue milhafa', color: christianColors.deepBlue, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'blue headscarf', color: christianColors.mediumBlue, garmentType: 'hijab', pattern: 'none' },
+        { desc: 'light blue headscarf', color: christianColors.lightBlue, garmentType: 'hijab', pattern: 'none' }
+      );
+    } else if (isJewish) {
+      // Jewish women - must wear YELLOW by Mamluk law
+      options.push(
+        { desc: 'saffron yellow khimar', color: jewishColors.saffron, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'golden khimar', color: jewishColors.golden, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'pale yellow khimar with band', color: jewishColors.paleYellow, garmentType: 'khimar', pattern: 'band', accent: jewishColors.golden },
+        { desc: 'amber khimar', color: jewishColors.amber, garmentType: 'khimar', pattern: 'simple', accent: jewishColors.saffron },
+        { desc: 'yellow cotton milhafa', color: jewishColors.saffron, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'golden milhafa', color: jewishColors.golden, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'yellow headscarf', color: jewishColors.saffron, garmentType: 'hijab', pattern: 'none' },
+        { desc: 'pale yellow headscarf', color: jewishColors.paleYellow, garmentType: 'hijab', pattern: 'none' }
+      );
+    } else if (isSamaritan) {
+      // Samaritan women - must wear RED by Mamluk law
+      options.push(
+        { desc: 'red linen khimar', color: samaritanColors.red, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'crimson khimar', color: samaritanColors.crimson, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'light red khimar', color: samaritanColors.lightRed, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'deep red khimar', color: samaritanColors.deepRed, garmentType: 'khimar', pattern: 'simple', accent: samaritanColors.lightRed },
+        { desc: 'red cotton milhafa', color: samaritanColors.red, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'crimson milhafa', color: samaritanColors.crimson, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'red headscarf', color: samaritanColors.red, garmentType: 'hijab', pattern: 'none' }
+      );
+    }
+
+    // Add wealthy-exclusive options (expensive dyes and silk)
+    if (isWealthy && isMuslim) {
+      // Wealthy Muslims can afford expensive indigo and crimson dyes
+      options.push(
+        { desc: 'silk khimar with geometric patterns', color: muslimColors.white, garmentType: 'khimar', pattern: 'geometric', accent: '#b59b6a' },
+        { desc: 'fine linen khimar with gold threading', color: muslimColors.cream, garmentType: 'khimar', pattern: 'geometric', accent: '#b59b6a' },
+        { desc: 'indigo silk khimar', color: muslimColors.indigo, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'indigo milhafa with pale striping', color: muslimColors.deepBlue, garmentType: 'milhafa', pattern: 'stripe', accent: '#a8b5c4' },
+        { desc: 'crimson silk milhafa', color: muslimColors.crimson, garmentType: 'milhafa', pattern: 'simple', accent: muslimColors.white },
+        { desc: 'embroidered ivory milhafa', color: muslimColors.white, garmentType: 'milhafa', pattern: 'geometric', accent: '#b59b6a' }
+      );
+    } else if (isWealthy && isChristian) {
+      // Wealthy Christians - rich blue silks
+      options.push(
+        { desc: 'silk blue khimar with geometric patterns', color: christianColors.deepBlue, garmentType: 'khimar', pattern: 'geometric', accent: christianColors.lightBlue },
+        { desc: 'indigo silk khimar', color: christianColors.indigo, garmentType: 'khimar', pattern: 'none' }
+      );
+    } else if (isWealthy && isJewish) {
+      // Wealthy Jews - rich golden silks
+      options.push(
+        { desc: 'silk golden khimar with patterns', color: jewishColors.golden, garmentType: 'khimar', pattern: 'geometric', accent: jewishColors.paleYellow },
+        { desc: 'saffron silk milhafa', color: jewishColors.saffron, garmentType: 'milhafa', pattern: 'simple', accent: jewishColors.golden }
+      );
+    } else if (isWealthy && isSamaritan) {
+      // Wealthy Samaritans - rich red silks
+      options.push(
+        { desc: 'crimson silk khimar', color: samaritanColors.crimson, garmentType: 'khimar', pattern: 'simple', accent: samaritanColors.lightRed }
+      );
+    }
+
+    // Add merchant-class options (striped fabrics more affordable than geometric)
+    if (isMerchant && isMuslim) {
+      options.push(
+        { desc: 'striped khimar in natural cotton', color: muslimColors.tan, garmentType: 'khimar', pattern: 'stripe', accent: muslimColors.brown },
+        { desc: 'milhafa with decorative band', color: muslimColors.beige, garmentType: 'milhafa', pattern: 'band', accent: muslimColors.white }
+      );
+    } else if (isMerchant && isChristian) {
+      options.push(
+        { desc: 'striped blue khimar', color: christianColors.mediumBlue, garmentType: 'khimar', pattern: 'stripe', accent: christianColors.lightBlue }
+      );
+    } else if (isMerchant && isJewish) {
+      options.push(
+        { desc: 'striped yellow khimar', color: jewishColors.amber, garmentType: 'khimar', pattern: 'stripe', accent: jewishColors.paleYellow }
+      );
+    }
+
+    return options[Math.floor(rand() * options.length)];
+  }
+
+  if (flags.isReligiousLeader) {
+    return { desc: 'white imamah (turban) in fine cotton', color: '#e8dfcf', pattern: 'none' };
+  }
+  if (flags.isSoldier) {
+    return flags.isOfficer
+      ? { desc: 'deep red imamah with pale striping', color: '#8b2e2e', pattern: 'stripe', accent: '#e8dfcf' }
+      : { desc: 'dark wool cap with a narrow band', color: '#3a3a3a', pattern: 'band', accent: '#5a5a5a' };
+  }
+
+  if (headwearStyle === 'fez') {
+    return rand() > 0.5
+      ? { desc: 'felt fez cap in deep red', color: '#8b2e2e', pattern: 'none' }
+      : { desc: 'felt fez cap in pale tan', color: '#cbb48a', pattern: 'none' };
+  }
+  if (headwearStyle === 'straw') {
+    return { desc: 'woven straw brimmed cap', color: '#cbb48a', pattern: 'none' };
+  }
+  if (headwearStyle === 'taqiyah') {
+    return { desc: 'simple skullcap in dark cloth', color: '#3a3a3a', pattern: 'none' };
+  }
+  if (headwearStyle === 'cap') {
+    return { desc: 'plain linen cap', color: '#5a4a3a', pattern: 'none' };
+  }
+  if (headwearStyle === 'none') {
+    return { desc: 'uncovered head', color: '#cbb48a', pattern: 'none' };
+  }
+
+  const options: HeadwearPick[] = [
+    { desc: 'deep red imamah (turban) with white striping', color: '#8b2e2e', pattern: 'stripe', accent: '#e8dfcf' },
+    { desc: 'dark indigo imamah with pale striping', color: '#3f5d7a', pattern: 'stripe', accent: '#a8b5c4' },
+    { desc: 'black wool headwrap with white banding', color: '#1f1f1f', pattern: 'band', accent: '#e8dfcf' },
+    { desc: 'brown wool imamah with lighter wrap', color: '#7b5a4a', pattern: 'none' },
+    { desc: 'tan cotton headwrap in plain weave', color: '#cbb48a', pattern: 'none' },
+    { desc: 'brown wool imamah with pale striping', color: '#7b5a4a', pattern: 'stripe', accent: '#c7b08c' }
+  ];
+  return options[Math.floor(rand() * options.length)];
+};
+
+export const generateNPCStats = (seed: number, context?: { districtType?: DistrictType; gender?: 'Male' | 'Female' }): NPCStats => {
   let s = seed;
   const rand = () => seededRandom(s++);
 
-  const gender: 'Male' | 'Female' = rand() > 0.5 ? 'Male' : 'Female';
+  // Use provided gender or generate randomly
+  const gender: 'Male' | 'Female' = context?.gender ?? (rand() > 0.5 ? 'Male' : 'Female');
   const age = Math.floor(rand() * 50) + 12;
   const districtType = context?.districtType;
 
@@ -1348,8 +1601,12 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   const isCarpenter = /Carpenter/i.test(profession);
   const isShepherd = /Shepherd/i.test(profession);
 
-  // Height and weight scales
-  const heightBase = age < 18 ? 0.6 + (age / 18) * 0.3 : 0.9 + rand() * 0.2;
+  // Height and weight scales - more dramatic scaling for children
+  // A 5-year-old should be ~0.45, 10-year-old ~0.6, 15-year-old ~0.8
+  const heightBase = age < 6 ? 0.35 + (age / 6) * 0.15  // Toddlers/young children: 0.35-0.5
+    : age < 12 ? 0.5 + ((age - 6) / 6) * 0.2             // Children: 0.5-0.7
+    : age < 18 ? 0.7 + ((age - 12) / 6) * 0.2            // Youth: 0.7-0.9
+    : 0.9 + rand() * 0.2;                                // Adults: 0.9-1.1
   const weightBase = rand() * 0.4 + 0.8;
   const robeSpreadBase = socialClass === SocialClass.NOBILITY ? 1.08
     : socialClass === SocialClass.MERCHANT ? 1.0
@@ -1485,16 +1742,31 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     }
   }
 
-  const headwearPalette = headwearStyle === 'turban'
-    ? ['#e8dfcf', '#cbb48a', '#8b2e2e', '#3f5d7a', '#1f1f1f']
-    : headwearStyle === 'fez'
-      ? ['#8b2e2e', '#7b5a4a', '#1f1f1f']
-      : headwearStyle === 'taqiyah'
-        ? ['#3a3a3a', '#1f1f1f', '#5a4a3a']
-        : headwearStyle === 'straw'
-          ? ['#cbb48a', '#d6c2a4']
-          : ['#cbb48a', '#7b5a4a', '#1f1f1f'];
-  const headwearColor = headwearPalette[Math.floor(rand() * headwearPalette.length)];
+  // CHILDREN: Override headwear and appearance for young ages
+  // Children don't wear formal turbans or fez - they wear simple caps or go bareheaded
+  if (age < 14 && gender === 'Male') {
+    if (headwearStyle === 'turban' || headwearStyle === 'fez') {
+      headwearStyle = rand() > 0.5 ? 'cap' : 'none';
+    }
+    // Very young children often bareheaded
+    if (age < 8 && rand() > 0.6) {
+      headwearStyle = 'none';
+    }
+  }
+  // Young girls wear simpler head coverings or none
+  if (age < 10 && gender === 'Female') {
+    if (rand() > 0.5) {
+      headwearStyle = 'none';
+    }
+  }
+
+  const headwearPick = buildHeadwearPick(rand, gender, headwearStyle, { isReligiousLeader, isSoldier, isOfficer }, socialClass, religion);
+  const headwearColor = headwearPick.color;
+  const headwearGarmentType = gender === 'Female' ? (headwearPick.garmentType ?? 'hijab') : undefined;
+  const headscarfPattern = gender === 'Female' ? (headwearPick.pattern ?? 'none') : undefined;
+  const headscarfAccentColor = gender === 'Female' ? headwearPick.accent : undefined;
+  const turbanPattern = gender === 'Male' ? (headwearPick.pattern ?? 'none') : undefined;
+  const turbanAccentColor = gender === 'Male' ? headwearPick.accent : undefined;
 
   // Hair color with age-based graying
   const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626', '#3a2c22'];
@@ -1530,6 +1802,11 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     if (roll < 0.85) return 'stubble';
     return 'none';
   })() : 'none';
+
+  // Facial hair color (grays faster than head hair)
+  const facialHairColor = gender === 'Male' && facialHair !== 'none'
+    ? getAgedFacialHairColor(baseHairColor, age, rand)
+    : hairColor;
 
   const accessoryPool = gender === 'Female'
     ? (socialClass === SocialClass.NOBILITY
@@ -1678,8 +1955,14 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     hairStyle,
     hairColor,
     facialHair,
+    facialHairColor,
     headwearStyle,
     headscarfStyle,
+    headscarfPattern,
+    headscarfAccentColor,
+    headwearGarmentType,
+    turbanPattern,
+    turbanAccentColor,
     headwearColor,
     sleeveCoverage,
     footwearStyle,
@@ -1800,52 +2083,24 @@ export const generatePlayerStats = (
     headwearStyle = isOfficer ? 'turban' : 'cap';
   }
 
-  const headwearByGender = gender === 'Female'
-    ? [
-        { desc: 'linen khimar in faded cloth', color: '#c2a878' },
-        { desc: 'cotton milhafa with a soft wrap', color: '#d6c2a4' },
-        { desc: 'light khimar with a simple band', color: '#c7b08c' }
-      ]
-    : [
-        { desc: 'deep red imamah (turban) with white striping', color: '#8b2e2e' },
-        { desc: 'dark indigo imamah with pale striping', color: '#3f5d7a' },
-        { desc: 'black wool headwrap with white banding', color: '#1f1f1f' },
-        { desc: 'brown wool imamah with lighter wrap', color: '#7b5a4a' },
-        { desc: 'tan cotton headwrap in plain weave', color: '#cbb48a' },
-        { desc: 'brown wool imamah with pale striping', color: '#7b5a4a' }
-      ];
-  let headwearPick = headwearByGender[Math.floor(rand() * headwearByGender.length)];
-  if (gender === 'Male') {
-    if (headwearStyle === 'fez') {
-      headwearPick = rand() > 0.5
-        ? { desc: 'felt fez cap in deep red', color: '#8b2e2e' }
-        : { desc: 'felt fez cap in pale tan', color: '#cbb48a' };
-    } else if (headwearStyle === 'straw') {
-      headwearPick = { desc: 'woven straw brimmed cap', color: '#cbb48a' };
-    }
-  }
-  if (isReligiousLeader) {
-    headwearPick = { desc: 'white imamah (turban) in fine cotton', color: '#e8dfcf' };
-  } else if (isSoldier) {
-    headwearPick = isOfficer
-      ? { desc: 'deep red imamah with pale striping', color: '#8b2e2e' }
-      : { desc: 'dark wool cap with a narrow band', color: '#3a3a3a' };
-  }
   if (!isReligiousLeader && !isSoldier && gender === 'Male') {
     if (religion === 'Eastern Orthodox' || religion === 'Syriac Orthodox' || religion === 'Armenian Apostolic') {
       headwearStyle = rand() > 0.6 ? 'none' : 'cap';
-      headwearPick = { desc: 'plain linen cap', color: '#5a4a3a' };
     } else if (religion === 'Jewish') {
       headwearStyle = rand() > 0.5 ? 'cap' : 'taqiyah';
-      headwearPick = { desc: 'simple skullcap in dark cloth', color: '#3a3a3a' };
     } else if (religion === 'Druze') {
       headwearStyle = rand() > 0.5 ? 'turban' : 'cap';
-      headwearPick = { desc: 'dark indigo imamah', color: '#3f5d7a' };
     } else if (religion === 'Shia Islam' && headwearStyle === 'cap' && rand() > 0.6) {
       headwearStyle = 'turban';
-      headwearPick = { desc: 'white-wrapped turban', color: '#e8dfcf' };
     }
   }
+
+  const headwearPick = buildHeadwearPick(rand, gender, headwearStyle, { isReligiousLeader, isSoldier, isOfficer }, socialClass, religion);
+  const headwearGarmentType = gender === 'Female' ? (headwearPick.garmentType ?? 'hijab') : undefined;
+  const headscarfPattern = gender === 'Female' ? (headwearPick.pattern ?? 'none') : undefined;
+  const headscarfAccentColor = gender === 'Female' ? headwearPick.accent : undefined;
+  const turbanPattern = gender === 'Male' ? (headwearPick.pattern ?? 'none') : undefined;
+  const turbanAccentColor = gender === 'Male' ? headwearPick.accent : undefined;
 
   const healthHistoryOptions = [
     'survived a childhood fever',
@@ -1943,6 +2198,33 @@ export const generatePlayerStats = (
         : socialClass === SocialClass.NOBILITY ? (rand() > 0.4 ? 'medium' : 'long')
         : socialClass === SocialClass.CLERGY ? (rand() > 0.6 ? 'short' : 'medium')
         : rand() > 0.5 ? 'medium' : 'short');
+  const facialHair: PlayerStats['facialHair'] = gender === 'Male' ? (() => {
+    if (age < 12) return 'none';
+    if (age < 18) return rand() > 0.85 ? 'stubble' : 'none';
+    if (age < 21) return rand() > 0.6 ? 'stubble' : 'none';
+    if (isReligiousLeader) return rand() > 0.2 ? 'full_beard' : 'short_beard';
+    if (isSoldier) return rand() > 0.5 ? 'mustache' : (rand() > 0.5 ? 'short_beard' : 'stubble');
+    if (age > 40) {
+      const roll = rand();
+      if (roll < 0.35) return 'full_beard';
+      if (roll < 0.6) return 'short_beard';
+      if (roll < 0.8) return 'goatee';
+      return 'stubble';
+    }
+    const roll = rand();
+    if (roll < 0.15) return 'full_beard';
+    if (roll < 0.35) return 'short_beard';
+    if (roll < 0.5) return 'goatee';
+    if (roll < 0.7) return 'mustache';
+    if (roll < 0.85) return 'stubble';
+    return 'none';
+  })() : 'none';
+
+  // Facial hair color (grays faster than head hair)
+  const facialHairColor = gender === 'Male' && facialHair !== 'none'
+    ? getAgedFacialHairColor(baseHairColor, age, rand)
+    : hairColor;
+
   let footwearStyle: 'sandals' | 'shoes' | 'bare' =
     socialClass === SocialClass.NOBILITY ? (rand() > 0.2 ? 'shoes' : 'sandals')
     : socialClass === SocialClass.MERCHANT ? (rand() > 0.3 ? 'shoes' : 'sandals')
@@ -2095,8 +2377,15 @@ export const generatePlayerStats = (
     robeOverwrap,
     robePattern,
     hairStyle,
+    facialHair,
+    facialHairColor,
     headwearStyle,
     headscarfStyle,
+    headscarfPattern,
+    headscarfAccentColor,
+    headwearGarmentType,
+    turbanPattern,
+    turbanAccentColor,
     sleeveCoverage,
     footwearStyle,
     footwearColor,

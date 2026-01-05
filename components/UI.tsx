@@ -44,6 +44,9 @@ import { ReportsPanelMockupC } from './ReportsPanelMockupC';
 import { AboutModal } from './AboutModal';
 import { FamilyMemberModal } from './FamilyMemberModal';
 import { FamilyMember } from '../types';
+import { buildNarratorPrompt, NarratorContext } from '../utils/narratorPrompt';
+import { NarratorHighlightEntry } from './NarratorPanel';
+import { LLMTransparencyModal } from './LLMTransparencyModal';
 
 interface UIProps {
   params: SimulationParams;
@@ -123,6 +126,10 @@ interface UIProps {
   onDropItemAtScreen?: (item: { inventoryId: string; itemId: string; label: string; appearance?: ItemAppearance }, clientX: number, clientY: number) => void;
   /** Consume an inventory item (use its effects) */
   onConsumeItem?: (playerItem: import('../types').PlayerItem) => void;
+  /** Build a narrator context snapshot for LLM */
+  getNarratorContext?: () => NarratorContext;
+  /** Highlight a narrator target in-world */
+  onNarratorHighlight?: (entry: NarratorHighlightEntry) => void;
   perfDebug?: {
     schedulePhase: number;
     scheduleActive: boolean;
@@ -633,7 +640,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, getNarratorContext, onNarratorHighlight, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -674,9 +681,174 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     narratorKey,
     narratorHistory,
     narratorOpen,
-    setNarratorOpen
+    setNarratorOpen,
+    pushNarration
   } = useNarration(params.mapX, params.mapY, params.timeOfDay);
+  const [narratorLoading, setNarratorLoading] = useState(false);
+  const [narratorExchanges, setNarratorExchanges] = useState<Array<{ player: string; narrator: string }>>([]);
+  const narratorPendingQuestionRef = useRef<string | null>(null);
+  const [llmTransparencyOpen, setLlmTransparencyOpen] = useState(false);
+  const [llmTransparencyEntries, setLlmTransparencyEntries] = useState<Array<{ id: string; prompt: string; response: string }>>([]);
   const perspectiveTimeoutRef = useRef<number | null>(null);
+
+  const summarizeNarratorOutput = useCallback((text: string) => {
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    const sentences = normalized.match(/[^.!?]+[.!?]+/g) ?? [normalized];
+    return sentences.slice(0, 4).join(' ').trim();
+  }, []);
+
+  const sanitizeNarratorMemory = useCallback((text: string, allowedTerms: string[]) => {
+    const allowed = new Set(allowedTerms.map((term) => term.toLowerCase()));
+    return text.replace(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g, (match) => {
+      const normalized = match.toLowerCase();
+      if (allowed.has(normalized)) return match;
+      return 'someone';
+    });
+  }, []);
+
+  useEffect(() => {
+    setNarratorExchanges([]);
+  }, [params.mapX, params.mapY, sceneMode]);
+
+  const narratorHighlights = useMemo(() => {
+    if (!getNarratorContext) {
+      return { entries: [] };
+    }
+    const context = getNarratorContext();
+    const entries: NarratorHighlightEntry[] = [];
+
+    context.nearbyNpcs.forEach((npc) => {
+      entries.push({
+        term: npc.label,
+        kind: npc.kind ?? 'npc',
+        id: npc.id,
+        position: npc.position
+      });
+    });
+
+    context.nearbyObjects.forEach((obj) => {
+      entries.push({
+        term: obj.label,
+        kind: obj.kind ?? 'object',
+        id: obj.id,
+        position: obj.position
+      });
+    });
+
+    context.nearbyBuildings.forEach((building) => {
+      entries.push({
+        term: building.label,
+        kind: building.kind ?? 'building',
+        id: building.id,
+        position: building.position
+      });
+    });
+
+    const familyNames = playerStats.familyMembers?.map((member) => member.name) ?? [];
+    familyNames.forEach((name) => {
+      if (entries.some((entry) => entry.term === name)) return;
+      entries.push({ term: name, kind: 'family' });
+    });
+
+    return {
+      entries
+    };
+  }, [getNarratorContext, playerStats.familyMembers, params.mapX, params.mapY, sceneMode]);
+
+  const handleNarratorSubmit = useCallback(async (question: string) => {
+    if (!getNarratorContext || narratorLoading) return;
+    setNarratorOpen(true);
+    setNarratorLoading(true);
+    try {
+      pushNarration(`You: ${question}`);
+      narratorPendingQuestionRef.current = question;
+      const baseContext = getNarratorContext();
+      const context = {
+        ...baseContext,
+        recentExchanges: narratorExchanges
+      };
+      const allowedTerms = [
+        baseContext.locationLabel,
+        baseContext.district,
+        ...(baseContext.nearbyBuildings.map((entry) => entry.label)),
+        ...(baseContext.nearbyNpcs.map((entry) => entry.label)),
+        ...(baseContext.nearbyObjects.map((entry) => entry.label)),
+        ...(baseContext.nearbyDistricts?.map((entry) => entry.locationLabel) ?? []),
+      ].filter(Boolean);
+      const prompt = buildNarratorPrompt(question, context);
+      const response = await fetch('/api/narrator', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
+      if (!response.ok) {
+        throw new Error(`Narrator request failed (${response.status})`);
+      }
+      const data = await response.json();
+      if (typeof data.text === 'string' && data.text.trim()) {
+        const trimmed = data.text.trim();
+        pushNarration(trimmed);
+        setLlmTransparencyEntries((prev) => {
+          const next = [...prev, {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            prompt,
+            response: trimmed
+          }];
+          return next.slice(-5);
+        });
+        setNarratorExchanges((prev) => {
+          const sanitized = sanitizeNarratorMemory(summarizeNarratorOutput(trimmed), allowedTerms);
+          const next = [...prev, {
+            player: narratorPendingQuestionRef.current ?? question,
+            narrator: sanitized
+          }];
+          return next.slice(-5);
+        });
+      } else {
+        const fallback = 'No clear answer comes; the scene refuses to explain itself.';
+        pushNarration(fallback);
+        setLlmTransparencyEntries((prev) => {
+          const next = [...prev, {
+            id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            prompt,
+            response: fallback
+          }];
+          return next.slice(-5);
+        });
+        setNarratorExchanges((prev) => {
+          const sanitized = sanitizeNarratorMemory(summarizeNarratorOutput(fallback), allowedTerms);
+          const next = [...prev, {
+            player: narratorPendingQuestionRef.current ?? question,
+            narrator: sanitized
+          }];
+          return next.slice(-5);
+        });
+      }
+    } catch (error) {
+      console.error('Narrator request failed:', error);
+      const fallback = 'No clear answer comes; the scene refuses to explain itself.';
+      pushNarration(fallback);
+      setLlmTransparencyEntries((prev) => {
+        const next = [...prev, {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          prompt,
+          response: fallback
+        }];
+        return next.slice(-5);
+      });
+      setNarratorExchanges((prev) => {
+        const sanitized = sanitizeNarratorMemory(summarizeNarratorOutput(fallback), allowedTerms);
+        const next = [...prev, {
+          player: narratorPendingQuestionRef.current ?? question,
+          narrator: sanitized
+        }];
+        return next.slice(-5);
+      });
+    } finally {
+      narratorPendingQuestionRef.current = null;
+      setNarratorLoading(false);
+    }
+  }, [getNarratorContext, narratorExchanges, narratorLoading, pushNarration, sanitizeNarratorMemory, setNarratorOpen, summarizeNarratorOutput]);
 
   // Biome ambience preview for settings
   const { currentPreview, playPreview, stopPreview } = useBiomeAmbiencePreview();
@@ -2134,6 +2306,11 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             narratorOpen={narratorOpen}
             onToggleNarrator={setNarratorOpen}
             mobileNarratorVisible={mobileNarratorVisible}
+            onNarratorSubmit={handleNarratorSubmit}
+            narratorLoading={narratorLoading}
+            narratorHighlights={narratorHighlights}
+            onNarratorHighlightSelect={onNarratorHighlight}
+            onOpenTransparency={() => setLlmTransparencyOpen(true)}
             inventoryItems={inventoryEntries}
             onOpenItemModal={(item) => setSelectedInventoryItem(item)}
             onDropItemAtScreen={onDropItemAtScreen}
@@ -2143,6 +2320,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
       <AboutModal
         isOpen={showAbout}
         onClose={() => setShowAbout(false)}
+      />
+
+      <LLMTransparencyModal
+        isOpen={llmTransparencyOpen}
+        onClose={() => setLlmTransparencyOpen(false)}
+        entries={llmTransparencyEntries}
       />
     </div>
   );

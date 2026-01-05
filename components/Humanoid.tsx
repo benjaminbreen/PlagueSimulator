@@ -31,7 +31,8 @@ const hairCache = new Map<string, THREE.CanvasTexture>();
 
 // Hair strand texture - creates realistic hair strand pattern
 const getHairTexture = (baseHex: string, isGraying: boolean = false) => {
-  const key = `${baseHex}_${isGraying}`;
+  const hashSeed = baseHex.split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+  const key = `${baseHex}_${isGraying}_${hashSeed % 17}`;
   const cached = hairCache.get(key);
   if (cached) return cached;
 
@@ -73,6 +74,23 @@ const getHairTexture = (baseHex: string, isGraying: boolean = false) => {
     ctx.quadraticCurveTo(x + midOffset, size / 2, x + endOffset, size);
     ctx.stroke();
   }
+
+  // Add a subtle part line and irregular break to avoid helmet look
+  const partX = (hashSeed % 37) + 30;
+  ctx.globalAlpha = 0.5;
+  ctx.strokeStyle = `rgb(${Math.min(255, r + 55)}, ${Math.min(255, g + 45)}, ${Math.min(255, b + 40)})`;
+  ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(partX, 0);
+  ctx.quadraticCurveTo(partX + 6, size / 2, partX - 4, size);
+  ctx.stroke();
+  ctx.globalAlpha = 0.35;
+  ctx.strokeStyle = `rgb(${Math.floor(r * 0.55)}, ${Math.floor(g * 0.55)}, ${Math.floor(b * 0.55)})`;
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.moveTo(partX + 3, 0);
+  ctx.quadraticCurveTo(partX + 8, size / 2, partX + 2, size);
+  ctx.stroke();
 
   // Add darker shadow strands for depth
   ctx.globalAlpha = 0.4;
@@ -116,7 +134,7 @@ const getHairTexture = (baseHex: string, isGraying: boolean = false) => {
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2); // Reduced repeat for less visible tiling
+  texture.repeat.set(1.6, 1.6); // Reduced repeat for less visible tiling
   texture.minFilter = THREE.LinearMipMapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
   hairCache.set(key, texture);
@@ -392,7 +410,14 @@ interface HumanoidProps {
   sashPatternScale?: number;
   hairStyle?: 'short' | 'medium' | 'long' | 'covered';
   facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
+  facialHairColor?: string;
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
+  headscarfPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  headscarfAccentColor?: string;
+  headwearGarmentType?: 'khimar' | 'milhafa' | 'hijab';
+  hasEmbroidery?: boolean;
+  turbanPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  turbanAccentColor?: string;
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
   footwearColor?: string;
@@ -481,7 +506,14 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   sashPatternScale,
   hairStyle: hairStyleProp,
   facialHair = 'none',
+  facialHairColor: facialHairColorProp,
   headwearStyle: headwearStyleProp,
+  headscarfPattern = 'none',
+  headscarfAccentColor,
+  headwearGarmentType = 'hijab',
+  hasEmbroidery = false,
+  turbanPattern = 'none',
+  turbanAccentColor,
   sleeveCoverage = robeSleeves ? 'full' : 'none',
   footwearStyle = 'sandals',
   footwearColor = '#9b7b4f',
@@ -585,6 +617,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const glowIntensity = useRef(0);
 
   const isFemale = gender === 'Female';
+  // Facial hair color - uses separate color if provided (for age-based graying), otherwise hairColor
+  const beardColor = facialHairColorProp || hairColor;
   const faceShadowColor = useMemo(() => new THREE.Color(sickHeadColor).multiplyScalar(0.85).getStyle(), [sickHeadColor]);
   const faceHighlightColor = useMemo(() => new THREE.Color(sickHeadColor).multiplyScalar(1.08).getStyle(), [sickHeadColor]);
   const lipColor = useMemo(() => {
@@ -626,6 +660,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       craniumHeight: 1.0 + Math.random() * 0.25,
       craniumDepth: 0.85 + Math.random() * 0.15,
       faceWidthRatio: 0.95 + Math.random() * 0.20,
+      hairlineVariant: (() => {
+        const roll = Math.random();
+        if (roll < 0.33) return 'full';
+        if (roll < 0.66) return 'receded';
+        return 'widow';
+      })(),
       // Lip fullness - affects Z-depth/protrusion (0.7 = thin, 1.3 = full)
       lipFullness: 1 + Math.random() * 0.6,
       // Mouth corner curve - positive = slight smile, negative = serious/frown
@@ -657,6 +697,39 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     }
     return new THREE.Color(turbanColor).multiplyScalar(1.18).getStyle();
   }, [turbanColor, headwearStyle]);
+  const scarfPatternColor = useMemo(
+    () => headscarfAccentColor ?? headwearHighlight,
+    [headscarfAccentColor, headwearHighlight]
+  );
+  const turbanPatternColor = useMemo(
+    () => turbanAccentColor ?? turbanHighlight,
+    [turbanAccentColor, turbanHighlight]
+  );
+
+  // Generate texture-based patterns for geometric and simple headscarf patterns
+  const headscarfTexture = useMemo(() => {
+    if (headscarfPattern === 'geometric') {
+      return getMotifTexture('geometric', headscarfColor, scarfPatternColor, 4);
+    } else if (headscarfPattern === 'simple') {
+      return getMotifTexture('damask', headscarfColor, scarfPatternColor, 6);
+    } else if (headscarfPattern === 'stripe') {
+      return getMotifTexture('stripe', headscarfColor, scarfPatternColor, 3);
+    }
+    return null;
+  }, [headscarfPattern, headscarfColor, scarfPatternColor]);
+
+  // Generate texture-based patterns for turban patterns
+  const turbanTexture = useMemo(() => {
+    if (turbanPattern === 'geometric') {
+      return getMotifTexture('geometric', turbanColor, turbanPatternColor, 4);
+    } else if (turbanPattern === 'simple') {
+      return getMotifTexture('tiraz', turbanColor, turbanPatternColor, 2);
+    } else if (turbanPattern === 'stripe') {
+      return getMotifTexture('stripe', turbanColor, turbanPatternColor, 3);
+    }
+    return null;
+  }, [turbanPattern, turbanColor, turbanPatternColor]);
+
   const femaleRobeSpread = useMemo(() => robeSpread ?? (0.75 + Math.random() * 0.18), [robeSpread]);
   const femaleRobeBand = useMemo(() => robeHemBand ?? (Math.random() > 0.5), [robeHemBand]);
   const eyeScale = useMemo(() => {
@@ -664,9 +737,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     return [base[0], base[1] * faceVariant.eyeScaleY, base[2]] as [number, number, number];
   }, [isFemale, faceVariant.eyeScaleY]);
   const eyeY = (isFemale ? 0.03 : 0.02) + faceVariant.eyeYOffset;
-  const browColor = isFemale ? faceShadowColor : '#3a2a1a';
-  const browHeight = Math.max(0.02, (isFemale ? 0.03 : 0.04) * faceVariant.browHeightScale);
-  const browY = eyeY + 0.045 + faceVariant.browYOffset;
+  const browColor = useMemo(
+    () => new THREE.Color(hairColor).multiplyScalar(0.92).getStyle(),
+    [hairColor]
+  );
+  const browHeight = Math.max(0.02, (isFemale ? 0.035 : 0.045) * faceVariant.browHeightScale);
+  const browY = eyeY + 0.058 + faceVariant.browYOffset;
   const browX = faceVariant.eyeSpacing - 0.008;
   const noseLength = isFemale ? 0.09 : 0.1;
   const noseRadius = isFemale ? 0.025 : 0.017;
@@ -2008,6 +2084,29 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <cylinderGeometry args={[0.22, 0.28, 0.35, 8]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
+            {/* Collar neckline - round neck opening with decorative band */}
+            <mesh position={[0, 1.48, 0.02]} castShadow>
+              <torusGeometry args={[0.12, 0.018, 6, 12]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.82} />
+            </mesh>
+            {/* Inner collar band - suggests modest layering */}
+            <mesh position={[0, 1.46, 0.01]} castShadow>
+              <cylinderGeometry args={[0.11, 0.12, 0.04, 8]} />
+              <meshStandardMaterial color={headwearShadow} roughness={0.9} />
+            </mesh>
+            {/* Embroidered collar detail - for wealthier characters */}
+            {hasEmbroidery && (
+              <>
+                <mesh position={[0.08, 1.48, 0.08]} castShadow>
+                  <sphereGeometry args={[0.012, 6, 6]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.7} />
+                </mesh>
+                <mesh position={[-0.08, 1.48, 0.08]} castShadow>
+                  <sphereGeometry args={[0.012, 6, 6]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.7} />
+                </mesh>
+              </>
+            )}
             <mesh position={[0, 1.05, 0]} castShadow>
               <cylinderGeometry args={[0.24, 0.24, 0.7, 8]} />
               <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
@@ -2076,6 +2175,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <cylinderGeometry args={[0.048, 0.042, 0.22, 8]} />
                 <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
               </mesh>
+              {/* Sleeve cuff - decorative band at wrist */}
+              {sleeveCoverage !== 'none' && (
+                <mesh position={[0, -0.20, 0]} castShadow>
+                  <cylinderGeometry args={[0.046, 0.048, 0.025, 8]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+                </mesh>
+              )}
               {/* Hand - palm pad with thumb, rotated so palm faces inward */}
               <group position={[0, -0.24, 0]} rotation={[0, Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>
@@ -2137,6 +2243,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <cylinderGeometry args={[0.048, 0.042, 0.22, 8]} />
                 <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
               </mesh>
+              {/* Sleeve cuff - decorative band at wrist */}
+              {sleeveCoverage !== 'none' && (
+                <mesh position={[0, -0.20, 0]} castShadow>
+                  <cylinderGeometry args={[0.046, 0.048, 0.025, 8]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+                </mesh>
+              )}
               {/* Hand - palm pad with thumb, rotated so palm faces inward */}
               <group position={[0, -0.24, 0]} rotation={[0, -Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>
@@ -2198,6 +2311,27 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <cylinderGeometry args={[0.25, 0.35, 0.9, 8]} />
               <meshStandardMaterial color={color} roughness={clothRoughness} />
             </mesh>
+            {/* Collar neckline - v-neck opening typical of thawb/qamis */}
+            <mesh position={[-0.04, 1.48, 0.14]} rotation={[0.3, 0.15, 0.1]} castShadow>
+              <boxGeometry args={[0.06, 0.14, 0.015]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+            </mesh>
+            <mesh position={[0.04, 1.48, 0.14]} rotation={[0.3, -0.15, -0.1]} castShadow>
+              <boxGeometry args={[0.06, 0.14, 0.015]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+            </mesh>
+            {/* Collar band - simple band at base of neck */}
+            <mesh position={[0, 1.52, 0]} castShadow>
+              <cylinderGeometry args={[0.14, 0.15, 0.035, 8]} />
+              <meshStandardMaterial color={robeAccentColor} roughness={0.88} />
+            </mesh>
+            {/* Tiraz-style embroidered band for wealthier characters */}
+            {hasEmbroidery && (
+              <mesh position={[0, 1.50, 0.01]} castShadow>
+                <cylinderGeometry args={[0.155, 0.16, 0.02, 8]} />
+                <meshStandardMaterial color={headwearHighlight} roughness={0.75} />
+              </mesh>
+            )}
             {motifMap && (
               <mesh position={[0, 1.1, 0.01]} castShadow>
                 <cylinderGeometry args={[0.26, 0.36, 0.88, 8]} />
@@ -2390,14 +2524,33 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           )}
           {/* Hair - LOD-based rendering for performance */}
           {headwearStyle === 'none' && hairStyle !== 'covered' && (
-            <group>
+            <group
+              scale={[
+                0.95 * faceVariant.craniumWidth,
+                1.1 * faceVariant.craniumHeight,
+                0.9 * faceVariant.craniumDepth
+              ]}
+            >
               {/* === LOW LOD (>35 units) - Silhouette only === */}
               {hairLOD === 'low' && (
                 <>
                   {/* Back/top hemisphere only - theta restricted to exclude front */}
-                  <mesh position={[0, 0.08, -0.09]} castShadow>
-                    <sphereGeometry args={[0.205, 8, 6, 0, Math.PI * 0.55, Math.PI * 0.4, Math.PI * 1.2]} />
+                  <mesh position={[0, 0.075, -0.085]} castShadow scale={[1, 1, 0.82]}>
+                    <sphereGeometry args={[0.19, 8, 6, 0, Math.PI * 0.55, Math.PI * 0.4, Math.PI * 1.2]} />
                     <meshStandardMaterial color={hairColor} roughness={0.9} />
+                  </mesh>
+                  {/* Side taper + neck nape to avoid helmet circle */}
+                  <mesh position={[-0.16, 0.0, -0.05]} rotation={[0, 0.2, 0.12]} castShadow>
+                    <capsuleGeometry args={[0.02, 0.06, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} />
+                  </mesh>
+                  <mesh position={[0.16, 0.0, -0.05]} rotation={[0, -0.2, -0.12]} castShadow>
+                    <capsuleGeometry args={[0.02, 0.06, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} />
+                  </mesh>
+                  <mesh position={[0, -0.04, -0.14]} rotation={[0.15, 0, 0]} castShadow>
+                    <capsuleGeometry args={[0.03, 0.08, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.9} />
                   </mesh>
                   {hairStyle === 'long' && (
                     <mesh position={[0, -0.12, -0.14]} rotation={[0.15, 0, 0]} castShadow>
@@ -2412,20 +2565,75 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {hairLOD === 'medium' && (
                 <>
                   {/* Base cap - back/top hemisphere only */}
-                  <mesh position={[0, 0.07, -0.085]} castShadow>
-                    <sphereGeometry args={[0.202, 10, 8, 0, Math.PI * 0.54, Math.PI * 0.35, Math.PI * 1.3]} />
-                    <meshStandardMaterial color={hairColor} roughness={0.88} />
+                  <mesh position={[0, 0.06, -0.11]} rotation={[-0.25, 0, 0]} castShadow scale={[1, 1, 0.84]}>
+                    <sphereGeometry args={[0.182, 10, 8, 0, Math.PI * 0.52, Math.PI * 0.45, Math.PI * 1.1]} />
+                    <meshStandardMaterial color={hairColor} roughness={0.88} map={hairTexture} />
                   </mesh>
+                  {/* Tapered side + nape */}
+                  <mesh position={[-0.17, hairStyle === 'short' ? -0.04 : -0.06, -0.06]} rotation={[0, 0.18, 0.12]} castShadow>
+                    <capsuleGeometry args={[0.024, hairStyle === 'short' ? 0.08 : 0.14, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.88} map={hairTexture} />
+                  </mesh>
+                  <mesh position={[0.17, hairStyle === 'short' ? -0.04 : -0.06, -0.06]} rotation={[0, -0.18, -0.12]} castShadow>
+                    <capsuleGeometry args={[0.024, hairStyle === 'short' ? 0.08 : 0.14, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.88} map={hairTexture} />
+                  </mesh>
+                  <mesh position={[0, hairStyle === 'short' ? -0.06 : -0.09, hairStyle === 'short' ? -0.12 : -0.15]} rotation={[0.22, 0, 0]} castShadow>
+                    <capsuleGeometry args={[0.035, hairStyle === 'short' ? 0.08 : 0.14, 4, 6]} />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.9} map={hairTexture} />
+                  </mesh>
+                  {hairStyle !== 'short' && (
+                    <mesh position={[0, -0.13, -0.16]} rotation={[0.25, 0, 0]} castShadow>
+                      <capsuleGeometry args={[0.03, 0.12, 4, 6]} />
+                      <meshStandardMaterial color={adjustColor(hairColor, 0.86)} roughness={0.9} map={hairTexture} />
+                    </mesh>
+                  )}
+                  {/* Hairline definition for medium LOD */}
+                  <mesh
+                    position={[
+                      0,
+                      faceVariant.hairlineVariant === 'receded' ? 0.175 : 0.165,
+                      faceVariant.hairlineVariant === 'receded' ? 0.02 : 0.04
+                    ]}
+                    rotation={[0.6, 0, 0]}
+                    castShadow
+                  >
+                    <torusGeometry
+                      args={[
+                        faceVariant.hairlineVariant === 'receded' ? 0.07 : 0.088,
+                        0.012,
+                        6,
+                        12,
+                        faceVariant.hairlineVariant === 'receded' ? Math.PI * 0.75 : Math.PI * 0.95
+                      ]}
+                    />
+                    <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} map={hairTexture} />
+                  </mesh>
+                  {faceVariant.hairlineVariant === 'widow' && hairStyle !== 'medium' && (
+                    <mesh position={[0, 0.115, 0.065]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                      <coneGeometry args={[0.016, 0.03, 8]} />
+                      <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} map={hairTexture} />
+                    </mesh>
+                  )}
                   {/* Medium/Long: side coverage */}
                   {(hairStyle === 'medium' || hairStyle === 'long') && (
                     <>
-                      <mesh position={[-0.15, -0.04, -0.06]} rotation={[0, 0.08, 0.12]} castShadow>
-                        <capsuleGeometry args={[0.035, 0.14, 3, 6]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.88} />
+                      <mesh position={[-0.162, -0.07, -0.07]} rotation={[0, 0.14, 0.18]} castShadow>
+                        <capsuleGeometry args={[0.034, 0.18, 3, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.88} map={hairTexture} />
                       </mesh>
-                      <mesh position={[0.15, -0.04, -0.06]} rotation={[0, -0.08, -0.12]} castShadow>
-                        <capsuleGeometry args={[0.035, 0.14, 3, 6]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.88} />
+                      <mesh position={[0.168, -0.065, -0.06]} rotation={[0, -0.12, -0.16]} castShadow>
+                        <capsuleGeometry args={[0.034, 0.18, 3, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.88} map={hairTexture} />
+                      </mesh>
+                      {/* Sideburn connectors to blend into facial sideburns */}
+                      <mesh position={[-0.17, 0.03, 0.10]} rotation={[0.14, 0.12, 0.2]} castShadow>
+                        <capsuleGeometry args={[0.028, 0.16, 4, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} map={hairTexture} />
+                      </mesh>
+                      <mesh position={[0.17, 0.03, 0.10]} rotation={[0.14, -0.12, -0.2]} castShadow>
+                        <capsuleGeometry args={[0.028, 0.16, 4, 6]} />
+                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.9} map={hairTexture} />
                       </mesh>
                     </>
                   )}
@@ -2443,20 +2651,42 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {hairLOD === 'high' && (
                 <>
                   {/* Layer 1: Skull-hugging dark base - back/top hemisphere */}
-                  <mesh position={[0, 0.06, -0.08]} castShadow>
-                    <sphereGeometry args={[0.200, 12, 10, 0, Math.PI * 0.56, Math.PI * 0.32, Math.PI * 1.36]} />
+                  <mesh position={[0, 0.085, -0.075]} castShadow scale={[1, 1, 0.85]}>
+                    <sphereGeometry args={[0.182, 12, 10, 0, Math.PI * 0.86, Math.PI * 0.32, Math.PI * 1.36]} />
                     <meshStandardMaterial color={adjustColor(hairColor, 0.82)} roughness={0.92} />
                   </mesh>
                   {/* Layer 2: Main volume with texture - slightly higher and forward */}
-                  <mesh position={[0, 0.09, -0.075]} castShadow>
-                    <sphereGeometry args={[0.203, 12, 10, 0, Math.PI * 0.52, Math.PI * 0.36, Math.PI * 1.28]} />
+                  <mesh position={[0, 0.015, -0.04]} castShadow scale={[1, 1, 0.96]}>
+                    <sphereGeometry args={[0.199, 10, 10, 0, Math.PI * 0.62, Math.PI * 0.36, Math.PI * 1.28]} />
                     <meshStandardMaterial color={hairColor} map={hairTexture} roughness={0.88} />
                   </mesh>
                   {/* Hairline definition - positioned at natural forehead hairline */}
-                  <mesh position={[0, 0.125, 0.05]} rotation={[0.5, 0, 0]} castShadow>
-                    <torusGeometry args={[0.095, 0.015, 6, 12, Math.PI * 1.1]} />
+                  <mesh
+                    position={[
+                      0,
+                      faceVariant.hairlineVariant === 'receded' ? 0.135 : 0.125,
+                      faceVariant.hairlineVariant === 'receded' ? 0.03 : 0.05
+                    ]}
+                    rotation={[0.5, 0, 0]}
+                    castShadow
+                  >
+                    <torusGeometry
+                      args={[
+                        faceVariant.hairlineVariant === 'receded' ? 0.082 : 0.095,
+                        0.055,
+                        6,
+                        12,
+                        faceVariant.hairlineVariant === 'receded' ? Math.PI * 0.85 : Math.PI * 1.1
+                      ]}
+                    />
                     <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.9} />
                   </mesh>
+                  {faceVariant.hairlineVariant === 'widow' && (
+                    <mesh position={[0, 0.112, 0.07]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                      <coneGeometry args={[0.018, 0.035, 8]} />
+                      <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.9} />
+                    </mesh>
+                  )}
 
                   {/* Short hair: temple and side coverage */}
                   {hairStyle === 'short' && (
@@ -2530,7 +2760,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Eyebrows - Natural curved with taper */}
               {(() => {
                 // Gender-specific base thickness - increased for strong prominence
-                const baseBrowThickness = isFemale ? 0.0042 : 0.0050;
+                const baseBrowThickness = isFemale ? 0.0052 : 0.0062;
                 const innerThickness = baseBrowThickness * 1.3; // Thicker near nose
                 const middleThickness = baseBrowThickness;
                 const outerThickness = baseBrowThickness * 0.8; // Thinner at tail
@@ -2541,20 +2771,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                     {/* Left eyebrow - 3-part curved with natural taper */}
                     <group ref={leftBrowRef} position={[-browX, browY, 0.165]} rotation={[0, 0, isFemale ? -0.1 : -0.08]}>
                       {/* Inner segment (near nose) - thickest and longer */}
-                      <mesh position={[0.010, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                        <capsuleGeometry args={[innerThickness, 0.027, 4, 8]} />
+                      <mesh position={[0.012, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[innerThickness, 0.034, 4, 8]} />
                         <meshStandardMaterial color={browColor} roughness={1} />
                       </mesh>
 
                       {/* Middle segment (arch peak) - medium thickness, raised, longer */}
                       <mesh position={[0, archHeight, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                        <capsuleGeometry args={[middleThickness, 0.030, 4, 8]} />
+                        <capsuleGeometry args={[middleThickness, 0.036, 4, 8]} />
                         <meshStandardMaterial color={browColor} roughness={1} />
                       </mesh>
 
                       {/* Outer segment (tail) - thinnest, tapered, longer */}
-                      <mesh position={[-0.012, archHeight * 0.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                        <capsuleGeometry args={[outerThickness, 0.026, 4, 6]} />
+                      <mesh position={[-0.014, archHeight * 0.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[outerThickness, 0.032, 4, 6]} />
                         <meshStandardMaterial color={browColor} roughness={1} />
                       </mesh>
                     </group>
@@ -2562,20 +2792,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                     {/* Right eyebrow - 3-part curved with natural taper */}
                     <group ref={rightBrowRef} position={[browX, browY, 0.165]} rotation={[0, 0, isFemale ? 0.1 : 0.08]}>
                       {/* Inner segment (near nose) - thickest and longer */}
-                      <mesh position={[-0.010, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                        <capsuleGeometry args={[innerThickness, 0.027, 4, 8]} />
+                      <mesh position={[-0.012, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[innerThickness, 0.034, 4, 8]} />
                         <meshStandardMaterial color={browColor} roughness={1} />
                       </mesh>
 
                       {/* Middle segment (arch peak) - medium thickness, raised, longer */}
                       <mesh position={[0, archHeight, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                        <capsuleGeometry args={[middleThickness, 0.030, 4, 8]} />
+                        <capsuleGeometry args={[middleThickness, 0.036, 4, 8]} />
                         <meshStandardMaterial color={browColor} roughness={1} />
                       </mesh>
 
                       {/* Outer segment (tail) - thinnest, tapered, longer */}
-                      <mesh position={[0.012, archHeight * 0.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
-                        <capsuleGeometry args={[outerThickness, 0.026, 4, 6]} />
+                      <mesh position={[0.014, archHeight * 0.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[outerThickness, 0.032, 4, 6]} />
                         <meshStandardMaterial color={browColor} roughness={1} />
                       </mesh>
                     </group>
@@ -3029,15 +3259,15 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                           <>
                             <mesh position={[0, -0.14 - jawOffset, 0.12 + jawForward]} castShadow>
                               <sphereGeometry args={[0.08, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.7)} roughness={1} transparent opacity={0.7} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.7)} roughness={1} transparent opacity={0.7} />
                             </mesh>
                             <mesh position={[-0.08, -0.11 - jawOffset * 0.5, 0.1 + jawForward * 0.8]} castShadow>
                               <boxGeometry args={[0.04, 0.06, 0.02]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.65} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.65)} roughness={1} transparent opacity={0.65} />
                             </mesh>
                             <mesh position={[0.08, -0.11 - jawOffset * 0.5, 0.1 + jawForward * 0.8]} castShadow>
                               <boxGeometry args={[0.04, 0.06, 0.02]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.65} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.65)} roughness={1} transparent opacity={0.65} />
                             </mesh>
                           </>
                         )}
@@ -3045,13 +3275,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   {/* Mustache - made more prominent */}
                   {(facialHair === 'mustache' || facialHair === 'full_beard' || facialHair === 'goatee') && (
                     <>
-                      <mesh position={[-0.028, mouthY + 0.020, 0.18]} rotation={[0, 0, 0.15]} castShadow>
+                      <mesh position={[-0.028, mouthY + 0.020, 0.18]} rotation={[0, 0, Math.PI / 2 + 0.15]} castShadow>
                         <capsuleGeometry args={[0.015, 0.035, 4, 6]} />
-                        <meshStandardMaterial color={hairColor} roughness={0.95} />
+                        <meshStandardMaterial color={beardColor} roughness={0.95} />
                       </mesh>
-                      <mesh position={[0.028, mouthY + 0.020, 0.18]} rotation={[0, 0, -0.15]} castShadow>
+                      <mesh position={[0.028, mouthY + 0.020, 0.18]} rotation={[0, 0, -Math.PI / 2 - 0.15]} castShadow>
                         <capsuleGeometry args={[0.015, 0.035, 4, 6]} />
-                        <meshStandardMaterial color={hairColor} roughness={0.95} />
+                        <meshStandardMaterial color={beardColor} roughness={0.95} />
                       </mesh>
                     </>
                   )}
@@ -3061,24 +3291,24 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                           <>
                             <mesh position={[0, -0.14 - jawOffset, 0.13 + jawForward]} castShadow>
                               <sphereGeometry args={[0.07, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-                              <meshStandardMaterial color={hairColor} roughness={0.92} />
+                              <meshStandardMaterial color={beardColor} roughness={0.92} />
                             </mesh>
                             <mesh position={[-0.06, -0.11 - jawOffset * 0.5, 0.11 + jawForward * 0.8]} castShadow>
                               <boxGeometry args={[0.04, 0.05, 0.03]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.9)} roughness={0.92} />
                             </mesh>
                             <mesh position={[0.06, -0.11 - jawOffset * 0.5, 0.11 + jawForward * 0.8]} castShadow>
                               <boxGeometry args={[0.04, 0.05, 0.03]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.9)} roughness={0.92} />
                             </mesh>
                       {/* Mustache for short beard */}
-                      <mesh position={[-0.022, mouthY + 0.016, 0.178]} rotation={[0, 0, 0.12]} castShadow>
+                      <mesh position={[-0.022, mouthY + 0.016, 0.178]} rotation={[0, 0, Math.PI / 2 + 0.12]} castShadow>
                         <capsuleGeometry args={[0.01, 0.025, 4, 6]} />
-                        <meshStandardMaterial color={hairColor} roughness={0.94} />
+                        <meshStandardMaterial color={beardColor} roughness={0.94} />
                       </mesh>
-                      <mesh position={[0.022, mouthY + 0.016, 0.178]} rotation={[0, 0, -0.12]} castShadow>
+                      <mesh position={[0.022, mouthY + 0.016, 0.178]} rotation={[0, 0, -Math.PI / 2 - 0.12]} castShadow>
                         <capsuleGeometry args={[0.01, 0.025, 4, 6]} />
-                        <meshStandardMaterial color={hairColor} roughness={0.94} />
+                        <meshStandardMaterial color={beardColor} roughness={0.94} />
                       </mesh>
                     </>
                   )}
@@ -3089,30 +3319,30 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                             {/* Main chin beard */}
                             <mesh position={[0, -0.16 - jawOffset, 0.10 + jawForward]} castShadow>
                               <sphereGeometry args={[0.09, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.6]} />
-                              <meshStandardMaterial color={hairColor} roughness={0.9} />
+                              <meshStandardMaterial color={beardColor} roughness={0.9} />
                             </mesh>
                             {/* Beard extension downward */}
                             <mesh position={[0, -0.22 - jawOffset * 1.2, 0.06 + jawForward * 0.6]} rotation={[0.3, 0, 0]} castShadow>
                               <capsuleGeometry args={[0.045, 0.08, 4, 8]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.92} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.92)} roughness={0.92} />
                             </mesh>
                             {/* Side jaw coverage */}
                             <mesh position={[-0.08, -0.12 - jawOffset * 0.5, 0.08 + jawForward * 0.7]} castShadow>
                               <boxGeometry args={[0.05, 0.08, 0.04]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.88)} roughness={0.92} />
                             </mesh>
                             <mesh position={[0.08, -0.12 - jawOffset * 0.5, 0.08 + jawForward * 0.7]} castShadow>
                               <boxGeometry args={[0.05, 0.08, 0.04]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.88)} roughness={0.92} />
                             </mesh>
                       {/* Sideburns connecting to beard */}
-                      <mesh position={[-0.12, -0.04, 0.04]} castShadow>
-                        <boxGeometry args={[0.03, 0.1, 0.03]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.85)} roughness={0.9} />
+                      <mesh position={[-0.12, 0.0, 0.04]} castShadow>
+                        <boxGeometry args={[0.03, 0.16, 0.03]} />
+                        <meshStandardMaterial color={adjustColor(beardColor, 0.85)} roughness={0.9} />
                       </mesh>
-                      <mesh position={[0.12, -0.04, 0.04]} castShadow>
-                        <boxGeometry args={[0.03, 0.1, 0.03]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.85)} roughness={0.9} />
+                      <mesh position={[0.12, 0.0, 0.04]} castShadow>
+                        <boxGeometry args={[0.03, 0.16, 0.03]} />
+                        <meshStandardMaterial color={adjustColor(beardColor, 0.85)} roughness={0.9} />
                       </mesh>
                     </>
                   )}
@@ -3122,11 +3352,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                           <>
                             <mesh position={[0, -0.15 - jawOffset, 0.14 + jawForward]} castShadow>
                               <sphereGeometry args={[0.055, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-                              <meshStandardMaterial color={hairColor} roughness={0.92} />
+                              <meshStandardMaterial color={beardColor} roughness={0.92} />
                             </mesh>
                             <mesh position={[0, -0.20 - jawOffset * 1.2, 0.10 + jawForward * 0.6]} rotation={[0.25, 0, 0]} castShadow>
                               <capsuleGeometry args={[0.028, 0.05, 4, 6]} />
-                              <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                              <meshStandardMaterial color={adjustColor(beardColor, 0.9)} roughness={0.92} />
                             </mesh>
                           </>
                         )}
@@ -3198,71 +3428,458 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* FULL SCARF - Most modest, full coverage with long drape */}
               {headscarfStyle === 'full' && (
                 <>
-                  <mesh position={[0, 0.142, -0.07]} castShadow>
-                    <sphereGeometry args={[0.24, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness} />
-                  </mesh>
-                  <mesh position={[0, -0.06, -0.12]} castShadow>
-                    <cylinderGeometry args={[0.19, 0.26, 0.32, 12]} />
-                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.02} />
-                  </mesh>
-                  <mesh position={[0, -0.18, -0.22]} rotation={[0.22, 0, 0]} castShadow>
-                    <boxGeometry args={[0.3, 0.3, 0.02]} />
-                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.03} />
-                  </mesh>
+                  {/* KHIMAR - Structured, tight wrapping */}
+                  {headwearGarmentType === 'khimar' && (
+                    <>
+                      {/* Tighter head covering - structured fit */}
+                      <mesh position={[0, 0.145, -0.06]} castShadow>
+                        <sphereGeometry args={[0.22, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.52]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness - 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Structured shoulder drape - more cylindrical, neat folds */}
+                      <mesh position={[0, -0.04, -0.10]} castShadow>
+                        <cylinderGeometry args={[0.18, 0.24, 0.28, 14]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Chest panel - straight, rectangular drape */}
+                      <mesh position={[0, -0.14, -0.18]} rotation={[0.18, 0, 0]} castShadow>
+                        <boxGeometry args={[0.28, 0.24, 0.015]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.01}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* MILHAFA - Loose, flowing, North African style */}
+                  {headwearGarmentType === 'milhafa' && (
+                    <>
+                      {/* Loose head wrap - larger radius, more coverage */}
+                      <mesh position={[0, 0.135, -0.08]} castShadow>
+                        <sphereGeometry args={[0.26, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.58]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.04}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Asymmetric drape - slightly offset for flowing look */}
+                      <mesh position={[0.03, -0.08, -0.14]} rotation={[0.24, 0.08, 0.04]} castShadow>
+                        <cylinderGeometry args={[0.20, 0.28, 0.36, 12]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.05}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Flowing back drape - larger, softer folds */}
+                      <mesh position={[0, -0.20, -0.25]} rotation={[0.26, 0, 0]} castShadow>
+                        <boxGeometry args={[0.34, 0.34, 0.025]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.06}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* HIJAB - Default, contemporary style (current geometry) */}
+                  {headwearGarmentType === 'hijab' && (
+                    <>
+                      <mesh position={[0, 0.142, -0.07]} castShadow>
+                        <sphereGeometry args={[0.24, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0, -0.06, -0.12]} castShadow>
+                        <cylinderGeometry args={[0.19, 0.26, 0.32, 12]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0, -0.18, -0.22]} rotation={[0.22, 0, 0]} castShadow>
+                        <boxGeometry args={[0.3, 0.3, 0.02]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.03}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
                 </>
               )}
 
               {/* MODEST SCARF - Traditional variant, similar to full but slightly shorter drape */}
               {headscarfStyle === 'modest' && (
                 <>
-                  <mesh position={[0, 0.14, -0.06]} castShadow>
-                    <sphereGeometry args={[0.24, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.53]} />
-                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness} />
-                  </mesh>
-                  <mesh position={[0, -0.05, -0.12]} castShadow>
-                    <cylinderGeometry args={[0.20, 0.25, 0.28, 12]} />
-                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.02} />
-                  </mesh>
-                  <mesh position={[0, -0.15, -0.20]} rotation={[0.20, 0, 0]} castShadow>
-                    <boxGeometry args={[0.28, 0.26, 0.02]} />
-                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.03} />
-                  </mesh>
+                  {/* KHIMAR - Structured modest variant */}
+                  {headwearGarmentType === 'khimar' && (
+                    <>
+                      <mesh position={[0, 0.143, -0.05]} castShadow>
+                        <sphereGeometry args={[0.22, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.50]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness - 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0, -0.03, -0.11]} castShadow>
+                        <cylinderGeometry args={[0.19, 0.23, 0.26, 14]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0, -0.13, -0.17]} rotation={[0.16, 0, 0]} castShadow>
+                        <boxGeometry args={[0.26, 0.22, 0.015]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.01}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* MILHAFA - Loose modest variant */}
+                  {headwearGarmentType === 'milhafa' && (
+                    <>
+                      <mesh position={[0, 0.133, -0.07]} castShadow>
+                        <sphereGeometry args={[0.26, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.56]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.04}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0.03, -0.07, -0.13]} rotation={[0.22, 0.08, 0.04]} castShadow>
+                        <cylinderGeometry args={[0.21, 0.27, 0.32, 12]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.05}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0, -0.17, -0.22]} rotation={[0.24, 0, 0]} castShadow>
+                        <boxGeometry args={[0.32, 0.30, 0.025]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.06}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* HIJAB - Default modest variant */}
+                  {headwearGarmentType === 'hijab' && (
+                    <>
+                      <mesh position={[0, 0.14, -0.06]} castShadow>
+                        <sphereGeometry args={[0.24, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.53]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0, -0.05, -0.12]} castShadow>
+                        <cylinderGeometry args={[0.20, 0.25, 0.28, 12]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      <mesh position={[0, -0.15, -0.20]} rotation={[0.20, 0, 0]} castShadow>
+                        <boxGeometry args={[0.28, 0.26, 0.02]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.03}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
                 </>
               )}
 
               {/* VEILED SCARF - Most conservative, covers lower face and shows just eyes */}
               {headscarfStyle === 'veiled' && (
                 <>
-                  {/* Head covering - full */}
-                  <mesh position={[0, 0.14, -0.1]} castShadow>
-                    <sphereGeometry args={[0.25, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.58]} />
-                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness} />
-                  </mesh>
-                  {/* Face veil - covers nose and mouth, shows only eyes */}
-                  <mesh position={[0, -0.17, 0.19]} castShadow>
-                    <boxGeometry args={[0.36, 0.24, 0.01]} />
-                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness + 0.01} />
-                  </mesh>
-                  {/* Neck/shoulder drape */}
-                  <mesh position={[0, -0.08, -0.10]} castShadow>
-                    <cylinderGeometry args={[0.20, 0.27, 0.34, 12]} />
-                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.02} />
-                  </mesh>
-                  {/* Long back drape */}
-                  <mesh position={[0, -0.20, -0.24]} rotation={[0.24, 0, 0]} castShadow>
-                    <boxGeometry args={[0.32, 0.32, 0.02]} />
-                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.03} />
-                  </mesh>
+                  {/* KHIMAR - Structured veiled variant */}
+                  {headwearGarmentType === 'khimar' && (
+                    <>
+                      {/* Head covering - structured, tight */}
+                      <mesh position={[0, 0.142, -0.09]} castShadow>
+                        <sphereGeometry args={[0.23, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness - 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Face veil - two-piece burqu' construction */}
+                      {/* Upper piece - covers forehead to nose bridge */}
+                      <mesh position={[0, -0.05, 0.20]} castShadow>
+                        <boxGeometry args={[0.32, 0.14, 0.01]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Lower piece - covers mouth and chin (small gap for breathing) */}
+                      <mesh position={[0, -0.22, 0.19]} castShadow>
+                        <boxGeometry args={[0.30, 0.12, 0.01]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Shoulder drape - neat, cylindrical */}
+                      <mesh position={[0, -0.06, -0.09]} castShadow>
+                        <cylinderGeometry args={[0.19, 0.26, 0.32, 14]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Back panel - straight */}
+                      <mesh position={[0, -0.18, -0.22]} rotation={[0.22, 0, 0]} castShadow>
+                        <boxGeometry args={[0.30, 0.30, 0.015]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.01}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* MILHAFA - Loose veiled variant */}
+                  {headwearGarmentType === 'milhafa' && (
+                    <>
+                      {/* Head covering - full, loose */}
+                      <mesh position={[0, 0.136, -0.11]} castShadow>
+                        <sphereGeometry args={[0.27, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.60]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.04}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Face veil - two-piece burqu' construction (flowing style) */}
+                      {/* Upper piece - covers forehead to nose bridge */}
+                      <mesh position={[0, -0.05, 0.20]} castShadow>
+                        <boxGeometry args={[0.36, 0.15, 0.01]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Lower piece - covers mouth and chin (small gap for breathing) */}
+                      <mesh position={[0, -0.22, 0.19]} castShadow>
+                        <boxGeometry args={[0.34, 0.13, 0.01]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.04}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Shoulder drape - asymmetric, flowing */}
+                      <mesh position={[0.03, -0.10, -0.11]} rotation={[0.26, 0.08, 0.04]} castShadow>
+                        <cylinderGeometry args={[0.21, 0.28, 0.38, 12]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.05}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Back drape - large, flowing */}
+                      <mesh position={[0, -0.22, -0.26]} rotation={[0.26, 0, 0]} castShadow>
+                        <boxGeometry args={[0.36, 0.36, 0.025]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.06}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
+
+                  {/* HIJAB - Default veiled variant */}
+                  {headwearGarmentType === 'hijab' && (
+                    <>
+                      {/* Head covering - full */}
+                      <mesh position={[0, 0.14, -0.1]} castShadow>
+                        <sphereGeometry args={[0.25, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.58]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Face veil - two-piece burqu' construction */}
+                      {/* Upper piece - covers forehead to nose bridge */}
+                      <mesh position={[0, -0.05, 0.20]} castShadow>
+                        <boxGeometry args={[0.34, 0.14, 0.01]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.01}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Lower piece - covers mouth and chin (small gap for breathing) */}
+                      <mesh position={[0, -0.22, 0.19]} castShadow>
+                        <boxGeometry args={[0.32, 0.12, 0.01]} />
+                        <meshStandardMaterial
+                          color={headscarfColor}
+                          roughness={headscarfRoughness + 0.03}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Neck/shoulder drape */}
+                      <mesh position={[0, -0.08, -0.10]} castShadow>
+                        <cylinderGeometry args={[0.20, 0.27, 0.34, 12]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.02}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                      {/* Long back drape */}
+                      <mesh position={[0, -0.20, -0.24]} rotation={[0.24, 0, 0]} castShadow>
+                        <boxGeometry args={[0.32, 0.32, 0.02]} />
+                        <meshStandardMaterial
+                          color={headwearShadow}
+                          roughness={headscarfRoughness + 0.03}
+                          map={headscarfTexture || undefined}
+                        />
+                      </mesh>
+                    </>
+                  )}
                 </>
+              )}
+              {/* Band and stripe patterns - position varies by garment type */}
+              {(headscarfPattern === 'band' || headscarfPattern === 'stripe') && (
+                <group>
+                  {/* Khimar: band at forehead (higher position) */}
+                  {headwearGarmentType === 'khimar' && (
+                    <>
+                      <mesh position={[0, 0.14, 0.01]} rotation={[Math.PI / 2.2, 0, 0]} castShadow>
+                        <torusGeometry args={[0.21, 0.013, 8, 18]} />
+                        <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.04} />
+                      </mesh>
+                      {headscarfPattern === 'stripe' && (
+                        <mesh position={[0, 0.17, 0.00]} rotation={[Math.PI / 2.3, 0, 0]} castShadow>
+                          <torusGeometry args={[0.19, 0.010, 8, 18]} />
+                          <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
+                        </mesh>
+                      )}
+                    </>
+                  )}
+                  {/* Milhafa: band lower (traditional North African style) */}
+                  {headwearGarmentType === 'milhafa' && (
+                    <>
+                      <mesh position={[0, 0.10, -0.03]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                        <torusGeometry args={[0.22, 0.012, 8, 18]} />
+                        <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.06} />
+                      </mesh>
+                      {headscarfPattern === 'stripe' && (
+                        <mesh position={[0, 0.13, -0.03]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                          <torusGeometry args={[0.20, 0.010, 8, 18]} />
+                          <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.06} />
+                        </mesh>
+                      )}
+                    </>
+                  )}
+                  {/* Hijab: middle position (default) */}
+                  {headwearGarmentType === 'hijab' && (
+                    <>
+                      <mesh position={[0, 0.12, -0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                        <torusGeometry args={[0.21, 0.012, 8, 18]} />
+                        <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
+                      </mesh>
+                      {headscarfPattern === 'stripe' && (
+                        <mesh position={[0, 0.15, -0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                          <torusGeometry args={[0.19, 0.010, 8, 18]} />
+                          <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
+                        </mesh>
+                      )}
+                    </>
+                  )}
+                </group>
+              )}
+
+              {/* Embroidery panels (tiraz) for wealthy women - decorative gold/silver bands */}
+              {hasEmbroidery && (
+                <group>
+                  {/* Forehead embroidery band - gold/silver metallic accent */}
+                  <mesh position={[0, 0.10, 0.08]} rotation={[Math.PI / 2.5, 0, 0]} castShadow>
+                    <torusGeometry args={[0.22, 0.008, 6, 20]} />
+                    <meshStandardMaterial
+                      color="#d4af37"
+                      roughness={0.25}
+                      metalness={0.6}
+                    />
+                  </mesh>
+                  {/* Side edge embroidery - decorative accents */}
+                  <mesh position={[0.18, -0.05, 0.02]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                    <cylinderGeometry args={[0.004, 0.004, 0.16, 8]} />
+                    <meshStandardMaterial
+                      color="#c9b28c"
+                      roughness={0.30}
+                      metalness={0.5}
+                    />
+                  </mesh>
+                  <mesh position={[-0.18, -0.05, 0.02]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                    <cylinderGeometry args={[0.004, 0.004, 0.16, 8]} />
+                    <meshStandardMaterial
+                      color="#c9b28c"
+                      roughness={0.30}
+                      metalness={0.5}
+                    />
+                  </mesh>
+                </group>
               )}
             </group>
           )}
           {headwearStyle === 'cap' && (
-            <mesh position={[0, 0.14, -0.02]} castShadow>
-              <sphereGeometry args={[0.18, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.6]} />
-              <meshStandardMaterial color={turbanColor} roughness={0.85} />
-            </mesh>
+            <group>
+              <mesh position={[0, 0.145, -0.03]} castShadow>
+                <cylinderGeometry args={[0.13, 0.15, 0.12, 12]} />
+                <meshStandardMaterial color={turbanColor} roughness={0.85} />
+              </mesh>
+              <mesh position={[0, 0.105, -0.03]} castShadow>
+                <cylinderGeometry args={[0.152, 0.152, 0.01, 12]} />
+                <meshStandardMaterial color={adjustColor(turbanColor, 0.8)} roughness={0.9} />
+              </mesh>
+              <mesh position={[0, 0.205, -0.03]} castShadow>
+                <sphereGeometry args={[0.11, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                <meshStandardMaterial color={turbanHighlight} roughness={0.8} />
+              </mesh>
+            </group>
           )}
           {headwearStyle === 'fez' && (
             <group>
@@ -3302,59 +3919,140 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           )}
           {headwearStyle === 'turban' && (
             <group>
-              {/* Inner cap/base - sits on top of head */}
-              <mesh position={[0, 0.32, -0.02]} castShadow>
-                <capsuleGeometry args={[0.15, 0.06, 12, 16]} />
-                <meshStandardMaterial color={turbanColor} roughness={0.88} />
+              {/* Taqiyah (skull cap) base - visible underneath */}
+              <mesh position={[0, 0.16, -0.02]} castShadow>
+                <sphereGeometry args={[0.19, 14, 12, 0, Math.PI * 2, 0, Math.PI * 0.50]} />
+                <meshStandardMaterial
+                  color={new THREE.Color(turbanColor).multiplyScalar(0.75).getStyle()}
+                  roughness={0.92}
+                />
               </mesh>
 
-              {/* Bottom wrap band - sits above forehead, pushed back */}
-              <mesh position={[0, 0.22, -0.04]} rotation={[0.18, 0, 0]} castShadow>
-                <cylinderGeometry args={[0.17, 0.18, 0.09, 20, 1]} />
-                <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
+              {/* Wrapped turban layers - stacked horizontal bands creating realistic wrapped appearance */}
+              {/* Layer 1: Foundation wrap - lowest layer above forehead */}
+              <mesh position={[0, 0.18, -0.03]} rotation={[0.12, 0, 0]} castShadow>
+                <torusGeometry args={[0.19, 0.035, 12, 24]} />
+                <meshStandardMaterial
+                  color={turbanColor}
+                  roughness={0.86}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
 
-              {/* Left side wrap */}
-              <mesh position={[-0.11, 0.26, -0.04]} rotation={[0.14, 0.2, -Math.PI / 8]} castShadow>
-                <cylinderGeometry args={[0.16, 0.17, 0.10, 20, 1]} />
-                <meshStandardMaterial color={turbanColor} roughness={0.85} />
+              {/* Layer 2: Second wrap layer */}
+              <mesh position={[0, 0.22, -0.025]} rotation={[0.10, 0, 0]} castShadow>
+                <torusGeometry args={[0.18, 0.038, 12, 24]} />
+                <meshStandardMaterial
+                  color={turbanHighlight}
+                  roughness={0.84}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
 
-              {/* Right side wrap */}
-              <mesh position={[0.11, 0.26, -0.04]} rotation={[0.14, -0.2, Math.PI / 8]} castShadow>
-                <cylinderGeometry args={[0.16, 0.17, 0.10, 20, 1]} />
-                <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
+              {/* Layer 3: Third wrap layer */}
+              <mesh position={[0, 0.26, -0.02]} rotation={[0.08, 0, 0]} castShadow>
+                <torusGeometry args={[0.17, 0.040, 12, 24]} />
+                <meshStandardMaterial
+                  color={turbanColor}
+                  roughness={0.85}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
 
-              {/* Front wrap layer - pushed back to avoid forehead */}
-              <mesh position={[0, 0.25, 0.01]} rotation={[Math.PI / 4.2, 0, 0]} castShadow>
-                <cylinderGeometry args={[0.16, 0.17, 0.09, 20, 1]} />
-                <meshStandardMaterial color={turbanColor} roughness={0.85} />
+              {/* Layer 4: Fourth wrap layer */}
+              <mesh position={[0, 0.30, -0.015]} rotation={[0.06, 0, 0]} castShadow>
+                <torusGeometry args={[0.16, 0.038, 12, 24]} />
+                <meshStandardMaterial
+                  color={turbanHighlight}
+                  roughness={0.83}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
 
-              {/* Mid-height wrap band */}
-              <mesh position={[0, 0.30, -0.02]} rotation={[0.08, 0, 0]} castShadow>
-                <cylinderGeometry args={[0.05, 0.16, 0.09, 20, 1]} />
-                <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
+              {/* Layer 5: Fifth wrap layer */}
+              <mesh position={[0, 0.34, -0.01]} rotation={[0.04, 0, 0]} castShadow>
+                <torusGeometry args={[0.15, 0.036, 12, 24]} />
+                <meshStandardMaterial
+                  color={turbanColor}
+                  roughness={0.86}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
 
-              {/* Top wrap layer */}
-              <mesh position={[0, 0.35, -0.03]} rotation={[0.05, 0, 0]} castShadow>
-                <cylinderGeometry args={[0.13, 0.14, 0.08, 20, 1]} />
-                <meshStandardMaterial color={turbanColor} roughness={0.85} />
+              {/* Crown cap - covers top */}
+              <mesh position={[0, 0.37, -0.01]} castShadow>
+                <sphereGeometry args={[0.13, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.45]} />
+                <meshStandardMaterial
+                  color={turbanHighlight}
+                  roughness={0.82}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
 
-              {/* Crown top piece */}
-              <mesh position={[0, 0.39, -0.03]} castShadow>
-                <sphereGeometry args={[0.11, 16, 12]} />
-                <meshStandardMaterial color={turbanHighlight} roughness={0.82} />
+              {/* Front drape piece - asymmetric fold over forehead (typical style) */}
+              <mesh position={[0.06, 0.16, 0.12]} rotation={[0.35, 0.15, 0.08]} castShadow>
+                <boxGeometry args={[0.14, 0.10, 0.015]} />
+                <meshStandardMaterial
+                  color={turbanHighlight}
+                  roughness={0.88}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
 
-              {/* Tail/end piece hanging at back - angled more backward and lower */}
-              <mesh position={[0, 0.12, -0.22]} rotation={[Math.PI / 2.8, 0, 0]} castShadow>
-                <boxGeometry args={[0.18, 0.05, 0.02]} />
-                <meshStandardMaterial color={turbanColor} roughness={0.86} />
+              {/* Tail/end piece hanging at back - traditional style */}
+              <mesh position={[0, 0.12, -0.22]} rotation={[Math.PI / 3.0, 0, 0]} castShadow>
+                <boxGeometry args={[0.16, 0.24, 0.018]} />
+                <meshStandardMaterial
+                  color={turbanColor}
+                  roughness={0.90}
+                  map={turbanTexture || undefined}
+                />
               </mesh>
+
+              {/* Stripe/band patterns - integrated into wrapping */}
+              {turbanPattern === 'stripe' && (
+                <group>
+                  {/* Contrasting stripe on layer 2 */}
+                  <mesh position={[0, 0.22, -0.025]} rotation={[0.10, 0, 0]} castShadow>
+                    <torusGeometry args={[0.18, 0.020, 12, 24]} />
+                    <meshStandardMaterial color={turbanPatternColor} roughness={0.75} />
+                  </mesh>
+                  {/* Contrasting stripe on layer 4 */}
+                  <mesh position={[0, 0.30, -0.015]} rotation={[0.06, 0, 0]} castShadow>
+                    <torusGeometry args={[0.16, 0.020, 12, 24]} />
+                    <meshStandardMaterial color={turbanPatternColor} roughness={0.75} />
+                  </mesh>
+                </group>
+              )}
+
+              {turbanPattern === 'band' && (
+                <group>
+                  {/* Single decorative band around middle */}
+                  <mesh position={[0, 0.26, -0.02]} rotation={[0.08, 0, 0]} castShadow>
+                    <torusGeometry args={[0.17, 0.025, 12, 24]} />
+                    <meshStandardMaterial
+                      color={turbanPatternColor}
+                      roughness={0.65}
+                      metalness={0.15}
+                    />
+                  </mesh>
+                </group>
+              )}
+
+              {turbanPattern === 'geometric' && (
+                <group>
+                  {/* Geometric pattern on front drape */}
+                  <mesh position={[0.06, 0.16, 0.13]} rotation={[0.35, 0.15, 0.08]} castShadow>
+                    <boxGeometry args={[0.12, 0.08, 0.001]} />
+                    <meshStandardMaterial
+                      color={turbanPatternColor}
+                      roughness={0.70}
+                      transparent
+                      opacity={0.85}
+                    />
+                  </mesh>
+                </group>
+              )}
             </group>
           )}
           {headwearStyle === 'taqiyah' && (
@@ -3369,6 +4067,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <cylinderGeometry args={[0.19, 0.20, 0.04, 20]} />
                 <meshStandardMaterial color={turbanHighlight} roughness={0.85} />
               </mesh>
+              {turbanPattern !== 'none' && (
+                <group>
+                  <mesh position={[0, 0.13, -0.03]} rotation={[0.08, 0, 0]} castShadow>
+                    <cylinderGeometry args={[0.19, 0.20, 0.02, 20]} />
+                    <meshStandardMaterial color={turbanPatternColor} roughness={0.7} />
+                  </mesh>
+                  {turbanPattern !== 'band' && (
+                    <mesh position={[0, 0.16, -0.02]} rotation={[0.08, 0, 0]} castShadow>
+                      <cylinderGeometry args={[0.18, 0.19, 0.02, 20]} />
+                      <meshStandardMaterial color={turbanPatternColor} roughness={0.7} />
+                    </mesh>
+                  )}
+                </group>
+              )}
             </group>
           )}
         </group>
@@ -3486,6 +4198,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <cylinderGeometry args={[0.055, 0.048, 0.24, 8]} />
                 <meshStandardMaterial color={lowerArmColor} />
               </mesh>
+              {/* Sleeve cuff - decorative band at wrist */}
+              {sleeveCoverage !== 'none' && (
+                <mesh position={[0, -0.22, 0]} castShadow>
+                  <cylinderGeometry args={[0.052, 0.054, 0.028, 8]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+                </mesh>
+              )}
               {/* Hand - palm pad with thumb, rotated so palm faces inward */}
               <group position={[0, -0.26, 0]} rotation={[0, Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>
@@ -3544,6 +4263,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <cylinderGeometry args={[0.055, 0.048, 0.24, 8]} />
                 <meshStandardMaterial color={lowerArmColor} />
               </mesh>
+              {/* Sleeve cuff - decorative band at wrist */}
+              {sleeveCoverage !== 'none' && (
+                <mesh position={[0, -0.22, 0]} castShadow>
+                  <cylinderGeometry args={[0.052, 0.054, 0.028, 8]} />
+                  <meshStandardMaterial color={robeAccentColor} roughness={0.85} />
+                </mesh>
+              )}
               {/* Hand - palm pad with thumb, rotated so palm faces inward */}
               <group position={[0, -0.26, 0]} rotation={[0, -Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>

@@ -324,6 +324,7 @@ export const Agents: React.FC<AgentsProps> = ({
             onNPCInitiatedEncounter={onNPCInitiatedEncounter ? handleNPCInitiatedEncounter : undefined}
             globalApproachCooldownRef={globalApproachCooldownRef}
             role={record.role}
+            familyRelationship={record.role === 'family' ? playerStats?.familyMembers?.find(fm => fm.npcId === record.stats.id)?.relationship : undefined}
           />
         );
       })}
