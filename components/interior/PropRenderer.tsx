@@ -2,25 +2,62 @@ import React, { useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
 import { useFrame } from '@react-three/fiber';
-import { InteriorProp, InteriorPropType } from '../../types';
+import { InteriorProp, InteriorPropType, SocialClass } from '../../types';
 import { seededRandom } from '../../utils/procedural';
 import { ContactShadow, Flame } from './primitives/Lighting';
 import { FirePit, FireSmoke } from './primitives/Fire';
 import { Spindle, DyeVat, Anvil, ToolRack, Mortar, HerbRack, MedicineShelf } from './primitives/Workshop';
 
+// Wood color palettes by luxury level
+const STAIR_WOOD_PALETTES = {
+  poor: { main: '#5a4030', dark: '#3a2a1a', light: '#6a5040', trim: '#4a3525' },
+  modest: { main: '#6a4a2a', dark: '#4a3520', light: '#7a5a3a', trim: '#5a3a25' },
+  wealthy: { main: '#7a5a3a', dark: '#5a4030', light: '#8a6a4a', trim: '#6a4a30' },
+  luxurious: { main: '#8a6040', dark: '#6a4530', light: '#9a7050', trim: '#7a5535' },
+};
+
+// Carpet colors for wealthy stairs
+const STAIR_CARPET_COLORS = [
+  { main: '#8a2a2a', border: '#6a1a1a', pattern: '#aa4a3a' }, // Deep red
+  { main: '#2a4a6a', border: '#1a3a5a', pattern: '#3a5a7a' }, // Persian blue
+  { main: '#4a3a5a', border: '#3a2a4a', pattern: '#5a4a6a' }, // Royal purple
+  { main: '#3a5a4a', border: '#2a4a3a', pattern: '#4a6a5a' }, // Forest green
+  { main: '#6a4a3a', border: '#5a3a2a', pattern: '#7a5a4a' }, // Rich brown
+];
+
 // Realistic staircase component with individual steps leading to upper level
 const Staircase: React.FC<{
   position: [number, number, number];
   rotation: [number, number, number];
-}> = ({ position, rotation }) => {
-  const woodColor = '#6a4a2a';
-  const woodDarkColor = '#4a3520';
+  luxuryLevel?: number; // 0 = poor, 1 = modest, 2 = wealthy, 3 = luxurious
+}> = ({ position, rotation, luxuryLevel = 1 }) => {
+  // Select wood palette based on luxury
+  const paletteKey = luxuryLevel === 0 ? 'poor' : luxuryLevel === 1 ? 'modest' : luxuryLevel >= 3 ? 'luxurious' : 'wealthy';
+  const palette = STAIR_WOOD_PALETTES[paletteKey];
+  const woodColor = palette.main;
+  const woodDarkColor = palette.dark;
+  const woodLightColor = palette.light;
+  const trimColor = palette.trim;
+
+  // Wealthy and luxurious stairs get carpets
+  const hasCarpet = luxuryLevel >= 2;
+  const carpetPalette = useMemo(() => {
+    if (!hasCarpet) return null;
+    const idx = Math.floor(seededRandom(`carpet-${position[0]}-${position[2]}`) * STAIR_CARPET_COLORS.length);
+    return STAIR_CARPET_COLORS[idx];
+  }, [hasCarpet, position]);
+
   const stepCount = 8;
   const stepHeight = 0.28;
   const stepDepth = 0.35;
   const stepWidth = 1.8;
   const railHeight = 0.9;
   const railWidth = 0.06;
+
+  // Door appearance based on luxury
+  const doorColor = luxuryLevel >= 2 ? '#5a4030' : '#4a3525';
+  const doorFrameColor = luxuryLevel >= 2 ? '#6a4a35' : '#3a2a1a';
+  const hasDoorDecor = luxuryLevel >= 2;
 
   return (
     <group position={position} rotation={rotation}>
@@ -37,6 +74,24 @@ const Staircase: React.FC<{
             <boxGeometry args={[stepWidth, stepHeight, 0.04]} />
             <meshStandardMaterial color={woodDarkColor} roughness={0.9} />
           </mesh>
+          {/* Carpet runner on step (for wealthy/luxurious) */}
+          {hasCarpet && carpetPalette && (
+            <>
+              <mesh position={[0, stepHeight / 2 + 0.045, 0]} castShadow receiveShadow>
+                <boxGeometry args={[stepWidth * 0.6, 0.025, stepDepth - 0.02]} />
+                <meshStandardMaterial color={carpetPalette.main} roughness={0.95} />
+              </mesh>
+              {/* Carpet border stripes */}
+              <mesh position={[-stepWidth * 0.25, stepHeight / 2 + 0.048, 0]} receiveShadow>
+                <boxGeometry args={[0.06, 0.015, stepDepth - 0.04]} />
+                <meshStandardMaterial color={carpetPalette.border} roughness={0.92} />
+              </mesh>
+              <mesh position={[stepWidth * 0.25, stepHeight / 2 + 0.048, 0]} receiveShadow>
+                <boxGeometry args={[0.06, 0.015, stepDepth - 0.04]} />
+                <meshStandardMaterial color={carpetPalette.border} roughness={0.92} />
+              </mesh>
+            </>
+          )}
         </group>
       ))}
 
@@ -55,39 +110,61 @@ const Staircase: React.FC<{
       ))}
 
       {/* Handrails */}
-      {[-1, 1].map((side) => (
-        <group key={`rail-${side}`}>
-          {/* Vertical posts at bottom and top */}
-          <mesh position={[side * (stepWidth / 2 + 0.04), railHeight / 2, 0.1]} castShadow>
-            <boxGeometry args={[railWidth, railHeight, railWidth]} />
-            <meshStandardMaterial color={woodDarkColor} roughness={0.85} />
-          </mesh>
-          <mesh
-            position={[
-              side * (stepWidth / 2 + 0.04),
-              stepCount * stepHeight + railHeight / 2,
-              -stepCount * stepDepth - 0.1
-            ]}
-            castShadow
-          >
-            <boxGeometry args={[railWidth, railHeight, railWidth]} />
-            <meshStandardMaterial color={woodDarkColor} roughness={0.85} />
-          </mesh>
-          {/* Angled rail connecting posts */}
-          <mesh
-            position={[
-              side * (stepWidth / 2 + 0.04),
-              stepCount * stepHeight / 2 + railHeight,
-              -stepCount * stepDepth / 2
-            ]}
-            rotation={[Math.atan2(stepCount * stepHeight, stepCount * stepDepth), 0, 0]}
-            castShadow
-          >
-            <boxGeometry args={[railWidth, Math.hypot(stepCount * stepHeight, stepCount * stepDepth) + 0.3, railWidth]} />
-            <meshStandardMaterial color={woodColor} roughness={0.8} />
-          </mesh>
-        </group>
-      ))}
+      {[-1, 1].map((side) => {
+        // Calculate exact post positions
+        const bottomPostY = railHeight / 2;
+        const bottomPostZ = 0.1;
+        const topPostY = stepCount * stepHeight + railHeight / 2;
+        const topPostZ = -stepCount * stepDepth - 0.1;
+        const sideX = side * (stepWidth / 2 + 0.04);
+
+        // Rail connects top of bottom post to top of top post
+        const railStartY = railHeight;
+        const railStartZ = bottomPostZ;
+        const railEndY = stepCount * stepHeight + railHeight;
+        const railEndZ = topPostZ;
+
+        // Calculate rail center and length
+        const railCenterY = (railStartY + railEndY) / 2;
+        const railCenterZ = (railStartZ + railEndZ) / 2;
+        const railDeltaY = railEndY - railStartY;
+        const railDeltaZ = railEndZ - railStartZ;
+        const railLength = Math.hypot(railDeltaY, railDeltaZ);
+
+        // Angle to rotate a Y-axis aligned box to follow the rail slope
+        // For stairs going up (+Y) and back (-Z), we need negative rotation around X
+        const railAngle = Math.atan2(railDeltaZ, railDeltaY);
+
+        return (
+          <group key={`rail-${side}`}>
+            {/* Vertical posts at bottom and top */}
+            <mesh position={[sideX, bottomPostY, bottomPostZ]} castShadow>
+              <boxGeometry args={[railWidth, railHeight, railWidth]} />
+              <meshStandardMaterial color={woodDarkColor} roughness={0.85} />
+            </mesh>
+            <mesh position={[sideX, topPostY, topPostZ]} castShadow>
+              <boxGeometry args={[railWidth, railHeight, railWidth]} />
+              <meshStandardMaterial color={woodDarkColor} roughness={0.85} />
+            </mesh>
+            {/* Angled rail connecting posts - properly oriented along stair direction */}
+            <mesh
+              position={[sideX, railCenterY, railCenterZ]}
+              rotation={[railAngle, 0, 0]}
+              castShadow
+            >
+              <boxGeometry args={[railWidth, railLength, railWidth]} />
+              <meshStandardMaterial color={woodLightColor} roughness={0.8} />
+            </mesh>
+            {/* Decorative finial on bottom post (wealthy+) */}
+            {luxuryLevel >= 2 && (
+              <mesh position={[sideX, railHeight + 0.08, bottomPostZ]} castShadow>
+                <sphereGeometry args={[0.05, 8, 6]} />
+                <meshStandardMaterial color={trimColor} roughness={0.7} />
+              </mesh>
+            )}
+          </group>
+        );
+      })}
 
       {/* Upper landing platform */}
       <mesh
@@ -99,21 +176,103 @@ const Staircase: React.FC<{
         <meshStandardMaterial color={woodColor} roughness={0.85} />
       </mesh>
 
-      {/* Back wall/barrier suggesting upper level */}
+      {/* Carpet on landing (wealthy+) */}
+      {hasCarpet && carpetPalette && (
+        <mesh
+          position={[0, stepCount * stepHeight + 0.1, -stepCount * stepDepth - 0.6]}
+          receiveShadow
+        >
+          <boxGeometry args={[stepWidth * 0.6, 0.025, 1.0]} />
+          <meshStandardMaterial color={carpetPalette.main} roughness={0.95} />
+        </mesh>
+      )}
+
+      {/* Back wall surrounding door */}
       <mesh
-        position={[0, stepCount * stepHeight + 0.6, -stepCount * stepDepth - 1.15]}
+        position={[0, stepCount * stepHeight + 1.1, -stepCount * stepDepth - 1.18]}
         castShadow
       >
-        <boxGeometry args={[stepWidth + 0.2, 1.1, 0.08]} />
+        <boxGeometry args={[stepWidth + 0.2, 2.1, 0.08]} />
         <meshStandardMaterial color="#8a7355" roughness={0.9} />
       </mesh>
 
-      {/* Dark opening suggesting passage to upper floor */}
+      {/* Door frame */}
+      <group position={[0, stepCount * stepHeight + 1.0, -stepCount * stepDepth - 1.12]}>
+        {/* Left frame */}
+        <mesh position={[-0.55, 0, 0]} castShadow>
+          <boxGeometry args={[0.1, 1.9, 0.06]} />
+          <meshStandardMaterial color={doorFrameColor} roughness={0.85} />
+        </mesh>
+        {/* Right frame */}
+        <mesh position={[0.55, 0, 0]} castShadow>
+          <boxGeometry args={[0.1, 1.9, 0.06]} />
+          <meshStandardMaterial color={doorFrameColor} roughness={0.85} />
+        </mesh>
+        {/* Top frame (lintel) */}
+        <mesh position={[0, 0.95, 0]} castShadow>
+          <boxGeometry args={[1.2, 0.12, 0.06]} />
+          <meshStandardMaterial color={doorFrameColor} roughness={0.85} />
+        </mesh>
+
+        {/* Door panel */}
+        <mesh position={[0, 0, 0.02]} castShadow>
+          <boxGeometry args={[1.0, 1.8, 0.06]} />
+          <meshStandardMaterial color={doorColor} roughness={0.88} />
+        </mesh>
+
+        {/* Door panels/details (modest+) */}
+        {luxuryLevel >= 1 && (
+          <>
+            {/* Upper panel inset */}
+            <mesh position={[0, 0.45, 0.055]} receiveShadow>
+              <boxGeometry args={[0.7, 0.6, 0.02]} />
+              <meshStandardMaterial color={woodDarkColor} roughness={0.9} />
+            </mesh>
+            {/* Lower panel inset */}
+            <mesh position={[0, -0.4, 0.055]} receiveShadow>
+              <boxGeometry args={[0.7, 0.7, 0.02]} />
+              <meshStandardMaterial color={woodDarkColor} roughness={0.9} />
+            </mesh>
+          </>
+        )}
+
+        {/* Door handle/ring */}
+        <mesh position={[0.35, 0, 0.08]} castShadow>
+          <cylinderGeometry args={[0.04, 0.04, 0.03, 8]} />
+          <meshStandardMaterial color="#4a4a4a" roughness={0.5} metalness={0.6} />
+        </mesh>
+
+        {/* Decorative door studs (wealthy+) */}
+        {hasDoorDecor && (
+          <>
+            {[-0.3, 0.3].map((x) =>
+              [-0.6, 0.6].map((y) => (
+                <mesh key={`stud-${x}-${y}`} position={[x, y, 0.06]} castShadow>
+                  <sphereGeometry args={[0.025, 6, 4]} />
+                  <meshStandardMaterial color="#5a5040" roughness={0.4} metalness={0.5} />
+                </mesh>
+              ))
+            )}
+          </>
+        )}
+
+        {/* Arch decoration above door (luxurious) */}
+        {luxuryLevel >= 3 && (
+          <mesh position={[0, 1.15, 0.01]} castShadow>
+            <boxGeometry args={[1.1, 0.15, 0.04]} />
+            <meshStandardMaterial color={trimColor} roughness={0.8} />
+          </mesh>
+        )}
+      </group>
+
+      {/* Threshold/step at door */}
       <mesh
-        position={[0, stepCount * stepHeight + 1.4, -stepCount * stepDepth - 1.1]}
+        position={[0, stepCount * stepHeight + 0.06, -stepCount * stepDepth - 1.05]}
+        castShadow
+        receiveShadow
       >
-        <planeGeometry args={[stepWidth - 0.4, 0.8]} />
-        <meshBasicMaterial color="#1a1410" />
+        <boxGeometry args={[1.2, 0.04, 0.12]} />
+        <meshStandardMaterial color={woodDarkColor} roughness={0.85} />
       </mesh>
     </group>
   );
@@ -209,8 +368,11 @@ const getPropLabelOffset = (type: InteriorPropType): [number, number, number] =>
       return [0, 2.0, 0];
     case InteriorPropType.STAIRS:
       return [0, 3.0, 0]; // Taller for realistic staircase
+    case InteriorPropType.ROOF_HATCH:
+      return [0, 0.8, 0]; // Low since it's on floor
     case InteriorPropType.FIRE_PIT:
     case InteriorPropType.BRAZIER:
+    case InteriorPropType.WALL_FIREPLACE:
       return [0, 1.2, 0];
     case InteriorPropType.SPICE_DISPLAY:
     case InteriorPropType.CERAMIC_DISPLAY:
@@ -238,10 +400,11 @@ const InteriorPropMesh: React.FC<{
   rugMaterial: THREE.MeshStandardMaterial;
   prayerRugMaterial: THREE.MeshStandardMaterial;
   profession: string;
+  socialClass?: SocialClass;
   positionVector?: THREE.Vector3;
   roomSize?: [number, number, number];
   isShattered?: boolean;
-}> = ({ prop, rugMaterial, prayerRugMaterial, profession, positionVector, roomSize, isShattered }) => {
+}> = ({ prop, rugMaterial, prayerRugMaterial, profession, socialClass, positionVector, roomSize, isShattered }) => {
   const itemRef = useRef<THREE.Object3D>(null);
   const base = positionVector ?? new THREE.Vector3(prop.position[0], prop.position[1], prop.position[2]);
   const rotation = prop.rotation as [number, number, number];
@@ -1405,7 +1568,7 @@ const InteriorPropMesh: React.FC<{
             </mesh>
 
             {/* Horizontal piping around edge */}
-            <mesh position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow>
+            <mesh position={[0, 0, 0]} receiveShadow castShadow>
               <torusGeometry args={[w * 0.48, 0.02, 8, 24]} />
               <meshStandardMaterial color={colors.accent} roughness={0.4} metalness={0.06} />
             </mesh>
@@ -1512,7 +1675,7 @@ const InteriorPropMesh: React.FC<{
             </mesh>
 
             {/* Horizontal piping around edge */}
-            <mesh position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow>
+            <mesh position={[0, 0, 0]} receiveShadow castShadow>
               <torusGeometry args={[w * 0.47, 0.018, 8, 8]} />
               <meshStandardMaterial color={colors.accent} roughness={0.5} metalness={0.05} />
             </mesh>
@@ -1566,7 +1729,7 @@ const InteriorPropMesh: React.FC<{
             </mesh>
 
             {/* Horizontal piping around edge */}
-            <mesh position={[0, 0, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow>
+            <mesh position={[0, 0, 0]} receiveShadow castShadow>
               <torusGeometry args={[w * 0.46, 0.016, 8, 20]} />
               <meshStandardMaterial color={colors.accent} roughness={0.55} metalness={0.04} />
             </mesh>
@@ -1751,7 +1914,62 @@ const InteriorPropMesh: React.FC<{
         </group>
       );
     case InteriorPropType.LAMP: {
-      // Ornate oil lamp with glass globe, brass stand, and decorative elements
+      // PEASANT class gets a simple clay oil lamp - terracotta dish with wick
+      if (socialClass === SocialClass.PEASANT) {
+        const clayColor = '#8b5a3c'; // Terracotta
+        const clayDark = '#6a4530';
+        const oilColor = '#3a3520'; // Dark oil residue
+
+        return (
+          <group {...common} position={anchoredPos(0.1)}>
+            <ContactShadow size={[0.25, 0.25]} />
+
+            {/* Dim point light - poor quality oil gives weak light */}
+            <pointLight
+              position={[0, 0.12, 0]}
+              color="#ff9955"
+              intensity={0.6}
+              distance={2.5}
+              decay={2}
+            />
+
+            {/* Simple clay dish base - hand-formed, slightly irregular */}
+            <mesh position={[0, 0.02, 0]} receiveShadow castShadow>
+              <cylinderGeometry args={[0.12, 0.14, 0.04, 8]} />
+              <meshStandardMaterial color={clayColor} roughness={0.95} metalness={0} />
+            </mesh>
+
+            {/* Shallow oil reservoir bowl */}
+            <mesh position={[0, 0.05, 0]} receiveShadow castShadow>
+              <cylinderGeometry args={[0.11, 0.12, 0.03, 8]} />
+              <meshStandardMaterial color={clayDark} roughness={0.9} metalness={0} />
+            </mesh>
+
+            {/* Oil inside (dark, used tallow/fat) */}
+            <mesh position={[0, 0.055, 0]} receiveShadow>
+              <cylinderGeometry args={[0.09, 0.09, 0.015, 8]} />
+              <meshStandardMaterial color={oilColor} roughness={0.7} metalness={0.1} />
+            </mesh>
+
+            {/* Pinched spout for wick */}
+            <mesh position={[0.1, 0.045, 0]} rotation={[0, 0, Math.PI / 8]} receiveShadow castShadow>
+              <boxGeometry args={[0.06, 0.025, 0.04]} />
+              <meshStandardMaterial color={clayColor} roughness={0.95} metalness={0} />
+            </mesh>
+
+            {/* Wick - simple fiber strand */}
+            <mesh position={[0.12, 0.07, 0]} receiveShadow castShadow>
+              <cylinderGeometry args={[0.008, 0.006, 0.05, 4]} />
+              <meshStandardMaterial color="#2a2015" roughness={1} metalness={0} />
+            </mesh>
+
+            {/* Small, smoky flame */}
+            <Flame position={[0.12, 0.11, 0]} size={0.055} color="#ff8844" emissive="#cc5522" />
+          </group>
+        );
+      }
+
+      // MERCHANT and above get ornate brass oil lamp with glass globe
       const brassColor = '#b8860b';
       const darkBrass = '#8a6409';
       const glassColor = '#d8e8f0';
@@ -2085,7 +2303,9 @@ const InteriorPropMesh: React.FC<{
     }
     case InteriorPropType.LANTERN: {
       // 14th century Damascus geometric metal lantern with randomized shapes and colors
-      const seed = Math.floor(seededRandom(prop.id.length + prop.position[0] * 29 + prop.position[2] * 37) * 10000);
+      // Hash the full prop.id string for proper randomization (not just length)
+      const idHash = prop.id.split('').reduce((acc, char, idx) => acc + char.charCodeAt(0) * (idx + 1), 0);
+      const seed = Math.floor(seededRandom(idHash + prop.position[0] * 29 + prop.position[1] * 53 + prop.position[2] * 37) * 10000);
       let localSeed = seed;
       const rand = () => seededRandom(localSeed++);
 
@@ -2429,6 +2649,31 @@ const InteriorPropMesh: React.FC<{
           <FireSmoke position={[0, 0, 0]} />
         </group>
       );
+    case InteriorPropType.WALL_FIREPLACE:
+      return (
+        <group {...common} position={anchoredPos(0)}>
+          {/* Stone hearth base */}
+          <mesh receiveShadow position={[0, 0.4, 0]}>
+            <boxGeometry args={[1.6, 0.8, 0.6]} />
+            <meshStandardMaterial color="#5a5a5a" roughness={0.9} />
+          </mesh>
+          {/* Back wall */}
+          <mesh receiveShadow position={[0, 1.2, -0.2]}>
+            <boxGeometry args={[1.8, 1.6, 0.2]} />
+            <meshStandardMaterial color="#4a4a4a" roughness={0.95} />
+          </mesh>
+          {/* Fire grate */}
+          <mesh receiveShadow position={[0, 0.5, 0.1]}>
+            <boxGeometry args={[1.2, 0.1, 0.4]} />
+            <meshStandardMaterial color="#2a2a2a" metalness={0.6} roughness={0.4} />
+          </mesh>
+          {/* Flames */}
+          <Flame position={[-0.3, 0.7, 0]} size={0.18} color="#ffb347" emissive="#ff7a18" />
+          <Flame position={[0.3, 0.7, 0]} size={0.18} color="#ffb347" emissive="#ff7a18" />
+          <Flame position={[0, 0.75, 0]} size={0.22} color="#ffb347" emissive="#ff7a18" />
+          <FireSmoke position={[0, 0.4, 0]} />
+        </group>
+      );
     case InteriorPropType.LOOM:
       return (
         <group {...common} position={anchoredPos(0.1)}>
@@ -2767,7 +3012,87 @@ const InteriorPropMesh: React.FC<{
     case InteriorPropType.LADDER:
       return <Ladder position={anchoredPos(0)} rotation={rotation} />;
     case InteriorPropType.STAIRS:
-      return <Staircase position={anchoredPos(0)} rotation={rotation} />;
+      return <Staircase position={anchoredPos(0)} rotation={rotation} luxuryLevel={prop.luxuryLevel} />;
+    case InteriorPropType.ROOF_HATCH: {
+      // Trapdoor to rooftop with visible ladder rungs descending
+      const luxuryLevel = prop.luxuryLevel ?? 1;
+      const hatchSize = 1.0;
+      const woodColor = luxuryLevel >= 2 ? '#6a4a32' : '#5a3a28';
+      const woodDarkColor = luxuryLevel >= 2 ? '#5a3a28' : '#4a2a1a';
+      const ironColor = '#3a3a3a';
+
+      return (
+        <group {...common} position={anchoredPos(0.02)}>
+          {/* Hatch frame (square on floor) */}
+          <mesh receiveShadow castShadow>
+            <boxGeometry args={[hatchSize + 0.12, 0.08, hatchSize + 0.12]} />
+            <meshStandardMaterial color={woodDarkColor} roughness={0.9} />
+          </mesh>
+
+          {/* Inner opening (dark void suggesting depth) */}
+          <mesh position={[0, 0.03, 0]} receiveShadow>
+            <boxGeometry args={[hatchSize - 0.08, 0.02, hatchSize - 0.08]} />
+            <meshBasicMaterial color="#1a1410" />
+          </mesh>
+
+          {/* Hatch door (trapdoor) - propped open */}
+          <mesh position={[0, 0.25, -(hatchSize / 2 + 0.04)]} rotation={[-1.1, 0, 0]} castShadow>
+            <boxGeometry args={[hatchSize - 0.06, 0.05, hatchSize - 0.06]} />
+            <meshStandardMaterial color={woodColor} roughness={0.85} />
+          </mesh>
+
+          {/* Panel detail on trapdoor */}
+          {luxuryLevel >= 1 && (
+            <mesh position={[0, 0.27, -(hatchSize / 2 + 0.06)]} rotation={[-1.1, 0, 0]} receiveShadow>
+              <boxGeometry args={[hatchSize * 0.6, 0.02, hatchSize * 0.6]} />
+              <meshStandardMaterial color={woodDarkColor} roughness={0.9} />
+            </mesh>
+          )}
+
+          {/* Iron hinges on far edge */}
+          {[-0.25, 0.25].map((x, i) => (
+            <mesh key={`hinge-${i}`} position={[x, 0.06, hatchSize / 2 - 0.08]} castShadow>
+              <boxGeometry args={[0.12, 0.025, 0.08]} />
+              <meshStandardMaterial color={ironColor} roughness={0.5} metalness={0.6} />
+            </mesh>
+          ))}
+
+          {/* Iron ring handle on trapdoor */}
+          <mesh position={[0, 0.32, -(hatchSize / 2 - 0.15)]} rotation={[-1.1, 0, 0]}>
+            <torusGeometry args={[0.07, 0.018, 8, 12]} />
+            <meshStandardMaterial color={ironColor} roughness={0.4} metalness={0.7} />
+          </mesh>
+
+          {/* Ladder rungs visible descending into darkness */}
+          {[0.15, 0.45, 0.75].map((y, i) => (
+            <mesh key={`rung-${i}`} position={[0, -y, 0.1]}>
+              <boxGeometry args={[0.65, 0.045, 0.045]} />
+              <meshStandardMaterial color="#7a5a3a" roughness={0.9} />
+            </mesh>
+          ))}
+
+          {/* Side rails of ladder descending */}
+          {[-0.38, 0.38].map((x, i) => (
+            <mesh key={`rail-${i}`} position={[x, -0.4, 0.1]}>
+              <boxGeometry args={[0.05, 0.9, 0.05]} />
+              <meshStandardMaterial color="#6a4a2a" roughness={0.88} />
+            </mesh>
+          ))}
+
+          {/* Decorative corner brackets (wealthy+) */}
+          {luxuryLevel >= 2 && (
+            <>
+              {[[-1, -1], [-1, 1], [1, -1], [1, 1]].map(([cx, cz], i) => (
+                <mesh key={`corner-${i}`} position={[cx * (hatchSize / 2 + 0.02), 0.06, cz * (hatchSize / 2 + 0.02)]}>
+                  <boxGeometry args={[0.08, 0.03, 0.08]} />
+                  <meshStandardMaterial color={ironColor} roughness={0.5} metalness={0.5} />
+                </mesh>
+              ))}
+            </>
+          )}
+        </group>
+      );
+    }
     case InteriorPropType.SPINDLE:
       return <Spindle position={anchoredPos(0)} rotation={rotation} />;
     case InteriorPropType.DYE_VAT:
@@ -3311,10 +3636,11 @@ export const InteriorPropRenderer: React.FC<{
   rugMaterial: THREE.MeshStandardMaterial;
   prayerRugMaterial: THREE.MeshStandardMaterial;
   profession: string;
+  socialClass?: SocialClass;
   roomSize?: [number, number, number];
   positionVector?: THREE.Vector3;
   isShattered?: boolean;
-}> = ({ prop, rugMaterial, prayerRugMaterial, profession, roomSize, positionVector, isShattered }) => {
+}> = ({ prop, rugMaterial, prayerRugMaterial, profession, socialClass, roomSize, positionVector, isShattered }) => {
   const labelOffset = useMemo(() => getPropLabelOffset(prop.type), [prop.type]);
   const zeroVector = useMemo(() => new THREE.Vector3(0, 0, 0), []);
   const displayProp = useMemo(() => ({
@@ -3334,6 +3660,7 @@ export const InteriorPropRenderer: React.FC<{
         rugMaterial={rugMaterial}
         prayerRugMaterial={prayerRugMaterial}
         profession={profession}
+        socialClass={socialClass}
         positionVector={positionVector ? zeroVector : undefined}
         roomSize={roomSize}
         isShattered={isShattered}

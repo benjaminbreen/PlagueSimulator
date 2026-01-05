@@ -12,6 +12,42 @@ import { seededRandom, generateNameForMerchant } from './procedural';
 import { assignDemographics } from './demographics';
 import { generateMerchantInventory } from './merchantItems';
 
+// Map profession names to merchant types for interior trading
+export function professionToMerchantType(profession: string): MerchantType | null {
+  const prof = profession.toLowerCase();
+
+  // Food professions
+  if (/baker|bread|pastry|cook/.test(prof)) return MerchantType.TRADER;
+  if (/butcher|meat/.test(prof)) return MerchantType.TRADER;
+
+  // Spice/medical professions
+  if (/spice|herb|apothecary|pharmacist|hakim|drug/.test(prof)) return MerchantType.APOTHECARY;
+
+  // Textile professions
+  if (/silk|textile|cloth|fabric|draper|tailor|weaver|dyer/.test(prof)) return MerchantType.TEXTILE;
+
+  // Metal professions
+  if (/blacksmith|goldsmith|jeweler|metal|copper|brass|smith/.test(prof)) return MerchantType.METALSMITH;
+
+  // Pottery/glass
+  if (/potter|ceramic|glassblower|glass/.test(prof)) return MerchantType.TRADER;
+
+  // Leather
+  if (/tanner|leather|cobbler|shoe/.test(prof)) return MerchantType.TRADER;
+
+  // Other tradeable professions
+  if (/perfume|incense|attar/.test(prof)) return MerchantType.APOTHECARY;
+  if (/scribe|bookseller|paper/.test(prof)) return MerchantType.TRADER;
+  if (/candlemaker|soap|chandler/.test(prof)) return MerchantType.TRADER;
+  if (/innkeeper|sherbet/.test(prof)) return MerchantType.TRADER;
+
+  // Generic merchants
+  if (/merchant|trader|seller|shop|keeper/.test(prof)) return MerchantType.TRADER;
+
+  // Non-merchant professions return null
+  return null;
+}
+
 // Map stall types to merchant types
 export const mapStallTypeToMerchantType = (stallType: MarketStallType): MerchantType => {
   switch (stallType) {
@@ -255,6 +291,34 @@ const generateMerchantStats = (
     }
   }
 
+  // Headscarf style for female merchants
+  // Distribution: 10% veiled, 60% full, 30% modest (standard distribution)
+  const headscarfStyle: 'veiled' | 'full' | 'modest' = gender === 'Female' ? (() => {
+    if (age >= 70) {
+      const roll = rand();
+      if (roll < 0.2) return 'veiled';
+      if (roll < 0.75) return 'full';
+      return 'modest';
+    }
+    if (age >= 60) {
+      const roll = rand();
+      if (roll < 0.12) return 'veiled';
+      if (roll < 0.7) return 'full';
+      return 'modest';
+    }
+    if (age >= 40) {
+      const roll = rand();
+      if (roll < 0.1) return 'veiled';
+      if (roll < 0.65) return 'full';
+      return 'modest';
+    }
+    // Younger merchants - standard distribution
+    const roll = rand();
+    if (roll < 0.08) return 'veiled';
+    if (roll < 0.65) return 'full';
+    return 'modest';
+  })() : 'full';
+
   // Generate disposition for merchant (merchants tend to be more personable for business)
   const baseDisposition = 30 + Math.floor(rand() * 50); // 30-80 range, skewing friendly
   const disposition = Math.min(100, baseDisposition);
@@ -307,6 +371,7 @@ const generateMerchantStats = (
     robePattern,
     hairStyle: gender === 'Female' ? 'covered' : rand() < 0.5 ? 'short' : 'medium',
     headwearStyle,
+    headscarfStyle,
     sleeveCoverage: 'full',
     footwearStyle,
     footwearColor: footwearStyle === 'shoes' ? '#3d2817' : '#8b7355',

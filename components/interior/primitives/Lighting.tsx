@@ -19,17 +19,15 @@ export const Flame: React.FC<{ position: [number, number, number]; size: number;
   );
 };
 
-const contactShadowMaterial = new THREE.MeshBasicMaterial({
-  color: '#22180f',
-  transparent: true,
-  opacity: 0.32,
-  depthWrite: false
-});
-
 export const ContactShadow: React.FC<{ size: [number, number]; y?: number }> = ({ size, y = 0.02 }) => (
   <mesh position={[0, y, 0]} rotation={[-Math.PI / 2, 0, 0]}>
     <circleGeometry args={[Math.max(size[0], size[1]) * 0.35, 18]} />
-    <primitive object={contactShadowMaterial} />
+    <meshBasicMaterial
+      color="#22180f"
+      transparent
+      opacity={0.32}
+      depthWrite={false}
+    />
   </mesh>
 );
 

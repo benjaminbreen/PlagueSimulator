@@ -2,7 +2,7 @@ import React, { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { AdaptiveEvents, PerformanceMonitor } from '@react-three/drei';
 import * as THREE from 'three';
-import { DevSettings, InteriorSpec, PlayerStats, SimulationParams, SimulationStats, NPCRecord, BuildingInfectionState, PlayerActionEvent, NpcStateOverride } from '../types';
+import { DevSettings, InteriorSpec, PlayerStats, SimulationParams, SimulationStats, NPCRecord, BuildingInfectionState, PlayerActionEvent, NpcStateOverride, InteriorNPC, InteriorMerchantData, MerchantNPC, MerchantInventory } from '../types';
 import { Simulation } from './Simulation';
 import { InteriorScene } from './InteriorScene';
 
@@ -46,6 +46,7 @@ interface SimulationShellProps {
   buildingInfection: Record<string, BuildingInfectionState>;
   onPlayerPositionUpdate: (pos: THREE.Vector3) => void;
   dossierMode: boolean;
+  merchantFocusPosition: [number, number, number] | null;
   onPlagueExposure: (updatedPlague: any) => void;
   onNPCInitiatedEncounter: (npc: any) => void;
   onFallDamage: (fallHeight: number, fatal: boolean) => void;
@@ -58,7 +59,9 @@ interface SimulationShellProps {
   onExitInterior?: () => void;
   onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
   onNearStairs?: (stairs: { id: string; label: string; position: [number, number, number]; type: import('../types').InteriorPropType } | null) => void;
+  onNearRoofHatch?: (hatch: { id: string; position: [number, number, number] } | null) => void;
   onNearBirdcage?: (birdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
+  onNearRooftopHatch?: (hatch: { buildingId: string; building: import('../types').BuildingMetadata; position: [number, number, number] } | null) => void;
   onShowLootModal?: (data: {
     type: 'shatter';
     sourceObjectName: string;
@@ -121,6 +124,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   buildingInfection,
   onPlayerPositionUpdate,
   dossierMode,
+  merchantFocusPosition,
   onPlagueExposure,
   onNPCInitiatedEncounter,
   onFallDamage,
@@ -133,7 +137,9 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   onExitInterior,
   onNearChest,
   onNearStairs,
+  onNearRoofHatch,
   onNearBirdcage,
+  onNearRooftopHatch,
   onShowLootModal,
   performanceMonitor
 }) => {
@@ -220,6 +226,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             buildingInfection={buildingInfection}
             onPlayerPositionUpdate={onPlayerPositionUpdate}
             dossierMode={dossierMode}
+            merchantFocusPosition={merchantFocusPosition}
             onPlagueExposure={onPlagueExposure}
             onNPCInitiatedEncounter={onNPCInitiatedEncounter}
             onFallDamage={onFallDamage}
@@ -233,6 +240,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onShowLootModal={onShowLootModal}
             onNearChest={onNearChest}
             onNearBirdcage={onNearBirdcage}
+            onNearRooftopHatch={onNearRooftopHatch}
           />
         )}
         {!transitioning && sceneMode === 'interior' && interiorSpec && (
@@ -256,6 +264,39 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onExitInterior={onExitInterior}
             onNearChest={onNearChest}
             onNearStairs={onNearStairs}
+            onNearRoofHatch={onNearRoofHatch}
+            onNearbyMerchant={(merchant) => {
+              if (!merchant) {
+                onNearMerchant(null);
+                return;
+              }
+              // Convert InteriorNPC + InteriorMerchantData to MerchantNPC format
+              const { npc, merchantData } = merchant;
+
+              // Don't allow trading with deceased merchants - they can still be talked to as shades
+              if (npc.state === 'DECEASED') {
+                onNearMerchant(null);
+                return;
+              }
+
+              const merchantNPC: MerchantNPC = {
+                id: `interior-merchant-${npc.id}`,
+                type: merchantData.merchantType,
+                stats: npc.stats,
+                locationId: interiorSpec?.buildingId ?? 'unknown',
+                locationType: 'INTERIOR',
+                position: npc.position,
+                inventory: {
+                  merchantId: `interior-merchant-${npc.id}`,
+                  items: merchantData.inventory,
+                  lastRestockTime: stats.simTime,
+                  restockInterval: 24,
+                },
+                haggleModifier: merchantData.haggleModifier,
+                greeting: merchantData.greeting,
+              };
+              onNearMerchant(merchantNPC);
+            }}
           />
         )}
       </Suspense>

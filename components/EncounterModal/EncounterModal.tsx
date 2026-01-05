@@ -9,7 +9,8 @@ import {
   SimulationStats,
   ConversationSummary,
   EncounterContext,
-  getLocationLabel
+  getLocationLabel,
+  AgentState
 } from '../../types';
 import { ConversationImpact } from '../../utils/friendliness';
 import { MoraleStats } from '../Agents';
@@ -18,6 +19,7 @@ import * as THREE from 'three';
 
 interface EncounterModalProps {
   npc: NPCStats;
+  npcState?: AgentState;  // NPC's current state (alive/deceased)
   player: PlayerStats;
   environment: {
     timeOfDay: number;
@@ -58,7 +60,8 @@ const AnimatedPortrait: React.FC<{
   npc: NPCStats;
   isSpeaking: boolean;
   emotion: EmotionSignal;
-}> = ({ npc, isSpeaking, emotion }) => {
+  isDeceased?: boolean;
+}> = ({ npc, isSpeaking, emotion, isDeceased = false }) => {
   const groupRef = useRef<THREE.Group>(null);
 
   // Animation state refs
@@ -72,11 +75,39 @@ const AnimatedPortrait: React.FC<{
   const emphasisActive = useRef(false);
   const bodySway = useRef(0);
 
+  // Spectral animation refs for deceased NPCs
+  const spectralPhase = useRef(Math.random() * Math.PI * 2);
+  const glowPulse = useRef(0);
+
   useFrame((state, delta) => {
     if (!groupRef.current) return;
     const t = state.clock.elapsedTime;
 
-    // === BREATHING ===
+    // === SPECTRAL EFFECTS FOR DECEASED ===
+    if (isDeceased) {
+      spectralPhase.current += delta * 0.5;
+      glowPulse.current += delta * 1.2;
+
+      // Slow ethereal floating
+      const floatY = Math.sin(spectralPhase.current) * 0.03;
+      const driftX = Math.sin(spectralPhase.current * 0.7) * 0.015;
+
+      groupRef.current.position.set(driftX, -1.65 + floatY, 0);
+
+      // Subtle rotation drift
+      groupRef.current.rotation.set(
+        Math.sin(spectralPhase.current * 0.3) * 0.02,
+        Math.sin(spectralPhase.current * 0.5) * 0.03,
+        Math.sin(spectralPhase.current * 0.4) * 0.015
+      );
+
+      // Pulsing scale for ethereal effect
+      const spectralScale = 1 + Math.sin(spectralPhase.current * 1.5) * 0.02;
+      groupRef.current.scale.setScalar(spectralScale);
+      return; // Skip normal animation for deceased
+    }
+
+    // === BREATHING (living NPCs only) ===
     breathPhase.current += delta * 0.7;
     const breathAmount = Math.sin(breathPhase.current) * 0.006;
     const breathY = Math.sin(breathPhase.current) * 0.002;
@@ -153,15 +184,66 @@ const AnimatedPortrait: React.FC<{
     groupRef.current.scale.setScalar(1 + breathAmount);
   });
 
+  // Calculate animated glow intensity for deceased
+  const glowIntensity = isDeceased ? 1.2 + Math.sin(glowPulse.current) * 0.4 : 0;
+  const glowOpacity = isDeceased ? 0.25 + Math.sin(glowPulse.current * 0.8) * 0.1 : 0;
+
   return (
     <group ref={groupRef} position={[0, -1.65, 0.0]}>
+      {/* Enhanced spectral glow effects for deceased NPCs */}
+      {isDeceased && (
+        <>
+          {/* Animated point light - pulsing */}
+          <pointLight
+            position={[0, 0.5, 0]}
+            intensity={glowIntensity}
+            color="#b0d8ff"
+            distance={3.5}
+            decay={1.8}
+          />
+
+          {/* Core ethereal glow - brighter, animated */}
+          <mesh position={[0, 0.5, 0]}>
+            <sphereGeometry args={[0.7, 24, 24]} />
+            <meshBasicMaterial
+              color="#ddeeff"
+              transparent
+              opacity={glowOpacity}
+              depthWrite={false}
+            />
+          </mesh>
+
+          {/* Outer mist aura - larger, softer */}
+          <mesh position={[0, 0.3, 0]}>
+            <sphereGeometry args={[1.3, 20, 20]} />
+            <meshBasicMaterial
+              color="#ffffff"
+              transparent
+              opacity={glowOpacity * 0.4}
+              depthWrite={false}
+            />
+          </mesh>
+
+          {/* Wispy particles around the shade */}
+          <mesh position={[0, 0.6, 0]}>
+            <sphereGeometry args={[0.5, 16, 16]} />
+            <meshBasicMaterial
+              color="#e0f0ff"
+              transparent
+              opacity={glowOpacity * 0.6}
+              depthWrite={false}
+            />
+          </mesh>
+        </>
+      )}
+
       <Humanoid
-        color={npc.robeBaseColor}
-        headColor="#c9a87c"
-        turbanColor={npc.headwearColor}
-        headscarfColor={npc.headwearColor}
-        robeAccentColor={npc.robeAccentColor}
-        hairColor={npc.hairColor}
+        color={isDeceased ? "#e8f2ff" : npc.robeBaseColor}
+        headColor={isDeceased ? "#f0f5ff" : "#c9a87c"}
+        turbanColor={isDeceased ? "#dde8f5" : npc.headwearColor}
+        headscarfColor={isDeceased ? "#dde8f5" : npc.headwearColor}
+        robeAccentColor={isDeceased ? "#c8d8e8" : npc.robeAccentColor}
+        hairColor={isDeceased ? "#e0e5ec" : npc.hairColor}
         facialHair={npc.facialHair}
         gender={npc.gender}
         scale={[1, 1, 1]}
@@ -174,7 +256,7 @@ const AnimatedPortrait: React.FC<{
         headwearStyle={npc.headwearStyle}
         sleeveCoverage={npc.sleeveCoverage}
         footwearStyle={npc.footwearStyle}
-        footwearColor={npc.footwearColor}
+        footwearColor={isDeceased ? "#d8e0e8" : npc.footwearColor}
         accessories={npc.accessories}
         sicknessLevel={0}
         isDead={false}
@@ -232,6 +314,7 @@ function renderMessageContent(content: string): React.ReactNode[] {
 
 export const EncounterModal: React.FC<EncounterModalProps> = ({
   npc,
+  npcState,
   player,
   environment,
   publicMorale,
@@ -243,6 +326,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
   isNPCInitiated = false,
   isFollowingAfterDismissal = false
 }) => {
+  const isDeceased = npcState === AgentState.DECEASED;
   const [activeTab, setActiveTab] = useState<'conversation' | 'history'>('conversation');
   const [inputValue, setInputValue] = useState('');
   const [isVisible, setIsVisible] = useState(false);
@@ -318,7 +402,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
     simulationStats,
     conversationHistory: conversationHistory.filter(h => h.npcId === npc.id),
     nativeLanguageMode,
-    isFollowingAfterDismissal
+    isFollowingAfterDismissal,
+    isDeceased
   };
 
   const {
@@ -478,14 +563,14 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
     >
       {/* Backdrop with blur animation */}
       <div
-        className={`absolute inset-0 bg-black/70 transition-all duration-300 ${
-          isVisible && !isExiting ? 'backdrop-blur-sm' : 'backdrop-blur-none'
+        className={`absolute inset-0 bg-black/55 transition-all duration-300 ${
+          isVisible && !isExiting ? 'backdrop-blur-md' : 'backdrop-blur-none'
         }`}
       />
 
       {/* Modal Container with scale animation */}
       <div
-        className={`relative w-full max-w-4xl max-h-[95vh] bg-gradient-to-b from-stone-900 to-stone-950 border border-amber-800/50 rounded-lg shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ease-out ${
+        className={`relative w-full max-w-4xl max-h-[85vh] bg-gradient-to-b from-stone-900 to-stone-950 border border-amber-800/50 rounded-lg shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ease-out ${
           isVisible && !isExiting
             ? 'scale-100 translate-y-0'
             : 'scale-95 translate-y-4'
@@ -495,21 +580,21 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-amber-900/40 bg-black/30">
           <div className="flex items-center gap-3">
-            <h3 className="text-xs sm:text-sm text-amber-500/80 uppercase tracking-[0.3em] font-semibold">
+            <h3 className="text-sm sm:text-sm text-amber-500/80 uppercase tracking-[0.3em] font-semibold">
               Encounter
             </h3>
             {/* Status chips with entry animation */}
             <div className={`hidden sm:flex items-center gap-2 transition-all duration-500 delay-200 ${
               isVisible ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'
             }`}>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full transition-colors duration-300 ${
+              <span className={`text-[12px] px-2 py-0.5 rounded-full transition-colors duration-300 ${
                 npc.panicLevel > 60 ? 'bg-red-900/40 text-red-300' :
                 npc.panicLevel > 40 ? 'bg-amber-900/40 text-amber-300' :
                 'bg-emerald-900/40 text-emerald-300'
               }`}>
                 {npc.panicLevel > 60 ? 'Panicked' : npc.panicLevel > 40 ? 'Anxious' : 'Calm'}
               </span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-stone-800/60 text-stone-300">
+              <span className="text-[12px] px-2 py-0.5 rounded-full bg-stone-800/60 text-stone-300">
                 {getAwarenessLabel(npc.awarenessLevel)}
               </span>
             </div>
@@ -530,11 +615,17 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
           <div className="w-full md:w-72 lg:w-80 border-b md:border-b-0 md:border-r border-amber-900/30 bg-black/20 flex flex-col flex-shrink-0 order-2 md:order-1 max-h-[35vh] md:max-h-none overflow-hidden">
 
             {/* Portrait Container - smaller on mobile */}
-            <div className="relative h-28 sm:h-36 md:h-64 bg-gradient-to-b from-amber-950/30 to-black/50 overflow-hidden flex-shrink-0">
+            <div className={`relative h-28 sm:h-36 md:h-64 overflow-hidden flex-shrink-0 ${
+              isDeceased
+                ? 'bg-gradient-to-b from-cyan-950/30 to-slate-950/60'
+                : 'bg-gradient-to-b from-amber-950/30 to-black/50'
+            }`}>
               {/* Ambient glow behind portrait */}
-              <div className={`absolute inset-0 bg-gradient-radial from-amber-900/20 via-transparent to-transparent transition-opacity duration-1000 ${
-                isLoading ? 'opacity-100' : 'opacity-40'
-              }`} />
+              <div className={`absolute inset-0 transition-opacity duration-1000 ${
+                isDeceased
+                  ? 'bg-gradient-radial from-cyan-900/25 via-blue-950/10 to-transparent'
+                  : 'bg-gradient-radial from-amber-900/20 via-transparent to-transparent'
+              } ${isLoading ? 'opacity-100' : 'opacity-40'}`} />
 
               <div className="absolute inset-3 border border-amber-600/20 rounded-md pointer-events-none" />
 
@@ -548,7 +639,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                 {/* Speaking glow effect */}
                 <SpeakingGlow isSpeaking={isLoading} />
                 {/* Animated portrait */}
-                <AnimatedPortrait npc={npc} isSpeaking={isLoading} emotion={emotion} />
+                <AnimatedPortrait npc={npc} isSpeaking={isLoading} emotion={emotion} isDeceased={isDeceased} />
               </Canvas>
 
               {/* Speaking indicator overlay */}
@@ -578,8 +669,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
               <div className={`text-center py-1 sm:pt-2 sm:pb-3 border-b border-amber-900/30 transition-all duration-500 delay-100 ${
                 isVisible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
               }`}>
-                <h2 className="text-base sm:text-xl historical-font text-amber-100 tracking-wide">
-                  {npc.name}
+                <h2 className={`text-base sm:text-xl historical-font tracking-wide ${isDeceased ? 'text-cyan-200' : 'text-amber-100'}`}>
+                  {npc.name} {isDeceased && <span className="text-cyan-300/80">(Deceased)</span>}
                 </h2>
                 <p className="text-[10px] sm:text-[11px] text-amber-500/70 mt-0.5 uppercase tracking-widest">
                   {npc.profession} • {npc.gender}, {npc.age}
@@ -804,7 +895,7 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
                             : 'bg-stone-800/75 text-stone-100 rounded-bl-sm border border-stone-700/50 hover:bg-stone-800/85'
                         }`}
                       >
-                        <p className="text-[15px] leading-relaxed whitespace-pre-wrap">
+                        <p className="text-[17px] leading-relaxed whitespace-pre-wrap">
                           {renderMessageContent(msg.content)}
                         </p>
                         <p className={`text-[10px] mt-1 ${

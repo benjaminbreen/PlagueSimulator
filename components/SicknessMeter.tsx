@@ -84,16 +84,16 @@ export const SicknessMeter: React.FC<SicknessMeterProps> = ({
       className={`
         ${colors.bg} ${colors.border} ${colors.glow}
         backdrop-blur-md border rounded-lg
-        px-4 py-2 transition-all cursor-pointer
+        px-4 py-1 mt-1 transition-all cursor-pointer
         hover:bg-opacity-60 active:scale-[0.98]
-        flex flex-col gap-1.5 min-w-[320px]
+        flex flex-col gap-1.5 min-w-[300px]
       `}
     >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Activity size={14} className={colors.text} />
-          <span className={`${colors.text} font-bold text-[10px] uppercase tracking-widest`}>
+          <span className={`${colors.text} font-bold text-[11px]  uppercase tracking-[0.05em]`}>
             {plague.state === AgentState.INFECTED
               ? `PLAGUE: ${getPlagueTypeLabel(plague.plagueType)}`
               : plague.state === AgentState.INCUBATING
@@ -103,25 +103,25 @@ export const SicknessMeter: React.FC<SicknessMeterProps> = ({
           </span>
         </div>
         {plague.state === AgentState.INFECTED && (
-          <span className={`${colors.text} text-[9px] font-bold`}>
+          <span className={`${colors.text} text-[10px] tracking-wide font-bold`}>
             Day {plague.daysInfected}
           </span>
         )}
         {plague.state === AgentState.INCUBATING && (
-          <span className={`${colors.text} text-[9px] font-bold opacity-70`}>
+          <span className={`${colors.text} text-[10px] font-bold opacity-100`}>
             Minor fatigue
           </span>
         )}
       </div>
 
       {/* Progress Bar */}
-      <div className="relative w-full h-3 bg-black/40 rounded-full overflow-hidden border border-white/10">
+      <div className="relative w-full h-2.5 bg-black/40 -mb-0.5 rounded-full overflow-hidden border border-white/10">
         <div
           className={`${colors.barFilled} h-full transition-all duration-500 ease-out`}
           style={{ width: `${progressPercent}%` }}
         />
-        <div className="absolute inset-0 flex items-center justify-end pr-2">
-          <span className="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+        <div className="absolute inset-0 flex items-center  justify-end pr-2">
+          <span className="text-[12px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
             {Math.round(progressPercent)}%
           </span>
         </div>
@@ -129,7 +129,7 @@ export const SicknessMeter: React.FC<SicknessMeterProps> = ({
 
       {/* Symptoms / Status */}
       {plague.state === AgentState.INFECTED && symptoms.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+        <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
           {symptoms.map((symptom, i) => (
             <span key={i} className={`${colors.text} font-medium`}>
               {symptom}

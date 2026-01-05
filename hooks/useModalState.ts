@@ -1,5 +1,12 @@
 import { useState } from 'react';
 import { LootModalData } from '../components/LootModal';
+import { MedicalEstablishmentType } from '../types';
+
+export interface MedicalModalState {
+  isOpen: boolean;
+  establishmentType: MedicalEstablishmentType;
+  practitionerName: string;
+}
 
 export const useModalState = () => {
   const [showEnterModal, setShowEnterModal] = useState(false);
@@ -8,6 +15,7 @@ export const useModalState = () => {
   const [showEncounterModal, setShowEncounterModal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
   const [lootModalData, setLootModalData] = useState<LootModalData | null>(null);
+  const [medicalModal, setMedicalModal] = useState<MedicalModalState | null>(null);
 
   return {
     showEnterModal,
@@ -21,6 +29,8 @@ export const useModalState = () => {
     showGuideModal,
     setShowGuideModal,
     lootModalData,
-    setLootModalData
+    setLootModalData,
+    medicalModal,
+    setMedicalModal
   };
 };

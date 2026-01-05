@@ -2,14 +2,20 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { MoraleStats } from './components/Agents';
-import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, InteriorPropType, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, PlagueType, SocialClass } from './types';
+import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, InteriorPropType, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, PlagueType, SocialClass, MedicalEstablishmentType } from './types';
+import { MedicalTreatmentModal } from './components/MedicalTreatmentModal';
+import { applyTreatmentEffects, getEfficacyMultiplier, getTreatmentById, ESTABLISHMENTS, generateDetailedOutcome, TreatmentOutcome } from './utils/medicalTreatments';
+import { getBuildingHeight } from './utils/buildingHeights';
+import { applyCompoundEffects } from './utils/apothecaryRecipes';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
-import { generateInteriorSpec } from './utils/interior';
+import { generateInteriorSpec, FamilyInteriorContext } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
 import { shouldNpcBeHome } from './utils/npcSchedule';
+import { generatePlayerFamily, getRelationshipLabel } from './utils/family';
 import { advanceNpcHealth, applyHouseholdExposure, ensureNpcPlagueMeta, resetNpcPlagueMeta } from './utils/npcHealth';
 import { updateBuildingInfections } from './utils/buildingInfection';
-import { initializePlague, progressPlague, getPlagueTypeLabel, exposePlayerToPlague } from './utils/plague';
+import { initializePlague, progressPlague, getPlagueTypeLabel, exposePlayerToPlague, applyItemEffects, isConsumableItem } from './utils/plague';
+import { getItemDetailsByItemId } from './utils/merchantItems';
 import { SimulationShell } from './components/SimulationShell';
 import { AppShell } from './components/AppShell';
 import { usePlagueMonitor } from './hooks/usePlagueMonitor';
@@ -65,7 +71,9 @@ function App() {
     showGuideModal,
     setShowGuideModal,
     lootModalData,
-    setLootModalData
+    setLootModalData,
+    medicalModal,
+    setMedicalModal
   } = useModalState();
   const [sceneMode, setSceneMode] = useState<'outdoor' | 'interior'>('outdoor');
   const [interiorSpec, setInteriorSpec] = useState<InteriorSpec | null>(null);
@@ -108,6 +116,8 @@ function App() {
   const [nearChest, setNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const [nearBirdcage, setNearBirdcage] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const [nearStairs, setNearStairs] = useState<{ id: string; label: string; position: [number, number, number]; type: InteriorPropType } | null>(null);
+  const [nearRoofHatch, setNearRoofHatch] = useState<{ id: string; position: [number, number, number] } | null>(null);
+  const [nearRooftopHatch, setNearRooftopHatch] = useState<{ buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null>(null);
   const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
   const [worldFlags, setWorldFlags] = useState<Record<string, boolean | number | string>>(() => {
     try {
@@ -133,6 +143,8 @@ function App() {
   const timeOfDayRef = useRef(12);
   const lastSimCommitRef = useRef(0);
   const seededInitialInfectionsRef = useRef(false);
+  const familyNpcsRef = useRef<NPCRecord[]>([]);
+  const homeAssignedRef = useRef(false);
   const [minimapData, setMinimapData] = useState<MiniMapData | null>(null);
   const [pickupPrompt, setPickupPrompt] = useState<string | null>(null);
   const [climbablePrompt, setClimbablePrompt] = useState<string | null>(null);
@@ -152,8 +164,11 @@ function App() {
   });
   const [toastMessages, setToastMessages] = useState<ToastMessage[]>([]);
   const toastIdCounter = useRef(0);
+  const [treatmentOutcome, setTreatmentOutcome] = useState<TreatmentOutcome | null>(null);
   const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const [cameraViewTarget, setCameraViewTarget] = useState<[number, number, number] | null>(null);
+  const [deceasedCycleIndex, setDeceasedCycleIndex] = useState(0);
+
   // Handle navigation to infected household
   const handleNavigateToHousehold = useCallback((buildingPosition: [number, number, number]) => {
     // Switch to overhead camera mode
@@ -162,6 +177,45 @@ function App() {
     // Will stay locked until player moves
     setCameraViewTarget(buildingPosition);
   }, []);
+
+  // Handle navigation to deceased NPCs - cycles through all deceased on each click
+  const handleNavigateToDeceased = useCallback(() => {
+    // Get all deceased NPCs (both outdoor and building residents)
+    const allNPCs = outdoorNpcPool;
+    const deceasedNPCs = allNPCs.filter(npc => npc.state === AgentState.DECEASED);
+
+    if (deceasedNPCs.length === 0) return;
+
+    // Cycle to next deceased NPC
+    const currentIndex = deceasedCycleIndex % deceasedNPCs.length;
+    const targetNPC = deceasedNPCs[currentIndex];
+
+    // Determine target position (outdoor or building)
+    let targetPosition: [number, number, number];
+
+    if (targetNPC.location === 'outdoor') {
+      // Use last known outdoor position (corpse location)
+      targetPosition = targetNPC.lastOutdoorPos;
+    } else {
+      // Find the building they died in
+      const building = tileBuildings.find(b => b.id === targetNPC.homeBuildingId);
+      if (building) {
+        targetPosition = building.position;
+      } else {
+        // Fallback to last outdoor position
+        targetPosition = targetNPC.lastOutdoorPos;
+      }
+    }
+
+    // Switch to overhead camera mode
+    setParams(prev => ({ ...prev, cameraMode: CameraMode.OVERHEAD }));
+
+    // Center camera on the deceased NPC
+    setCameraViewTarget(targetPosition);
+
+    // Increment cycle index for next click
+    setDeceasedCycleIndex(prev => (prev + 1) % deceasedNPCs.length);
+  }, [outdoorNpcPool, deceasedCycleIndex, tileBuildings]);
 
   // Clear camera view target when player starts moving
   const handlePlayerStartMove = useCallback(() => {
@@ -518,9 +572,28 @@ function App() {
       currency: 100, // Starting dirhams
       inventory: startingInventory,
       maxInventorySlots: 20,
-      plague: initializePlague()
+      plague: initializePlague(),
+      activeEffects: []
     };
   });
+
+  // Apply owner override to home building when homeBuildingId is set or when navigating to home tile
+  useEffect(() => {
+    if (!playerStats.homeBuildingId) return;
+    const isHomeTile = playerStats.homeMapPosition?.mapX === params.mapX &&
+                       playerStats.homeMapPosition?.mapY === params.mapY;
+    if (!isHomeTile) return;
+
+    // Check if the home building exists and needs owner update
+    const homeBuilding = tileBuildings.find(b => b.id === playerStats.homeBuildingId);
+    if (homeBuilding && homeBuilding.ownerName !== playerStats.name) {
+      setTileBuildings(prev => prev.map(b =>
+        b.id === playerStats.homeBuildingId
+          ? { ...b, ownerName: playerStats.name, ownerProfession: playerStats.profession }
+          : b
+      ));
+    }
+  }, [playerStats.homeBuildingId, playerStats.homeMapPosition, playerStats.name, playerStats.profession, params.mapX, params.mapY, tileBuildings]);
 
   // Plague notification state
   const [showPlagueModal, setShowPlagueModal] = useState(false);
@@ -724,6 +797,7 @@ function App() {
     showCityWalls: true,
     showSoundDebug: false,
     showEventDebug: false,
+    deathMode: false,
   });
 
   useEffect(() => {
@@ -840,9 +914,66 @@ function App() {
     setNearBirdcage(null);
   }, [setLootModalData]);
 
+  // Helper to determine medical establishment type from profession
+  const getEstablishmentType = useCallback((profession: string): MedicalEstablishmentType => {
+    const prof = profession.toLowerCase();
+    if (prof.includes('physician') || prof.includes('doctor') || prof.includes('hakim')) {
+      return 'physician';
+    }
+    if (prof.includes('hospital') || prof.includes('bimaristan')) {
+      return 'bimaristan';
+    }
+    // Default to barber for barber-surgeons and general medical
+    return 'barber';
+  }, []);
+
+  // Trigger medical treatment modal when interacting with medical NPC
+  const triggerMedicalModal = useCallback((npcName: string, profession: string) => {
+    const establishmentType = getEstablishmentType(profession);
+    setMedicalModal({
+      isOpen: true,
+      establishmentType,
+      practitionerName: npcName
+    });
+  }, [getEstablishmentType, setMedicalModal]);
+
+  // Direct medical treatment trigger (doesn't require NPC proximity)
+  const handleTriggerMedicalTreatment = useCallback(() => {
+    // Determine establishment type from interior spec or building
+    const buildingName = interiorSpec?.name ?? interiorBuilding?.name ?? '';
+    const buildingNameLower = buildingName.toLowerCase();
+
+    let establishmentType: 'barber' | 'physician' | 'bimaristan' = 'barber';
+    let practitionerName = 'the Barber-Surgeon';
+
+    if (buildingNameLower.includes('bimaristan') || buildingNameLower.includes('hospital')) {
+      establishmentType = 'bimaristan';
+      practitionerName = 'the Hospital Staff';
+    } else if (buildingNameLower.includes('physician') || buildingNameLower.includes('doctor') || buildingNameLower.includes('hakim')) {
+      establishmentType = 'physician';
+      practitionerName = 'the Physician';
+    }
+
+    setMedicalModal({
+      isOpen: true,
+      establishmentType,
+      practitionerName
+    });
+  }, [interiorSpec, interiorBuilding, setMedicalModal]);
+
   // Mobile/touch trigger for speaking to NPC (equivalent to pressing E)
   const handleTriggerSpeakToNpc = useCallback(() => {
-    if (nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+    if (nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal && !medicalModal) {
+      // Check if we're in a MEDICAL building and talking to the owner (medical practitioner)
+      const buildingType = interiorSpec?.buildingType ?? interiorBuilding?.type;
+      const isOwner = nearSpeakableNpc.role === 'owner';
+
+      if (sceneMode === 'interior' && buildingType === BuildingType.MEDICAL && isOwner) {
+        // Open medical treatment modal instead of conversation
+        triggerMedicalModal(nearSpeakableNpc.stats.name, nearSpeakableNpc.stats.profession);
+        return;
+      }
+
       setSelectedNpc(nearSpeakableNpc);
       setIsNPCInitiatedEncounter(false);
       setIsFollowingAfterDismissal(false);
@@ -865,7 +996,7 @@ function App() {
       });
       setShowEncounterModal(true);
     }
-  }, [nearSpeakableNpc, nearMerchant, showEncounterModal, showMerchantModal, showEnterModal, showPlayerModal, tryTriggerEvent]);
+  }, [nearSpeakableNpc, nearMerchant, showEncounterModal, showMerchantModal, showEnterModal, showPlayerModal, medicalModal, sceneMode, interiorSpec, interiorBuilding, triggerMedicalModal, tryTriggerEvent]);
 
   // Mobile/touch trigger for trading with merchant (equivalent to pressing E near merchant)
   const handleTriggerMerchant = useCallback(() => {
@@ -903,6 +1034,34 @@ function App() {
     setNearStairs(null);
   }, [sceneMode, interiorSpec, nearStairs, activeInteriorFloor]);
 
+  // Exit to rooftop via roof hatch
+  const handleExitViaRoofHatch = useCallback(() => {
+    if (sceneMode !== 'interior' || !interiorBuilding || !nearRoofHatch) return;
+
+    // Calculate roof height for this building
+    const district = getDistrictType(params.mapX, params.mapY);
+    const roofHeight = getBuildingHeight(interiorBuilding, district);
+
+    // Use the stored world position from the hatch, adjusted to roof height
+    const exitPos = interiorBuilding.roofHatchWorldPos ?? [
+      interiorBuilding.position[0],
+      roofHeight + 0.1,
+      interiorBuilding.position[2]
+    ];
+
+    // Set player position to rooftop at hatch location
+    playerPositionRef.current.set(exitPos[0], roofHeight + 0.2, exitPos[2]);
+
+    // Exit interior to outdoor scene
+    setSceneMode('outdoor');
+    setInteriorSpec(null);
+    setInteriorNarrator(null);
+    setInteriorBuilding(null);
+    setActiveInteriorFloor(0);
+    setNearStairs(null);
+    setNearRoofHatch(null);
+  }, [sceneMode, interiorBuilding, nearRoofHatch, params.mapX, params.mapY]);
+
   // Global Key Listener for Interaction
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -919,8 +1078,29 @@ function App() {
         handleTriggerUseStairs();
         return;
       }
-      if (e.key === 'Enter' && sceneMode === 'outdoor' && nearBuilding && nearBuilding.isOpen && !showEnterModal) {
-        setShowEnterModal(true);
+      // Exit to rooftop via roof hatch with 'E' key
+      if (e.key === 'e' && sceneMode === 'interior' && nearRoofHatch && !lootModalData && !showMerchantModal && !showEncounterModal && !showEnterModal && !showPlayerModal) {
+        handleExitViaRoofHatch();
+        return;
+      }
+      // Open merchant modal with 'E' key in interior (interior merchants take priority)
+      if (e.key === 'e' && sceneMode === 'interior' && nearMerchant && !showMerchantModal && !showEncounterModal && !showEnterModal && !showPlayerModal) {
+        setShowMerchantModal(true);
+        tryTriggerEvent({
+          when: 'merchantOpen',
+          targetType: 'merchantAny',
+          targetId: 'any',
+          source: 'environment'
+        });
+        return;
+      }
+      if (e.key === 'Enter' && sceneMode === 'outdoor' && nearBuilding && !showEnterModal && !showEncounterModal && !showMerchantModal && !showPlayerModal) {
+        // Allow entry to open buildings OR infected/deceased plague houses
+        const infectionState = buildingInfectionState[nearBuilding.id];
+        const isInfected = infectionState?.status === 'infected' || infectionState?.status === 'deceased';
+        if (nearBuilding.isOpen || isInfected) {
+          setShowEnterModal(true);
+        }
       }
       // Open merchant modal with 'E' key (merchants take priority over regular NPCs)
       if (e.key === 'e' && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && !showEncounterModal) {
@@ -994,6 +1174,9 @@ function App() {
         setShowEncounterModal(false);
         setIsNPCInitiatedEncounter(false);
       }
+      if (e.key === 'Escape' && medicalModal) {
+        setMedicalModal(null);
+      }
       if (e.key === 'Escape' && observeMode) {
         stopObserveMode();
       }
@@ -1001,10 +1184,18 @@ function App() {
         e.preventDefault();
         setShowEncounterModal(true);
       }
+      // T key for medical treatment in medical buildings
+      if ((e.key === 't' || e.key === 'T') && sceneMode === 'interior' && !medicalModal && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal && !lootModalData) {
+        const buildingType = interiorSpec?.buildingType ?? interiorBuilding?.type;
+        if (buildingType === BuildingType.MEDICAL) {
+          e.preventDefault();
+          handleTriggerMedicalTreatment();
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, nearBirdcage, lootModalData, handleOpenChest, handleOpenBirdcage, nearStairs, handleTriggerUseStairs]);
+  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, nearBirdcage, lootModalData, handleOpenChest, handleOpenBirdcage, nearStairs, handleTriggerUseStairs, nearRoofHatch, handleExitViaRoofHatch, medicalModal, setMedicalModal, interiorSpec, interiorBuilding, handleTriggerMedicalTreatment]);
 
   // Push trigger function
   const triggerPush = useCallback(() => {
@@ -1148,6 +1339,31 @@ function App() {
     }, 600);
   }, [currentWeather, params.mapX, params.mapY, params.timeOfDay, tryTriggerEvent]);
 
+  // Handle navigation to player's home - centers camera on home building
+  const handleGoHome = useCallback(() => {
+    if (!playerStats.homeMapPosition || !playerStats.homeBuildingId) return;
+
+    const { mapX: homeX, mapY: homeY } = playerStats.homeMapPosition;
+    const currentX = params.mapX;
+    const currentY = params.mapY;
+    const isOnHomeTile = homeX === currentX && homeY === currentY;
+
+    if (isOnHomeTile) {
+      // Already on home tile - center camera on home building
+      const homeBuilding = tileBuildings.find(b => b.id === playerStats.homeBuildingId);
+      if (homeBuilding) {
+        // Switch to overhead camera and center on home
+        setParams(prev => ({ ...prev, cameraMode: CameraMode.OVERHEAD }));
+        setCameraViewTarget(homeBuilding.position);
+      }
+    } else {
+      // Navigate to home tile
+      const dx = homeX - currentX;
+      const dy = homeY - currentY;
+      handleMapChange(dx, dy);
+    }
+  }, [playerStats.homeMapPosition, playerStats.homeBuildingId, params.mapX, params.mapY, handleMapChange, tileBuildings]);
+
   useEffect(() => {
     setTileBuildings([]);
     setOutdoorNpcPool([]);
@@ -1237,14 +1453,25 @@ function App() {
       const district = getDistrictType(params.mapX, params.mapY);
       const tileSeed = hashToSeedTile(tileKey);
       const seedInitial = !seededInitialInfectionsRef.current;
-      registry = createTileNPCRegistry(buildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, seedInitial);
+      // Include family NPCs if this is the home tile
+      const isHomeTile = playerStats.homeMapPosition?.mapX === params.mapX &&
+                         playerStats.homeMapPosition?.mapY === params.mapY;
+      const familyNpcs = isHomeTile ? familyNpcsRef.current : undefined;
+      console.log('[Family Debug] Creating registry:', {
+        isHomeTile,
+        familyNpcsCount: familyNpcs?.length ?? 0,
+        familyNpcIds: familyNpcs?.map(n => n.id) ?? [],
+        homeMapPosition: playerStats.homeMapPosition,
+        currentTile: { mapX: params.mapX, mapY: params.mapY }
+      });
+      registry = createTileNPCRegistry(buildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, seedInitial, familyNpcs);
       if (seedInitial) {
         seededInitialInfectionsRef.current = true;
       }
       tileRegistriesRef.current.set(tileKey, registry);
     }
     return registry;
-  }, [params.mapX, params.mapY, stats.simTime]);
+  }, [params.mapX, params.mapY, stats.simTime, playerStats.homeMapPosition]);
 
   const updateRegistryForSchedule = useCallback((registry: { npcMap: Map<string, NPCRecord>; lastScheduleSimTime: number }) => {
     const timeOfDay = params.timeOfDay;
@@ -1417,6 +1644,63 @@ function App() {
     return fresh.map((entry) => entry.text).slice(0, 2);
   }, []);
 
+  // Handle NPC selection with optional death mode kill
+  const handleNpcSelect = useCallback((npc: { stats: NPCStats; state: AgentState } | null) => {
+    if (!npc) {
+      setSelectedNpc(null);
+      return;
+    }
+
+    console.log(`[NPC SELECT] ${npc.stats.name} - State: ${npc.state}, Death Mode: ${devSettings.deathMode}`);
+
+    // If death mode is active and NPC is alive, kill them instantly WITHOUT selecting them
+    if (devSettings.deathMode && npc.state !== AgentState.DECEASED) {
+      const tileKey = getTileKey(params.mapX, params.mapY);
+      const registry = tileRegistriesRef.current.get(tileKey);
+      if (registry) {
+        const record = registry.npcMap.get(npc.stats.id);
+        if (record && record.state !== AgentState.DECEASED) {
+          // Force NPC to deceased state
+          record.state = AgentState.DECEASED;
+          record.stateStartTime = stats.simTime;
+
+          // Ensure plague meta exists for death
+          if (!record.plagueMeta) {
+            record.plagueMeta = {
+              plagueType: PlagueType.BUBONIC,
+              exposureTime: stats.simTime - 72,
+              incubationHours: 48,
+              deathHours: 24,
+              onsetTime: stats.simTime - 24
+            };
+          }
+
+          // Trigger state override to update the visual immediately
+          setNpcStateOverride({
+            id: npc.stats.id,
+            state: AgentState.DECEASED,
+            nonce: Date.now()
+          });
+
+          // Don't select the NPC - just kill them and return
+          console.log(`[DEATH MODE] Killed NPC: ${npc.stats.name}`);
+
+          // Show toast notification
+          setToastMessages(prev => [...prev, {
+            id: `death-${toastIdCounter.current++}`,
+            message: `☠️ ${npc.stats.name} has been slain`,
+            duration: 2000
+          }]);
+
+          return;
+        }
+      }
+    }
+
+    // Normal NPC selection (not in death mode or already deceased)
+    setSelectedNpc(npc);
+  }, [devSettings.deathMode, params.mapX, params.mapY, stats.simTime]);
+
   const handleNpcUpdate = useCallback((id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: import('./types').NPCPlagueMeta) => {
     const tileKey = getTileKey(params.mapX, params.mapY);
     const registry = tileRegistriesRef.current.get(tileKey);
@@ -1459,6 +1743,56 @@ function App() {
       const placeHint = building ? `near the ${building.ownerProfession?.toLowerCase() ?? 'homes'}` : district.toLowerCase().replace(/_/g, ' ');
       const rumorText = `${ownerName}, a ${profession}, died ${placeHint}.`;
       addDistrictRumor(district, rumorText, stats.simTime);
+
+      // Check if deceased NPC is a family member
+      if (record.role === 'family') {
+        const familyMember = playerStats.familyMembers.find(m => m.npcId === id);
+        if (familyMember && familyMember.alive) {
+          // Update family member status
+          setPlayerStats(prev => ({
+            ...prev,
+            familyMembers: prev.familyMembers.map(m =>
+              m.npcId === id
+                ? { ...m, alive: false, deathSimTime: stats.simTime }
+                : m
+            )
+          }));
+
+          // Show grief notification for family death
+          const relationLabel = getRelationshipLabel(familyMember.relationship, familyMember.gender);
+          setToastMessages(prev => [...prev, {
+            id: `family-death-${toastIdCounter.current++}`,
+            message: `Tragedy has struck. Your ${relationLabel.toLowerCase()}, ${familyMember.name}, has succumbed to the plague.`,
+            duration: 8000
+          }]);
+        }
+      }
+    }
+
+    // Check if family member has become infected (INCUBATING -> INFECTED transition)
+    if (record.role === 'family' && prevState === AgentState.INCUBATING && state === AgentState.INFECTED) {
+      const familyMember = playerStats.familyMembers.find(m => m.npcId === id);
+      if (familyMember && familyMember.alive) {
+        const relationLabel = getRelationshipLabel(familyMember.relationship, familyMember.gender);
+        setToastMessages(prev => [...prev, {
+          id: `family-sick-${toastIdCounter.current++}`,
+          message: `Your ${relationLabel.toLowerCase()}, ${familyMember.name}, has fallen ill with plague symptoms. Return home quickly!`,
+          duration: 7000
+        }]);
+      }
+    }
+
+    // Check if family member has been exposed (HEALTHY -> INCUBATING transition)
+    if (record.role === 'family' && prevState === AgentState.HEALTHY && state === AgentState.INCUBATING) {
+      const familyMember = playerStats.familyMembers.find(m => m.npcId === id);
+      if (familyMember && familyMember.alive) {
+        const relationLabel = getRelationshipLabel(familyMember.relationship, familyMember.gender);
+        setToastMessages(prev => [...prev, {
+          id: `family-exposed-${toastIdCounter.current++}`,
+          message: `Your ${relationLabel.toLowerCase()}, ${familyMember.name}, has been exposed to the plague and is showing early signs.`,
+          duration: 6000
+        }]);
+      }
     }
 
     const activityEntry = npcActivityRef.current.get(id);
@@ -1472,7 +1806,7 @@ function App() {
       activity,
       location
     });
-  }, [addDistrictRumor, buildNpcActivityLabel, params.mapX, params.mapY, stats.simTime, tileBuildings]);
+  }, [addDistrictRumor, buildNpcActivityLabel, params.mapX, params.mapY, stats.simTime, tileBuildings, playerStats.familyMembers]);
 
   const handleBuildingsUpdate = useCallback((buildings: BuildingMetadata[]) => {
     scheduleTickRef.current = 0;
@@ -1482,8 +1816,92 @@ function App() {
       schedulePhase: -1,
       scheduleActive: false
     }));
+
     setTileBuildings(buildings);
   }, []);
+
+  // Wrapper for setNearBuilding that fixes owner name for player's home
+  const handleNearBuilding = useCallback((building: BuildingMetadata | null) => {
+    if (building && building.id === playerStats.homeBuildingId) {
+      setNearBuilding({
+        ...building,
+        ownerName: playerStats.name,
+        ownerProfession: playerStats.profession
+      });
+    } else {
+      setNearBuilding(building);
+    }
+  }, [playerStats.homeBuildingId, playerStats.name, playerStats.profession]);
+
+  // Helper to select player home based on social class
+  const selectPlayerHome = useCallback((buildings: BuildingMetadata[], socialClass: SocialClass): BuildingMetadata | null => {
+    const residential = buildings.filter(b =>
+      b.type === BuildingType.RESIDENTIAL ||
+      b.type === BuildingType.COURTYARD_HOUSE
+    );
+    if (residential.length === 0) return null;
+
+    // Sort by size - nobility gets largest, peasants get smallest
+    const sorted = [...residential].sort((a, b) => b.sizeScale - a.sizeScale);
+    const index = socialClass === SocialClass.NOBILITY ? 0
+                : socialClass === SocialClass.MERCHANT ? Math.floor(sorted.length * 0.3)
+                : Math.floor(sorted.length * 0.7);
+    return sorted[Math.min(index, sorted.length - 1)];
+  }, []);
+
+  // Assign player home and generate family when buildings first load on starting tile
+  useEffect(() => {
+    // Only run once, on starting tile, when buildings are loaded
+    if (homeAssignedRef.current || tileBuildings.length === 0) return;
+    // Only assign home on starting tile (0,0) or if home not yet assigned
+    if (playerStats.homeBuildingId) return;
+
+    const home = selectPlayerHome(tileBuildings, playerStats.socialClass);
+    if (!home) return;
+
+    // Generate family with the home building ID
+    const { familyMembers, npcRecords } = generatePlayerFamily(
+      { ...playerStats, homeBuildingId: home.id },
+      playerSeed
+    );
+
+    console.log('[Family Debug] Generated family:', {
+      familyMembersCount: familyMembers.length,
+      npcRecordsCount: npcRecords.length,
+      members: familyMembers.map(m => ({ name: m.name, npcId: m.npcId, relationship: m.relationship })),
+      npcIds: npcRecords.map(r => r.id)
+    });
+
+    // Store family NPCs for registry injection
+    familyNpcsRef.current = npcRecords;
+    homeAssignedRef.current = true;
+    console.log('[Family Debug] Stored in familyNpcsRef, count:', familyNpcsRef.current.length);
+
+    // Update the home building's owner to be the player
+    setTileBuildings(prev => prev.map(b =>
+      b.id === home.id
+        ? { ...b, ownerName: playerStats.name, ownerProfession: playerStats.profession }
+        : b
+    ));
+
+    // Immediately recreate registry WITH family NPCs (don't just delete - race condition)
+    const homeTileKey = getTileKey(params.mapX, params.mapY);
+    const district = getDistrictType(params.mapX, params.mapY);
+    const tileSeed = hashToSeedTile(homeTileKey);
+    const newRegistry = createTileNPCRegistry(tileBuildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, false, npcRecords);
+    tileRegistriesRef.current.set(homeTileKey, newRegistry);
+    console.log('[Family Debug] Registry recreated with family NPCs, registry size:', newRegistry.npcMap.size, 'family count:', npcRecords.length);
+
+    // Update player stats with home and family
+    setPlayerStats(prev => ({
+      ...prev,
+      homeBuildingId: home.id,
+      homeMapPosition: { mapX: params.mapX, mapY: params.mapY },
+      familyMembers
+    }));
+
+    console.log(`[Family] Assigned home: ${home.id}, generated ${familyMembers.length} family members for ${playerStats.name}`);
+  }, [tileBuildings, playerStats.homeBuildingId, playerStats.socialClass, playerStats.name, playerStats.profession, selectPlayerHome, params.mapX, params.mapY]);
 
   useEffect(() => {
     if (tileBuildings.length === 0) return;
@@ -1587,7 +2005,59 @@ function App() {
 
   const enterInterior = useCallback((building: BuildingMetadata) => {
     const seed = hashToSeed(building.id);
-    const spec = generateInteriorSpec(building, seed);
+
+    // Check if this is the player's home and prepare family context
+    const isPlayerHome = building.id === playerStats.homeBuildingId;
+    let familyContext: FamilyInteriorContext | undefined;
+
+    console.log('[Family Debug] enterInterior called:', {
+      buildingId: building.id,
+      playerHomeBuildingId: playerStats.homeBuildingId,
+      isPlayerHome,
+      familyMembersCount: playerStats.familyMembers.length,
+      familyMembers: playerStats.familyMembers.map(m => ({ name: m.name, npcId: m.npcId, relationship: m.relationship }))
+    });
+
+    if (isPlayerHome && playerStats.familyMembers.length > 0) {
+      const registry = ensureTileRegistry(tileBuildings);
+      const familyNpcStats = new Map<string, NPCStats>();
+
+      console.log('[Family Debug] Creating familyContext, registry exists:', !!registry);
+
+      // Get family NPC stats from registry
+      if (registry) {
+        playerStats.familyMembers.forEach(member => {
+          const record = registry.npcMap.get(member.npcId);
+          console.log('[Family Debug] Looking up family member in registry:', {
+            npcId: member.npcId,
+            found: !!record,
+            recordStats: record?.stats?.name
+          });
+          if (record) {
+            familyNpcStats.set(member.npcId, record.stats);
+          }
+        });
+      }
+
+      familyContext = {
+        isPlayerHome: true,
+        familyMembers: playerStats.familyMembers,
+        familyNpcStats
+      };
+      console.log('[Family Debug] familyContext created:', {
+        isPlayerHome: familyContext.isPlayerHome,
+        familyMembersCount: familyContext.familyMembers.length,
+        familyNpcStatsSize: familyContext.familyNpcStats.size
+      });
+    } else {
+      console.log('[Family Debug] NOT creating familyContext because:', {
+        isPlayerHome,
+        familyMembersLength: playerStats.familyMembers.length
+      });
+    }
+
+    const spec = generateInteriorSpec(building, seed, undefined, familyContext);
+    console.log('[Family Debug] Interior spec generated, NPCs:', spec.npcs.map(n => ({ id: n.id, role: n.role, name: n.stats.name })));
     const registry = ensureTileRegistry(tileBuildings);
     if (registry) {
       const syncedNpcs = spec.npcs.map((npc) => {
@@ -1658,7 +2128,132 @@ function App() {
         source: 'environment'
       });
     }
-  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent]);
+  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers]);
+
+  // Enter building via rooftop hatch (from outdoor scene on roof)
+  // Similar to enterInterior but starts at top floor instead of ground floor
+  const handleEnterViaRooftopHatch = useCallback(() => {
+    if (sceneMode !== 'outdoor' || !nearRooftopHatch) return;
+
+    const building = nearRooftopHatch.building;
+    const seed = hashToSeed(building.id);
+
+    // Build family context if entering player's home
+    const isPlayerHome = building.id === playerStats.homeBuildingId;
+    let familyContext: FamilyInteriorContext | undefined;
+
+    if (isPlayerHome && playerStats.familyMembers.length > 0) {
+      const registry = ensureTileRegistry(tileBuildings);
+      const familyNpcStats = new Map<string, NPCStats>();
+      if (registry) {
+        playerStats.familyMembers.forEach(member => {
+          const record = registry.npcMap.get(member.npcId);
+          if (record) {
+            familyNpcStats.set(member.npcId, record.stats);
+          }
+        });
+      }
+      familyContext = {
+        isPlayerHome: true,
+        familyMembers: playerStats.familyMembers,
+        familyNpcStats
+      };
+    }
+
+    // Generate interior spec for this building
+    const spec = generateInteriorSpec(building, seed, undefined, familyContext);
+
+    // Sync NPC stats from registry
+    const registry = ensureTileRegistry(tileBuildings);
+    if (registry) {
+      const syncedNpcs = spec.npcs.map((npc) => {
+        const record = registry.npcMap.get(npc.id);
+        if (!record) return npc;
+        record.location = 'interior';
+        return {
+          ...npc,
+          stats: record.stats,
+          state: record.state,
+          plagueMeta: record.plagueMeta
+        };
+      });
+      spec.npcs = syncedNpcs;
+      // Sync to top floor (where player enters via hatch)
+      const topFloorIndex = spec.floors ? spec.floors.length - 1 : 0;
+      if (spec.floors?.[topFloorIndex]) {
+        spec.floors[topFloorIndex].npcs = syncedNpcs;
+      }
+    }
+
+    // Enter at top floor
+    const topFloorIndex = spec.floors ? spec.floors.length - 1 : 0;
+
+    setInteriorSpec(spec);
+    setInteriorNarrator(spec.floors?.[topFloorIndex]?.narratorState ?? spec.narratorState);
+    setInteriorBuilding(building);
+    setActiveInteriorFloor(topFloorIndex);
+    setNearStairs(null);
+    lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
+    setNearBuilding(null);
+    setNearRooftopHatch(null);
+    setSceneMode('interior');
+
+    // Trigger interior enter events
+    tryTriggerEvent({
+      when: 'interiorEnter',
+      targetType: 'interiorAny',
+      targetId: 'any',
+      contextOverrides: {
+        environment: {
+          district: getDistrictType(params.mapX, params.mapY),
+          timeOfDay: params.timeOfDay,
+          weather: currentWeather
+        }
+      },
+      source: 'environment'
+    });
+
+    tryTriggerEvent({
+      when: 'interiorEnter',
+      targetType: 'buildingType',
+      targetId: building.type,
+      contextOverrides: {
+        environment: {
+          district: getDistrictType(params.mapX, params.mapY),
+          timeOfDay: params.timeOfDay,
+          weather: currentWeather
+        }
+      },
+      source: 'environment'
+    });
+
+    if (building.district) {
+      tryTriggerEvent({
+        when: 'interiorEnter',
+        targetType: 'buildingDistrict',
+        targetId: building.district,
+        contextOverrides: {
+          environment: {
+            district: building.district,
+            timeOfDay: params.timeOfDay,
+            weather: currentWeather
+          }
+        },
+        source: 'environment'
+      });
+    }
+  }, [sceneMode, nearRooftopHatch, currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers]);
+
+  // Separate key handler for rooftop hatch entry (must be after handleEnterViaRooftopHatch is defined)
+  useEffect(() => {
+    const handleRooftopHatchKey = (e: KeyboardEvent) => {
+      if (e.key === 'e' && sceneMode === 'outdoor' && nearRooftopHatch && !showMerchantModal && !showEncounterModal && !showEnterModal && !showPlayerModal) {
+        handleEnterViaRooftopHatch();
+      }
+    };
+    window.addEventListener('keydown', handleRooftopHatchKey);
+    return () => window.removeEventListener('keydown', handleRooftopHatchKey);
+  }, [sceneMode, nearRooftopHatch, showMerchantModal, showEncounterModal, showEnterModal, showPlayerModal, handleEnterViaRooftopHatch]);
 
   const handlePurchase = useCallback((item: import('./types').MerchantItem, quantity: number) => {
     if (!nearMerchant) return;
@@ -1689,8 +2284,8 @@ function App() {
       // Deduct currency
       const newCurrency = prev.currency - finalPrice;
 
-      // Add to inventory (or update existing)
-      const existingItemIndex = prev.inventory.findIndex(i => i.itemId === item.id);
+      // Add to inventory (or update existing) - use item.name for lookup compatibility
+      const existingItemIndex = prev.inventory.findIndex(i => i.itemId === item.name);
       let newInventory = [...prev.inventory];
 
       if (existingItemIndex >= 0) {
@@ -1701,7 +2296,7 @@ function App() {
       } else {
         newInventory.push({
           id: `player-item-${Date.now()}`,
-          itemId: item.id,
+          itemId: item.name,
           quantity,
           acquiredAt: stats.simTime
         });
@@ -1767,6 +2362,232 @@ function App() {
       };
     });
   }, [nearMerchant, playerStats.inventory]);
+
+  // Handle consuming an item from inventory
+  const handleConsumeItem = useCallback((playerItem: import('./types').PlayerItem) => {
+    // Get item details to access effects
+    const itemDetails = getItemDetailsByItemId(playerItem.itemId);
+    if (!itemDetails || !itemDetails.effects) {
+      console.log('Item has no consumable effects');
+      return;
+    }
+
+    // Check if item is consumable
+    if (!isConsumableItem(itemDetails.effects)) {
+      console.log('Item is not consumable');
+      return;
+    }
+
+    // Apply effects to plague symptoms
+    const { plague: newPlague, message: plagueMessage } = applyItemEffects(
+      playerStats.plague,
+      itemDetails.effects
+    );
+
+    // Handle plague protection effects (add to active effects)
+    const plagueProtectionEffects = itemDetails.effects.filter(e => e.type === 'plagueProtection');
+    const newActiveEffects = [...playerStats.activeEffects];
+
+    for (const effect of plagueProtectionEffects) {
+      if (effect.duration) {
+        newActiveEffects.push({
+          id: `effect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          effectType: 'plagueProtection',
+          value: effect.value,
+          expiresAt: stats.simTime + (effect.duration * 60), // Convert hours to game seconds
+          source: itemDetails.name
+        });
+      }
+    }
+
+    // Update player stats - reduce quantity or remove item, update plague and active effects
+    setPlayerStats(prev => {
+      const newInventory = prev.inventory.map(i =>
+        i.id === playerItem.id
+          ? { ...i, quantity: i.quantity - 1 }
+          : i
+      ).filter(i => i.quantity > 0);
+
+      return {
+        ...prev,
+        inventory: newInventory,
+        plague: newPlague,
+        activeEffects: newActiveEffects
+      };
+    });
+
+    // Generate toast message
+    let toastMessage = `You consumed ${itemDetails.name}.`;
+
+    // Add specific messages based on item type
+    const hasHeal = itemDetails.effects.some(e => e.type === 'heal');
+    const hasSymptomRelief = itemDetails.effects.some(e => e.type === 'symptomRelief');
+    const hasPlagueProtection = plagueProtectionEffects.length > 0;
+
+    if (plagueMessage) {
+      toastMessage += ` ${plagueMessage}.`;
+    } else if (hasHeal && !hasSymptomRelief) {
+      toastMessage += ' You feel refreshed.';
+    }
+
+    if (hasPlagueProtection) {
+      const duration = plagueProtectionEffects[0].duration;
+      toastMessage += ` Protected for ${duration}h.`;
+    }
+
+    // Special messages for notable items
+    if (itemDetails.name === 'Theriac Compound') {
+      toastMessage = 'The legendary cure courses through you! All symptoms recede.';
+    } else if (itemDetails.name === 'Opium Paste') {
+      toastMessage = 'A numbing calm spreads through you... but your body grows weaker.';
+    }
+
+    setToastMessages(prev => [...prev, {
+      id: `consume-${toastIdCounter.current++}`,
+      message: toastMessage,
+      duration: 4000
+    }]);
+  }, [playerStats.plague, playerStats.activeEffects, playerStats.inventory, stats.simTime]);
+
+  // Handle apothecary compounding
+  const handleCompound = useCallback((
+    recipe: import('./types').CompoundRecipe,
+    totalCost: number,
+    ingredientsToBuy: { name: string; price: number }[]
+  ) => {
+    // Check if player can afford
+    if (playerStats.currency < totalCost) {
+      setToastMessages(prev => [...prev, {
+        id: `compound-error-${toastIdCounter.current++}`,
+        message: 'Not enough dirhams for compounding.',
+        duration: 3000
+      }]);
+      return;
+    }
+
+    // Deduct currency and consume ingredients, add compounded item
+    setPlayerStats(prev => {
+      const newInventory = [...prev.inventory];
+      const newCurrency = prev.currency - totalCost;
+
+      // Consume ingredients from inventory
+      for (const ingredientName of recipe.ingredients) {
+        const idx = newInventory.findIndex(i => i.itemId === ingredientName);
+        if (idx >= 0) {
+          newInventory[idx] = { ...newInventory[idx], quantity: newInventory[idx].quantity - 1 };
+          if (newInventory[idx].quantity <= 0) {
+            newInventory.splice(idx, 1);
+          }
+        }
+      }
+
+      // Apply immediate effects to plague
+      const { newStatus, protectionEffects, message } = applyCompoundEffects(
+        prev.plague,
+        recipe
+      );
+
+      // Add protection effects to active effects
+      const newActiveEffects = [...prev.activeEffects];
+      for (const pe of protectionEffects) {
+        newActiveEffects.push({
+          id: `effect-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          effectType: 'plagueProtection',
+          value: pe.value,
+          expiresAt: stats.simTime + (pe.duration * 60),
+          source: recipe.nameEn
+        });
+      }
+
+      return {
+        ...prev,
+        currency: newCurrency,
+        inventory: newInventory,
+        plague: { ...prev.plague, ...newStatus },
+        activeEffects: newActiveEffects
+      };
+    });
+
+    // Update merchant inventory if we bought ingredients
+    if (ingredientsToBuy.length > 0 && nearMerchant) {
+      setNearMerchant(prev => {
+        if (!prev) return prev;
+        const updatedItems = prev.inventory.items.map(item => {
+          const bought = ingredientsToBuy.find(b => b.name === item.name);
+          if (bought && item.quantity > 0) {
+            return { ...item, quantity: item.quantity - 1 };
+          }
+          return item;
+        });
+        return {
+          ...prev,
+          inventory: { ...prev.inventory, items: updatedItems }
+        };
+      });
+    }
+
+    // Show toast
+    setToastMessages(prev => [...prev, {
+      id: `compound-${toastIdCounter.current++}`,
+      message: `Compounded ${recipe.nameEn} (${recipe.transliteration})`,
+      duration: 4000
+    }]);
+  }, [playerStats.currency, playerStats.inventory, playerStats.plague, playerStats.activeEffects, stats.simTime, nearMerchant]);
+
+  // Handle medical treatment from MedicalTreatmentModal
+  const handleMedicalTreatment = useCallback((treatmentId: string, cost: number) => {
+    const treatment = getTreatmentById(treatmentId);
+    if (!treatment) return;
+
+    // Check if player can afford
+    if (playerStats.currency < cost) {
+      setToastMessages(prev => [...prev, {
+        id: `treatment-error-${toastIdCounter.current++}`,
+        message: 'Not enough dirhams for this treatment.',
+        duration: 3000
+      }]);
+      return;
+    }
+
+    // Get establishment type and efficacy
+    const establishmentType = medicalModal?.establishmentType ?? 'barber';
+    const efficacyMultiplier = getEfficacyMultiplier(
+      playerStats.plague.daysInfected,
+      playerStats.plague.plagueType
+    );
+
+    // Generate detailed outcome with procedural details
+    const outcome = generateDetailedOutcome(
+      treatment,
+      {
+        fever: playerStats.plague.fever,
+        weakness: playerStats.plague.weakness,
+        buboes: playerStats.plague.buboes,
+        coughingBlood: playerStats.plague.coughingBlood,
+        delirium: playerStats.plague.delirium,
+        skinBleeding: playerStats.plague.skinBleeding,
+        gangrene: playerStats.plague.gangrene,
+        survivalChance: playerStats.plague.survivalChance
+      },
+      efficacyMultiplier,
+      establishmentType,
+      cost
+    );
+
+    // Update player stats with new plague status from outcome
+    setPlayerStats(prev => ({
+      ...prev,
+      currency: prev.currency - cost,
+      plague: {
+        ...prev.plague,
+        ...outcome.newPlagueStatus
+      }
+    }));
+
+    // Close treatment modal and show outcome modal
+    setMedicalModal(null);
+    setTreatmentOutcome(outcome);
+  }, [playerStats.currency, playerStats.plague, medicalModal, setMedicalModal]);
 
   // Loot modal handlers
   const handleLootAccept = useCallback((items: LootItem[]) => {
@@ -1944,6 +2765,11 @@ function App() {
     return goingUp ? 'Go upstairs' : 'Go downstairs';
   }, [nearStairs, activeInteriorFloor]);
 
+  const roofHatchPromptLabel = useMemo(() => {
+    if (!nearRoofHatch) return null;
+    return 'Exit to rooftop';
+  }, [nearRoofHatch]);
+
   // Get nearby NPCs for the Historical Guide context
   const nearbyNPCs = useMemo(() => {
     const tileKey = getTileKey(params.mapX, params.mapY);
@@ -1993,6 +2819,38 @@ function App() {
     setDevSettings
   }), [devSettings, setDevSettings]);
 
+  // Calculate home building info for dossier display
+  const isOnHomeTile = playerStats.homeMapPosition?.mapX === params.mapX &&
+                       playerStats.homeMapPosition?.mapY === params.mapY;
+
+  const homeDisplayInfo = useMemo(() => {
+    if (!playerStats.homeBuildingId || !playerStats.homeMapPosition) {
+      return { buildingType: undefined, districtName: undefined };
+    }
+
+    // Get home building from buildings if on home tile
+    const homeBuilding = isOnHomeTile
+      ? tileBuildings.find(b => b.id === playerStats.homeBuildingId)
+      : null;
+
+    // Get building type label
+    let buildingType: string | undefined;
+    if (homeBuilding) {
+      switch (homeBuilding.type) {
+        case BuildingType.RESIDENTIAL: buildingType = 'Private Residence'; break;
+        case BuildingType.COURTYARD_HOUSE: buildingType = 'Courtyard House'; break;
+        default: buildingType = 'Residence';
+      }
+    }
+
+    // Get district name
+    const districtName = formatDistrictName(
+      getDistrictType(playerStats.homeMapPosition.mapX, playerStats.homeMapPosition.mapY)
+    );
+
+    return { buildingType, districtName };
+  }, [playerStats.homeBuildingId, playerStats.homeMapPosition, isOnHomeTile, tileBuildings]);
+
   const uiProps = useMemo(() => ({
     params,
     setParams,
@@ -2025,6 +2883,7 @@ function App() {
     simTime: stats.simTime,
     showPlayerModal,
     setShowPlayerModal,
+    showMerchantModal,
     showEncounterModal,
     setShowEncounterModal,
     conversationHistories,
@@ -2052,14 +2911,26 @@ function App() {
     onSelectGuideEntry: handleOpenGuideEntry,
     infectedHouseholds,
     onNavigateToHousehold: handleNavigateToHousehold,
+    onNavigateToDeceased: handleNavigateToDeceased,
     onDropItem: handleDropItem,
     onDropItemAtScreen: handleDropItemAtScreen,
+    onConsumeItem: handleConsumeItem,
     perfDebug,
     onTriggerEnterBuilding: () => {
-      if (nearBuilding?.isOpen && !showEnterModal) {
-        setShowEnterModal(true);
+      if (nearBuilding && !showEnterModal) {
+        // Allow entry to open buildings OR infected/deceased plague houses
+        const infectionState = buildingInfectionState[nearBuilding.id];
+        const isInfected = infectionState?.status === 'infected' || infectionState?.status === 'deceased';
+        if (nearBuilding.isOpen || isInfected) {
+          setShowEnterModal(true);
+        }
       }
-    }
+    },
+    // Home navigation props
+    homeBuildingType: homeDisplayInfo.buildingType,
+    homeDistrictName: homeDisplayInfo.districtName,
+    isOnHomeTile,
+    onGoHome: handleGoHome
   }), [
     actionSlots,
     activeEvent,
@@ -2075,6 +2946,7 @@ function App() {
     handleDebugEvent,
     handleDropItem,
     handleDropItemAtScreen,
+    handleConsumeItem,
     handleFastTravel,
     handleForceAllNpcState,
     handleForceNpcState,
@@ -2118,7 +2990,10 @@ function App() {
     stats.simTime,
     stats,
     triggerAction,
-    triggerPush
+    triggerPush,
+    homeDisplayInfo,
+    isOnHomeTile,
+    handleGoHome
   ]);
 
   const simulationShellProps = useMemo(() => ({
@@ -2136,11 +3011,11 @@ function App() {
     onClearSelectedNpc: handleClearSelectedNpc,
     onStatsUpdate: handleStatsUpdate,
     onMapChange: handleMapChange,
-    onNearBuilding: setNearBuilding,
+    onNearBuilding: handleNearBuilding,
     onBuildingsUpdate: handleBuildingsUpdate,
     onNearMerchant: setNearMerchant,
     onNearSpeakableNpc: setNearSpeakableNpc,
-    onNpcSelect: setSelectedNpc,
+    onNpcSelect: handleNpcSelect,
     onNpcUpdate: handleNpcUpdate,
     selectedNpcId: selectedNpc?.stats.id ?? null,
     onMinimapUpdate: setMinimapData,
@@ -2162,6 +3037,7 @@ function App() {
     buildingInfection: buildingInfectionState,
     onPlayerPositionUpdate: handlePlayerPositionUpdate,
     dossierMode: showPlayerModal,
+    merchantFocusPosition: showMerchantModal && nearMerchant ? nearMerchant.position : null,
     onPlagueExposure: handlePlagueExposure,
     onNPCInitiatedEncounter: handleNPCInitiatedEncounter,
     onFallDamage: handleFallDamage,
@@ -2175,7 +3051,9 @@ function App() {
     onExitInterior: exitInterior,
     onNearChest: setNearChest,
     onNearStairs: setNearStairs,
+    onNearRoofHatch: setNearRoofHatch,
     onNearBirdcage: setNearBirdcage,
+    onNearRooftopHatch: setNearRooftopHatch,
     onShowLootModal: handleShowLootModal,
     performanceMonitor: performanceMonitorConfig
   }), [
@@ -2215,9 +3093,10 @@ function App() {
     selectedNpc?.stats.id,
     setIsClimbing,
     setMinimapData,
-    setNearBuilding,
+    handleNearBuilding,
     setNearChest,
     setNearStairs,
+    setNearRoofHatch,
     setNearBirdcage,
     setNearMerchant,
     setNearSpeakableNpc,
@@ -2227,7 +3106,9 @@ function App() {
     setCurrentWeather,
     setSelectedNpc,
     showDemographicsOverlay,
+    showMerchantModal,
     showPlayerModal,
+    nearMerchant,
     stats,
     transitioning
   ]);
@@ -2260,6 +3141,7 @@ function App() {
         onTriggerMerchant={handleTriggerMerchant}
         onPurchase={handlePurchase}
         onSell={handleSell}
+        onCompound={handleCompound}
         showGuideModal={showGuideModal}
         selectedGuideEntryId={selectedGuideEntryId}
         onCloseGuideModal={() => {
@@ -2275,6 +3157,11 @@ function App() {
         nearStairs={nearStairs}
         stairsPromptLabel={stairsPromptLabel}
         onTriggerUseStairs={handleTriggerUseStairs}
+        nearRoofHatch={nearRoofHatch}
+        roofHatchPromptLabel={roofHatchPromptLabel}
+        onTriggerExitViaRoofHatch={handleExitViaRoofHatch}
+        nearRooftopHatch={nearRooftopHatch}
+        onTriggerEnterViaRooftopHatch={handleEnterViaRooftopHatch}
         nearBirdcage={nearBirdcage}
         onTriggerOpenBirdcage={handleTriggerOpenBirdcage}
         showEncounterModal={showEncounterModal}
@@ -2297,6 +3184,15 @@ function App() {
         onLootAccept={handleLootAccept}
         onLootDecline={handleLootDecline}
         onLootClose={handleLootClose}
+        medicalModal={medicalModal}
+        onCloseMedicalModal={() => setMedicalModal(null)}
+        onMedicalTreatment={handleMedicalTreatment}
+        playerCurrency={playerStats.currency}
+        isInMedicalBuilding={sceneMode === 'interior' && (interiorBuilding?.type === BuildingType.MEDICAL || interiorSpec?.buildingType === BuildingType.MEDICAL)}
+        onTriggerMedicalTreatment={handleTriggerMedicalTreatment}
+        playerSkinTone={playerStats.skinTone}
+        treatmentOutcome={treatmentOutcome}
+        onCloseTreatmentOutcome={() => setTreatmentOutcome(null)}
       />
 
       <SimulationShell {...simulationShellProps} />

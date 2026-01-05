@@ -151,6 +151,7 @@ export interface NPCStats {
   hairColor?: string;
   facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
+  headscarfStyle?: 'veiled' | 'full' | 'modest';
   headwearColor?: string;
   sleeveCoverage?: 'full' | 'lower' | 'none';
   footwearStyle?: 'sandals' | 'shoes' | 'bare';
@@ -184,6 +185,30 @@ export interface NPCRecord {
   districtType?: DistrictType;
 }
 
+// Family member linked to an NPC in the registry
+export type FamilyRelationship = 'spouse' | 'child' | 'parent' | 'sibling';
+
+export interface FamilyMember {
+  id: string;
+  relationship: FamilyRelationship;
+  npcId: string;  // Links to NPCRecord in registry
+  name: string;
+  age: number;
+  gender: 'Male' | 'Female';
+  alive: boolean;
+  deathSimTime?: number;  // When they died, if deceased
+  // Appearance for portrait rendering (matches NPCStats/Humanoid)
+  appearance?: {
+    skinTone: string;    // HSL or hex
+    hairColor: string;   // hex
+    hairStyle?: 'short' | 'medium' | 'long' | 'covered';
+    headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
+    headscarfStyle?: 'veiled' | 'full' | 'modest';
+    headwearColor?: string;
+    facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
+  };
+}
+
 export interface PlayerStats {
   name: string;
   age: number;
@@ -195,7 +220,10 @@ export interface PlayerStats {
   language: Language;
   height: number;
   weight: number;
-  family: string;
+  family: string;  // Display text like "Married, two children"
+  familyMembers: FamilyMember[];  // Actual family NPCs
+  homeBuildingId: string | null;  // Player's home building
+  homeMapPosition: { mapX: number; mapY: number } | null;  // Map tile of home
   healthStatus: string;
   skinTone: string;
   hairColor: string;
@@ -249,6 +277,7 @@ export interface PlayerStats {
   inventory: PlayerItem[];
   maxInventorySlots: number; // Start with 20
   plague: PlagueStatus;      // Plague infection status
+  activeEffects: ActiveEffect[]; // Temporary effects from consumed items
 }
 
 export interface BuildingMetadata {
@@ -269,6 +298,9 @@ export interface BuildingMetadata {
   district?: DistrictType; // For district-specific building styling
   hasCourtyard?: boolean;
   courtyardScale?: number;
+  // Roof hatch access
+  hasRoofHatch?: boolean;
+  roofHatchWorldPos?: [number, number, number]; // World position for rooftop re-entry detection
 }
 
 export enum InteriorRoomType {
@@ -302,6 +334,7 @@ export enum InteriorPropType {
   LAMP = 'LAMP',
   BRAZIER = 'BRAZIER',
   FIRE_PIT = 'FIRE_PIT',
+  WALL_FIREPLACE = 'WALL_FIREPLACE',  // Stone hearth built into wall (for inns/wealthy homes)
   AMPHORA = 'AMPHORA',
   SCREEN = 'SCREEN',
   LOOM = 'LOOM',
@@ -357,6 +390,8 @@ export enum InteriorPropType {
   CERAMIC_DISPLAY = 'CERAMIC_DISPLAY',   // Stacked pottery/ceramics
   LEATHER_GOODS = 'LEATHER_GOODS',       // Leather bags/items hung
   JEWELRY_CASE = 'JEWELRY_CASE',         // Small locked display case
+  // Roof access
+  ROOF_HATCH = 'ROOF_HATCH',             // Trapdoor to rooftop
 }
 
 // Profession lifestyle categories for interior generation
@@ -429,6 +464,14 @@ export interface InteriorProp {
   scale: [number, number, number];
   label: string;
   tags?: string[];
+  luxuryLevel?: number; // 0 = poor, 1 = modest, 2 = wealthy, 3 = luxurious
+}
+
+export interface InteriorMerchantData {
+  merchantType: MerchantType;
+  inventory: MerchantItem[];
+  greeting: string;
+  haggleModifier: number;
 }
 
 export interface InteriorNPC {
@@ -439,6 +482,7 @@ export interface InteriorNPC {
   stats: NPCStats;
   state: AgentState;
   plagueMeta?: NPCPlagueMeta;
+  merchantData?: InteriorMerchantData;
 }
 
 export type InteriorFloorType = 'public' | 'private';
@@ -526,6 +570,10 @@ export interface ClimbableAccessory {
   // Climbing behavior
   climbSpeed: number;             // Units per second when climbing
   requiresHold: boolean;          // True = hold W to climb, False = auto-walk
+
+  // Rooftop hatch eligibility (set during generation)
+  isMultiStory?: boolean;         // True if building qualifies for roof hatch
+  roofY?: number;                 // Actual roof Y position for hatch placement
 }
 
 export interface ClimbingState {
@@ -611,9 +659,65 @@ export enum MerchantType {
 }
 
 export interface ItemEffect {
-  type: 'heal' | 'buff' | 'debuff' | 'plagueProtection';
+  type: 'heal' | 'buff' | 'debuff' | 'plagueProtection' | 'symptomRelief';
+  stat?: 'fever' | 'weakness' | 'buboes' | 'coughingBlood' | 'delirium' | 'skinBleeding' | 'gangrene' | 'survivalChance' | 'all';
   value: number;
-  duration?: number; // For temporary effects
+  duration?: number; // Game hours, undefined = instant
+}
+
+export interface ActiveEffect {
+  id: string;
+  effectType: 'plagueProtection' | 'symptomRelief' | 'buff';
+  stat?: string;
+  value: number;
+  expiresAt: number; // Sim time when effect expires
+  source: string; // Item name that granted this effect
+}
+
+// ============================================
+// MEDICAL TREATMENT SYSTEM
+// ============================================
+
+export type MedicalEstablishmentType = 'barber' | 'physician' | 'bimaristan';
+export type TreatmentRiskLevel = 'none' | 'low' | 'medium' | 'high';
+
+// Medical treatment performed by professionals
+export interface MedicalTreatment {
+  id: string;
+  nameEn: string;
+  nameAr: string;  // Arabic name
+  transliteration: string;  // Arabic transliteration
+  description: string;
+  cost: number;
+  effects: ItemEffect[];
+  riskLevel: TreatmentRiskLevel;
+  riskDescription?: string;
+  successChance: number;  // 0-100, base chance of treatment working
+  requirements?: {
+    minBuboes?: number;      // For lancing (0-100)
+    hasGangrene?: boolean;   // For cauterization
+    minDaysInfected?: number;
+    requiresItem?: string;   // e.g., sharp instrument
+    maxWeakness?: number;    // Patient too weak for treatment
+  };
+  availableAt: MedicalEstablishmentType[];
+}
+
+// Apothecary compound categories
+export type CompoundCategory = 'electuary' | 'syrup' | 'ointment' | 'fumigant' | 'powder' | 'distillation' | 'pill';
+
+// Apothecary compound recipe
+export interface CompoundRecipe {
+  id: string;
+  nameEn: string;
+  nameAr: string;
+  transliteration: string;
+  category: CompoundCategory;
+  categoryAr: string;
+  description: string;
+  ingredients: string[];  // Item names required
+  effects: ItemEffect[];
+  fee: number;  // Apothecary's compounding fee
 }
 
 export interface MerchantItem {
@@ -659,6 +763,7 @@ export interface ItemAppearance {
   baseColor: string;
   accentColor?: string;
   headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
+  headscarfStyle?: 'veiled' | 'full' | 'modest';
   robeHasSash?: boolean;
   robeHasTrim?: boolean;
   robeHemBand?: boolean;
@@ -687,6 +792,7 @@ export interface MiniMapData {
   npcs: Array<{ x: number; z: number; state: AgentState }>;
   specialNPCs: Array<{ x: number; z: number; type: SpecialNPCType }>;
   landmarks?: Array<{ x: number; z: number; label: string }>;
+  playerHome?: { x: number; z: number }; // Player's home position (if on this tile)
   district: DistrictType;
   radius: number;
 }
@@ -721,6 +827,7 @@ export interface DevSettings {
   showCityWalls: boolean;
   showSoundDebug: boolean;
   showEventDebug: boolean;
+  deathMode: boolean;
 }
 
 export interface SimulationStats {
@@ -1129,6 +1236,8 @@ export interface EncounterContext {
   nativeLanguageMode: boolean;
   /** If true, the player insisted on following after being dismissed - NPC is angry/fearful */
   isFollowingAfterDismissal?: boolean;
+  /** If true, the NPC is deceased - roleplay as a shade/ghost */
+  isDeceased?: boolean;
 }
 
 // ============================================

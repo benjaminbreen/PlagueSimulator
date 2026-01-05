@@ -1,5 +1,14 @@
-import { BuildingMetadata, BuildingType, InteriorSpec, InteriorFloor, InteriorRoom, InteriorRoomType, InteriorProp, InteriorPropType, InteriorNPC, InteriorOverrides, SocialClass, NPCStats, Obstacle, getProfessionCategory, ProfessionCategory, PROFESSION_SIZE_SCALE, AgentState } from '../types';
+import { BuildingMetadata, BuildingType, InteriorSpec, InteriorFloor, InteriorRoom, InteriorRoomType, InteriorProp, InteriorPropType, InteriorNPC, InteriorOverrides, SocialClass, NPCStats, Obstacle, getProfessionCategory, ProfessionCategory, PROFESSION_SIZE_SCALE, AgentState, InteriorMerchantData, MerchantType, FamilyMember } from '../types';
 import { generateNPCStats, seededRandom } from './procedural';
+import { professionToMerchantType } from './merchantGeneration';
+import { generateMerchantInventory } from './merchantItems';
+
+// Family context for player home interiors
+export interface FamilyInteriorContext {
+  isPlayerHome: boolean;
+  familyMembers: FamilyMember[];
+  familyNpcStats: Map<string, NPCStats>;
+}
 
 const ROOM_HEIGHT = 3.4;
 
@@ -62,12 +71,12 @@ const defaultRoomTypes = (socialClass: SocialClass, profession: string, building
   }
 
   if (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY) {
-    if (prof.includes('inn') || prof.includes('sherbet')) {
-      types.push(InteriorRoomType.HALL, InteriorRoomType.PRIVATE);
-    } else if (prof.includes('khan') || prof.includes('caravanserai')) {
-      types.push(InteriorRoomType.HALL, InteriorRoomType.STORAGE);
+    if (prof.includes('inn') || prof.includes('funduq') || prof.includes('khan') || prof.includes('wakala')) {
+      types.push(InteriorRoomType.HALL, InteriorRoomType.PRIVATE);  // Inn common room + guest rooms
+    } else if (prof.includes('caravanserai')) {
+      types.push(InteriorRoomType.HALL, InteriorRoomType.PRIVATE, InteriorRoomType.STORAGE);  // Lodging + storage
     } else {
-      types.push(InteriorRoomType.HALL, InteriorRoomType.STORAGE);
+      types.push(InteriorRoomType.HALL, InteriorRoomType.STORAGE);  // Standard shop
     }
     return types;
   }
@@ -167,6 +176,57 @@ const placeRooms = (seed: number, roomTypes: InteriorRoomType[], size: number): 
   return rooms;
 };
 
+/**
+ * INN-SPECIFIC: Place rooms in a linear hallway layout (hotel corridor style)
+ * Creates a central hallway with bedrooms on alternating sides
+ */
+const placeInnRooms = (seed: number, bedroomCount: number, baseSize: number): InteriorRoom[] => {
+  let s = seed;
+  const rand = () => seededRandom(s++);
+  const rooms: InteriorRoom[] = [];
+
+  // Hallway dimensions - narrow central corridor
+  const hallwayWidth = 2.8;
+  const hallwayLength = Math.min(baseSize * 1.2, 28); // Long corridor, capped at 28 units
+
+  // Bedroom dimensions
+  const bedroomWidth = Math.max(4.5, (baseSize - hallwayWidth) / 2); // Rooms on each side
+  const bedroomDepth = Math.max(4, hallwayLength / Math.ceil(bedroomCount / 2) - 0.5); // Space along hallway
+
+  // Central hallway
+  rooms.push({
+    id: 'room-hall-0',
+    type: InteriorRoomType.HALL,
+    center: [0, 0, 0],
+    size: [hallwayWidth, ROOM_HEIGHT, hallwayLength]
+  });
+
+  // Place bedrooms alternating left/right along the hallway
+  for (let i = 0; i < bedroomCount; i++) {
+    const side = i % 2 === 0 ? 1 : -1; // Alternate left (1) and right (-1)
+    const row = Math.floor(i / 2); // Which row along the hallway
+    const totalRows = Math.ceil(bedroomCount / 2);
+
+    // Position along hallway (z-axis)
+    const zPos = (row / totalRows) * hallwayLength - (hallwayLength / 2) + (bedroomDepth / 2);
+
+    // Position perpendicular to hallway (x-axis)
+    const xPos = side * (hallwayWidth / 2 + bedroomWidth / 2);
+
+    // Add slight random variation to bedroom size for realism
+    const sizeVariation = 0.9 + rand() * 0.2; // 90%-110% of base size
+
+    rooms.push({
+      id: `room-bedroom-${i + 1}`,
+      type: InteriorRoomType.PRIVATE,
+      center: [xPos, 0, zPos],
+      size: [bedroomWidth * sizeVariation, ROOM_HEIGHT, bedroomDepth * sizeVariation]
+    });
+  }
+
+  return rooms;
+};
+
 const propTemplates: Array<{
   room: InteriorRoomType[];
   type: InteriorPropType;
@@ -226,10 +286,10 @@ const wornLabel = (baseLabel: string, socialClass: SocialClass, rand: () => numb
   return `${prefix} ${baseLabel.toLowerCase()}`;
 };
 
-// Merchant type for specialized displays
-type MerchantType = 'spice' | 'textile' | 'perfume' | 'metal' | 'ceramic' | 'leather' | 'jeweler' | 'general';
+// Interior display type for specialized commercial props (separate from the trading MerchantType enum)
+type InteriorDisplayType = 'spice' | 'textile' | 'perfume' | 'metal' | 'ceramic' | 'leather' | 'jeweler' | 'general';
 
-const getMerchantType = (profession: string): MerchantType => {
+const getInteriorDisplayType = (profession: string): InteriorDisplayType => {
   const prof = profession.toLowerCase();
   if (/spice|herb|drug|apothecary/.test(prof)) return 'spice';
   if (/cloth|textile|silk|fabric|draper|tailor/.test(prof)) return 'textile';
@@ -367,6 +427,35 @@ export const getSharedWalls = (room: InteriorRoom, allRooms: InteriorRoom[]): ('
     }
   });
   return sharedWalls;
+};
+
+/**
+ * INN-SPECIFIC: Get door placement for inn hallway layout
+ * All bedrooms should have doors facing the central hallway
+ */
+const getInnDoorMap = (rooms: InteriorRoom[]): Map<string, 'north' | 'south' | 'east' | 'west' | null> => {
+  const map = new Map<string, 'north' | 'south' | 'east' | 'west' | null>();
+  const hallway = rooms.find(r => r.type === InteriorRoomType.HALL);
+
+  if (!hallway) {
+    // Fallback to standard door mapping if no hallway found
+    return new Map(rooms.map(r => [r.id, null]));
+  }
+
+  rooms.forEach((room) => {
+    if (room.type === InteriorRoomType.HALL) {
+      map.set(room.id, null); // Hallway has no door
+      return;
+    }
+
+    // Bedrooms face the hallway - determine which wall
+    // If bedroom is to the left (negative x), door is on east wall (facing right to hallway)
+    // If bedroom is to the right (positive x), door is on west wall (facing left to hallway)
+    const isLeftSide = room.center[0] < hallway.center[0];
+    map.set(room.id, isLeftSide ? 'east' : 'west');
+  });
+
+  return map;
 };
 
 const getInteriorDoorMap = (rooms: InteriorRoom[], entrySide: 'north' | 'south' | 'east' | 'west'): Map<string, 'north' | 'south' | 'east' | 'west' | null> => {
@@ -526,47 +615,72 @@ const addCommercialLayout = (
   };
   const counterSide = oppositeSide(entrySide);
 
-  if (profLower.includes('inn') || profLower.includes('sherbet')) {
-    const cafeRoom = entryRoom ?? hall;
-    const tableCount = cafeRoom.size[0] > 14 ? 3 : 2;
-    for (let i = 0; i < tableCount; i += 1) {
-      const offsetX = (i - (tableCount - 1) / 2) * 3.2;
-      const basePos: [number, number, number] = [cafeRoom.center[0] + offsetX, 0, cafeRoom.center[2] + (i % 2 === 0 ? 1.0 : -1.0)];
-      addProp(props, cafeRoom, InteriorPropType.LOW_TABLE, 'Low table', clampToRoom(cafeRoom, basePos));
-      const pillows: [number, number, number][] = [
-        [basePos[0] + 1.0, 0, basePos[2]],
-        [basePos[0] - 1.0, 0, basePos[2]],
-        [basePos[0], 0, basePos[2] + 1.0],
-        [basePos[0], 0, basePos[2] - 1.0],
-      ];
-      pillows.forEach((pos) => {
-        addProp(props, cafeRoom, InteriorPropType.FLOOR_PILLOWS, 'Floor pillows', clampToRoom(cafeRoom, pos), [0, rand() * Math.PI * 2, 0]);
-      });
-      addProp(props, cafeRoom, InteriorPropType.TRAY, 'Serving tray', clampToRoom(cafeRoom, [basePos[0] + 0.2, 0.78, basePos[2] - 0.1]));
-      addProp(props, cafeRoom, InteriorPropType.TEA_SET, 'Sherbet service', clampToRoom(cafeRoom, [basePos[0] - 0.2, 0.78, basePos[2] + 0.1]));
-      if (rand() > 0.4) {
-        addProp(props, cafeRoom, InteriorPropType.HOOKAH, 'Hookah', clampToRoom(cafeRoom, [basePos[0] + 1.2, 0, basePos[2] + 0.6]));
-      }
-    }
-    addProp(props, cafeRoom, InteriorPropType.BRAZIER, 'Charcoal brazier', clampToRoom(cafeRoom, wallAnchorSafe(cafeRoom, counterSide, 0.7)));
-    if (rand() > 0.4) {
-      addProp(props, cafeRoom, InteriorPropType.BENCH, 'Low bench', clampToRoom(cafeRoom, wallAnchorSafe(cafeRoom, 'east', 0.7, -2.0)), [0, Math.PI / 2, 0]);
-    }
-    if (rand() > 0.3) {
-      addProp(props, cafeRoom, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(cafeRoom, wallAnchorSafe(cafeRoom, 'west', 0.7, 1.4)), [0, Math.PI / 2, 0]);
-    }
-    return;
-  }
+  // INN/FUNDUQ/KHAN/WAKALA/CARAVANSERAI: Common room with long table, benches, fireplace
+  if (profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai') || profLower.includes('caravanserai')) {
+    const commonRoom = entryRoom ?? hall;
+    const [rcx, , rcz] = commonRoom.center;
+    const roomWidth = commonRoom.size[0];
+    const roomDepth = commonRoom.size[2];
 
-  if (profLower.includes('khan') || profLower.includes('caravanserai')) {
-    addProp(
-      props,
-      hall,
-      InteriorPropType.COUNTER,
-      'Reception counter',
-      clampToRoom(hall, wallAnchor(hall, counterSide, 0.8)),
-      faceIntoRoom(counterSide)
+    // LONG COMMUNAL TABLE down the center
+    const tableLength = Math.min(roomDepth * 0.6, 8);
+    const tableY = 0.78; // Standard table height (for placing items ON the table)
+    addProp(props, commonRoom, InteriorPropType.LOW_TABLE, 'Long communal table',
+      clampToRoom(commonRoom, [rcx, 0, rcz]),  // Table at ground level
+      [0, entrySide === 'east' || entrySide === 'west' ? Math.PI / 2 : 0, 0],
+      [1.8, 0.78, tableLength / 1.5] // Wide, long table
     );
+
+    // BENCHES on both sides of the table
+    const benchOffset = 1.2; // Distance from table center
+    const benchLength = tableLength * 0.8;
+
+    // Bench orientation depends on table orientation
+    const benchRotation = entrySide === 'east' || entrySide === 'west' ? Math.PI / 2 : 0;
+
+    addProp(props, commonRoom, InteriorPropType.BENCH, 'Long bench',
+      clampToRoom(commonRoom, [rcx - benchOffset, 0, rcz]),
+      [0, benchRotation, 0],
+      [0.5, 0.5, benchLength]
+    );
+    addProp(props, commonRoom, InteriorPropType.BENCH, 'Long bench',
+      clampToRoom(commonRoom, [rcx + benchOffset, 0, rcz]),
+      [0, benchRotation, 0],
+      [0.5, 0.5, benchLength]
+    );
+
+    // WALL-MOUNTED FIREPLACE (stone hearth)
+    const fireplaceSide = getSafeSide(commonRoom, counterSide);
+    addProp(props, commonRoom, InteriorPropType.WALL_FIREPLACE, 'Stone hearth',
+      clampToRoom(commonRoom, wallAnchorSafe(commonRoom, fireplaceSide, 0.5, 0)),
+      faceIntoRoom(fireplaceSide)
+    );
+
+    // OIL LAMPS instead of braziers (hanging from ceiling or on table)
+    addProp(props, commonRoom, InteriorPropType.FLOOR_LAMP, 'Oil lamp',
+      clampToRoom(commonRoom, [rcx - 2, tableY, rcz]),
+      [0, 0, 0]
+    );
+    addProp(props, commonRoom, InteriorPropType.FLOOR_LAMP, 'Oil lamp',
+      clampToRoom(commonRoom, [rcx + 2, tableY, rcz]),
+      [0, 0, 0]
+    );
+
+    // COUNTER for innkeeper
+    const counterWall = oppositeSide(entrySide);
+    addProp(props, commonRoom, InteriorPropType.COUNTER, 'Inn counter',
+      clampToRoom(commonRoom, wallAnchorSafe(commonRoom, counterWall, 0.7, 0)),
+      faceIntoRoom(counterWall)
+    );
+
+    // Table settings (trays, cups)
+    addProp(props, commonRoom, InteriorPropType.TRAY, 'Serving tray',
+      clampToRoom(commonRoom, [rcx - 1.2, tableY, rcz + 1.0])
+    );
+    addProp(props, commonRoom, InteriorPropType.TRAY, 'Serving tray',
+      clampToRoom(commonRoom, [rcx + 1.2, tableY, rcz - 1.0])
+    );
+
     return;
   }
 
@@ -633,8 +747,8 @@ const addCommercialLayout = (
     addProp(props, hall, InteriorPropType.GRAIN_SACK, 'Flour sack', clampToRoom(hall, wallAnchor(hall, 'west', 0.6, 1.2)));
   }
 
-  // Cook and food service items
-  if (profLower.includes('cook') || profLower.includes('sherbet') || profLower.includes('inn')) {
+  // Cook and food service items (inns, funduqs serve meals)
+  if (profLower.includes('cook') || profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('wakala') || profLower.includes('caravanserai')) {
     addProp(props, hall, InteriorPropType.COOKING_POT, 'Copper cooking pot', clampToRoom(hall, wallAnchor(hall, 'east', 1.0, -1.5)));
     addProp(props, hall, InteriorPropType.SPICE_JAR, 'Spice jars', clampToRoom(hall, [hall.center[0] - 1.5, 0.8, hall.center[2] + 1.5]));
     if (rand() > 0.4) {
@@ -642,13 +756,13 @@ const addCommercialLayout = (
     }
   }
 
-  // Merchant-specific display items based on merchant type
-  const merchantType = getMerchantType(profession);
-  if (merchantType !== 'general') {
+  // Merchant-specific display items based on display type
+  const displayType = getInteriorDisplayType(profession);
+  if (displayType !== 'general') {
     const displayRoom = entryRoom ?? hall;
     const [dcx, , dcz] = displayRoom.center;
 
-    switch (merchantType) {
+    switch (displayType) {
       case 'spice':
         addProp(props, displayRoom, InteriorPropType.SPICE_DISPLAY, 'Spice jars display', clampToRoom(displayRoom, [dcx + 1.5, 0.9, dcz - 1.0]));
         // Enhance existing basket labels
@@ -875,15 +989,8 @@ const pickProps = (
     );
   }
   if (floorType === 'public' && (buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY)) {
-    if (profLower.includes('inn') || profLower.includes('sherbet')) {
-      extraTemplates.push(
-        { room: [InteriorRoomType.HALL], type: InteriorPropType.FLOOR_PILLOWS, label: 'Floor pillows' },
-        { room: [InteriorRoomType.HALL], type: InteriorPropType.TRAY, label: 'Serving tray' },
-        { room: [InteriorRoomType.HALL], type: InteriorPropType.TEA_SET, label: 'Sherbet service' },
-        { room: [InteriorRoomType.HALL], type: InteriorPropType.HOOKAH, label: 'Hookah' },
-        { room: [InteriorRoomType.HALL], type: InteriorPropType.BRAZIER, label: 'Charcoal brazier' },
-      );
-    } else if (profLower.includes('khan') || profLower.includes('caravanserai')) {
+    // Skip extra templates for inns - already handled in addCommercialLayout
+    if (profLower.includes('caravanserai')) {
       extraTemplates.push(
         { room: [InteriorRoomType.HALL], type: InteriorPropType.COUNTER, label: 'Reception counter' },
         { room: [InteriorRoomType.STORAGE], type: InteriorPropType.CRATE, label: 'Cargo crates' },
@@ -901,6 +1008,10 @@ const pickProps = (
   }
 
   rooms.forEach((room) => {
+    // Skip narrow corridors (inn hallways) - they shouldn't have furniture
+    // Hallway width is 2.8, normal halls are 4.5+
+    if (room.type === InteriorRoomType.HALL && room.size[0] < 3.5) return;
+
     const candidates = [...propTemplates, ...extraTemplates].filter((template) => {
       if (!template.room.includes(room.type)) return false;
       if (template.minClass && socialClass !== template.minClass && socialClass !== SocialClass.NOBILITY) return false;
@@ -1004,7 +1115,10 @@ const pickProps = (
 
   rooms.forEach((room) => {
     if (room.type === InteriorRoomType.HALL) {
-      if (profLower.includes('inn') || profLower.includes('sherbet')) return;
+      // Skip narrow corridors (inn hallways) - they shouldn't have furniture
+      if (room.size[0] < 3.5) return;
+      // Skip auto-table for inns - they have custom communal table layout
+      if (profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai')) return;
       const hasTable = props.some((prop) => prop.roomId === room.id && prop.type === InteriorPropType.LOW_TABLE);
       if (!hasTable) {
         // Non-entry rooms don't need to avoid door sides
@@ -1229,6 +1343,14 @@ const pickProps = (
         candleCount = Math.max(1, candleCount - 1);
       }
 
+      // PEASANT class gets minimal lighting - they're too poor for multiple lamps
+      // A ragpicker would have a single crude clay lamp, not brass floor lamps
+      if (socialClass === SocialClass.PEASANT) {
+        floorLampCount = 0; // Too poor for standing brass lamps
+        tableLampCount = 1; // Single crude clay lamp
+        candleCount = hasFireSource ? 0 : 1; // Maybe one tallow candle if no fire
+      }
+
       // Add standing floor oil lamps - avoid placing near shared walls or exterior open sides
       const existingFloorLamps = props.filter((prop) => prop.roomId === room.id && prop.type === InteriorPropType.FLOOR_LAMP).length;
       const floorLampsToAdd = Math.max(0, floorLampCount - existingFloorLamps);
@@ -1371,7 +1493,7 @@ const applyRoomLayouts = (
   const rand = () => seededRandom(s++);
   const profLower = profession.toLowerCase();
   const isCommercial = buildingType === BuildingType.COMMERCIAL || buildingType === BuildingType.HOSPITALITY || profLower.includes('merchant') || profLower.includes('shop');
-  const isInnLike = profLower.includes('inn') || profLower.includes('sherbet');
+  const isInnLike = profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai');
   const getSafeSide = (room: InteriorRoom, preferred: 'north' | 'south' | 'east' | 'west') => {
     const blocked = new Set(sharedWallsMap.get(room.id) ?? []);
     const doorSide = doorMap.get(room.id);
@@ -1426,6 +1548,26 @@ const applyRoomLayouts = (
     });
 
     return allWalls.filter(wall => !sharedWalls.includes(wall));
+  };
+
+  // Helper to check if a position has adequate spacing from existing large props
+  const largePropTypes = new Set<InteriorPropType>([
+    InteriorPropType.WORKBENCH,
+    InteriorPropType.COUNTER,
+    InteriorPropType.RAISED_BED,
+    InteriorPropType.LOW_BED,
+    InteriorPropType.DESK,
+    InteriorPropType.STAIRCASE,
+    InteriorPropType.LADDER,
+  ]);
+
+  const hasSpacingFromLargeProps = (room: InteriorRoom, pos: [number, number, number], minDist = 2.0): boolean => {
+    const roomProps = props.filter((prop) => prop.roomId === room.id && largePropTypes.has(prop.type));
+    return roomProps.every((prop) => {
+      const dx = pos[0] - prop.position[0];
+      const dz = pos[2] - prop.position[2];
+      return Math.hypot(dx, dz) >= minDist;
+    });
   };
 
   const clampToRoom = (room: InteriorRoom, pos: [number, number, number], margin = 0.6): [number, number, number] => {
@@ -1548,15 +1690,22 @@ const applyRoomLayouts = (
         }
 
         // Profession-specific props for single-room dwellings
+        // Note: workbenches use opposite corner from chest to avoid overlap
+        const workSide = safeSide === 'north' ? 'east' : safeSide === 'south' ? 'west' : safeSide === 'east' ? 'south' : 'north';
         switch (profCategory) {
-          case 'ARTISAN':
-            upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', clampToRoom(room, wallAnchorSafe(room, safeSide, 1.0, -0.8)));
+          case 'ARTISAN': {
+            // Place workbench on perpendicular wall with spacing from other furniture
+            const workbenchPos = clampToRoom(room, wallAnchorSafe(room, workSide, 1.2, 0));
+            if (hasSpacingFromLargeProps(room, workbenchPos, 1.8)) {
+              upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', workbenchPos);
+            }
             break;
+          }
           case 'AGRICULTURAL':
-            upsertProp(props, room, InteriorPropType.PRODUCE_BASKET, 'Produce basket', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.6, -0.6)));
+            upsertProp(props, room, InteriorPropType.PRODUCE_BASKET, 'Produce basket', clampToRoom(room, wallAnchorSafe(room, workSide, 0.6, 0)));
             break;
           case 'TRANSPORT':
-            upsertProp(props, room, InteriorPropType.ROPE_COIL, 'Rope coil', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.5, -0.5)));
+            upsertProp(props, room, InteriorPropType.ROPE_COIL, 'Rope coil', clampToRoom(room, wallAnchorSafe(room, workSide, 0.5, 0)));
             break;
           default:
             break;
@@ -1564,8 +1713,8 @@ const applyRoomLayouts = (
       }
 
       upsertProp(props, room, InteriorPropType.FLOOR_MAT, 'Woven floor mat', clampToRoom(room, wallAnchorSafe(room, safeSide, 1.4, 0)));
-      upsertProp(props, room, InteriorPropType.CHEST, 'Storage chest', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.8, -0.8)));
-      upsertProp(props, room, InteriorPropType.LAMP, 'Oil lamp', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.8, 0.6)));
+      upsertProp(props, room, InteriorPropType.CHEST, 'Storage chest', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.8, 0.8)));
+      upsertProp(props, room, InteriorPropType.LAMP, 'Oil lamp', clampToRoom(room, wallAnchorSafe(room, safeSide, 0.8, -0.6)));
       return;
     }
     if (room.type === InteriorRoomType.PRIVATE) {
@@ -1633,6 +1782,14 @@ const applyRoomLayouts = (
       // Wash basin for personal rooms
       upsertProp(props, room, InteriorPropType.WATER_BASIN, 'Wash basin', clampToRoom(room, wallAnchorSafe(room, workWall, 0.7, 0.4)));
 
+      // INN GUEST ROOMS: Add desk and chair for guests
+      const profLower = profession.toLowerCase();
+      const isInnRoom = floorType === 'private' && (profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai'));
+      if (isInnRoom) {
+        upsertProp(props, room, InteriorPropType.DESK, 'Writing desk', clampToRoom(room, wallAnchorSafe(room, workWall, 0.9, -0.8)));
+        upsertProp(props, room, InteriorPropType.CHAIR, 'Wooden chair', clampToRoom(room, wallAnchorSafe(room, workWall, 0.6, -1.2)));
+      }
+
       if (floorType === 'private') {
         const householdFactor = Math.min(1, rooms.length / 3);
         const baseToyChance = socialClass === SocialClass.NOBILITY
@@ -1654,11 +1811,19 @@ const applyRoomLayouts = (
       }
 
       // Profession-specific props - use safe walls
+      // Note: Large work furniture (workbenches) only on ground floor, not in upstairs bedrooms
       switch (profCategory) {
-        case 'ARTISAN':
-          upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', clampToRoom(room, wallAnchorSafe(room, workWall, 1.0, 0)));
+        case 'ARTISAN': {
+          // Only place workbench on ground floor; upstairs bedrooms get just tool storage
+          if (floorType === 'public') {
+            const workbenchPos = clampToRoom(room, wallAnchorSafe(room, workWall, 1.2, 0));
+            if (hasSpacingFromLargeProps(room, workbenchPos, 1.8)) {
+              upsertProp(props, room, InteriorPropType.WORKBENCH, 'Work bench', workbenchPos);
+            }
+          }
           upsertProp(props, room, InteriorPropType.TOOL_RACK, 'Tool rack', clampToRoom(room, wallAnchorSafe(room, decorWall, 0.6, -0.8)));
           break;
+        }
         case 'MILITARY':
           upsertProp(props, room, InteriorPropType.WEAPON_RACK, 'Weapon rack', clampToRoom(room, wallAnchorSafe(room, workWall, 0.8, 0)));
           break;
@@ -1830,7 +1995,8 @@ const createNPCs = (
   socialClass: SocialClass,
   rooms: InteriorRoom[],
   props: InteriorProp[],
-  seed: number
+  seed: number,
+  familyContext?: FamilyInteriorContext
 ): InteriorNPC[] => {
   let s = seed;
   const rand = () => seededRandom(s++);
@@ -1914,14 +2080,94 @@ const createNPCs = (
       ownerPosition = avoidProps(room, ownerPosition);
     }
   }
-  npcs.push({
-    id: `npc-owner-${building.id}`,
-    role: 'owner',
-    position: ownerPosition,
-    rotation: ownerRotation,
-    stats: ownerStats,
-    state: AgentState.HEALTHY,
+
+  // Check if owner has a tradeable profession and generate merchant data
+  const merchantType = professionToMerchantType(building.ownerProfession);
+  let merchantData: InteriorMerchantData | undefined;
+  if (merchantType) {
+    const inventory = generateMerchantInventory(merchantType, `interior-${building.id}`, seed + 200, 0);
+    const haggleModifier = 0.85 + rand() * 0.35; // 0.85-1.20
+    const greetings = [
+      `Welcome to my ${building.ownerProfession.toLowerCase()} shop!`,
+      `Salaam, friend. Looking for quality ${merchantType === MerchantType.APOTHECARY ? 'remedies' : merchantType === MerchantType.TEXTILE ? 'fabrics' : merchantType === MerchantType.METALSMITH ? 'metalwork' : 'goods'}?`,
+      `Please, come in. I have the finest wares in Damascus.`,
+      `A customer! Let me show you what I have.`,
+    ];
+    const greeting = greetings[Math.floor(rand() * greetings.length)];
+    merchantData = {
+      merchantType,
+      inventory,
+      greeting,
+      haggleModifier,
+    };
+  }
+
+  // For player's home, don't add random owner - add family members instead
+  console.log('[Family Debug interior.ts] familyContext check:', {
+    hasFamilyContext: !!familyContext,
+    isPlayerHome: familyContext?.isPlayerHome,
+    familyMembersLength: familyContext?.familyMembers?.length,
+    familyNpcStatsSize: familyContext?.familyNpcStats?.size
   });
+
+  if (familyContext?.isPlayerHome && familyContext.familyMembers.length > 0) {
+    console.log('[Family Debug interior.ts] Adding family members as NPCs');
+    // Add family members as NPCs
+    const seatProp = findProp([InteriorPropType.CUSHION, InteriorPropType.FLOOR_PILLOWS, InteriorPropType.BENCH]);
+    const cookProp = findProp([InteriorPropType.FIRE_PIT, InteriorPropType.BRAZIER, InteriorPropType.STOVE]);
+
+    familyContext.familyMembers.forEach((member, idx) => {
+      const stats = familyContext.familyNpcStats.get(member.npcId);
+      console.log('[Family Debug interior.ts] Processing family member:', {
+        name: member.name,
+        npcId: member.npcId,
+        hasStats: !!stats,
+        alive: member.alive
+      });
+      if (!stats || !member.alive) return;
+
+      // Position based on relationship
+      let position: [number, number, number];
+      let rotation: [number, number, number] = [0, rand() * Math.PI * 2, 0];
+
+      if (member.relationship === 'spouse') {
+        // Spouse near hearth or cooking area
+        position = cookProp
+          ? placeByProp(cookProp, entryRoom, [0.6, 0, 0.3])
+          : placeByProp(seatProp, entryRoom, [0.5, 0, 0.4]);
+      } else if (member.relationship === 'child') {
+        // Children in the main room
+        const childOffset = idx * 0.8;
+        position = placeByProp(seatProp, otherRoom || entryRoom, [0.3 + childOffset * 0.2, 0, 0.3]);
+      } else if (member.relationship === 'parent') {
+        // Elder parent seated on cushions
+        position = placeByProp(seatProp, otherRoom || entryRoom, [0.7, 0, 0.5]);
+      } else {
+        // Siblings
+        position = placeByProp(seatProp, entryRoom, [0.4, 0, 0.4 + idx * 0.3]);
+      }
+
+      npcs.push({
+        id: member.npcId, // Use the registry NPC ID
+        role: 'family',
+        position,
+        rotation,
+        stats,
+        state: AgentState.HEALTHY,
+      });
+    });
+  } else {
+    // Not player home - add normal owner NPC
+    npcs.push({
+      id: `npc-owner-${building.id}`,
+      role: 'owner',
+      position: ownerPosition,
+      rotation: ownerRotation,
+      stats: ownerStats,
+      state: AgentState.HEALTHY,
+      merchantData,
+    });
+  }
 
   if (building.type === BuildingType.SCHOOL) {
     const studentCount = 3 + Math.floor(rand() * 2); // 3-4 students
@@ -2008,6 +2254,118 @@ const createNPCs = (
     }
   }
 
+  // Add guests to inns/funduqs/khans/wakalas/caravanserais (2-4 travelers in common room)
+  const profLower = building.ownerProfession.toLowerCase();
+  if (building.type === BuildingType.HOSPITALITY || profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai')) {
+    const numGuests = 2 + Math.floor(rand() * 3);  // 2 to 4 guests
+    const commonRoom = rooms.find((room) => room.type === InteriorRoomType.HALL) ?? entryRoom;
+
+    // Find benches/tables where guests sit
+    const benchProps = props.filter((prop) =>
+      prop.type === InteriorPropType.BENCH ||
+      prop.type === InteriorPropType.LOW_TABLE ||
+      prop.type === InteriorPropType.FLOOR_PILLOWS
+    );
+
+    for (let i = 0; i < numGuests; i++) {
+      const guestStats = generateNPCStats(seed + 120 + i * 8);
+
+      // Generate diverse traveler professions
+      const travelerProfessions = ['Merchant', 'Trader', 'Pilgrim', 'Camel Driver', 'Silk Merchant', 'Spice Trader', 'Scholar', 'Messenger'];
+      guestStats.profession = travelerProfessions[Math.floor(rand() * travelerProfessions.length)];
+      guestStats.socialClass = rand() > 0.6 ? SocialClass.MERCHANT : SocialClass.PEASANT;
+      guestStats.age = 18 + Math.floor(rand() * 45);
+
+      // Position guests near benches/tables in common room
+      let guestPos: [number, number, number];
+      if (benchProps.length > 0 && i < benchProps.length) {
+        const benchProp = benchProps[i % benchProps.length];
+        const offsetX = (rand() - 0.5) * 1.5;
+        const offsetZ = (rand() - 0.5) * 1.5;
+        guestPos = avoidProps(commonRoom, [
+          benchProp.position[0] + offsetX,
+          0,
+          benchProp.position[2] + offsetZ
+        ]);
+      } else {
+        // Fallback: place randomly in common room
+        guestPos = placeInRoom(commonRoom, 150 + i * 10);
+      }
+
+      npcs.push({
+        id: `npc-guest-${building.id}-${i}`,
+        role: 'guest',
+        position: guestPos,
+        rotation: [0, rand() * Math.PI * 2, 0],
+        stats: guestStats,
+        state: AgentState.HEALTHY,
+      });
+    }
+  }
+
+  return npcs;
+};
+
+// Create sleeping guests for inn upstairs bedrooms
+const createInnUpstairsGuests = (
+  building: BuildingMetadata,
+  rooms: InteriorRoom[],
+  props: InteriorProp[],
+  seed: number
+): InteriorNPC[] => {
+  let s = seed + 300;  // Different seed offset to avoid collision with ground floor guests
+  const rand = () => seededRandom(s++);
+  const npcs: InteriorNPC[] = [];
+
+  // Find bedroom rooms (PRIVATE type)
+  const bedrooms = rooms.filter((room) => room.type === InteriorRoomType.PRIVATE);
+  const numGuestsUpstairs = Math.min(bedrooms.length, 1 + Math.floor(rand() * 3));  // 1-3 guests upstairs
+
+  for (let i = 0; i < numGuestsUpstairs; i++) {
+    const bedroom = bedrooms[i % bedrooms.length];
+    const guestStats = generateNPCStats(seed + 400 + i * 11);
+
+    // Generate traveler professions
+    const travelerProfessions = ['Merchant', 'Trader', 'Pilgrim', 'Scholar', 'Messenger', 'Silk Trader', 'Caravan Driver'];
+    guestStats.profession = travelerProfessions[Math.floor(rand() * travelerProfessions.length)];
+    guestStats.socialClass = rand() > 0.5 ? SocialClass.MERCHANT : SocialClass.PEASANT;
+    guestStats.age = 20 + Math.floor(rand() * 40);
+
+    // Find bed in the bedroom
+    const bedProp = props.find((prop) =>
+      prop.roomId === bedroom.id &&
+      (prop.type === InteriorPropType.SLEEPING_MAT ||
+       prop.type === InteriorPropType.LOW_BED ||
+       prop.type === InteriorPropType.RAISED_BED ||
+       prop.type === InteriorPropType.BEDROLL)
+    );
+
+    // Position guest near bed if found, otherwise center of room
+    let guestPos: [number, number, number];
+    if (bedProp) {
+      guestPos = [
+        bedProp.position[0] + (rand() - 0.5) * 0.8,
+        0,
+        bedProp.position[2] + (rand() - 0.5) * 0.8
+      ];
+    } else {
+      guestPos = [
+        bedroom.center[0] + (rand() - 0.5) * (bedroom.size[0] - 2),
+        0,
+        bedroom.center[2] + (rand() - 0.5) * (bedroom.size[2] - 2)
+      ];
+    }
+
+    npcs.push({
+      id: `npc-guest-upstairs-${building.id}-${i}`,
+      role: 'guest',
+      position: guestPos,
+      rotation: [0, rand() * Math.PI * 2, 0],
+      stats: guestStats,
+      state: AgentState.HEALTHY,
+    });
+  }
+
   return npcs;
 };
 
@@ -2024,14 +2382,15 @@ const buildNarratorState = (spec: InteriorSpec) => ({
 export const generateInteriorSpec = (
   building: BuildingMetadata,
   seed: number,
-  overrides?: InteriorOverrides
+  overrides?: InteriorOverrides,
+  familyContext?: FamilyInteriorContext
 ): InteriorSpec => {
   const socialClass = inferSocialClass(building);
   const profession = building.ownerProfession;
   const sizeScale = building.sizeScale ?? 1;
   const profLower = profession.toLowerCase();
   const isCommercial = building.type === BuildingType.COMMERCIAL || building.type === BuildingType.HOSPITALITY;
-  const isInnLike = isCommercial && (profLower.includes('inn') || profLower.includes('sherbet'));
+  const isInnLike = isCommercial && (profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('wakala') || profLower.includes('caravanserai'));
   const isCaravan = isCommercial && (profLower.includes('khan') || profLower.includes('caravanserai'));
   const isShopStall = isCommercial && !isInnLike && !isCaravan;
   const allowMultiRoom = building.type === BuildingType.CIVIC
@@ -2060,16 +2419,31 @@ export const generateInteriorSpec = (
     || building.type === BuildingType.CIVIC
     || building.type === BuildingType.RELIGIOUS
     || building.type === BuildingType.SCHOOL
-    || building.type === BuildingType.MEDICAL;
+    || building.type === BuildingType.MEDICAL
+    || building.type === BuildingType.HOSPITALITY  // Inns always have 2-3 stories
+    || (building.storyCount ?? 1) >= 2;  // Use actual story count as fallback
 
   const buildFloor = (level: number, floorType: 'public' | 'private', includeExteriorDoor: boolean) => {
     let localSeed = seed + level * 997;
+    const rand = () => seededRandom(localSeed++);
+    const profLower = profession.toLowerCase();
+    const isInn = profLower.includes('inn') || profLower.includes('funduq') || profLower.includes('khan') || profLower.includes('wakala') || profLower.includes('caravanserai');
+
     let roomTypes = getFloorRoomTypes(baseRoomTypes, floorType, profession);
     if (floorType === 'private') {
       roomTypes = roomTypes.filter((type) => type !== InteriorRoomType.ENTRY);
+
+      // INN UPSTAIRS: Multiple guest bedrooms
+      if (isInn) {
+        const guestRoomCount = 4 + Math.floor(rand() * 2); // 4-5 guest rooms
+        roomTypes = [
+          InteriorRoomType.HALL,  // Hallway connecting rooms
+          ...Array(guestRoomCount).fill(InteriorRoomType.PRIVATE) // Guest bedrooms
+        ];
+      }
     }
     let roomCount = overrides?.roomCount ?? roomTypes.length;
-    if (floorType === 'private') {
+    if (floorType === 'private' && !isInn) {
       roomCount = Math.min(roomCount, 2);
     }
     let size = resolveRoomSize(socialClass, sizeScale, building.type, building.storyCount, profession);
@@ -2085,9 +2459,16 @@ export const generateInteriorSpec = (
       ? entrySide
       : null;
 
-    const rooms = placeRooms(localSeed, roomTypes.slice(0, roomCount), size);
+    // INN UPSTAIRS: Use linear hallway layout instead of grid
+    const rooms = (floorType === 'private' && isInn)
+      ? placeInnRooms(localSeed, roomCount - 1, size) // -1 because placeInnRooms creates hallway separately
+      : placeRooms(localSeed, roomTypes.slice(0, roomCount), size);
     localSeed += 50;
-    const interiorDoorMap = getInteriorDoorMap(rooms, entrySide);
+
+    // INN UPSTAIRS: Use special door mapping for hallway layout
+    const interiorDoorMap = (floorType === 'private' && isInn)
+      ? getInnDoorMap(rooms)
+      : getInteriorDoorMap(rooms, entrySide);
     const sharedWallsMap = new Map<string, ('north' | 'south' | 'east' | 'west')[]>(
       rooms.map((room) => [room.id, getSharedWalls(room, rooms)])
     );
@@ -2132,6 +2513,15 @@ export const generateInteriorSpec = (
           const basePos = wallAnchor(entryRoom, ladderSide, stairInset, cornerPos);
           const stairPos = clampToRoom(entryRoom, basePos, 1.2);
           const stairRot: [number, number, number] = faceIntoRoom(ladderSide);
+          // Calculate luxury level based on social class and building type
+          let luxuryLevel = socialClass === SocialClass.PEASANT ? 0
+            : socialClass === SocialClass.MERCHANT ? 1
+            : socialClass === SocialClass.CLERGY ? 2
+            : 3; // NOBILITY
+          // Religious and civic buildings get a bump
+          if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC) {
+            luxuryLevel = Math.min(3, luxuryLevel + 1);
+          }
           props.push({
             id: `prop-${stairType.toLowerCase()}-${building.id}`,
             type: stairType,
@@ -2140,6 +2530,7 @@ export const generateInteriorSpec = (
             rotation: stairRot,
             scale: [1, 1, 1],
             label: stairType === InteriorPropType.LADDER ? 'Wooden ladder' : 'Stairway',
+            luxuryLevel,
           });
         }
       }
@@ -2203,13 +2594,13 @@ export const generateInteriorSpec = (
       });
     };
 
-    const isLargeOrWealthyResidence = building.type === BuildingType.RESIDENTIAL && (
+    // Only wealthy residences get ornate Damascus lanterns - nobility and clergy only
+    // Merchants get nice brass lamps but not hanging lanterns with colored glass
+    const isWealthyResidence = building.type === BuildingType.RESIDENTIAL && (
       socialClass === SocialClass.NOBILITY ||
-      socialClass === SocialClass.MERCHANT ||
-      socialClass === SocialClass.CLERGY ||
-      sizeScale > 1.1
+      socialClass === SocialClass.CLERGY
     );
-    if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL || isLargeOrWealthyResidence) {
+    if (building.type === BuildingType.RELIGIOUS || building.type === BuildingType.CIVIC || building.type === BuildingType.SCHOOL || building.type === BuildingType.MEDICAL || isWealthyResidence) {
       addLantern();
     }
     if (!hasLightSource && entryRoom) {
@@ -2224,7 +2615,12 @@ export const generateInteriorSpec = (
       });
     }
 
-    const npcs = floorType === 'public' ? createNPCs(building, socialClass, rooms, props, localSeed) : [];
+    // Generate NPCs: public floors get shopkeepers/guests, inn private floors get sleeping guests
+    const npcs = floorType === 'public'
+      ? createNPCs(building, socialClass, rooms, props, localSeed, familyContext)
+      : (floorType === 'private' && isInn)
+        ? createInnUpstairsGuests(building, rooms, props, localSeed)
+        : [];
 
     props.forEach((prop) => {
       const room = rooms.find((candidate) => candidate.id === prop.roomId);
@@ -2370,7 +2766,50 @@ export const generateInteriorSpec = (
         rotation: [...stair.rotation],
         scale: [1, 1, 1],
         label: 'Stair Landing',
+        luxuryLevel: stair.luxuryLevel,
       });
+    }
+
+    // Add roof hatch on top floor for roof access
+    // All multi-story buildings with exterior ladders get hatches for rooftop access
+    // Find suitable room - prefer private room or storage, avoid entry/hall
+    const hatchRoom = floor1.rooms.find(r =>
+      r.type === InteriorRoomType.PRIVATE || r.type === InteriorRoomType.STORAGE
+    ) || floor1.rooms[0];
+
+    if (hatchRoom) {
+        // Calculate luxury level for hatch appearance
+        let hatchLuxury = socialClass === SocialClass.PEASANT ? 0
+          : socialClass === SocialClass.MERCHANT ? 1
+          : socialClass === SocialClass.CLERGY ? 2
+          : 3;
+
+        // Place hatch slightly offset from center to avoid furniture
+        const hatchOffsetX = (seededRandom(seed + 7778) - 0.5) * (hatchRoom.size[0] * 0.3);
+        const hatchOffsetZ = (seededRandom(seed + 7779) - 0.5) * (hatchRoom.size[2] * 0.3);
+
+        floor1.props.push({
+          id: `roof-hatch-${building.id}`,
+          type: InteriorPropType.ROOF_HATCH,
+          roomId: hatchRoom.id,
+          position: [
+            hatchRoom.center[0] + hatchOffsetX,
+            0.02,
+            hatchRoom.center[2] + hatchOffsetZ
+          ],
+          rotation: [0, 0, 0],
+          scale: [1, 1, 1],
+          label: 'Roof hatch',
+          luxuryLevel: hatchLuxury,
+        });
+
+        // Mark building as having a roof hatch and store world position
+        building.hasRoofHatch = true;
+        building.roofHatchWorldPos = [
+          building.position[0] + hatchRoom.center[0] + hatchOffsetX,
+          building.position[1], // Will be adjusted to roof height when used
+          building.position[2] + hatchRoom.center[2] + hatchOffsetZ
+        ];
     }
   }
 

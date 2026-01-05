@@ -49,7 +49,8 @@ import { BuildingRoofDetails } from './environment/buildings/BuildingRoofDetails
 import { BuildingFacadeDetails } from './environment/buildings/BuildingFacadeDetails';
 import { BuildingDoor } from './environment/buildings/BuildingDoor';
 import { BirdcageSystem } from './environment/buildings/BirdcageSystem';
-import { generateClimbablesForBuilding } from '../utils/climbables';
+import { generateClimbablesForBuilding, calculateRooftopHatchPosition, buildingCanHaveRooftopHatch } from '../utils/climbables';
+import { getBuildingMultipliers } from '../utils/buildingArchitecture';
 import { ISLAMIC_COLORS } from './environment/decorations/IslamicOrnaments';
 
 // Texture generators, constants, and hover system now imported from environment/
@@ -3327,8 +3328,9 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
   const handleBuildingsGenerated = React.useCallback((buildings: BuildingMetadata[]) => {
     // Extract building positions
     setBuildingPositions(buildings.map(b => b.position));
-    // Forward to original callback
-    onBuildingsGenerated?.(buildings);
+
+    // Build a map for quick lookup
+    const buildingMap = new Map(buildings.map(b => [b.id, b]));
 
     // Generate all climbables for all buildings
     const allClimbables: import('../types').ClimbableAccessory[] = [];
@@ -3345,6 +3347,32 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
       }
       allClimbables.push(...buildingClimbables);
     }
+
+    // Mark climbables and buildings with rooftop hatch data
+    // Only applies to multi-story buildings (matching interior hatch generation)
+    for (const climbable of allClimbables) {
+      if (climbable.type === 'WOODEN_LADDER' || climbable.type === 'LEAN_TO') {
+        const building = buildingMap.get(climbable.buildingId);
+        if (building) {
+          const isMultiStory = buildingCanHaveRooftopHatch(building);
+          climbable.isMultiStory = isMultiStory;
+          // Calculate actual visual roof height using architecture multipliers
+          // This matches the finalHeight used in Building component rendering
+          const baseHeight = getBuildingHeight(building, district);
+          const { heightMultiplier } = getBuildingMultipliers(building);
+          const finalHeight = baseHeight * heightMultiplier;
+          climbable.roofY = finalHeight;
+          if (isMultiStory && !building.hasRoofHatch) {
+            const { position } = calculateRooftopHatchPosition(climbable);
+            building.hasRoofHatch = true;
+            building.roofHatchWorldPos = [position[0], finalHeight, position[2]];
+          }
+        }
+      }
+    }
+
+    // Forward to original callback (buildings now have hatch data)
+    onBuildingsGenerated?.(buildings);
 
     // Store for rendering and pass to callback
     setClimbablesForRendering(allClimbables);

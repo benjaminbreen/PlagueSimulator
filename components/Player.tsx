@@ -85,6 +85,7 @@ interface PlayerProps {
   onPushCharge?: (charge: number) => void;
   pushTriggerRef?: React.MutableRefObject<number | null>;
   dossierMode?: boolean;
+  merchantFocusPosition?: [number, number, number] | null; // When set, camera focuses on merchant
   actionEvent?: PlayerActionEvent | null;
   sprintStateRef?: React.MutableRefObject<boolean>;
   ratsRef?: React.MutableRefObject<Rat[] | null>;
@@ -129,6 +130,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onPushCharge,
   pushTriggerRef,
   dossierMode = false,
+  merchantFocusPosition = null,
   actionEvent,
   sprintStateRef,
   ratsRef,
@@ -283,6 +285,15 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const activeClimbableRef = useRef<ClimbableAccessory | null>(null);
   const nearbyClimbableRef = useRef<ClimbableAccessory | null>(null);
   const nearbyClimbablePushableRef = useRef<PushableObject | null>(null); // For climbing onto crates, etc.
+
+  // Click-to-move pathfinding state - improved with proactive obstacle detection
+  const clickMoveStuckCounter = useRef(0);
+  const clickMoveLastPos = useRef(new THREE.Vector3());
+  const clickMoveLastDistToGoal = useRef(Infinity); // Track actual progress toward goal
+  const clickMoveSteeringAngle = useRef(0); // Current steering offset when avoiding obstacles
+  const clickMoveSteeringDirection = useRef(1); // 1 = try right first, -1 = try left first
+  const clickMoveWaypoints = useRef<THREE.Vector3[]>([]); // Intermediate waypoints for complex paths
+  const clickMoveAvoidanceMode = useRef<'none' | 'steering' | 'following'>('none'); // Current avoidance strategy
   const standingOnPushableRef = useRef<PushableObject | null>(null); // Track what object we're standing on
   const [isClimbing, setIsClimbing] = useState(false);
   const climbAnimationPhaseRef = useRef(0);
@@ -351,6 +362,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   // Dossier mode camera state
   const savedCameraPos = useRef<THREE.Vector3 | null>(null);
   const savedCameraTarget = useRef<THREE.Vector3 | null>(null);
+  const savedMerchantCameraPos = useRef<THREE.Vector3 | null>(null);
+  const savedMerchantCameraTarget = useRef<THREE.Vector3 | null>(null);
 
   useImperativeHandle(ref, () => group.current!, []);
 
@@ -946,13 +959,56 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       camera.position.lerp(portraitCameraPos, 0.08);
       orbitRef.current.target.lerp(portraitTarget, 0.08);
       orbitRef.current.update();
+    }
+    // 0b. Merchant Mode Camera Animation - focus on merchant on LEFT side
+    else if (merchantFocusPosition && orbitRef.current) {
+      // Save original camera position on first frame
+      if (!savedMerchantCameraPos.current) {
+        savedMerchantCameraPos.current = camera.position.clone();
+        savedMerchantCameraTarget.current = orbitRef.current.target.clone();
+      }
+
+      // Set camera view offset to center merchant in LEFT half of screen
+      // Modal takes up right ~50%, so we want merchant centered at 25% position
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.setViewOffset(
+          size.width,        // Full viewport width
+          size.height,       // Full viewport height
+          size.width / 4,    // Shift right by 25% to move center point to 25% position
+          0,                 // No vertical shift
+          size.width,        // Render full width
+          size.height        // Render full height
+        );
+      }
+
+      // Calculate camera position to view merchant (slightly elevated, looking at them)
+      const merchantPos = new THREE.Vector3(
+        merchantFocusPosition[0],
+        merchantFocusPosition[1],
+        merchantFocusPosition[2]
+      );
+      const merchantCameraPos = new THREE.Vector3(
+        merchantPos.x,
+        merchantPos.y + 1.8,  // Slightly above eye level
+        merchantPos.z + 3.0   // 3 units in front
+      );
+      const merchantTarget = new THREE.Vector3(
+        merchantPos.x,
+        merchantPos.y + 1.4,  // Look at upper body/face
+        merchantPos.z
+      );
+
+      // Smooth lerp to merchant view position
+      camera.position.lerp(merchantCameraPos, 0.08);
+      orbitRef.current.target.lerp(merchantTarget, 0.08);
+      orbitRef.current.update();
     } else {
-      // Always clear camera view offset when NOT in dossier mode
+      // Always clear camera view offset when NOT in special mode
       if (camera instanceof THREE.PerspectiveCamera) {
         camera.clearViewOffset();
       }
 
-      // Lerp back to original position when modal closes
+      // Lerp back to original position when dossier modal closes
       if (savedCameraPos.current && orbitRef.current) {
         camera.position.lerp(savedCameraPos.current, 0.08);
         orbitRef.current.target.lerp(savedCameraTarget.current!, 0.08);
@@ -964,10 +1020,23 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           savedCameraTarget.current = null;
         }
       }
+
+      // Lerp back to original position when merchant modal closes
+      if (savedMerchantCameraPos.current && orbitRef.current) {
+        camera.position.lerp(savedMerchantCameraPos.current, 0.08);
+        orbitRef.current.target.lerp(savedMerchantCameraTarget.current!, 0.08);
+        orbitRef.current.update();
+
+        // Clear saved position when close enough
+        if (camera.position.distanceTo(savedMerchantCameraPos.current) < 0.1) {
+          savedMerchantCameraPos.current = null;
+          savedMerchantCameraTarget.current = null;
+        }
+      }
     }
 
-    // Skip all movement and interaction logic when in dossier mode
-    if (dossierMode) return;
+    // Skip all movement and interaction logic when in dossier or merchant mode
+    if (dossierMode || merchantFocusPosition) return;
 
     // === CLIMBING SYSTEM ===
 
@@ -1904,72 +1973,215 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
 
     // 3b. Click-to-Move Auto-Movement (when no keyboard input)
+    // Improved with proactive obstacle detection, smart steering, and boundary following
     if (!moving && targetPosition && setTargetPosition) {
-      const direction = targetPosition.clone().sub(group.current.position);
+      // Use current waypoint or final target
+      const currentGoal = clickMoveWaypoints.current.length > 0
+        ? clickMoveWaypoints.current[0]
+        : targetPosition;
+
+      const direction = currentGoal.clone().sub(group.current.position);
       direction.y = 0;
-      const distanceToTarget = direction.length();
+      const distanceToGoal = direction.length();
+      const distanceToFinalTarget = targetPosition.clone().sub(group.current.position).setY(0).length();
 
-      // Arrival threshold - stop when close enough
+      // Configuration
       const ARRIVAL_THRESHOLD = 0.5;
+      const WAYPOINT_THRESHOLD = 1.0; // Larger threshold for intermediate waypoints
+      const LOOKAHEAD_DISTANCE = 2.5; // How far ahead to check for obstacles
+      const PROBE_ANGLES = [0, Math.PI/6, -Math.PI/6, Math.PI/3, -Math.PI/3, Math.PI/2, -Math.PI/2]; // Angles to probe for clear paths
+      const STUCK_THRESHOLD = 0.15; // Progress toward goal threshold
+      const STUCK_FRAMES_BEFORE_STEER = 5; // Faster response
+      const STUCK_FRAMES_BEFORE_FOLLOW = 15; // Switch to boundary following
+      const STUCK_FRAMES_GIVE_UP = 45; // Give up sooner
+      const PLAYER_RADIUS = 0.6;
 
-      if (distanceToTarget > ARRIVAL_THRESHOLD) {
-        // Move toward target
-        direction.normalize();
-        moveVec = direction;
+      // Helper: Check if a position is blocked
+      const isBlocked = (pos: THREE.Vector3) =>
+        isBlockedByBuildings(pos, buildings, PLAYER_RADIUS, buildingHash || undefined) ||
+        isBlockedByObstacles(pos, obstacles, PLAYER_RADIUS, obstacleHash || undefined);
 
-        // Clear camera view target when player auto-walks
-        if (cameraViewTarget && onPlayerStartMove) {
-          onPlayerStartMove();
+      // Helper: Check if path from current position to target point is clear
+      const isPathClear = (targetPoint: THREE.Vector3, steps = 5): boolean => {
+        const start = group.current.position.clone();
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          const checkPos = start.clone().lerp(targetPoint, t);
+          checkPos.y = start.y; // Keep same height
+          if (isBlocked(checkPos)) return false;
+        }
+        return true;
+      };
+
+      // Helper: Find best steering direction by probing
+      const findBestDirection = (): { angle: number; clearance: number } | null => {
+        const baseDir = direction.clone().normalize();
+        let bestAngle = 0;
+        let bestClearance = 0;
+
+        for (const probeAngle of PROBE_ANGLES) {
+          const cos = Math.cos(probeAngle);
+          const sin = Math.sin(probeAngle);
+          const probedDir = new THREE.Vector3(
+            baseDir.x * cos - baseDir.z * sin,
+            0,
+            baseDir.x * sin + baseDir.z * cos
+          );
+
+          // Check how far we can go in this direction
+          let clearance = 0;
+          for (let dist = 0.5; dist <= LOOKAHEAD_DISTANCE; dist += 0.5) {
+            const checkPos = group.current.position.clone().add(probedDir.clone().multiplyScalar(dist));
+            if (isBlocked(checkPos)) break;
+            clearance = dist;
+          }
+
+          // Prefer directions closer to the goal direction (smaller angle)
+          const angleWeight = 1 - Math.abs(probeAngle) / Math.PI;
+          const score = clearance * (0.5 + 0.5 * angleWeight);
+
+          if (score > bestClearance) {
+            bestClearance = score;
+            bestAngle = probeAngle;
+          }
         }
 
-        // Reuse same movement code as keyboard
-        const airControl = isGrounded.current ? 1 : 0.6;
-        const damp = landingDamp.current > 0 ? 0.7 : 1.0;
-        currentSpeed = PLAYER_SPEED * airControl * damp; // Walk speed for auto-movement
-        const moveDelta = moveVec.multiplyScalar(currentSpeed * delta);
+        return bestClearance > 0 ? { angle: bestAngle, clearance: bestClearance } : null;
+      };
 
-        // Apply movement with collision detection
-        const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-        const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6, obstacleHash || undefined);
-        if (!blockedX) {
-          group.current.position.x = nextX.x;
-        } else {
-          // Hit obstacle - cancel target
-          setTargetPosition(null);
-        }
+      // Check if we've reached a waypoint
+      if (clickMoveWaypoints.current.length > 0 && distanceToGoal < WAYPOINT_THRESHOLD) {
+        clickMoveWaypoints.current.shift(); // Remove reached waypoint
+        clickMoveStuckCounter.current = 0;
+        clickMoveSteeringAngle.current = 0;
+        clickMoveAvoidanceMode.current = 'none';
+      }
 
-        const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-        const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6, obstacleHash || undefined);
-        if (!blockedZ) {
-          group.current.position.z = nextZ.z;
-        } else {
-          // Hit obstacle - cancel target
-          setTargetPosition(null);
-        }
-
-        // Update walking state
-        if (walkingRef.current !== true) {
-          walkingRef.current = true;
-          setIsWalking(true);
-        }
-
-        // Rotate character to face movement direction
-        if (cameraMode !== CameraMode.FIRST_PERSON) {
-          const targetRot = Math.atan2(moveVec.x, moveVec.z);
-          const currentRot = group.current.rotation.y;
-          let angleDiff = Math.abs(targetRot - currentRot);
-          if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
-          const isSharpTurn = angleDiff > Math.PI / 2;
-          const baseSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
-          const rotSpeed = isSharpTurn ? Math.min(0.6, baseSpeed * 2) : baseSpeed;
-          group.current.rotation.y = lerpAngle(group.current.rotation.y, targetRot, rotSpeed);
-        }
-      } else {
-        // Arrived at target
+      // Check if arrived at final target
+      if (distanceToFinalTarget < ARRIVAL_THRESHOLD) {
         setTargetPosition(null);
+        clickMoveWaypoints.current = [];
+        clickMoveStuckCounter.current = 0;
+        clickMoveSteeringAngle.current = 0;
+        clickMoveLastDistToGoal.current = Infinity;
+        clickMoveAvoidanceMode.current = 'none';
         if (walkingRef.current !== false) {
           walkingRef.current = false;
           setIsWalking(false);
+        }
+      } else if (distanceToGoal > ARRIVAL_THRESHOLD) {
+        // Track progress toward goal (not just position change)
+        const madeProgressTowardGoal = distanceToFinalTarget < clickMoveLastDistToGoal.current - STUCK_THRESHOLD;
+
+        if (madeProgressTowardGoal) {
+          clickMoveStuckCounter.current = 0;
+          // Gradually reduce steering when making progress
+          clickMoveSteeringAngle.current *= 0.8;
+          if (Math.abs(clickMoveSteeringAngle.current) < 0.05) {
+            clickMoveSteeringAngle.current = 0;
+            clickMoveAvoidanceMode.current = 'none';
+          }
+        } else {
+          clickMoveStuckCounter.current++;
+        }
+        clickMoveLastDistToGoal.current = Math.min(clickMoveLastDistToGoal.current, distanceToFinalTarget);
+        clickMoveLastPos.current.copy(group.current.position);
+
+        // PROACTIVE: Check if direct path ahead is blocked
+        const lookaheadPos = group.current.position.clone().add(
+          direction.clone().normalize().multiplyScalar(Math.min(LOOKAHEAD_DISTANCE, distanceToGoal))
+        );
+        const pathBlocked = !isPathClear(lookaheadPos, 4);
+
+        // Determine avoidance strategy
+        if (pathBlocked || clickMoveStuckCounter.current > STUCK_FRAMES_BEFORE_STEER) {
+          if (clickMoveAvoidanceMode.current === 'none') {
+            // Find best direction to steer
+            const bestDir = findBestDirection();
+            if (bestDir && bestDir.clearance > 0.5) {
+              clickMoveSteeringAngle.current = bestDir.angle;
+              clickMoveAvoidanceMode.current = 'steering';
+            }
+          } else if (clickMoveStuckCounter.current > STUCK_FRAMES_BEFORE_FOLLOW) {
+            // Steering isn't working - try switching direction
+            clickMoveSteeringDirection.current *= -1;
+            const bestDir = findBestDirection();
+            if (bestDir) {
+              // Apply stronger steering in the new direction
+              clickMoveSteeringAngle.current = bestDir.angle * clickMoveSteeringDirection.current;
+            }
+            clickMoveAvoidanceMode.current = 'following';
+          }
+        }
+
+        // Give up if stuck for too long
+        if (clickMoveStuckCounter.current > STUCK_FRAMES_GIVE_UP) {
+          setTargetPosition(null);
+          clickMoveWaypoints.current = [];
+          clickMoveStuckCounter.current = 0;
+          clickMoveSteeringAngle.current = 0;
+          clickMoveLastDistToGoal.current = Infinity;
+          clickMoveAvoidanceMode.current = 'none';
+          if (walkingRef.current !== false) {
+            walkingRef.current = false;
+            setIsWalking(false);
+          }
+        } else {
+          // Calculate movement direction with steering
+          const moveDir = direction.clone().normalize();
+
+          // Apply steering angle
+          if (clickMoveSteeringAngle.current !== 0) {
+            const cos = Math.cos(clickMoveSteeringAngle.current);
+            const sin = Math.sin(clickMoveSteeringAngle.current);
+            const rotatedX = moveDir.x * cos - moveDir.z * sin;
+            const rotatedZ = moveDir.x * sin + moveDir.z * cos;
+            moveDir.x = rotatedX;
+            moveDir.z = rotatedZ;
+          }
+
+          moveVec = moveDir;
+
+          // Clear camera view target when player auto-walks
+          if (cameraViewTarget && onPlayerStartMove) {
+            onPlayerStartMove();
+          }
+
+          // Apply movement with wall sliding
+          const airControl = isGrounded.current ? 1 : 0.6;
+          const damp = landingDamp.current > 0 ? 0.7 : 1.0;
+          currentSpeed = PLAYER_SPEED * airControl * damp;
+          const moveDelta = moveVec.clone().multiplyScalar(currentSpeed * delta);
+
+          // Try X movement
+          const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
+          if (!isBlocked(nextX)) {
+            group.current.position.x = nextX.x;
+          }
+
+          // Try Z movement
+          const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
+          if (!isBlocked(nextZ)) {
+            group.current.position.z = nextZ.z;
+          }
+
+          // Update walking state
+          if (walkingRef.current !== true) {
+            walkingRef.current = true;
+            setIsWalking(true);
+          }
+
+          // Rotate character to face movement direction
+          if (cameraMode !== CameraMode.FIRST_PERSON) {
+            const targetRot = Math.atan2(moveVec.x, moveVec.z);
+            const currentRot = group.current.rotation.y;
+            let angleDiff = Math.abs(targetRot - currentRot);
+            if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
+            const isSharpTurn = angleDiff > Math.PI / 2;
+            const baseSpeed = cameraMode === CameraMode.OVER_SHOULDER ? 0.35 : 0.1;
+            const rotSpeed = isSharpTurn ? Math.min(0.6, baseSpeed * 2) : baseSpeed;
+            group.current.rotation.y = lerpAngle(group.current.rotation.y, targetRot, rotSpeed);
+          }
         }
       }
     }
@@ -1977,6 +2189,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     // Keyboard input cancels click-to-move target
     if (moving && targetPosition && setTargetPosition) {
       setTargetPosition(null);
+      clickMoveWaypoints.current = [];
+      clickMoveStuckCounter.current = 0;
+      clickMoveSteeringAngle.current = 0;
+      clickMoveLastDistToGoal.current = Infinity;
+      clickMoveAvoidanceMode.current = 'none';
     }
 
     // Clear camera view target when player starts moving
@@ -2975,6 +3192,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             robePattern={playerStats?.robePattern}
             hairStyle={playerStats?.hairStyle}
             headwearStyle={playerStats?.headwearStyle}
+            headscarfStyle={playerStats?.headscarfStyle}
+            facialHair={playerStats?.facialHair}
             sleeveCoverage={playerStats?.sleeveCoverage}
             footwearStyle={playerStats?.footwearStyle}
             footwearColor={playerStats?.footwearColor}
@@ -2998,6 +3217,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             movementStartTimeRef={movementStartTimeRef}
             movementStopTimeRef={movementStopTimeRef}
             sprintTransitionRef={sprintTransitionRef}
+            isPlayer={true}
           />
         )}
         

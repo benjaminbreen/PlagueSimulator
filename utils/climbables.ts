@@ -324,6 +324,9 @@ export function findNearbyClimbable(
   let nearest: ClimbableAccessory | null = null;
   let nearestDist = maxDistance;
 
+  // If very close, skip facing check entirely (prevents angle instability)
+  const CLOSE_RANGE = 2.0;
+
   for (const climbable of climbables) {
     // Check from base position (ground) or top position (roof)
     const checkPos = fromRooftop ? climbable.topPosition : climbable.basePosition;
@@ -341,23 +344,90 @@ export function findNearbyClimbable(
 
     if (horizontalDist >= nearestDist) continue;
 
-    // Check if player is facing the climbable
-    // playerFacing uses rotation.y convention: 0 = +Z, PI/2 = -X, PI = -Z, -PI/2 = +X
-    // We need angle from player TO climbable in same convention
-    const angleToClimbable = Math.atan2(-dx, -dz); // Negated to match rotation.y convention
+    // If very close, accept without facing check (you're right next to it)
+    if (horizontalDist < CLOSE_RANGE) {
+      nearest = climbable;
+      nearestDist = horizontalDist;
+      continue;
+    }
 
+    // For further distances, check if player is roughly facing the climbable
+    const angleToClimbable = Math.atan2(-dx, -dz);
     let angleDiff = angleToClimbable - playerFacing;
-    // Normalize to [-PI, PI]
     while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
     while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
 
-    if (Math.abs(angleDiff) < Math.PI / 2) { // Within 90 degree cone
+    // Wide 120-degree cone for easier detection at range
+    if (Math.abs(angleDiff) < Math.PI * 2 / 3) {
       nearest = climbable;
       nearestDist = horizontalDist;
     }
   }
 
   return nearest;
+}
+
+/**
+ * Check if a building has an exterior ladder that could connect to a roof hatch
+ */
+export function buildingHasExteriorLadder(
+  buildingId: string,
+  climbables: ClimbableAccessory[]
+): boolean {
+  return climbables.some(c =>
+    c.buildingId === buildingId &&
+    (c.type === 'WOODEN_LADDER' || c.type === 'LEAN_TO')
+  );
+}
+
+/**
+ * Calculate rooftop hatch position from a climbable's landing position.
+ * Offsets the hatch inward from the ladder toward the center of the roof.
+ */
+export function calculateRooftopHatchPosition(
+  climbable: ClimbableAccessory
+): { position: [number, number, number]; rotation: number } {
+  const [topX, topY, topZ] = climbable.topPosition;
+  const offsetAmount = 1.2;
+  let hatchX = topX;
+  let hatchZ = topZ;
+  let rotation = 0;
+
+  // Wall sides must match calculateWallPosition:
+  // 0=North(+Z), 1=East(+X), 2=South(-Z), 3=West(-X)
+  switch (climbable.wallSide) {
+    case 0: // North wall (+Z) - move south toward center
+      hatchZ -= offsetAmount;
+      rotation = 0;
+      break;
+    case 1: // East wall (+X) - move west toward center
+      hatchX -= offsetAmount;
+      rotation = -Math.PI / 2;
+      break;
+    case 2: // South wall (-Z) - move north toward center
+      hatchZ += offsetAmount;
+      rotation = Math.PI;
+      break;
+    case 3: // West wall (-X) - move east toward center
+      hatchX += offsetAmount;
+      rotation = Math.PI / 2;
+      break;
+  }
+
+  return {
+    position: [hatchX, topY, hatchZ],
+    rotation
+  };
+}
+
+/**
+ * Check if a building qualifies for a rooftop hatch (must be multi-story)
+ */
+export function buildingCanHaveRooftopHatch(building: BuildingMetadata): boolean {
+  return (building.sizeScale ?? 1) > 1.15
+    || building.type === BuildingType.CIVIC
+    || building.type === BuildingType.RELIGIOUS
+    || building.type === BuildingType.SCHOOL;
 }
 
 /**

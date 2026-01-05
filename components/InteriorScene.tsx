@@ -2,7 +2,7 @@ import React, { useMemo, useEffect, useRef, useCallback, useState } from 'react'
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
-import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState, CONSTANTS, PANIC_SUSCEPTIBILITY, NpcStateOverride, NPCPlagueMeta, PlagueType, DroppedItemRequest } from '../types';
+import { InteriorSpec, InteriorProp, InteriorPropType, InteriorRoom, InteriorRoomType, SimulationParams, PlayerStats, Obstacle, SocialClass, BuildingType, NPCStats, AgentState, CONSTANTS, PANIC_SUSCEPTIBILITY, NpcStateOverride, NPCPlagueMeta, PlagueType, DroppedItemRequest, InteriorNPC, MerchantType, InteriorMerchantData } from '../types';
 import { EXPOSURE_CONFIG, calculatePlagueProtection } from '../utils/plagueExposure';
 import { exposePlayerToPlague } from '../utils/plague';
 import { createNpcPlagueMeta } from '../utils/npcHealth';
@@ -39,13 +39,18 @@ interface InteriorSceneProps {
   onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
   onNearStairs?: (stairs: { id: string; label: string; position: [number, number, number]; type: InteriorPropType } | null) => void;
   activeFloorIndex?: number;
+  onNearbyMerchant?: (merchant: { npc: InteriorNPC; merchantData: InteriorMerchantData } | null) => void;
+  onNearRoofHatch?: (hatch: { id: string; position: [number, number, number] } | null) => void;
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0 }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0, onNearbyMerchant, onNearRoofHatch }) => {
   const { scene, gl } = useThree();
+  // Tap-to-move state for interior
+  const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
+  const pointerDownRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const previousBackground = useRef<THREE.Color | THREE.Texture | null>(null);
   const previousFog = useRef<THREE.Fog | THREE.FogExp2 | null>(null);
   const previousExposure = useRef<number | null>(null);
@@ -113,6 +118,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const [pickedUpIds, setPickedUpIds] = useState<Set<string>>(new Set());
   const [hoveredNpcId, setHoveredNpcId] = useState<string | null>(null);
   const nearStairsIdRef = useRef<string | null>(null);
+  const nearRoofHatchIdRef = useRef<string | null>(null);
   const activeFloor = useMemo(() => spec.floors?.[activeFloorIndex] ?? null, [spec.floors, activeFloorIndex]);
   const activeRooms = useMemo(() => activeFloor?.rooms ?? spec.rooms, [activeFloor, spec.rooms]);
   const baseProps = useMemo(() => activeFloor?.props ?? spec.props, [activeFloor, spec.props]);
@@ -235,6 +241,99 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         });
       } else {
         onNearStairs(null);
+      }
+    }
+  });
+
+  // Track nearby roof hatch for rooftop exit (only on top floor)
+  const isTopFloor = spec.floors ? activeFloorIndex === spec.floors.length - 1 : true;
+  useFrame(() => {
+    if (!playerRef.current || !onNearRoofHatch || !isTopFloor) {
+      // Clear hatch detection if not on top floor
+      if (nearRoofHatchIdRef.current !== null) {
+        nearRoofHatchIdRef.current = null;
+        onNearRoofHatch?.(null);
+      }
+      return;
+    }
+
+    const hatchProps = activeProps.filter(prop => prop.type === InteriorPropType.ROOF_HATCH);
+    if (hatchProps.length === 0) {
+      if (nearRoofHatchIdRef.current !== null) {
+        nearRoofHatchIdRef.current = null;
+        onNearRoofHatch(null);
+      }
+      return;
+    }
+
+    const pos = playerRef.current.position;
+    const HATCH_INTERACT_DISTANCE = 1.5;
+    let nearestHatch: InteriorProp | null = null;
+    let nearestDist = Infinity;
+
+    for (const hatch of hatchProps) {
+      const dx = pos.x - hatch.position[0];
+      const dz = pos.z - hatch.position[2];
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      if (dist < HATCH_INTERACT_DISTANCE && dist < nearestDist) {
+        nearestDist = dist;
+        nearestHatch = hatch;
+      }
+    }
+
+    const newId = nearestHatch?.id ?? null;
+    if (newId !== nearRoofHatchIdRef.current) {
+      nearRoofHatchIdRef.current = newId;
+      if (nearestHatch) {
+        onNearRoofHatch({
+          id: nearestHatch.id,
+          position: nearestHatch.position,
+        });
+      } else {
+        onNearRoofHatch(null);
+      }
+    }
+  });
+
+  // Track nearby merchant for trading
+  const nearMerchantIdRef = useRef<string | null>(null);
+  useFrame(() => {
+    if (!playerRef.current || !onNearbyMerchant) return;
+    const pos = playerRef.current.position;
+    const MERCHANT_INTERACT_DISTANCE = 2.5;
+
+    // Find NPCs with merchant data
+    const merchantNpcs = activeNpcs.filter(npc => npc.merchantData);
+
+    let nearestMerchant: typeof merchantNpcs[0] | null = null;
+    let nearestDist = Infinity;
+
+    for (const npc of merchantNpcs) {
+      // Get NPC position from npcStatesRef if available
+      const npcState = npcStatesRef.current.find(s => s.id === npc.id);
+      const npcPos = npcState?.position ?? new THREE.Vector3(npc.position[0], npc.position[1], npc.position[2]);
+
+      const dx = pos.x - npcPos.x;
+      const dz = pos.z - npcPos.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+
+      if (dist < MERCHANT_INTERACT_DISTANCE && dist < nearestDist) {
+        nearestDist = dist;
+        nearestMerchant = npc;
+      }
+    }
+
+    // Update state only if changed
+    const newMerchantId = nearestMerchant?.id ?? null;
+    if (newMerchantId !== nearMerchantIdRef.current) {
+      nearMerchantIdRef.current = newMerchantId;
+      if (nearestMerchant && nearestMerchant.merchantData) {
+        onNearbyMerchant({
+          npc: nearestMerchant,
+          merchantData: nearestMerchant.merchantData,
+        });
+      } else {
+        onNearbyMerchant(null);
       }
     }
   });
@@ -560,6 +659,25 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     activeRooms.forEach((room) => map.set(room.id, room));
     return map;
   }, [activeRooms]);
+
+  // Calculate total bounds of all rooms for clickable floor plane
+  const totalBounds = useMemo(() => {
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    activeRooms.forEach((room) => {
+      const [cx, , cz] = room.center;
+      const [w, , d] = room.size;
+      minX = Math.min(minX, cx - w / 2);
+      maxX = Math.max(maxX, cx + w / 2);
+      minZ = Math.min(minZ, cz - d / 2);
+      maxZ = Math.max(maxZ, cz + d / 2);
+    });
+    const width = maxX - minX + 2; // Add some padding
+    const depth = maxZ - minZ + 2;
+    const centerX = (minX + maxX) / 2;
+    const centerZ = (minZ + maxZ) / 2;
+    return { width, depth, centerX, centerZ };
+  }, [activeRooms]);
+
   const wallHeight = activeWallHeight ?? 3.2;
   const roomHotspots = useMemo(() => {
     const map = new Map<string, Array<{ position: THREE.Vector3; action: 'sit' | 'stand' | 'read' | 'cook' }>>();
@@ -635,15 +753,31 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           : 'west'
   ), [activeExteriorDoorSide]);
   const isDay = params.timeOfDay >= 7 && params.timeOfDay <= 17;
+  // PERFORMANCE: Cap lights to 4 per floor to prevent GPU overload from too many PointLights
   const lampProps = useMemo(
-    () => activeProps.filter((prop) => (
-      prop.type === InteriorPropType.LAMP
-      || prop.type === InteriorPropType.BRAZIER
-      || prop.type === InteriorPropType.FIRE_PIT
-      || prop.type === InteriorPropType.CANDLE
-      || prop.type === InteriorPropType.FLOOR_LAMP
-      || prop.type === InteriorPropType.LANTERN
-    )),
+    () => {
+      const allLamps = activeProps.filter((prop) => (
+        prop.type === InteriorPropType.LAMP
+        || prop.type === InteriorPropType.BRAZIER
+        || prop.type === InteriorPropType.FIRE_PIT
+        || prop.type === InteriorPropType.CANDLE
+        || prop.type === InteriorPropType.FLOOR_LAMP
+        || prop.type === InteriorPropType.LANTERN
+      ));
+      // Prioritize fire pits and braziers (main light sources), then floor lamps, then others
+      const prioritized = allLamps.sort((a, b) => {
+        const priority = (type: InteriorPropType) => {
+          if (type === InteriorPropType.FIRE_PIT) return 0;
+          if (type === InteriorPropType.BRAZIER) return 1;
+          if (type === InteriorPropType.FLOOR_LAMP) return 2;
+          if (type === InteriorPropType.LANTERN) return 3;
+          if (type === InteriorPropType.LAMP) return 4;
+          return 5; // candles last
+        };
+        return priority(a.type) - priority(b.type);
+      });
+      return prioritized.slice(0, 4); // Max 4 lights per floor
+    },
     [activeProps]
   );
   const styleSeed = useMemo(() => activeSeed + activeRooms.length * 31, [activeSeed, activeRooms.length]);
@@ -1737,6 +1871,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             rugMaterial={rugMat}
             prayerRugMaterial={prayerMat}
             profession={spec.profession}
+            socialClass={spec.socialClass}
             positionVector={pushable?.position}
             roomSize={roomForProp?.size}
             isShattered={pushable?.isShattered}
@@ -1835,14 +1970,18 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             robeOverwrap={npc.stats.robeOverwrap}
             hairStyle={npc.stats.hairStyle}
             headwearStyle={npc.stats.headwearStyle}
+            headscarfStyle={npc.stats.headscarfStyle}
             sleeveCoverage={npc.stats.sleeveCoverage}
             footwearStyle={npc.stats.footwearStyle}
             footwearColor={npc.stats.footwearColor}
             accessories={npc.stats.accessories}
             enableArmSwing
-            isWalking={npcWalkState[npc.id] ?? true}
+            isWalking={npcWalkState[npc.id] ?? false}
             isDead={(npcStatesRef.current.find((entry) => entry.id === npc.id)?.state ?? npc.state) === AgentState.DECEASED}
             sicknessLevel={(npcStatesRef.current.find((entry) => entry.id === npc.id)?.state ?? npc.state) === AgentState.INFECTED ? 1 : (npcStatesRef.current.find((entry) => entry.id === npc.id)?.state ?? npc.state) === AgentState.INCUBATING ? 0.4 : 0}
+            // Gaze tracking - interior NPCs look at player when nearby
+            gazeTarget={playerRef.current?.position}
+            worldPosition={npc.position}
           />
         </group>
       ))}
@@ -1859,7 +1998,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         onImpactPuff={handleImpactPuff}
         onPickupPrompt={onPickupPrompt}
         onPickup={handlePickup}
-        setTargetPosition={() => {}}
+        targetPosition={playerTarget}
+        setTargetPosition={setPlayerTarget}
         observeMode={observeMode}
         interiorEntrySide={activeFloorIndex === 0 && activeExteriorDoorSide !== undefined
           ? (activeExteriorDoorSide === 0 ? 'north' : activeExteriorDoorSide === 1 ? 'south' : activeExteriorDoorSide === 2 ? 'east' : 'west')
@@ -1875,6 +2015,33 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           mapY={params.mapY}
         />
       )}
+
+      {/* Invisible clickable floor plane for tap-to-move on mobile */}
+      <mesh
+        rotation={[-Math.PI / 2, 0, 0]}
+        position={[totalBounds.centerX, 0.01, totalBounds.centerZ]}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          pointerDownRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
+        }}
+        onPointerUp={(e) => {
+          e.stopPropagation();
+          if (!pointerDownRef.current) return;
+          const dx = Math.abs(e.clientX - pointerDownRef.current.x);
+          const dy = Math.abs(e.clientY - pointerDownRef.current.y);
+          const dt = Date.now() - pointerDownRef.current.time;
+          // Only register as tap if quick click and minimal movement
+          const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+          const threshold = isMobile ? 15 : 5;
+          if (dx < threshold && dy < threshold && dt < 400) {
+            setPlayerTarget(e.point.clone());
+          }
+          pointerDownRef.current = null;
+        }}
+      >
+        <planeGeometry args={[totalBounds.width, totalBounds.depth]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
     </group>
   );
 };

@@ -4,7 +4,7 @@
  * Based on 14th century Damascus outbreak patterns
  */
 
-import { AgentState, PlagueType, BuboLocation, PlagueStatus } from '../types';
+import { AgentState, PlagueType, BuboLocation, PlagueStatus, ItemEffect, ActiveEffect } from '../types';
 import { seededRandom } from './procedural';
 
 // Game time constants (assumed - adjust based on your game's time system)
@@ -326,6 +326,132 @@ export function attemptTreatment(
   }
 
   return newPlague;
+}
+
+/**
+ * Apply item effects to plague symptoms
+ * @param currentPlague Current plague status
+ * @param effects Array of item effects to apply
+ * @returns Updated plague status and message describing the effect
+ */
+export function applyItemEffects(
+  currentPlague: PlagueStatus,
+  effects: ItemEffect[]
+): { plague: PlagueStatus; message: string } {
+  const newPlague = { ...currentPlague };
+  const messages: string[] = [];
+
+  for (const effect of effects) {
+    if (effect.type === 'symptomRelief') {
+      const stat = effect.stat;
+      const value = effect.value;
+
+      if (stat === 'all') {
+        // Apply to all symptoms
+        newPlague.fever = Math.max(0, newPlague.fever - value);
+        newPlague.weakness = Math.max(0, newPlague.weakness - value);
+        newPlague.buboes = Math.max(0, newPlague.buboes - value);
+        newPlague.coughingBlood = Math.max(0, newPlague.coughingBlood - value);
+        newPlague.delirium = Math.max(0, newPlague.delirium - value);
+        newPlague.skinBleeding = Math.max(0, newPlague.skinBleeding - value);
+        messages.push('All symptoms subside slightly');
+      } else if (stat === 'survivalChance') {
+        // Boost survival chance
+        newPlague.survivalChance = Math.min(100, newPlague.survivalChance + value);
+        messages.push(`Your survival chances improve`);
+      } else if (stat === 'fever') {
+        newPlague.fever = Math.max(0, newPlague.fever - value);
+        if (value >= 10) messages.push('Your fever subsides');
+      } else if (stat === 'weakness') {
+        newPlague.weakness = Math.max(0, newPlague.weakness - value);
+        if (value >= 10) messages.push('You feel slightly stronger');
+      } else if (stat === 'buboes') {
+        newPlague.buboes = Math.max(0, newPlague.buboes - value);
+        if (value >= 10) messages.push('The swelling eases');
+      } else if (stat === 'coughingBlood') {
+        newPlague.coughingBlood = Math.max(0, newPlague.coughingBlood - value);
+        if (value >= 10) messages.push('Your coughing eases');
+      } else if (stat === 'delirium') {
+        newPlague.delirium = Math.max(0, newPlague.delirium - value);
+        if (value >= 10) messages.push('Your mind clears');
+      } else if (stat === 'skinBleeding') {
+        newPlague.skinBleeding = Math.max(0, newPlague.skinBleeding - value);
+        if (value >= 5) messages.push('The bleeding slows');
+      }
+    } else if (effect.type === 'debuff') {
+      // Handle negative effects (like Opium's weakness increase)
+      const stat = effect.stat;
+      const value = effect.value;
+
+      if (stat === 'weakness') {
+        newPlague.weakness = Math.min(100, newPlague.weakness + value);
+        messages.push('...but your body grows weaker');
+      }
+    }
+  }
+
+  // Recalculate overall severity
+  newPlague.overallSeverity = Math.max(
+    newPlague.fever,
+    newPlague.weakness,
+    newPlague.buboes,
+    newPlague.coughingBlood,
+    newPlague.skinBleeding,
+    newPlague.delirium,
+    newPlague.gangrene
+  );
+
+  return {
+    plague: newPlague,
+    message: messages.length > 0 ? messages.join('. ') : ''
+  };
+}
+
+/**
+ * Check if an item has consumable effects
+ */
+export function isConsumableItem(effects?: ItemEffect[]): boolean {
+  if (!effects || effects.length === 0) return false;
+  return effects.some(e =>
+    e.type === 'heal' || e.type === 'symptomRelief' || e.type === 'plagueProtection'
+  );
+}
+
+/**
+ * Get a description of what consuming an item will do
+ */
+export function getItemEffectDescription(effects?: ItemEffect[]): string {
+  if (!effects || effects.length === 0) return '';
+
+  const descriptions: string[] = [];
+
+  for (const effect of effects) {
+    if (effect.type === 'heal') {
+      descriptions.push(`Restores vitality`);
+    } else if (effect.type === 'symptomRelief') {
+      if (effect.stat === 'all') {
+        descriptions.push(`Reduces all symptoms`);
+      } else if (effect.stat === 'survivalChance') {
+        descriptions.push(`+${effect.value}% survival chance`);
+      } else if (effect.stat === 'fever') {
+        descriptions.push(`Reduces fever`);
+      } else if (effect.stat === 'weakness') {
+        descriptions.push(`Reduces weakness`);
+      } else if (effect.stat === 'buboes') {
+        descriptions.push(`Eases swelling`);
+      } else if (effect.stat === 'coughingBlood') {
+        descriptions.push(`Eases coughing`);
+      } else if (effect.stat === 'delirium') {
+        descriptions.push(`Clears the mind`);
+      }
+    } else if (effect.type === 'plagueProtection') {
+      descriptions.push(`Wards off pestilence (${effect.duration}h)`);
+    } else if (effect.type === 'debuff' && effect.stat === 'weakness') {
+      descriptions.push(`Causes weakness`);
+    }
+  }
+
+  return descriptions.join(', ');
 }
 
 /**

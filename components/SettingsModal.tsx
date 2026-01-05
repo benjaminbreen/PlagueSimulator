@@ -529,7 +529,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   className="accent-amber-600"
                 />
               </label>
+              <label className="flex items-center justify-between">
+                <span className="text-amber-300/80">Death Mode</span>
+                <input
+                  type="checkbox"
+                  checked={devSettings.deathMode}
+                  onChange={(e) => setDevSettings(prev => ({ ...prev, deathMode: e.target.checked }))}
+                  className="accent-red-600"
+                />
+              </label>
             </div>
+
+            {devSettings.deathMode && (
+              <div className="bg-red-950/30 border border-red-900/40 rounded-lg p-4">
+                <div className="text-[10px] uppercase tracking-[0.25em] text-red-400/80 font-bold mb-2">☠️ Death Mode Active</div>
+                <div className="text-[10px] text-red-200/60 leading-relaxed">
+                  Click any NPC to instantly kill them. Their corpse will appear where they stood.
+                </div>
+              </div>
+            )}
 
             {devSettings.showEventDebug && (
               <div className="bg-black/40 border border-amber-900/40 rounded-lg p-4">

@@ -49,10 +49,18 @@ export const useSimulationClock = ({
             ...prev,
             timeOfDay: nextTimeOfDay
           }));
-          setPlayerStats(prevPlayer => ({
-            ...prevPlayer,
-            plague: progressPlague(prevPlayer.plague, nextSimTime)
-          }));
+          setPlayerStats(prevPlayer => {
+            // Filter out expired active effects
+            const activeEffects = prevPlayer.activeEffects.filter(
+              effect => effect.expiresAt > nextSimTime
+            );
+
+            return {
+              ...prevPlayer,
+              plague: progressPlague(prevPlayer.plague, nextSimTime),
+              activeEffects
+            };
+          });
         }
       }
 

@@ -31,6 +31,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
+    // Log if this is a deceased NPC conversation
+    if (systemPrompt.includes('YOU ARE DECEASED')) {
+      console.log('[CHAT API] Deceased NPC conversation detected - system prompt includes shade instructions');
+      console.log('[CHAT API] First 500 chars of prompt:', systemPrompt.substring(0, 500));
+    }
+
     const contents = [
       ...messages,
       {

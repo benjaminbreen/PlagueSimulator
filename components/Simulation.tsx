@@ -33,6 +33,7 @@ import { Astrologer } from './npcs/Astrologer';
 import { Scribe } from './npcs/Scribe';
 import { exposePlayerToPlague } from '../utils/plague';
 import { InfectedBuildingMarkers } from './environment/InfectedBuildingMarkers';
+import { PlayerHomeMarker } from './environment/PlayerHomeMarker';
 import { BoundaryHeadingIndicator } from './BoundaryHeadingIndicator';
 
 interface SimulationProps {
@@ -69,6 +70,7 @@ interface SimulationProps {
   buildingInfection?: Record<string, BuildingInfectionState>;
   onPlayerPositionUpdate?: (pos: THREE.Vector3) => void;
   dossierMode?: boolean;
+  merchantFocusPosition?: [number, number, number] | null;
   onPlagueExposure?: (plague: PlagueStatus) => void;
   /** Callback when a friendly NPC approaches and initiates an encounter */
   onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
@@ -100,6 +102,8 @@ interface SimulationProps {
   onNearChest?: (chest: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
   /** Callback when player is near a hanging birdcage */
   onNearBirdcage?: (birdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
+  /** Callback when player is on rooftop near a roof hatch */
+  onNearRooftopHatch?: (hatch: { buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null) => void;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -1228,7 +1232,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1293,6 +1297,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [currentNearSpeakableNpc, setCurrentNearSpeakableNpc] = useState<{ stats: NPCStats; state: AgentState } | null>(null);
   const [currentNearChest, setCurrentNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const [currentNearBirdcage, setCurrentNearBirdcage] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
+  const [currentNearRooftopHatch, setCurrentNearRooftopHatch] = useState<{ buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null>(null);
   const nearSpeakableNpcTickRef = useRef(0);
 
   // Ambient audio state
@@ -1304,6 +1309,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const terrainSeed = useMemo(() => params.mapX * 1000 + params.mapY * 13 + 19, [params.mapX, params.mapY]);
   const sessionSeed = useMemo(() => Math.floor(Math.random() * 1000000), []);
   const district = useMemo(() => getDistrictType(params.mapX, params.mapY), [params.mapX, params.mapY]);
+
+  // Memoized player home building lookup (avoid repeated .find() in render)
+  const isOnHomeTile = playerStats.homeMapPosition?.mapX === params.mapX &&
+                       playerStats.homeMapPosition?.mapY === params.mapY;
+  const homeBuilding = useMemo(() => {
+    if (!playerStats.homeBuildingId || !isOnHomeTile) return null;
+    return buildingsRef.current.find(b => b.id === playerStats.homeBuildingId) ?? null;
+  }, [playerStats.homeBuildingId, isOnHomeTile, buildingsState]); // buildingsState triggers update when buildings load
 
   // cameraViewTarget is passed directly to Player component - only moves camera, not player
   const isOutskirts = district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT';
@@ -2758,6 +2771,40 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
       }
 
+      // Check proximity to rooftop hatches (only if player is elevated - on a roof)
+      // Player must be at least 2.5 units high to be considered on a rooftop
+      let closestRooftopHatch: { buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null = null;
+      if (pos.y > 2.5 && buildingsRef.current.length > 0) {
+        let minHatchDist = 2.0; // Interaction range for roof hatches
+
+        for (const building of buildingsRef.current) {
+          if (!building.hasRoofHatch || !building.roofHatchWorldPos) continue;
+
+          const [hx, hy, hz] = building.roofHatchWorldPos;
+          const dx = hx - pos.x;
+          const dz = hz - pos.z;
+          const dy = Math.abs(hy - pos.y); // Check vertical proximity too
+          const dist = Math.sqrt(dx * dx + dz * dz);
+
+          // Must be close horizontally and within ~1 unit vertically
+          if (dist < minHatchDist && dy < 1.5) {
+            minHatchDist = dist;
+            closestRooftopHatch = {
+              buildingId: building.id,
+              building,
+              position: building.roofHatchWorldPos
+            };
+          }
+        }
+      }
+
+      if (closestRooftopHatch?.buildingId !== currentNearRooftopHatch?.buildingId) {
+        setCurrentNearRooftopHatch(closestRooftopHatch);
+        if (onNearRooftopHatch) {
+          onNearRooftopHatch(closestRooftopHatch);
+        }
+      }
+
       // Check for nearby speakable NPCs (throttled for performance - every ~150ms)
       const npcCheckTime = state.clock.elapsedTime;
       if (npcCheckTime - nearSpeakableNpcTickRef.current > 0.15 && agentHashRef.current && npcPool.length > 0) {
@@ -2884,12 +2931,24 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
               .slice(0, 12)
             : [];
 
+          // Find player's home building if on home tile
+          let playerHome: MiniMapData['playerHome'] = undefined;
+          if (playerStats.homeBuildingId &&
+              playerStats.homeMapPosition?.mapX === params.mapX &&
+              playerStats.homeMapPosition?.mapY === params.mapY) {
+            const homeBuilding = buildingsRef.current.find(b => b.id === playerStats.homeBuildingId);
+            if (homeBuilding) {
+              playerHome = { x: homeBuilding.position[0], z: homeBuilding.position[2] };
+            }
+          }
+
           onMinimapUpdate({
             player: { x: pos.x, z: pos.z, yaw: playerRef.current.rotation.y, cameraYaw },
             buildings,
             npcs,
             specialNPCs,
             landmarks,
+            playerHome,
             district,
             radius,
           });
@@ -3112,6 +3171,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           playerRef.current?.position.z ?? 0
         ]}
       />
+      <PlayerHomeMarker
+        homeBuilding={homeBuilding}
+        isOnHomeTile={isOnHomeTile}
+      />
       {devSettings.showRats && <Rats ref={ratsRef} ratsRef={ratsRef} params={params} playerPos={playerRef.current?.position} catPos={catPositionRef.current} npcPositions={npcPositionsRef.current} agentHashRef={agentHashRef} />}
 
       <Player
@@ -3138,6 +3201,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onPushCharge={onPushCharge}
         pushTriggerRef={pushTriggerRef}
         dossierMode={dossierMode}
+        merchantFocusPosition={merchantFocusPosition}
         sprintStateRef={sprintStateRef}
         ratsRef={ratsRef}
         onPlagueExposure={handlePlagueExposure}

@@ -4,6 +4,26 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { WornItemMesh, getWornItemConfig, WornItemConfig } from './items/WornItemMeshes';
 
+// ============================================================================
+// FEATURE FLAG: 3D Eye Rendering (Phase 1 Implementation)
+// ============================================================================
+// Toggle between old flat eyes (false) and new 3D eyeballs (true)
+//
+// NEW (USE_3D_EYES = true):
+//   - Spherical eyeball geometry with depth
+//   - Corneal bulge with clearcoat for wet/glassy appearance
+//   - Specular highlights for realism
+//   - Lower roughness materials (~60 extra vertices per NPC)
+//
+// OLD (USE_3D_EYES = false):
+//   - Original flat plane eyes (fallback)
+//   - Zero performance cost
+//   - Tested and stable
+//
+// ROLLBACK: If new eyes look bad, change this to false:
+const USE_3D_EYES = false;  // REVERTED - needs proper implementation
+// ============================================================================
+
 const damaskCache = new Map<string, THREE.CanvasTexture>();
 const strawCache = new Map<string, THREE.CanvasTexture>();
 const motifCache = new Map<string, THREE.CanvasTexture>();
@@ -336,6 +356,8 @@ interface HumanoidProps {
   headColor?: string;
   turbanColor?: string;
   headscarfColor?: string;
+  headscarfRoughness?: number;
+  headscarfStyle?: 'veiled' | 'full' | 'modest';
   gender?: 'Male' | 'Female';
   hairColor?: string;
   scale?: [number, number, number];
@@ -411,6 +433,8 @@ interface HumanoidProps {
   // ANIMATION: Enhanced movement animations
   turnPhaseRef?: React.MutableRefObject<number>; // 0-1 pivot animation progress
   angularVelocityRef?: React.MutableRefObject<number>; // Current turn rate for pivot direction
+  // Player flag - enables player-specific behaviors (slower blink rate)
+  isPlayer?: boolean;
   movementStartTimeRef?: React.MutableRefObject<number>; // For start inertia
   movementStopTimeRef?: React.MutableRefObject<number>; // For stop inertia
   sprintTransitionRef?: React.MutableRefObject<number>; // 0-1 walk to run blend
@@ -421,6 +445,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   headColor = '#e0ac69',
   turbanColor = '#f0f0f0',
   headscarfColor = '#b08968',
+  headscarfRoughness = 0.92,
+  headscarfStyle = 'full',
   gender = 'Male',
   hairColor = '#3b2a1a',
   scale = [1, 1, 1] as [number, number, number],
@@ -488,6 +514,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   movementStartTimeRef,
   movementStopTimeRef,
   sprintTransitionRef,
+  isPlayer = false,
 }) => {
   const simpleLodActive = enableSimpleLod && distanceFromCamera > simpleLodDistance;
   const animationLodActive = distanceFromCamera > animationLodDistance;
@@ -594,10 +621,31 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       browHeightScale: 0.85 + Math.random() * 0.3,
       mouthWidthScale: 0.9 + Math.random() * 0.2,
       mouthYOffset: (Math.random() - 0.5) * 0.01,
+      // Head shape variety - range from narrow (0.8) to wide (1.05)
+      craniumWidth: 0.8 + Math.random() * 0.25,
+      craniumHeight: 1.0 + Math.random() * 0.25,
+      craniumDepth: 0.85 + Math.random() * 0.15,
+      faceWidthRatio: 0.95 + Math.random() * 0.20,
+      // Lip fullness - affects Z-depth/protrusion (0.7 = thin, 1.3 = full)
+      lipFullness: 0.7 + Math.random() * 0.6,
+      // Mouth corner curve - positive = slight smile, negative = serious/frown
+      mouthCornerCurve: (Math.random() - 0.5) * 0.006,
     };
   }, []);
   const lipWidthScale = useMemo(() => 0.95 + Math.random() * 0.15, []);
-  const lipLowerScale = useMemo(() => 1.08 + Math.random() * 0.18, []);
+  const lipLowerScale = useMemo(() => {
+    const roll = Math.random();
+    if (roll < 0.67) {
+      // 2/3 have wider lower lip (current behavior)
+      return 1.08 + Math.random() * 0.18;
+    } else if (roll < 0.83) {
+      // 1/6 have equal width lips
+      return 1.0;
+    } else {
+      // 1/6 have wider upper lip
+      return 0.8 + Math.random() * 0.12;
+    }
+  }, []);
   const lipGap = useMemo(() => 0.006 + Math.random() * 0.004, []);
   const headwearShadow = useMemo(() => new THREE.Color(headscarfColor).multiplyScalar(0.85).getStyle(), [headscarfColor]);
   const headwearHighlight = useMemo(() => new THREE.Color(headscarfColor).multiplyScalar(1.08).getStyle(), [headscarfColor]);
@@ -624,6 +672,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const noseRadius = isFemale ? 0.015 : 0.017;
   const mouthWidth = isFemale ? 0.045 : 0.05;
   const mouthY = (isFemale ? -0.095 : -0.09) + faceVariant.mouthYOffset;
+
+  // Jaw prominence - gender and age based
+  const jawProminence = useMemo(() => {
+    if (isFemale) {
+      // 30% of women have subtle jaw definition
+      return Math.random() < 0.3 ? 0.3 + Math.random() * 0.4 : 0;
+    } else {
+      // 80% of men have jaw definition (subtle to prominent)
+      return Math.random() < 0.8 ? 0.4 + Math.random() * 0.6 : 0;
+    }
+  }, [isFemale]);
+  const ageJawModifier = age && age > 50 ? 1.15 : age && age < 25 ? 0.85 : 1.0;
+  const finalJawSize = jawProminence * ageJawModifier;
+
   const upperArmColor = sleeveCoverage === 'full' ? color : sleeveCoverage === 'lower' ? headColor : headColor;
   const lowerArmColor = sleeveCoverage === 'none' ? headColor : color;
   const hasAccessory = (value: string) => accessories.includes(value);
@@ -725,7 +787,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const lowerLidLeft = useRef<THREE.Mesh>(null);
   const lowerLidRight = useRef<THREE.Mesh>(null);
   const blinkTimer = useRef(0);
-  const blinkCooldown = useRef(2 + Math.random() * 3); // 2-5 seconds initial
+  // Player blinks less frequently (5-10s) than NPCs (2-5s) for more natural idle look
+  const blinkCooldown = useRef(isPlayer ? 5 + Math.random() * 5 : 2 + Math.random() * 3);
   const blinkProgress = useRef(0);
   const isBlinking = useRef(false);
 
@@ -756,9 +819,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   // Eye gaze refs
   const leftEye = useRef<THREE.Group>(null);
   const rightEye = useRef<THREE.Group>(null);
-  // Gaze tracking state
+  // Gaze tracking state (horizontal only - no vertical pitch)
   const currentGazeYaw = useRef(0);
-  const currentGazePitch = useRef(0);
   // Eye scanning state (eyes shift while walking)
   const eyeScanTimer = useRef(Math.random() * 3);
   const eyeScanTargetX = useRef(0);
@@ -859,21 +921,25 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const perfNow = performance.now() * 0.001;
 
     // ANIMATION: Calculate movement inertia (start/stop ramp)
-    let movementInertia = 1;
+    // Default to isWalking state if refs not provided (for NPCs without tracking)
+    let movementInertia = isWalking ? 1 : 0;
     if (movementStartTimeRef && movementStopTimeRef) {
       if (isWalking) {
         // Ramp up over 0.25 seconds when starting to walk
-        const startTime = movementStartTimeRef.current || perfNow;
+        const startTime = movementStartTimeRef.current > 0 ? movementStartTimeRef.current : perfNow;
         const timeSinceStart = Math.max(0, perfNow - startTime);
         movementInertia = Math.min(1, timeSinceStart / 0.25);
         // Ease the ramp for smoother start
         movementInertia = movementInertia * movementInertia * (3 - 2 * movementInertia); // smoothstep
       } else {
         // Decay over 0.2 seconds when stopping
-        const stopTime = movementStopTimeRef.current || perfNow;
-        const timeSinceStop = Math.max(0, perfNow - stopTime);
-        movementInertia = Math.max(0, 1 - timeSinceStop / 0.2);
-        movementInertia = movementInertia * movementInertia; // ease out
+        // If stopTime ref is 0 (never walked), stay at 0 inertia (idle)
+        if (movementStopTimeRef.current > 0) {
+          const timeSinceStop = Math.max(0, perfNow - movementStopTimeRef.current);
+          movementInertia = Math.max(0, 1 - timeSinceStop / 0.2);
+          movementInertia = movementInertia * movementInertia; // ease out
+        }
+        // else: keep default of 0 (never moved, so no decay animation needed)
       }
     }
 
@@ -1044,55 +1110,46 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     }
 
     // Gaze tracking - look toward target (e.g., player) when nearby
+    // HORIZONTAL ONLY - NPCs turn head left/right, no up/down tilt (looks natural for walking)
     if (gazeTarget && worldPosition && headGroup.current) {
       // Calculate direction to target
       const dx = gazeTarget.x - worldPosition.x;
       const dz = gazeTarget.z - worldPosition.z;
-      const dy = gazeTarget.y - (worldPosition.y + 1.75); // Head height
       const distToTarget = Math.sqrt(dx * dx + dz * dz);
 
       // Only track targets within 8 units
       if (distToTarget < 8 && distToTarget > 0.5) {
-        // Calculate yaw (horizontal turn) and pitch (vertical tilt) to target
+        // Calculate yaw (horizontal turn) to target
         const targetYaw = Math.atan2(-dx, -dz); // Negate for correct direction
-        const targetPitch = Math.atan2(dy, distToTarget);
 
         // Clamp to natural head turn limits
         const maxYaw = 0.7; // ~40 degrees
-        const maxPitch = 0.35; // ~20 degrees
+
         const clampedYaw = THREE.MathUtils.clamp(targetYaw, -maxYaw, maxYaw);
-        const clampedPitch = THREE.MathUtils.clamp(targetPitch, -maxPitch, maxPitch);
 
-        // Smoothly interpolate toward target gaze
+        // Smoothly interpolate toward target gaze (horizontal only)
         currentGazeYaw.current = THREE.MathUtils.lerp(currentGazeYaw.current, clampedYaw, 0.04);
-        currentGazePitch.current = THREE.MathUtils.lerp(currentGazePitch.current, clampedPitch, 0.04);
 
-        // Apply head rotation (combine with existing head movement)
-        const existingY = headGroup.current.rotation.y || 0;
-        headGroup.current.rotation.y = THREE.MathUtils.lerp(existingY, currentGazeYaw.current, 0.06);
-        headGroup.current.rotation.x = (headGroup.current.rotation.x || 0) + currentGazePitch.current * 0.5;
+        // Note: Head rotation is applied in the animation section below (combined with walking animation)
 
-        // Eye gaze - eyes move faster and track more precisely
+        // Eye gaze - eyes move horizontally to track target
         const eyeYaw = THREE.MathUtils.clamp(targetYaw - currentGazeYaw.current, -0.25, 0.25);
-        const eyePitch = THREE.MathUtils.clamp(targetPitch - currentGazePitch.current, -0.15, 0.15);
 
-        // Shift eye position to look at target
+        // Shift eye position horizontally to look at target
         const gazeOffsetX = eyeYaw * 0.015;
-        const gazeOffsetY = eyePitch * 0.01;
         if (leftEye.current) {
           const baseX = -faceVariant.eyeSpacing;
           leftEye.current.position.x = THREE.MathUtils.lerp(leftEye.current.position.x, baseX + gazeOffsetX, 0.15);
-          leftEye.current.position.y = THREE.MathUtils.lerp(leftEye.current.position.y, eyeY + gazeOffsetY, 0.15);
+          leftEye.current.position.y = THREE.MathUtils.lerp(leftEye.current.position.y, eyeY, 0.15);
         }
         if (rightEye.current) {
           const baseX = faceVariant.eyeSpacing;
           rightEye.current.position.x = THREE.MathUtils.lerp(rightEye.current.position.x, baseX + gazeOffsetX, 0.15);
-          rightEye.current.position.y = THREE.MathUtils.lerp(rightEye.current.position.y, eyeY + gazeOffsetY, 0.15);
+          rightEye.current.position.y = THREE.MathUtils.lerp(rightEye.current.position.y, eyeY, 0.15);
         }
       } else {
         // Target out of range - return to forward gaze
         currentGazeYaw.current = THREE.MathUtils.lerp(currentGazeYaw.current, 0, 0.02);
-        currentGazePitch.current = THREE.MathUtils.lerp(currentGazePitch.current, 0, 0.02);
 
         if (leftEye.current) {
           const baseX = -faceVariant.eyeSpacing;
@@ -1263,7 +1320,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         const hasActionAnimation = actionAnim && actionAnim.progress > 0 && actionAnim.progress < 1;
         const hasInteraction = interactionCharge > 0 || interactionSwing > 0 || hasActionAnimation;
 
-        // Normal walk arm swing - only when not in interaction
+        // Normal walk arm swing - immediate response when walking
         if (!hasInteraction) {
           if (isWalking) {
             const gait = leftPhase;
@@ -1304,20 +1361,26 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               }
             }
           } else {
-            // IDLE: Arms at rest with subtle movement
+            // IDLE: Arms at natural rest pose - slightly forward, elbows bent
+            const idleArmX = 0.12;
+            const idleArmZ = 0.08;
+            const idleElbow = -0.25;
+
             if (leftArm.current) {
-              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, 0, 0.08);
-              leftArm.current.rotation.z = THREE.MathUtils.lerp(leftArm.current.rotation.z, 0, 0.08);
+              leftArm.current.rotation.x = THREE.MathUtils.lerp(leftArm.current.rotation.x, idleArmX, 0.1);
+              leftArm.current.rotation.z = THREE.MathUtils.lerp(leftArm.current.rotation.z, idleArmZ, 0.1);
+              leftArm.current.rotation.y = THREE.MathUtils.lerp(leftArm.current.rotation.y, 0, 0.1);
             }
             if (leftForearm.current) {
-              leftForearm.current.rotation.x = THREE.MathUtils.lerp(leftForearm.current.rotation.x, -0.1, 0.08);
+              leftForearm.current.rotation.x = THREE.MathUtils.lerp(leftForearm.current.rotation.x, idleElbow, 0.1);
             }
             if (rightArm.current) {
-              rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, 0, 0.08);
-              rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, 0, 0.08);
+              rightArm.current.rotation.x = THREE.MathUtils.lerp(rightArm.current.rotation.x, idleArmX, 0.1);
+              rightArm.current.rotation.z = THREE.MathUtils.lerp(rightArm.current.rotation.z, -idleArmZ, 0.1);
+              rightArm.current.rotation.y = THREE.MathUtils.lerp(rightArm.current.rotation.y, 0, 0.1);
             }
             if (rightForearm.current) {
-              rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, -0.1, 0.08);
+              rightForearm.current.rotation.x = THREE.MathUtils.lerp(rightForearm.current.rotation.x, idleElbow, 0.1);
             }
           }
         }
@@ -1494,13 +1557,24 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     if (bodyGroup.current) {
       // ANIMATION: Bobbing and breathing with smooth blend
+      const effectiveWalking = isWalking || movementInertia > 0.01;
+
+      // Idle breathing is slow and subtle (about 14 breaths/min = 0.23 Hz)
+      const idleBreathSpeed = 0.5;
+      const idleBreathAmp = 0.008; // Very subtle vertical movement
+      const idleBreathing = Math.sin(state.clock.elapsedTime * idleBreathSpeed) * idleBreathAmp;
+
+      // Walking/running breath is faster and more pronounced
       const walkBreathSpeed = 1.6;
       const runBreathSpeed = 3.2;
-      const breathingSpeed = walkBreathSpeed + (runBreathSpeed - walkBreathSpeed) * sprintBlend;
+      const activeBreathSpeed = walkBreathSpeed + (runBreathSpeed - walkBreathSpeed) * sprintBlend;
       const walkBreathAmp = 0.02;
       const runBreathAmp = 0.01;
-      const breathAmp = walkBreathAmp + (runBreathAmp - walkBreathAmp) * sprintBlend;
-      const breathing = Math.sin(state.clock.elapsedTime * breathingSpeed) * breathAmp;
+      const activeBreathAmp = walkBreathAmp + (runBreathAmp - walkBreathAmp) * sprintBlend;
+      const activeBreathing = Math.sin(state.clock.elapsedTime * activeBreathSpeed) * activeBreathAmp;
+
+      // Smoothly blend between idle and active breathing based on movement inertia
+      const breathing = idleBreathing + (activeBreathing - idleBreathing) * movementInertia;
 
       // ANIMATION: Body bob blends between walk and run
       const walkBob = 0.025;
@@ -1551,15 +1625,18 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         }
       }
 
-      // ANIMATION: Apply inertia to body position
-      const effectiveWalking = isWalking || movementInertia > 0.01;
-      bodyGroup.current.position.y = (effectiveWalking ? bodyBob : breathing) + jumpLift + crouch + settle + interactionCrouch;
+      // ANIMATION: Apply inertia to body position - blend between breathing and bobbing
+      // bodyBob already includes movementInertia, so we blend breathing with bob
+      const bodyVertical = breathing + bodyBob; // bodyBob fades to 0 as movementInertia decays
+      bodyGroup.current.position.y = bodyVertical + jumpLift + crouch + settle + interactionCrouch;
 
       // ANIMATION: Forward lean blends smoothly between walk and run
       const walkLean = 0;
       const runLean = 0.42;
       const targetRotationX = walkLean + (runLean - walkLean) * sprintBlend;
-      const idleLean = !effectiveWalking ? Math.sin(state.clock.elapsedTime * 0.6) * 0.02 : 0;
+      // Idle lean blends in as movement inertia fades out
+      const idleLeanBase = Math.sin(state.clock.elapsedTime * 0.6) * 0.02;
+      const idleLean = idleLeanBase * (1 - movementInertia);
       const jumpTilt = jumping ? (-0.15 + jumpT * 0.2) : 0;
       const crouchTilt = anticipate * 0.22;
       const landTilt = -landing * 0.18;
@@ -1596,12 +1673,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     // Head lag/bob for natural independent movement
     if (headGroup.current) {
-      // ANIMATION: Head bob blends between walk and run
+      // ANIMATION: Head bob synced to footsteps - one bob per foot strike
+      // abs(sin(t)) gives 2 peaks per full stride cycle (left foot + right foot)
       const walkHeadBob = 0.015;
-      const runHeadBob = 0.008;
+      const runHeadBob = 0.01;
       const headBobAmount = walkHeadBob + (runHeadBob - walkHeadBob) * sprintBlend;
-      const effectiveWalking = isWalking || movementInertia > 0.01;
-      const headBob = effectiveWalking ? Math.sin(t * 2) * headBobAmount * movementInertia : 0;
+      const headBob = Math.abs(Math.sin(t)) * headBobAmount * movementInertia;
 
       // Counter body lean more during sprint for stable gaze
       const walkLagFactor = -0.2;
@@ -1609,11 +1686,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       const lagFactor = walkLagFactor + (runLagFactor - walkLagFactor) * sprintBlend;
       const headLag = bodyGroup.current ? bodyGroup.current.rotation.x * lagFactor : 0;
 
-      // ANIMATION: Head sway blends
-      const walkHeadSway = 0.02;
-      const runHeadSway = 0.01;
+      // ANIMATION: Head sway blends - subtle side-to-side matching stride
+      const walkHeadSway = 0.025;
+      const runHeadSway = 0.015;
       const headSwayAmount = walkHeadSway + (runHeadSway - walkHeadSway) * sprintBlend;
-      const headSway = effectiveWalking ? Math.sin(t) * headSwayAmount * movementInertia : 0;
+      const headSway = Math.sin(t) * headSwayAmount * movementInertia;
 
       // ANIMATION: Head anticipates turn direction (look-ahead)
       const headTurnAnticipation = turnPhase * 0.25 * turnDirection;
@@ -1646,8 +1723,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       // Include age-based head forward lean (elderly have head jutting forward)
       const ageHeadLean = agePosture.headForward;
       headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headLag + headInteractionX + ageHeadLean, 0.15);
-      // ANIMATION: Head turns toward new direction during pivots
-      headGroup.current.rotation.y = THREE.MathUtils.lerp(headGroup.current.rotation.y || 0, headInteractionY + headTurnAnticipation, 0.15);
+      // ANIMATION: Head turns toward new direction during pivots + gaze tracking
+      // Combine gaze yaw with walking head turn (don't override!)
+      headGroup.current.rotation.y = THREE.MathUtils.lerp(
+        headGroup.current.rotation.y || 0,
+        currentGazeYaw.current + headInteractionY + headTurnAnticipation,
+        0.15
+      );
       headGroup.current.rotation.z = -headSway * 0.5; // Subtle opposite sway
     }
 
@@ -1689,8 +1771,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       }
     }
 
-    // PERFORMANCE: Only update blinking for NPCs close to camera (<25 units)
-    if (showFacialDetails) {
+    // PERFORMANCE: Only update blinking for NPCs close to camera (<25 units), always for player
+    if (showFacialDetails || isPlayer) {
       const dt = state.clock.getDelta();
       if (!isBlinking.current) {
         blinkTimer.current += dt;
@@ -1700,25 +1782,55 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         }
       }
       if (isBlinking.current) {
-        blinkProgress.current += dt * 8;
+        blinkProgress.current += dt * 12; // Faster blink (was 8)
         const phase = Math.min(1, blinkProgress.current);
         const blinkAmount = Math.sin(phase * Math.PI);
-        const upperScale = 1 - blinkAmount * 0.85;
-        const lowerScale = 1 - blinkAmount * 0.6;
-        if (upperLidLeft.current) upperLidLeft.current.scale.y = upperScale;
-        if (upperLidRight.current) upperLidRight.current.scale.y = upperScale;
-        if (lowerLidLeft.current) lowerLidLeft.current.scale.y = lowerScale;
-        if (lowerLidRight.current) lowerLidRight.current.scale.y = lowerScale;
+
+        // Move eyelids to close over the eye
+        const upperMove = blinkAmount * 0.024; // Move down from top to center
+        const lowerMove = blinkAmount * 0.024; // Move up from bottom to center
+        const lidScale = 1 + blinkAmount * 4; // Expand to cover entire eye
+
+        if (upperLidLeft.current) {
+          upperLidLeft.current.position.y = eyeY + 0.024 - upperMove;
+          upperLidLeft.current.scale.y = lidScale;
+        }
+        if (upperLidRight.current) {
+          upperLidRight.current.position.y = eyeY + 0.024 - upperMove;
+          upperLidRight.current.scale.y = lidScale;
+        }
+        if (lowerLidLeft.current) {
+          lowerLidLeft.current.position.y = eyeY - 0.024 + lowerMove;
+          lowerLidLeft.current.scale.y = lidScale;
+        }
+        if (lowerLidRight.current) {
+          lowerLidRight.current.position.y = eyeY - 0.024 + lowerMove;
+          lowerLidRight.current.scale.y = lidScale;
+        }
         if (phase >= 1) {
           isBlinking.current = false;
           blinkTimer.current = 0;
-          blinkCooldown.current = 2.5 + Math.random() * 4; // 2.5-6.5 seconds between blinks
+          // Player: 5-10s between blinks, NPCs: 2.5-6.5s
+          blinkCooldown.current = isPlayer ? 5 + Math.random() * 5 : 2.5 + Math.random() * 4;
         }
       } else {
-        if (upperLidLeft.current) upperLidLeft.current.scale.y = 1;
-        if (upperLidRight.current) upperLidRight.current.scale.y = 1;
-        if (lowerLidLeft.current) lowerLidLeft.current.scale.y = 1;
-        if (lowerLidRight.current) lowerLidRight.current.scale.y = 1;
+        // Reset to resting position (eyes open)
+        if (upperLidLeft.current) {
+          upperLidLeft.current.position.y = eyeY + 0.024;
+          upperLidLeft.current.scale.y = 1;
+        }
+        if (upperLidRight.current) {
+          upperLidRight.current.position.y = eyeY + 0.024;
+          upperLidRight.current.scale.y = 1;
+        }
+        if (lowerLidLeft.current) {
+          lowerLidLeft.current.position.y = eyeY - 0.024;
+          lowerLidLeft.current.scale.y = 1;
+        }
+        if (lowerLidRight.current) {
+          lowerLidRight.current.position.y = eyeY - 0.024;
+          lowerLidRight.current.scale.y = 1;
+        }
       }
     }
 
@@ -2212,11 +2324,21 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         
         {/* Head */}
         <group ref={headGroup} position={[0, 1.75, 0]}>
-          <mesh castShadow scale={[0.95, 1.1, 0.9]}>
+          {/* Cranium - randomized shape for variety */}
+          <mesh castShadow scale={[
+            0.95 * faceVariant.craniumWidth,
+            1.1 * faceVariant.craniumHeight,
+            0.9 * faceVariant.craniumDepth
+          ]}>
             <sphereGeometry args={[0.2, 12, 12]} />
             <meshStandardMaterial color={headColor} />
           </mesh>
-          <mesh position={[0, 0.0, 0.085]} scale={[1.05, 1.05, 0.45]} castShadow>
+          {/* Face - follows cranium width with individual variation */}
+          <mesh position={[0, 0.0, 0.085]} scale={[
+            1.05 * faceVariant.craniumWidth * faceVariant.faceWidthRatio,
+            1.05,
+            0.45
+          ]} castShadow>
             <sphereGeometry args={[0.16, 12, 10]} />
             <meshStandardMaterial color={headColor} />
           </mesh>
@@ -2419,78 +2541,398 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               )}
             </group>
           )}
-          {/* PERFORMANCE: Facial details only rendered for NPCs within 25 units */}
-          {showFacialDetails && (
+          {/* PERFORMANCE: Facial details only rendered for NPCs within 25 units, always for player */}
+          {(showFacialDetails || isPlayer) && (
             <>
-              {/* Eyebrows */}
-              <mesh ref={leftBrowRef} position={[-browX, browY, 0.165]} rotation={[0, 0, isFemale ? -0.1 : -0.08]} castShadow>
-                <boxGeometry args={[0.05, browHeight, 0.02]} />
-                <meshStandardMaterial color={browColor} roughness={1} />
-              </mesh>
-              <mesh ref={rightBrowRef} position={[browX, browY, 0.165]} rotation={[0, 0, isFemale ? 0.1 : 0.08]} castShadow>
-                <boxGeometry args={[0.05, browHeight, 0.02]} />
-                <meshStandardMaterial color={browColor} roughness={1} />
-              </mesh>
-              {/* Eye whites */}
-              <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.195]} scale={eyeScale} castShadow>
-                <planeGeometry args={[0.05, 0.03]} />
-                <meshStandardMaterial color="#f2efe8" roughness={1} />
-              </mesh>
-              <mesh position={[faceVariant.eyeSpacing, eyeY, 0.195]} scale={eyeScale} castShadow>
-                <planeGeometry args={[0.05, 0.03]} />
-                <meshStandardMaterial color="#f2efe8" roughness={1} />
-              </mesh>
-              {/* Left eye - iris and pupil in group for gaze tracking */}
-              <group ref={leftEye} position={[-faceVariant.eyeSpacing, eyeY, 0.202]}>
-                {/* Iris */}
-                <mesh castShadow>
-                  <planeGeometry args={[0.018, 0.018]} />
-                  <meshStandardMaterial color={eyeColor} roughness={1} />
-                </mesh>
-                {/* Pupil */}
-                <mesh position={[0, 0, 0.004]} castShadow>
-                  <planeGeometry args={[0.015, 0.015]} />
-                  <meshStandardMaterial color="#2a2a2a" roughness={1} />
-                </mesh>
-              </group>
-              {/* Right eye - iris and pupil in group for gaze tracking */}
-              <group ref={rightEye} position={[faceVariant.eyeSpacing, eyeY, 0.202]}>
-                {/* Iris */}
-                <mesh castShadow>
-                  <planeGeometry args={[0.018, 0.018]} />
-                  <meshStandardMaterial color={eyeColor} roughness={1} />
-                </mesh>
-                {/* Pupil */}
-                <mesh position={[0, 0, 0.004]} castShadow>
-                  <planeGeometry args={[0.015, 0.015]} />
-                  <meshStandardMaterial color="#2a2a2a" roughness={1} />
-                </mesh>
-              </group>
-              {/* Eyelids */}
-              <mesh ref={upperLidLeft} position={[-faceVariant.eyeSpacing, eyeY + 0.018, 0.193]} castShadow>
-                <planeGeometry args={[0.05, 0.012]} />
-                <meshStandardMaterial color={faceShadowColor} roughness={1} />
-              </mesh>
-              <mesh ref={upperLidRight} position={[faceVariant.eyeSpacing, eyeY + 0.018, 0.193]} castShadow>
-                <planeGeometry args={[0.05, 0.012]} />
-                <meshStandardMaterial color={faceShadowColor} roughness={1} />
-              </mesh>
-              <mesh ref={lowerLidLeft} position={[-faceVariant.eyeSpacing, eyeY - 0.018, 0.193]} castShadow>
-                <planeGeometry args={[0.05, 0.01]} />
-                <meshStandardMaterial color={faceShadowColor} roughness={1} />
-              </mesh>
-              <mesh ref={lowerLidRight} position={[faceVariant.eyeSpacing, eyeY - 0.018, 0.193]} castShadow>
-                <planeGeometry args={[0.05, 0.01]} />
-                <meshStandardMaterial color={faceShadowColor} roughness={1} />
-              </mesh>
+              {/* Eyebrows - Natural curved with taper */}
+              {(() => {
+                // Gender-specific base thickness - increased for strong prominence
+                const baseBrowThickness = isFemale ? 0.0042 : 0.0050;
+                const innerThickness = baseBrowThickness * 1.3; // Thicker near nose
+                const middleThickness = baseBrowThickness;
+                const outerThickness = baseBrowThickness * 0.8; // Thinner at tail
+                const archHeight = isFemale ? 0.003 : 0.002; // More arch for female
+
+                return (
+                  <>
+                    {/* Left eyebrow - 3-part curved with natural taper */}
+                    <group ref={leftBrowRef} position={[-browX, browY, 0.165]} rotation={[0, 0, isFemale ? -0.1 : -0.08]}>
+                      {/* Inner segment (near nose) - thickest and longer */}
+                      <mesh position={[0.010, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[innerThickness, 0.017, 4, 8]} />
+                        <meshStandardMaterial color={browColor} roughness={1} />
+                      </mesh>
+
+                      {/* Middle segment (arch peak) - medium thickness, raised, longer */}
+                      <mesh position={[0, archHeight, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[middleThickness, 0.020, 4, 8]} />
+                        <meshStandardMaterial color={browColor} roughness={1} />
+                      </mesh>
+
+                      {/* Outer segment (tail) - thinnest, tapered, longer */}
+                      <mesh position={[-0.012, archHeight * 0.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[outerThickness, 0.016, 4, 6]} />
+                        <meshStandardMaterial color={browColor} roughness={1} />
+                      </mesh>
+                    </group>
+
+                    {/* Right eyebrow - 3-part curved with natural taper */}
+                    <group ref={rightBrowRef} position={[browX, browY, 0.165]} rotation={[0, 0, isFemale ? 0.1 : 0.08]}>
+                      {/* Inner segment (near nose) - thickest and longer */}
+                      <mesh position={[-0.010, 0, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[innerThickness, 0.017, 4, 8]} />
+                        <meshStandardMaterial color={browColor} roughness={1} />
+                      </mesh>
+
+                      {/* Middle segment (arch peak) - medium thickness, raised, longer */}
+                      <mesh position={[0, archHeight, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[middleThickness, 0.020, 4, 8]} />
+                        <meshStandardMaterial color={browColor} roughness={1} />
+                      </mesh>
+
+                      {/* Outer segment (tail) - thinnest, tapered, longer */}
+                      <mesh position={[0.012, archHeight * 0.5, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+                        <capsuleGeometry args={[outerThickness, 0.016, 4, 6]} />
+                        <meshStandardMaterial color={browColor} roughness={1} />
+                      </mesh>
+                    </group>
+                  </>
+                );
+              })()}
+              {/* === EYES - Toggle between old flat (USE_3D_EYES=false) and new 3D (USE_3D_EYES=true) === */}
+              {!USE_3D_EYES ? (
+                // IMPROVED REALISTIC EYES (flat, no curvature)
+                <>
+                  {/* === LEFT EYE WHITE - Almond-shaped flat circle === */}
+                  <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.195]} scale={[1, 0.95, 1]} castShadow>
+                    <circleGeometry args={[0.024, 20]} />
+                    <meshStandardMaterial
+                      color="#f8f5f0"
+                      roughness={0.35}
+                      metalness={0.02}
+                    />
+                  </mesh>
+
+                  {/* === RIGHT EYE WHITE - Almond-shaped flat circle === */}
+                  <mesh position={[faceVariant.eyeSpacing, eyeY, 0.195]} scale={[1, 0.95, 1]} castShadow>
+                    <circleGeometry args={[0.024, 20]} />
+                    <meshStandardMaterial
+                      color="#f8f5f0"
+                      roughness={0.35}
+                      metalness={0.02}
+                    />
+                  </mesh>
+
+                  {/* === LEFT IRIS & PUPIL (gaze tracking) === */}
+                  <group ref={leftEye} position={[-faceVariant.eyeSpacing, eyeY, 0.197]}>
+                    {/* Iris outer ring - darker limbus for depth (BIGGER) */}
+                    <mesh position={[0, 0, 0.001]}>
+                      <ringGeometry args={[0.0135, 0.0145, 24]} />
+                      <meshStandardMaterial
+                        color={new THREE.Color(eyeColor).multiplyScalar(0.65).getStyle()}
+                        roughness={0.6}
+                      />
+                    </mesh>
+                    {/* Iris main color - circular (BIGGER - 56% of eye width) */}
+                    <mesh position={[0, 0, 0.002]} castShadow>
+                      <circleGeometry args={[0.014, 24]} />
+                      <meshStandardMaterial color={eyeColor} roughness={0.5} />
+                    </mesh>
+                    {/* Iris inner variation - lighter center ring for depth */}
+                    <mesh position={[0, 0, 0.003]}>
+                      <ringGeometry args={[0.006, 0.009, 20]} />
+                      <meshStandardMaterial
+                        color={new THREE.Color(eyeColor).multiplyScalar(1.15).getStyle()}
+                        roughness={0.45}
+                        transparent
+                        opacity={0.6}
+                      />
+                    </mesh>
+                    {/* Pupil - circular, properly sized (47% of iris) */}
+                    <mesh position={[0, 0, 0.004]} castShadow>
+                      <circleGeometry args={[0.0065, 20]} />
+                      <meshStandardMaterial color="#0a0a0a" roughness={0.2} />
+                    </mesh>
+                    {/* Highlight for wetness - circular bright spot */}
+                    <mesh position={[0.004, 0.005, 0.006]}>
+                      <circleGeometry args={[0.002, 8]} />
+                      <meshBasicMaterial color="#ffffff" opacity={0.85} transparent />
+                    </mesh>
+                    {/* Secondary highlight - smaller, dimmer */}
+                    <mesh position={[-0.003, -0.004, 0.0055]}>
+                      <circleGeometry args={[0.0012, 6]} />
+                      <meshBasicMaterial color="#ffffff" opacity={0.4} transparent />
+                    </mesh>
+                  </group>
+
+                  {/* === RIGHT IRIS & PUPIL (gaze tracking) === */}
+                  <group ref={rightEye} position={[faceVariant.eyeSpacing, eyeY, 0.197]}>
+                    {/* Iris outer ring - darker limbus for depth (BIGGER) */}
+                    <mesh position={[0, 0, 0.001]}>
+                      <ringGeometry args={[0.0135, 0.0145, 24]} />
+                      <meshStandardMaterial
+                        color={new THREE.Color(eyeColor).multiplyScalar(0.65).getStyle()}
+                        roughness={0.6}
+                      />
+                    </mesh>
+                    {/* Iris main color - circular (BIGGER - 56% of eye width) */}
+                    <mesh position={[0, 0, 0.002]} castShadow>
+                      <circleGeometry args={[0.014, 24]} />
+                      <meshStandardMaterial color={eyeColor} roughness={0.5} />
+                    </mesh>
+                    {/* Iris inner variation - lighter center ring for depth */}
+                    <mesh position={[0, 0, 0.003]}>
+                      <ringGeometry args={[0.006, 0.009, 20]} />
+                      <meshStandardMaterial
+                        color={new THREE.Color(eyeColor).multiplyScalar(1.15).getStyle()}
+                        roughness={0.45}
+                        transparent
+                        opacity={0.6}
+                      />
+                    </mesh>
+                    {/* Pupil - circular, properly sized (47% of iris) */}
+                    <mesh position={[0, 0, 0.004]} castShadow>
+                      <circleGeometry args={[0.0065, 20]} />
+                      <meshStandardMaterial color="#0a0a0a" roughness={0.2} />
+                    </mesh>
+                    {/* Highlight for wetness - circular bright spot */}
+                    <mesh position={[0.004, 0.005, 0.006]}>
+                      <circleGeometry args={[0.002, 8]} />
+                      <meshBasicMaterial color="#ffffff" opacity={0.85} transparent />
+                    </mesh>
+                    {/* Secondary highlight - smaller, dimmer */}
+                    <mesh position={[-0.003, -0.004, 0.0055]}>
+                      <circleGeometry args={[0.0012, 6]} />
+                      <meshBasicMaterial color="#ffffff" opacity={0.4} transparent />
+                    </mesh>
+                  </group>
+                </>
+              ) : (
+                // NEW 3D EYEBALLS (realistic - recessed into eye sockets, wrapped by lids)
+                <>
+                  {/* Left eye socket - recessed cavity with shadow */}
+                  <mesh position={[-faceVariant.eyeSpacing, eyeY, 0.165]} castShadow>
+                    <sphereGeometry args={[0.028, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+                    <meshStandardMaterial
+                      color={faceShadowColor}
+                      roughness={0.95}
+                    />
+                  </mesh>
+
+                  {/* Right eye socket - recessed cavity with shadow */}
+                  <mesh position={[faceVariant.eyeSpacing, eyeY, 0.165]} castShadow>
+                    <sphereGeometry args={[0.028, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+                    <meshStandardMaterial
+                      color={faceShadowColor}
+                      roughness={0.95}
+                    />
+                  </mesh>
+
+                  {/* Left eye - 3D eyeball RECESSED into socket with gaze tracking */}
+                  <group ref={leftEye} position={[-faceVariant.eyeSpacing, eyeY, 0.17]}>
+                    {/* Eyeball hemisphere - sclera (white), only front half visible */}
+                    <mesh castShadow>
+                      <sphereGeometry args={[0.024, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                      <meshStandardMaterial
+                        color="#f8f5f0"
+                        roughness={0.3}
+                        metalness={0.05}
+                      />
+                    </mesh>
+
+                    {/* Iris - colored circle on eyeball surface */}
+                    <mesh position={[0, 0, 0.020]}>
+                      <circleGeometry args={[0.009, 20]} />
+                      <meshStandardMaterial
+                        color={eyeColor}
+                        roughness={0.4}
+                      />
+                    </mesh>
+
+                    {/* Pupil - black center */}
+                    <mesh position={[0, 0, 0.021]}>
+                      <circleGeometry args={[0.0038, 16]} />
+                      <meshStandardMaterial
+                        color="#0a0a0a"
+                        roughness={0.2}
+                      />
+                    </mesh>
+
+                    {/* Corneal bulge - transparent dome for wet/glassy look */}
+                    <mesh position={[0, 0, 0.012]}>
+                      <sphereGeometry args={[0.0128, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.48]} />
+                      <meshPhysicalMaterial
+                        color="#ffffff"
+                        transparent
+                        opacity={0.12}
+                        roughness={0.05}
+                        metalness={0.0}
+                        clearcoat={0.9}
+                        clearcoatRoughness={0.05}
+                        transmission={0.1}
+                      />
+                    </mesh>
+
+                    {/* Specular highlight - tiny bright spot for wetness */}
+                    <mesh position={[0.005, 0.007, 0.023]}>
+                      <circleGeometry args={[0.0022, 8]} />
+                      <meshBasicMaterial color="#ffffff" opacity={0.85} transparent />
+                    </mesh>
+                  </group>
+
+                  {/* Right eye - 3D eyeball RECESSED into socket with gaze tracking */}
+                  <group ref={rightEye} position={[faceVariant.eyeSpacing, eyeY, 0.17]}>
+                    {/* Eyeball hemisphere - sclera (white), only front half visible */}
+                    <mesh castShadow>
+                      <sphereGeometry args={[0.024, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                      <meshStandardMaterial
+                        color="#f8f5f0"
+                        roughness={0.3}
+                        metalness={0.05}
+                      />
+                    </mesh>
+
+                    {/* Iris - colored circle on eyeball surface */}
+                    <mesh position={[0, 0, 0.020]}>
+                      <circleGeometry args={[0.009, 20]} />
+                      <meshStandardMaterial
+                        color={eyeColor}
+                        roughness={0.4}
+                      />
+                    </mesh>
+
+                    {/* Pupil - black center */}
+                    <mesh position={[0, 0, 0.021]}>
+                      <circleGeometry args={[0.0038, 16]} />
+                      <meshStandardMaterial
+                        color="#0a0a0a"
+                        roughness={0.2}
+                      />
+                    </mesh>
+
+                    {/* Corneal bulge - transparent dome for wet/glassy look */}
+                    <mesh position={[0, 0, 0.012]}>
+                      <sphereGeometry args={[0.0128, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.48]} />
+                      <meshPhysicalMaterial
+                        color="#ffffff"
+                        transparent
+                        opacity={0.12}
+                        roughness={0.05}
+                        metalness={0.0}
+                        clearcoat={0.9}
+                        clearcoatRoughness={0.05}
+                        transmission={0.1}
+                      />
+                    </mesh>
+
+                    {/* Specular highlight - tiny bright spot for wetness */}
+                    <mesh position={[0.005, 0.007, 0.023]}>
+                      <circleGeometry args={[0.0022, 8]} />
+                      <meshBasicMaterial color="#ffffff" opacity={0.85} transparent />
+                    </mesh>
+                  </group>
+                </>
+              )}
+              {/* Eyelids - flat, positioned around flat eyes */}
+              {!USE_3D_EYES ? (
+                // Flat eyelids for flat eyes
+                <>
+                  {/* Upper left eyelid - positioned at top of eye */}
+                  <mesh
+                    ref={upperLidLeft}
+                    position={[-faceVariant.eyeSpacing, eyeY + 0.024, 0.199]}
+                    castShadow
+                  >
+                    <planeGeometry args={[0.054, 0.006]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+
+                  {/* Upper right eyelid - positioned at top of eye */}
+                  <mesh
+                    ref={upperLidRight}
+                    position={[faceVariant.eyeSpacing, eyeY + 0.024, 0.199]}
+                    castShadow
+                  >
+                    <planeGeometry args={[0.054, 0.006]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+
+                  {/* Lower left eyelid - positioned at bottom of eye */}
+                  <mesh
+                    ref={lowerLidLeft}
+                    position={[-faceVariant.eyeSpacing, eyeY - 0.024, 0.199]}
+                    castShadow
+                  >
+                    <planeGeometry args={[0.054, 0.006]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+
+                  {/* Lower right eyelid - positioned at bottom of eye */}
+                  <mesh
+                    ref={lowerLidRight}
+                    position={[faceVariant.eyeSpacing, eyeY - 0.024, 0.199]}
+                    castShadow
+                  >
+                    <planeGeometry args={[0.054, 0.006]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+                </>
+              ) : (
+                // Curved eyelids that wrap around 3D eyeballs
+                <>
+                  {/* Upper left eyelid - lowered for natural resting position */}
+                  <mesh
+                    ref={upperLidLeft}
+                    position={[-faceVariant.eyeSpacing, eyeY + 0.003, 0.183]}
+                    rotation={[Math.PI * 0.48, 0, 0]}
+                    castShadow
+                  >
+                    <torusGeometry args={[0.026, 0.008, 8, 16, Math.PI]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+
+                  {/* Upper right eyelid - lowered for natural resting position */}
+                  <mesh
+                    ref={upperLidRight}
+                    position={[faceVariant.eyeSpacing, eyeY + 0.003, 0.183]}
+                    rotation={[Math.PI * 0.48, 0, 0]}
+                    castShadow
+                  >
+                    <torusGeometry args={[0.026, 0.008, 8, 16, Math.PI]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+
+                  {/* Lower left eyelid - curved torus arc wrapping eyeball */}
+                  <mesh
+                    ref={lowerLidLeft}
+                    position={[-faceVariant.eyeSpacing, eyeY - 0.015, 0.183]}
+                    rotation={[Math.PI * 0.52, 0, 0]}
+                    castShadow
+                  >
+                    <torusGeometry args={[0.026, 0.006, 8, 16, Math.PI]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+
+                  {/* Lower right eyelid - curved torus arc wrapping eyeball */}
+                  <mesh
+                    ref={lowerLidRight}
+                    position={[faceVariant.eyeSpacing, eyeY - 0.015, 0.183]}
+                    rotation={[Math.PI * 0.52, 0, 0]}
+                    castShadow
+                  >
+                    <torusGeometry args={[0.026, 0.006, 8, 16, Math.PI]} />
+                    <meshStandardMaterial color={faceShadowColor} roughness={1} />
+                  </mesh>
+                </>
+              )}
               {/* Eyelashes (female only) */}
               {isFemale && (
                 <>
-                  <mesh position={[-faceVariant.eyeSpacing, eyeY + 0.025, 0.194]} castShadow>
+                  <mesh position={[-faceVariant.eyeSpacing, eyeY + 0.028, 0.194]} castShadow>
                     <boxGeometry args={[0.05, 0.006, 0.01]} />
                     <meshStandardMaterial color="#1a1a1a" roughness={1} />
                   </mesh>
-                  <mesh position={[faceVariant.eyeSpacing, eyeY + 0.025, 0.194]} castShadow>
+                  <mesh position={[faceVariant.eyeSpacing, eyeY + 0.028, 0.194]} castShadow>
                     <boxGeometry args={[0.05, 0.006, 0.01]} />
                     <meshStandardMaterial color="#1a1a1a" roughness={1} />
                   </mesh>
@@ -2539,16 +2981,25 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               </mesh>
               {/* Lips */}
               <mesh ref={upperLipRef} position={[0, mouthY, 0.175]} castShadow>
-                <boxGeometry args={[mouthWidth * lipWidthScale * faceVariant.mouthWidthScale, 0.012, 0.015]} />
+                <boxGeometry args={[mouthWidth * lipWidthScale * faceVariant.mouthWidthScale, 0.012, 0.015 * faceVariant.lipFullness]} />
                 <meshStandardMaterial color={lipUpperColor} roughness={1} />
               </mesh>
               <mesh ref={lowerLipRef} position={[0, mouthY - 0.012, 0.175]} castShadow>
-                <boxGeometry args={[mouthWidth * lipWidthScale * lipLowerScale * faceVariant.mouthWidthScale, 0.014, 0.015]} />
+                <boxGeometry args={[mouthWidth * lipWidthScale * lipLowerScale * faceVariant.mouthWidthScale, 0.014, 0.015 * faceVariant.lipFullness]} />
                 <meshStandardMaterial color={lipColor} roughness={1} />
               </mesh>
               <mesh ref={mouthInteriorRef} position={[0, mouthY - lipGap, 0.176]} castShadow>
                 <boxGeometry args={[mouthWidth * lipWidthScale * 0.9 * faceVariant.mouthWidthScale, 0.004, 0.01]} />
                 <meshStandardMaterial color="#2a1a1a" roughness={1} />
+              </mesh>
+              {/* Mouth corners - create subtle smile/frown resting expression */}
+              <mesh position={[-(mouthWidth * lipWidthScale * faceVariant.mouthWidthScale * 0.5), mouthY - 0.006 + faceVariant.mouthCornerCurve, 0.175]} castShadow>
+                <sphereGeometry args={[0.006, 6, 6]} />
+                <meshStandardMaterial color={lipColor} roughness={1} />
+              </mesh>
+              <mesh position={[mouthWidth * lipWidthScale * faceVariant.mouthWidthScale * 0.5, mouthY - 0.006 + faceVariant.mouthCornerCurve, 0.175]} castShadow>
+                <sphereGeometry args={[0.006, 6, 6]} />
+                <meshStandardMaterial color={lipColor} roughness={1} />
               </mesh>
               {/* Nose */}
               <mesh position={[0, -0.01, 0.195]} castShadow>
@@ -2556,56 +3007,97 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <meshStandardMaterial color={headColor} roughness={1} />
               </mesh>
 
+              {/* Jaw - subtle definition for some characters */}
+              {finalJawSize > 0 && (
+                <group>
+                  {/* Jawline - horizontal capsule positioned to blend with face */}
+                  <mesh
+                    position={[0, -0.16, 0.06]}
+                    rotation={[0, 0, Math.PI / 2]}
+                    castShadow
+                  >
+                    <capsuleGeometry
+                      args={[
+                        0.03 * finalJawSize,
+                        0.10 * faceVariant.craniumWidth * faceVariant.faceWidthRatio,
+                        4,
+                        8
+                      ]}
+                    />
+                    <meshStandardMaterial
+                      color={faceShadowColor}
+                      roughness={0.92}
+                    />
+                  </mesh>
+                  {/* Chin - only for prominent jaws */}
+                  {finalJawSize > 0.6 && (
+                    <mesh position={[0, -0.21, 0.09]} castShadow>
+                      <sphereGeometry args={[0.035 * finalJawSize, 8, 8]} />
+                      <meshStandardMaterial
+                        color={headColor}
+                        roughness={0.9}
+                      />
+                    </mesh>
+                  )}
+                </group>
+              )}
+
               {/* Facial Hair - men only */}
               {!isFemale && facialHair !== 'none' && (
                 <group>
-                  {/* Stubble - subtle shadow on jaw and chin */}
-                  {facialHair === 'stubble' && (
-                    <>
-                      <mesh position={[0, -0.14, 0.12]} castShadow>
-                        <sphereGeometry args={[0.08, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.7)} roughness={1} transparent opacity={0.4} />
-                      </mesh>
-                      <mesh position={[-0.08, -0.11, 0.1]} castShadow>
-                        <boxGeometry args={[0.04, 0.06, 0.02]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.35} />
-                      </mesh>
-                      <mesh position={[0.08, -0.11, 0.1]} castShadow>
-                        <boxGeometry args={[0.04, 0.06, 0.02]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.35} />
-                      </mesh>
-                    </>
-                  )}
+                  {/* Jaw-adjusted positions - beards follow jaw structure */}
+                  {(() => {
+                    const jawOffset = finalJawSize * 0.04; // Move down/forward with jaw
+                    const jawForward = finalJawSize * 0.025; // Move forward with jaw
+                    return (
+                      <>
+                        {/* Stubble - subtle shadow on jaw and chin */}
+                        {facialHair === 'stubble' && (
+                          <>
+                            <mesh position={[0, -0.14 - jawOffset, 0.12 + jawForward]} castShadow>
+                              <sphereGeometry args={[0.08, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.5]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.7)} roughness={1} transparent opacity={0.7} />
+                            </mesh>
+                            <mesh position={[-0.08, -0.11 - jawOffset * 0.5, 0.1 + jawForward * 0.8]} castShadow>
+                              <boxGeometry args={[0.04, 0.06, 0.02]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.65} />
+                            </mesh>
+                            <mesh position={[0.08, -0.11 - jawOffset * 0.5, 0.1 + jawForward * 0.8]} castShadow>
+                              <boxGeometry args={[0.04, 0.06, 0.02]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.65)} roughness={1} transparent opacity={0.65} />
+                            </mesh>
+                          </>
+                        )}
 
-                  {/* Mustache */}
+                  {/* Mustache - made more prominent */}
                   {(facialHair === 'mustache' || facialHair === 'full_beard' || facialHair === 'goatee') && (
                     <>
-                      <mesh position={[-0.025, mouthY + 0.018, 0.18]} rotation={[0, 0, 0.15]} castShadow>
-                        <capsuleGeometry args={[0.012, 0.03, 4, 6]} />
+                      <mesh position={[-0.028, mouthY + 0.020, 0.18]} rotation={[0, 0, 0.15]} castShadow>
+                        <capsuleGeometry args={[0.015, 0.035, 4, 6]} />
                         <meshStandardMaterial color={hairColor} roughness={0.95} />
                       </mesh>
-                      <mesh position={[0.025, mouthY + 0.018, 0.18]} rotation={[0, 0, -0.15]} castShadow>
-                        <capsuleGeometry args={[0.012, 0.03, 4, 6]} />
+                      <mesh position={[0.028, mouthY + 0.020, 0.18]} rotation={[0, 0, -0.15]} castShadow>
+                        <capsuleGeometry args={[0.015, 0.035, 4, 6]} />
                         <meshStandardMaterial color={hairColor} roughness={0.95} />
                       </mesh>
                     </>
                   )}
 
-                  {/* Short beard - covers chin and lower jaw */}
-                  {facialHair === 'short_beard' && (
-                    <>
-                      <mesh position={[0, -0.14, 0.13]} castShadow>
-                        <sphereGeometry args={[0.07, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-                        <meshStandardMaterial color={hairColor} roughness={0.92} />
-                      </mesh>
-                      <mesh position={[-0.06, -0.11, 0.11]} castShadow>
-                        <boxGeometry args={[0.04, 0.05, 0.03]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
-                      </mesh>
-                      <mesh position={[0.06, -0.11, 0.11]} castShadow>
-                        <boxGeometry args={[0.04, 0.05, 0.03]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
-                      </mesh>
+                        {/* Short beard - covers chin and lower jaw */}
+                        {facialHair === 'short_beard' && (
+                          <>
+                            <mesh position={[0, -0.14 - jawOffset, 0.13 + jawForward]} castShadow>
+                              <sphereGeometry args={[0.07, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                              <meshStandardMaterial color={hairColor} roughness={0.92} />
+                            </mesh>
+                            <mesh position={[-0.06, -0.11 - jawOffset * 0.5, 0.11 + jawForward * 0.8]} castShadow>
+                              <boxGeometry args={[0.04, 0.05, 0.03]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                            </mesh>
+                            <mesh position={[0.06, -0.11 - jawOffset * 0.5, 0.11 + jawForward * 0.8]} castShadow>
+                              <boxGeometry args={[0.04, 0.05, 0.03]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                            </mesh>
                       {/* Mustache for short beard */}
                       <mesh position={[-0.022, mouthY + 0.016, 0.178]} rotation={[0, 0, 0.12]} castShadow>
                         <capsuleGeometry args={[0.01, 0.025, 4, 6]} />
@@ -2618,28 +3110,28 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                     </>
                   )}
 
-                  {/* Full beard - thick coverage */}
-                  {facialHair === 'full_beard' && (
-                    <>
-                      {/* Main chin beard */}
-                      <mesh position={[0, -0.16, 0.10]} castShadow>
-                        <sphereGeometry args={[0.09, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.6]} />
-                        <meshStandardMaterial color={hairColor} roughness={0.9} />
-                      </mesh>
-                      {/* Beard extension downward */}
-                      <mesh position={[0, -0.22, 0.06]} rotation={[0.3, 0, 0]} castShadow>
-                        <capsuleGeometry args={[0.045, 0.08, 4, 8]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.92} />
-                      </mesh>
-                      {/* Side jaw coverage */}
-                      <mesh position={[-0.08, -0.12, 0.08]} castShadow>
-                        <boxGeometry args={[0.05, 0.08, 0.04]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
-                      </mesh>
-                      <mesh position={[0.08, -0.12, 0.08]} castShadow>
-                        <boxGeometry args={[0.05, 0.08, 0.04]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
-                      </mesh>
+                        {/* Full beard - thick coverage */}
+                        {facialHair === 'full_beard' && (
+                          <>
+                            {/* Main chin beard */}
+                            <mesh position={[0, -0.16 - jawOffset, 0.10 + jawForward]} castShadow>
+                              <sphereGeometry args={[0.09, 10, 10, 0, Math.PI * 2, 0, Math.PI * 0.6]} />
+                              <meshStandardMaterial color={hairColor} roughness={0.9} />
+                            </mesh>
+                            {/* Beard extension downward */}
+                            <mesh position={[0, -0.22 - jawOffset * 1.2, 0.06 + jawForward * 0.6]} rotation={[0.3, 0, 0]} castShadow>
+                              <capsuleGeometry args={[0.045, 0.08, 4, 8]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.92)} roughness={0.92} />
+                            </mesh>
+                            {/* Side jaw coverage */}
+                            <mesh position={[-0.08, -0.12 - jawOffset * 0.5, 0.08 + jawForward * 0.7]} castShadow>
+                              <boxGeometry args={[0.05, 0.08, 0.04]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                            </mesh>
+                            <mesh position={[0.08, -0.12 - jawOffset * 0.5, 0.08 + jawForward * 0.7]} castShadow>
+                              <boxGeometry args={[0.05, 0.08, 0.04]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.88)} roughness={0.92} />
+                            </mesh>
                       {/* Sideburns connecting to beard */}
                       <mesh position={[-0.12, -0.04, 0.04]} castShadow>
                         <boxGeometry args={[0.03, 0.1, 0.03]} />
@@ -2652,19 +3144,22 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                     </>
                   )}
 
-                  {/* Goatee - chin only with mustache */}
-                  {facialHair === 'goatee' && (
-                    <>
-                      <mesh position={[0, -0.15, 0.14]} castShadow>
-                        <sphereGeometry args={[0.055, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-                        <meshStandardMaterial color={hairColor} roughness={0.92} />
-                      </mesh>
-                      <mesh position={[0, -0.20, 0.10]} rotation={[0.25, 0, 0]} castShadow>
-                        <capsuleGeometry args={[0.028, 0.05, 4, 6]} />
-                        <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
-                      </mesh>
-                    </>
-                  )}
+                        {/* Goatee - chin only with mustache */}
+                        {facialHair === 'goatee' && (
+                          <>
+                            <mesh position={[0, -0.15 - jawOffset, 0.14 + jawForward]} castShadow>
+                              <sphereGeometry args={[0.055, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                              <meshStandardMaterial color={hairColor} roughness={0.92} />
+                            </mesh>
+                            <mesh position={[0, -0.20 - jawOffset * 1.2, 0.10 + jawForward * 0.6]} rotation={[0.25, 0, 0]} castShadow>
+                              <capsuleGeometry args={[0.028, 0.05, 4, 6]} />
+                              <meshStandardMaterial color={adjustColor(hairColor, 0.9)} roughness={0.92} />
+                            </mesh>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                 </group>
               )}
             </>
@@ -2727,18 +3222,67 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
           {headwearStyle === 'scarf' && (
             <group>
-              <mesh position={[0, 0.12, -0.06]} castShadow>
-                <sphereGeometry args={[0.26, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
-                <meshStandardMaterial color={headscarfColor} roughness={0.92} />
-              </mesh>
-              <mesh position={[0, -0.1, -0.12]} castShadow>
-                <cylinderGeometry args={[0.24, 0.26, 0.32, 12]} />
-                <meshStandardMaterial color={headwearShadow} roughness={0.94} />
-              </mesh>
-              <mesh position={[0, -0.18, -0.22]} rotation={[0.22, 0, 0]} castShadow>
-                <boxGeometry args={[0.3, 0.3, 0.02]} />
-                <meshStandardMaterial color={headwearShadow} roughness={0.95} />
-              </mesh>
+              {/* FULL SCARF - Most modest, full coverage with long drape */}
+              {headscarfStyle === 'full' && (
+                <>
+                  <mesh position={[0, 0.142, -0.07]} castShadow>
+                    <sphereGeometry args={[0.24, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.55]} />
+                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness} />
+                  </mesh>
+                  <mesh position={[0, -0.06, -0.12]} castShadow>
+                    <cylinderGeometry args={[0.19, 0.26, 0.32, 12]} />
+                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.02} />
+                  </mesh>
+                  <mesh position={[0, -0.18, -0.22]} rotation={[0.22, 0, 0]} castShadow>
+                    <boxGeometry args={[0.3, 0.3, 0.02]} />
+                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.03} />
+                  </mesh>
+                </>
+              )}
+
+              {/* MODEST SCARF - Traditional variant, similar to full but slightly shorter drape */}
+              {headscarfStyle === 'modest' && (
+                <>
+                  <mesh position={[0, 0.14, -0.06]} castShadow>
+                    <sphereGeometry args={[0.24, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.53]} />
+                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness} />
+                  </mesh>
+                  <mesh position={[0, -0.05, -0.12]} castShadow>
+                    <cylinderGeometry args={[0.20, 0.25, 0.28, 12]} />
+                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.02} />
+                  </mesh>
+                  <mesh position={[0, -0.15, -0.20]} rotation={[0.20, 0, 0]} castShadow>
+                    <boxGeometry args={[0.28, 0.26, 0.02]} />
+                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.03} />
+                  </mesh>
+                </>
+              )}
+
+              {/* VEILED SCARF - Most conservative, covers lower face and shows just eyes */}
+              {headscarfStyle === 'veiled' && (
+                <>
+                  {/* Head covering - full */}
+                  <mesh position={[0, 0.14, -0.08]} castShadow>
+                    <sphereGeometry args={[0.25, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.58]} />
+                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness} />
+                  </mesh>
+                  {/* Face veil - covers nose and mouth, shows only eyes */}
+                  <mesh position={[0, 0.01, 0.14]} castShadow>
+                    <boxGeometry args={[0.26, 0.14, 0.02]} />
+                    <meshStandardMaterial color={headscarfColor} roughness={headscarfRoughness + 0.01} />
+                  </mesh>
+                  {/* Neck/shoulder drape */}
+                  <mesh position={[0, -0.08, -0.10]} castShadow>
+                    <cylinderGeometry args={[0.20, 0.27, 0.34, 12]} />
+                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.02} />
+                  </mesh>
+                  {/* Long back drape */}
+                  <mesh position={[0, -0.20, -0.24]} rotation={[0.24, 0, 0]} castShadow>
+                    <boxGeometry args={[0.32, 0.32, 0.02]} />
+                    <meshStandardMaterial color={headwearShadow} roughness={headscarfRoughness + 0.03} />
+                  </mesh>
+                </>
+              )}
             </group>
           )}
           {headwearStyle === 'cap' && (
@@ -2940,15 +3484,17 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           <>
             {/* Shoulders */}
             <group ref={leftShoulder} position={[-0.3, 1.4, 0]}>
-              <mesh castShadow>
-                <boxGeometry args={[0.18, 0.18, 0.18]} />
-                <meshStandardMaterial color={color} roughness={0.85} />
+              {/* Capsule shoulder - horizontal for natural slope */}
+              <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
+                <capsuleGeometry args={[0.07, 0.12, 4, 8]} />
+                <meshStandardMaterial color={color} roughness={clothRoughness} />
               </mesh>
             </group>
             <group ref={rightShoulder} position={[0.3, 1.4, 0]}>
-              <mesh castShadow>
-                <boxGeometry args={[0.18, 0.18, 0.18]} />
-                <meshStandardMaterial color={color} roughness={0.85} />
+              {/* Capsule shoulder - horizontal for natural slope */}
+              <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
+                <capsuleGeometry args={[0.07, 0.12, 4, 8]} />
+                <meshStandardMaterial color={color} roughness={clothRoughness} />
               </mesh>
             </group>
             <group ref={leftArm} position={[-0.38, 1.12, 0]}>
@@ -3074,22 +3620,22 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         {!isFemale && (
           <group ref={hipGroup}>
             <group ref={leftLeg} position={[-0.15, 0.45, 0]}>
-              {/* Upper leg (thigh) */}
+              {/* Upper leg (thigh) - tapered cylinder for fabric draping */}
               <mesh position={[0, 0.1, 0]} castShadow>
-                <boxGeometry args={[0.15, 0.45, 0.15]} />
-                <meshStandardMaterial color={color} />
+                <cylinderGeometry args={[0.065, 0.085, 0.45, 10]} />
+                <meshStandardMaterial color={color} roughness={clothRoughness} />
               </mesh>
               {/* Knee joint */}
               <group ref={leftKnee} position={[0, -0.15, 0]}>
-                {/* Knee cap */}
-                <mesh position={[0, 0, 0.02]} castShadow>
-                  <sphereGeometry args={[0.07, 8, 8]} />
-                  <meshStandardMaterial color={color} />
+                {/* Fabric over knee - hemisphere instead of full sphere */}
+                <mesh position={[0, 0, 0]} castShadow>
+                  <sphereGeometry args={[0.09, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.65]} />
+                  <meshStandardMaterial color={color} roughness={clothRoughness} />
                 </mesh>
-                {/* Lower leg (shin) */}
+                {/* Lower leg (shin) - tapered cylinder for fabric flow */}
                 <mesh position={[0, -0.22, 0]} castShadow>
-                  <boxGeometry args={[0.13, 0.4, 0.13]} />
-                  <meshStandardMaterial color={color} />
+                  <cylinderGeometry args={[0.055, 0.065, 0.4, 10]} />
+                  <meshStandardMaterial color={color} roughness={clothRoughness} />
                 </mesh>
                 {/* Sirwal (trousers) visible at ankle */}
                 <mesh position={[0, -0.38, 0]} castShadow>
@@ -3113,22 +3659,22 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               </group>
             </group>
             <group ref={rightLeg} position={[0.15, 0.45, 0]}>
-              {/* Upper leg (thigh) */}
+              {/* Upper leg (thigh) - tapered cylinder for fabric draping */}
               <mesh position={[0, 0.1, 0]} castShadow>
-                <boxGeometry args={[0.15, 0.45, 0.15]} />
-                <meshStandardMaterial color={color} />
+                <cylinderGeometry args={[0.065, 0.085, 0.45, 10]} />
+                <meshStandardMaterial color={color} roughness={clothRoughness} />
               </mesh>
               {/* Knee joint */}
               <group ref={rightKnee} position={[0, -0.15, 0]}>
-                {/* Knee cap */}
-                <mesh position={[0, 0, 0.02]} castShadow>
-                  <sphereGeometry args={[0.07, 8, 8]} />
-                  <meshStandardMaterial color={color} />
+                {/* Fabric over knee - hemisphere instead of full sphere */}
+                <mesh position={[0, 0, 0]} castShadow>
+                  <sphereGeometry args={[0.09, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.65]} />
+                  <meshStandardMaterial color={color} roughness={clothRoughness} />
                 </mesh>
-                {/* Lower leg (shin) */}
+                {/* Lower leg (shin) - tapered cylinder for fabric flow */}
                 <mesh position={[0, -0.22, 0]} castShadow>
-                  <boxGeometry args={[0.13, 0.4, 0.13]} />
-                  <meshStandardMaterial color={color} />
+                  <cylinderGeometry args={[0.055, 0.065, 0.4, 10]} />
+                  <meshStandardMaterial color={color} roughness={clothRoughness} />
                 </mesh>
                 {/* Sirwal (trousers) visible at ankle */}
                 <mesh position={[0, -0.38, 0]} castShadow>

@@ -6,7 +6,9 @@ import {
   ConversationSummary,
   SocialClass,
   SimulationStats,
-  EncounterEnvironment
+  EncounterEnvironment,
+  FamilyMember,
+  FamilyRelationship
 } from '../types';
 import { MoraleStats } from '../components/Agents';
 import { seededRandom } from './procedural';
@@ -119,6 +121,71 @@ function buildRelationshipContext(history: { summary: string; sentiment: string 
   return `## RELATIONSHIP\nYou have spoken before. Recent interactions:\n${recentSummaries}`;
 }
 
+// Check if NPC is a family member of the player
+function getFamilyRelationship(
+  npcId: string,
+  familyMembers: FamilyMember[]
+): { isFamily: boolean; relationship?: FamilyRelationship; memberName?: string } {
+  const member = familyMembers.find(m => m.npcId === npcId);
+  if (!member) return { isFamily: false };
+  return { isFamily: true, relationship: member.relationship, memberName: member.name };
+}
+
+// Get player's relationship label from family member's perspective
+function getPlayerRelationLabel(relationship: FamilyRelationship, playerGender: 'Male' | 'Female'): string {
+  switch (relationship) {
+    case 'spouse':
+      return playerGender === 'Male' ? 'husband' : 'wife';
+    case 'child':
+      return playerGender === 'Male' ? 'father' : 'mother';
+    case 'parent':
+      return playerGender === 'Male' ? 'son' : 'daughter';
+    case 'sibling':
+      return playerGender === 'Male' ? 'brother' : 'sister';
+    default:
+      return 'family';
+  }
+}
+
+// Build family context section for system prompt
+function buildFamilyContext(
+  npcId: string,
+  familyMembers: FamilyMember[],
+  playerGender: 'Male' | 'Female'
+): string {
+  const familyInfo = getFamilyRelationship(npcId, familyMembers);
+  if (!familyInfo.isFamily || !familyInfo.relationship) return '';
+
+  const playerLabel = getPlayerRelationLabel(familyInfo.relationship, playerGender);
+  const relationshipType = familyInfo.relationship;
+
+  let context = `\n## CRITICAL: FAMILY RELATIONSHIP
+- This person is your ${playerLabel}. You are their ${relationshipType}.
+- You love and care deeply for them - they are your family.
+- You speak with familial warmth, intimacy, and concern.
+- You share a home and daily life together.
+- You worry about their safety during these dangerous plague times.`;
+
+  if (relationshipType === 'spouse') {
+    context += `\n- As their spouse, you discuss household matters, the children (if any), and your shared concerns.
+- You may express affection, worry about their work, or ask about their day.`;
+  } else if (relationshipType === 'child') {
+    context += `\n- As their child, you look up to them with respect and love.
+- You may ask for guidance, share what you learned today, or express your worries.`;
+  } else if (relationshipType === 'parent') {
+    context += `\n- As their parent, you offer wisdom, concern, and perhaps unsolicited advice.
+- You may fuss over their health, remind them of duties, or share family wisdom.`;
+  } else if (relationshipType === 'sibling') {
+    context += `\n- As their sibling, you share a lifelong bond and perhaps some rivalry.
+- You speak with casual familiarity that only siblings share.`;
+  }
+
+  context += `\n- IGNORE social class dynamics - you are family and speak as equals in love.
+- Your baseline friendliness is extremely high (90+) - family bonds override everything else.`;
+
+  return context;
+}
+
 // Get disposition description for LLM context
 function getDispositionDescription(disposition: number): string {
   if (disposition >= 80) return "naturally warm and welcoming";
@@ -137,7 +204,8 @@ export function buildSystemPrompt(context: EncounterContext): string {
     simulationStats,
     conversationHistory,
     nativeLanguageMode,
-    isFollowingAfterDismissal = false
+    isFollowingAfterDismissal = false,
+    isDeceased = false
   } = context;
 
   const timeDescription = getTimeDescription(environment.timeOfDay);
@@ -158,6 +226,18 @@ export function buildSystemPrompt(context: EncounterContext): string {
   const sharedEthnicity = npc.ethnicity === player.ethnicity;
 
   return `You are ${npc.name}, a ${npc.age}-year-old ${npc.gender.toLowerCase()} ${npc.profession} in Damascus, 1348 AD.
+${isDeceased ? `
+## CRITICAL: YOU ARE DECEASED - ROLEPLAY AS A SHADE
+- YOU ARE DEAD. Your mortal life has ended. You exist now as a shade, a spirit lingering at the place where you died.
+- You perished from the plague that ravages Damascus. You remember the fever, the swellings, the final moments of agony.
+- You are a ghost, a pale echo of who you were. Your voice comes from beyond the veil of death.
+- You can perceive this person speaking to you, and you can respond, but you are no longer of the living world.
+- You reflect on your life with the clarity that comes after death - your regrets, your joys, what you left behind.
+- You may speak of what you see from this liminal state, caught between the living world and what lies beyond.
+- Your memories are intact, but you now understand things you did not in life. Death has given you perspective.
+- You cannot offer physical goods or trade - you are incorporeal, a spirit bound to this place.
+- Speak with the melancholy wisdom of one who has crossed over. You are contemplative, perhaps sorrowful or at peace.
+- DO NOT pretend to be alive. You know you are dead and should reference this state naturally.` : ''}
 
 ## YOUR IDENTITY
 - Social class: ${npc.socialClass}
@@ -214,6 +294,7 @@ ${sharedReligion ? `- KINSHIP: You share the same faith (${npc.religion}). This 
 ${sharedEthnicity ? `- KINSHIP: You are both ${npc.ethnicity}. This creates a sense of community.` : ""}
 ${!sharedReligion && !sharedEthnicity ? "- They are a stranger of different background. You are cautious but not hostile." : ""}
 ${getPlayerInfluence(player, npc)}
+${buildFamilyContext(npc.id, player.familyMembers || [], player.gender)}
 
 ${relationshipContext}
 ${isFollowingAfterDismissal ? `

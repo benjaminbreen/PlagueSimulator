@@ -1,9 +1,10 @@
 import React from 'react';
-import { ArrowUpDown, ChevronDown, Package, ShieldAlert, Skull } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, Info, Package, ShieldAlert, Skull } from 'lucide-react';
 import { AgentState, InfectedHouseholdInfo, ItemAppearance, NPCStats, PlayerStats, SimulationParams, SimulationStats } from '../types';
 import { MoraleStats } from './Agents';
 import { GuideTab } from './HistoricalGuide';
 import { ItemIcon } from './items/ItemIcon';
+import { getFamilyDescription } from '../utils/family';
 
 interface InventoryEntry {
   id: string;
@@ -28,6 +29,7 @@ interface ReportsPanelProps {
   stats: SimulationStats;
   infectedHouseholds: InfectedHouseholdInfo[];
   onNavigateToHousehold?: (buildingPosition: [number, number, number]) => void;
+  onNavigateToDeceased?: () => void;
   moraleStats: MoraleStats;
   alchemistTableCollapsed: boolean;
   setAlchemistTableCollapsed: (collapsed: boolean) => void;
@@ -49,6 +51,7 @@ interface ReportsPanelProps {
   onOpenGuideModal?: () => void;
   onSelectGuideEntry?: (entryId: string) => void;
   playerInfected: boolean;
+  onOpenFamilyDossier?: () => void;
 }
 
 export const ReportsPanel: React.FC<ReportsPanelProps> = ({
@@ -61,6 +64,7 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
   stats,
   infectedHouseholds,
   onNavigateToHousehold,
+  onNavigateToDeceased,
   moraleStats,
   alchemistTableCollapsed,
   setAlchemistTableCollapsed,
@@ -81,7 +85,8 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
   nearbyNPCs = [],
   onOpenGuideModal,
   onSelectGuideEntry,
-  playerInfected
+  playerInfected,
+  onOpenFamilyDossier
 }) => {
   return (
     <div className="self-end md:self-start mt-0 md:mt-0 w-full md:w-[420px]">
@@ -158,7 +163,19 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                     <span className="font-mono text-lg">{stats.infected}</span>
                     <span className="text-[10px] uppercase tracking-wider text-red-400/70">Infected</span>
                   </div>
-                  <div className="flex items-center gap-2 text-gray-500">
+                  <div
+                    onClick={() => {
+                      if (stats.deceased > 0 && onNavigateToDeceased) {
+                        onNavigateToDeceased();
+                      }
+                    }}
+                    className={`flex items-center gap-2 text-gray-500 ${
+                      stats.deceased > 0 && onNavigateToDeceased
+                        ? 'cursor-pointer hover:bg-gray-900/30 px-2 py-1 -mx-2 -my-1 rounded transition-colors hover:text-gray-400'
+                        : ''
+                    }`}
+                    title={stats.deceased > 0 && onNavigateToDeceased ? 'Click to center camera on deceased (cycles through all)' : undefined}
+                  >
                     <div className="w-2.5 h-2.5 rounded-full bg-gray-600"></div>
                     <span className="font-mono text-lg">{stats.deceased}</span>
                     <span className="text-[10px] uppercase tracking-wider text-gray-600">Deceased</span>
@@ -177,10 +194,17 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                             household.status === 'deceased' ? 'text-gray-400 hover:text-gray-300' : 'text-red-400/90 hover:text-red-300'
                           }`}
                         >
-                          <span className="font-mono">
-                            {household.infectedCount + household.deceasedCount}
-                          </span>
-                          {' '}person{household.infectedCount + household.deceasedCount > 1 ? 's' : ''} in the home of{' '}
+                          {(() => {
+                            const count = household.infectedCount + household.deceasedCount;
+                            if (count === 0) return <span className="text-amber-300/70">Recovery reported</span>;
+                            return (
+                              <>
+                                <span className="font-mono">{count}</span>
+                                {' '}{count === 1 ? 'person' : 'people'} ill
+                              </>
+                            );
+                          })()}
+                          {' '}in the home of{' '}
                           <span className="text-amber-200/90">{household.npcName}</span>
                           {' '}to the{' '}
                           <span className="text-amber-300/80">{household.direction}</span>
@@ -416,8 +440,24 @@ export const ReportsPanel: React.FC<ReportsPanelProps> = ({
                 </div>
               </div>
               <div className="border-t border-amber-900/40 pt-3 text-[11px] text-amber-100/70">
-                <span className="uppercase tracking-widest text-amber-500/60">Family</span>
-                <div className="mt-1">{playerStats.family}</div>
+                <div className="flex items-center justify-between">
+                  <span className="uppercase tracking-widest text-amber-500/60">Family</span>
+                  {onOpenFamilyDossier && playerStats.familyMembers && playerStats.familyMembers.length > 0 && (
+                    <button
+                      onClick={onOpenFamilyDossier}
+                      className="flex items-center gap-1 text-[9px] text-amber-400/70 hover:text-amber-300 transition-colors"
+                      title="View family details"
+                    >
+                      <Info size={10} />
+                      <span>More Info</span>
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1">
+                  {playerStats.familyMembers && playerStats.familyMembers.length > 0
+                    ? getFamilyDescription(playerStats.familyMembers)
+                    : playerStats.family}
+                </div>
               </div>
               <div className="border-t border-amber-900/40 pt-3">
                 <div className="flex items-center justify-between mb-2">

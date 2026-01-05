@@ -803,22 +803,171 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ name, size = 32, className }
     );
   }
 
-  // Cloth / Linen / Headscarf / Cloak
-  if (n.includes('linen') || n.includes('cloth') || n.includes('headscarf') || n.includes('cloak') || n.includes('shroud')) {
+  // Cloak - flowing outer garment
+  if (n.includes('cloak')) {
+    const isWool = n.includes('wool');
+    const color1 = isWool ? '#6a5a4a' : '#4a4a5a';
+    const color2 = isWool ? '#4a3a2a' : '#2a2a3a';
+    return (
+      <svg {...svgProps}>
+        <defs>
+          <linearGradient id="cloak-body" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={color1} />
+            <stop offset="100%" stopColor={color2} />
+          </linearGradient>
+        </defs>
+        <path d="M 16 4 L 8 8 L 6 26 L 12 28 L 16 24 L 20 28 L 26 26 L 24 8 Z" fill="url(#cloak-body)" />
+        <path d="M 12 8 Q 16 6 20 8" stroke={color2} strokeWidth="1.5" fill="none" />
+        <ellipse cx="16" cy="6" rx="4" ry="2.5" fill="#8a7a6a" />
+        <rect x="14" y="4" width="4" height="3" rx="1" fill={color1} />
+        <path d="M 8 12 Q 12 14 16 12 Q 20 14 24 12" stroke={color2} strokeWidth="0.7" fill="none" opacity="0.5" />
+        <rect x="7" y="10" width="3" height="14" fill={color1} opacity="0.4" rx="1" />
+      </svg>
+    );
+  }
+
+  // Tunic - simple shirt/dress garment
+  if (n.includes('tunic') || n.includes('robe') || n.includes('kaftan')) {
+    const isHemp = n.includes('hemp');
+    const isDamask = n.includes('damask');
+    const isKaftan = n.includes('kaftan');
+    const color1 = isDamask ? '#4a5a8a' : isHemp ? '#a09070' : isKaftan ? '#7a4a6a' : '#8a7a6a';
+    const color2 = isDamask ? '#2a3a6a' : isHemp ? '#706040' : isKaftan ? '#5a2a4a' : '#5a4a3a';
+    return (
+      <svg {...svgProps}>
+        <defs>
+          <linearGradient id="tunic-body" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={color1} />
+            <stop offset="100%" stopColor={color2} />
+          </linearGradient>
+        </defs>
+        {/* Main body */}
+        <path d="M 10 10 L 8 28 L 24 28 L 22 10 Z" fill="url(#tunic-body)" />
+        {/* Sleeves */}
+        <path d="M 10 10 L 4 16 L 6 18 L 10 14" fill={color1} />
+        <path d="M 22 10 L 28 16 L 26 18 L 22 14" fill={color1} />
+        {/* Neckline */}
+        <ellipse cx="16" cy="9" rx="4" ry="2" fill={color2} />
+        <ellipse cx="16" cy="9" rx="2.5" ry="1.2" fill="#d0c0b0" />
+        {/* Pattern for damask/kaftan */}
+        {(isDamask || isKaftan) && (
+          <>
+            <line x1="12" y1="14" x2="20" y2="14" stroke="#c0a080" strokeWidth="0.7" opacity="0.6" />
+            <line x1="11" y1="20" x2="21" y2="20" stroke="#c0a080" strokeWidth="0.7" opacity="0.6" />
+            {isKaftan && <circle cx="16" cy="17" r="1.5" fill="#d4af37" opacity="0.7" />}
+          </>
+        )}
+        <rect x="9" y="11" width="2" height="14" fill={color1} opacity="0.4" rx="0.5" />
+      </svg>
+    );
+  }
+
+  // Headscarf / Headwrap
+  if (n.includes('headscarf') || n.includes('headwrap')) {
+    const isSilk = n.includes('silk');
+    const color1 = isSilk ? '#c0a0c0' : '#d0c0a0';
+    const color2 = isSilk ? '#8a6a8a' : '#a09070';
+    return (
+      <svg {...svgProps}>
+        <defs>
+          <linearGradient id="scarf-body" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor={color1} />
+            <stop offset="100%" stopColor={color2} />
+          </linearGradient>
+        </defs>
+        {/* Head shape */}
+        <ellipse cx="16" cy="14" rx="10" ry="9" fill="url(#scarf-body)" />
+        {/* Draping fabric */}
+        <path d="M 6 14 Q 8 20 10 26 L 16 24 L 22 26 Q 24 20 26 14" fill={color2} opacity="0.8" />
+        {/* Wrap detail */}
+        <path d="M 8 12 Q 16 8 24 12" stroke={color1} strokeWidth="2" fill="none" />
+        <ellipse cx="16" cy="10" rx="6" ry="3" fill={color1} />
+        {isSilk && <ellipse cx="14" cy="12" rx="2" ry="1.5" fill="#e0d0e0" opacity="0.5" />}
+      </svg>
+    );
+  }
+
+  // Burial Shroud - white draped cloth
+  if (n.includes('shroud')) {
+    return (
+      <svg {...svgProps}>
+        <defs>
+          <linearGradient id="shroud-cloth" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#f8f8f0" />
+            <stop offset="50%" stopColor="#e8e8e0" />
+            <stop offset="100%" stopColor="#d8d8d0" />
+          </linearGradient>
+        </defs>
+        <rect x="4" y="6" width="24" height="22" rx="1" fill="url(#shroud-cloth)" />
+        <path d="M 4 10 Q 12 8 20 10 Q 24 11 28 10" stroke="#c8c8c0" strokeWidth="1" fill="none" />
+        <path d="M 4 16 Q 10 14 18 16 Q 24 17 28 16" stroke="#c8c8c0" strokeWidth="1" fill="none" />
+        <path d="M 4 22 Q 14 20 28 22" stroke="#c8c8c0" strokeWidth="1" fill="none" />
+        <rect x="5" y="7" width="3" height="18" fill="#fff" opacity="0.4" rx="1" />
+      </svg>
+    );
+  }
+
+  // Vest / Brocade
+  if (n.includes('vest') || n.includes('brocade')) {
+    return (
+      <svg {...svgProps}>
+        <defs>
+          <linearGradient id="vest-body" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#7a5a4a" />
+            <stop offset="100%" stopColor="#4a2a1a" />
+          </linearGradient>
+        </defs>
+        {/* Main vest body */}
+        <path d="M 10 8 L 8 26 L 14 28 L 14 14 L 18 14 L 18 28 L 24 26 L 22 8 Z" fill="url(#vest-body)" />
+        {/* Opening in front */}
+        <rect x="14" y="10" width="4" height="16" fill="#c0b0a0" />
+        {/* Shoulders */}
+        <path d="M 10 8 L 6 12 L 8 14 L 10 12" fill="#6a4a3a" />
+        <path d="M 22 8 L 26 12 L 24 14 L 22 12" fill="#6a4a3a" />
+        {/* Decorative pattern */}
+        <circle cx="11" cy="16" r="1" fill="#d4af37" opacity="0.7" />
+        <circle cx="21" cy="16" r="1" fill="#d4af37" opacity="0.7" />
+        <circle cx="11" cy="22" r="1" fill="#d4af37" opacity="0.7" />
+        <circle cx="21" cy="22" r="1" fill="#d4af37" opacity="0.7" />
+      </svg>
+    );
+  }
+
+  // Belt Sash
+  if (n.includes('sash') || n.includes('belt')) {
+    return (
+      <svg {...svgProps}>
+        <defs>
+          <linearGradient id="sash-body" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#c0a080" />
+            <stop offset="100%" stopColor="#907050" />
+          </linearGradient>
+        </defs>
+        <rect x="2" y="12" width="28" height="8" rx="2" fill="url(#sash-body)" />
+        <path d="M 20 16 L 28 22 L 26 28 L 20 24" fill="#a08060" />
+        <path d="M 18 16 L 24 26 L 22 28 L 16 20" fill="#b09070" />
+        <ellipse cx="19" cy="16" rx="2" ry="1.5" fill="#d4af37" />
+        <rect x="3" y="13" width="2" height="6" fill="#d0b090" opacity="0.4" rx="0.5" />
+      </svg>
+    );
+  }
+
+  // Cloth / Linen (generic folded fabric)
+  if (n.includes('linen') || n.includes('cloth') || n.includes('scrap')) {
     return (
       <svg {...svgProps}>
         <defs>
           <linearGradient id="cloth-fold" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#e0d0b8" />
-            <stop offset="50%" stopColor="#c8b8a0" />
-            <stop offset="100%" stopColor="#b0a088" />
+            <stop offset="0%" stopColor="#e8e0d0" />
+            <stop offset="50%" stopColor="#d0c8b8" />
+            <stop offset="100%" stopColor="#b8b0a0" />
           </linearGradient>
         </defs>
-        <rect x="3" y="7" width="26" height="20" rx="1" fill="url(#cloth-fold)" />
-        <rect x="12" y="11" width="14" height="12" fill="#a09078" opacity="0.6" />
-        <path d="M3 13 Q10 11 17 13" stroke="#b8a890" strokeWidth="1" fill="none" />
-        <path d="M3 19 Q12 17 21 19" stroke="#b8a890" strokeWidth="1" fill="none" />
-        <rect x="4" y="8" width="3" height="16" fill="#f0e0c8" opacity="0.3" rx="1" />
+        <rect x="4" y="8" width="24" height="18" rx="1" fill="url(#cloth-fold)" />
+        <rect x="12" y="12" width="12" height="10" fill="#a89878" opacity="0.5" />
+        <path d="M4 14 Q10 12 16 14" stroke="#c0b8a8" strokeWidth="1" fill="none" />
+        <path d="M4 20 Q12 18 20 20" stroke="#c0b8a8" strokeWidth="1" fill="none" />
+        <rect x="5" y="9" width="3" height="14" fill="#f0e8d8" opacity="0.4" rx="1" />
       </svg>
     );
   }
@@ -1134,19 +1283,24 @@ export const ItemIcon: React.FC<ItemIconProps> = ({ name, size = 32, className }
   }
 
   // Default Textile item - folded cloth
-  if (n.includes('textile') || n.includes('silk') || n.includes('cotton') || n.includes('wool') || n.includes('belt') || n.includes('sash')) {
+  if (n.includes('textile') || n.includes('silk') || n.includes('cotton') || n.includes('wool') || n.includes('hemp') || n.includes('fabric') || n.includes('damask') || n.includes('purple')) {
+    const isSilk = n.includes('silk');
+    const isPurple = n.includes('purple');
+    const color1 = isPurple ? '#6a3a8a' : isSilk ? '#c8b8d0' : '#d8c8b0';
+    const color2 = isPurple ? '#4a1a6a' : isSilk ? '#a898b0' : '#a89878';
     return (
       <svg {...svgProps}>
         <defs>
           <linearGradient id="textile-fold" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#d8c8b0" />
-            <stop offset="100%" stopColor="#a89878" />
+            <stop offset="0%" stopColor={color1} />
+            <stop offset="100%" stopColor={color2} />
           </linearGradient>
         </defs>
         <rect x="3" y="9" width="26" height="18" rx="1" fill="url(#textile-fold)" />
-        <path d="M3 15 Q12 13 21 15" stroke="#c0b098" strokeWidth="1" fill="none" />
-        <path d="M3 21 Q14 19 25 21" stroke="#c0b098" strokeWidth="1" fill="none" />
-        <rect x="4" y="10" width="3" height="14" fill="#e8d8c0" opacity="0.4" rx="1" />
+        <path d="M3 15 Q12 13 21 15" stroke={color2} strokeWidth="1" fill="none" />
+        <path d="M3 21 Q14 19 25 21" stroke={color2} strokeWidth="1" fill="none" />
+        <rect x="4" y="10" width="3" height="14" fill={color1} opacity="0.4" rx="1" />
+        {(isSilk || isPurple) && <ellipse cx="16" cy="18" rx="3" ry="2" fill="#fff" opacity="0.2" />}
       </svg>
     );
   }

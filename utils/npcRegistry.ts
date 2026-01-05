@@ -134,7 +134,8 @@ export const createTileNPCRegistry = (
   simTime: number,
   tileSeed: number,
   streetCount: number,
-  seedInitialInfections = false
+  seedInitialInfections = false,
+  familyNpcs?: NPCRecord[]
 ) => {
   const npcMap = new Map<string, NPCRecord>();
   buildings.forEach((building) => {
@@ -145,6 +146,14 @@ export const createTileNPCRegistry = (
   createStreetNPCRecords(tileSeed, districtType, simTime, streetCount).forEach((record) => {
     npcMap.set(record.id, record);
   });
+
+  // Add family NPCs to the registry if provided
+  if (familyNpcs && familyNpcs.length > 0) {
+    familyNpcs.forEach((familyNpc) => {
+      // Set district type for family members
+      npcMap.set(familyNpc.id, { ...familyNpc, districtType });
+    });
+  }
 
   // Seed initial incubating cases once at the start of a playthrough.
   // Uses deterministic seeded RNG for reproducibility

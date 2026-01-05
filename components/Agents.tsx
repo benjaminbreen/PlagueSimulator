@@ -323,6 +323,7 @@ export const Agents: React.FC<AgentsProps> = ({
             playerStats={playerStats}
             onNPCInitiatedEncounter={onNPCInitiatedEncounter ? handleNPCInitiatedEncounter : undefined}
             globalApproachCooldownRef={globalApproachCooldownRef}
+            role={record.role}
           />
         );
       })}

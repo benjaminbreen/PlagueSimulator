@@ -119,9 +119,17 @@ export function useConversation({
     let cancelled = false;
 
     async function generateGreeting() {
-      const greetingPrompt = isNPCInitiated
-        ? '[SYSTEM: You notice this stranger and decide to approach them. Generate a brief, natural greeting to initiate conversation. 1-2 sentences max.]'
-        : '[SYSTEM: This person has just approached you. Generate a brief, natural greeting based on what you are currently doing and your mood. 1-2 sentences max.]';
+      // Check if this is a deceased NPC
+      const isDeceased = systemPromptRef.current.includes('YOU ARE DECEASED');
+
+      let greetingPrompt: string;
+      if (isDeceased) {
+        greetingPrompt = '[SYSTEM: REMEMBER - You are DEAD, a shade/ghost. This living person has approached your spirit. Generate a brief, melancholy greeting from beyond death. Reference that you are deceased. 1-2 sentences max.]';
+      } else if (isNPCInitiated) {
+        greetingPrompt = '[SYSTEM: You notice this stranger and decide to approach them. Generate a brief, natural greeting to initiate conversation. 1-2 sentences max.]';
+      } else {
+        greetingPrompt = '[SYSTEM: This person has just approached you. Generate a brief, natural greeting based on what you are currently doing and your mood. 1-2 sentences max.]';
+      }
 
       try {
         const { message } = await callChatAPI(
@@ -183,11 +191,17 @@ export function useConversation({
       const trimmedMessages = trimConversationHistory(messagesRef.current, 10);
       const formattedMessages = formatMessagesForGemini(trimmedMessages);
 
+      // For deceased NPCs, prepend a reminder to the player message
+      const isDeceased = systemPromptRef.current.includes('YOU ARE DECEASED');
+      const playerMessageWithContext = isDeceased
+        ? `[REMINDER: You are DEAD, a shade. Stay in character as deceased.]\n\n${content.trim()}`
+        : content.trim();
+
       // Call Gemini API directly
       const { message, action } = await callChatAPI(
         systemPromptRef.current,
         formattedMessages,
-        content.trim()
+        playerMessageWithContext
       );
 
       // Add NPC response

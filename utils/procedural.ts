@@ -228,7 +228,7 @@ const HOSPITALITY_PROFESSIONS = [
   'Funduq Keeper',
   'Khan Warden',
   'Caravanserai Keeper',
-  'Sherbet House Keeper'
+  'Wakala Keeper'  // Merchant lodging house
 ];
 const MEDICAL_PROFESSIONS = [
   'Hakim',
@@ -413,13 +413,27 @@ const generateDisposition = (rand: () => number): number => {
   // Clamp to valid range
   return Math.floor(Math.max(0, Math.min(100, base)));
 };
+// Weighted toward larger families - duplicates increase probability
 const FAMILY_STRUCTURES = [
+  // Small/no family (rare)
   'No immediate family noted',
   'Widowed, one child',
+  'Single, elder parent',
+  // Medium families (common)
+  'Married, two children',
   'Married, two children',
   'Married, three children',
+  'Married, three children',
+  'Married, three children',
+  // Larger families (common)
+  'Married, four children',
+  'Married, four children',
+  'Married, five children',
   'Extended family in household',
-  'Single, elder parent',
+  'Extended family in household',
+  // Large extended families
+  'Large extended family',  // spouse + 4 children + elder
+  'Widowed, three children',
 ];
 const HEALTH_STATUSES = ['Sound', 'Wary', 'Recovering', 'Stressed', 'Healthy'];
 
@@ -1489,8 +1503,12 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
 
   // Facial hair for men (historically, beards were common in medieval Damascus)
   const facialHair: NPCStats['facialHair'] = gender === 'Male' ? (() => {
-    // Young men (under 20) typically clean-shaven or stubble
-    if (age < 20) return rand() > 0.7 ? 'stubble' : 'none';
+    // Children never have facial hair
+    if (age < 12) return 'none';
+    // Youth (12-17) rarely have stubble
+    if (age < 18) return rand() > 0.85 ? 'stubble' : 'none';
+    // Young men (18-20) typically clean-shaven or stubble
+    if (age < 21) return rand() > 0.6 ? 'stubble' : 'none';
     // Religious leaders almost always have beards
     if (isReligiousLeader) return rand() > 0.2 ? 'full_beard' : 'short_beard';
     // Soldiers often have mustaches or short beards
@@ -1524,6 +1542,64 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     rand() > 0.6 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none',
     rand() > 0.7 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none'
   ].filter(a => a !== 'none');
+
+  // Headscarf style variety for women (when headwearStyle is 'scarf')
+  // Distribution: 10% veiled (most conservative), 60% full (standard), 30% modest (traditional variant)
+  const headscarfStyle: 'veiled' | 'full' | 'modest' = gender === 'Female' ? (() => {
+    // Very elderly women (70+) and extremely religious households favor veiled
+    if (age >= 70) {
+      const roll = rand();
+      if (roll < 0.2) return 'veiled';   // 20% veiled
+      if (roll < 0.75) return 'full';    // 55% full
+      return 'modest';                   // 25% modest
+    }
+
+    // Elderly women (60-69) favor full coverage
+    if (age >= 60) {
+      const roll = rand();
+      if (roll < 0.12) return 'veiled';  // 12% veiled
+      if (roll < 0.7) return 'full';     // 58% full
+      return 'modest';                   // 30% modest
+    }
+
+    // Older women (40-59) - standard distribution
+    if (age >= 40) {
+      const roll = rand();
+      if (roll < 0.1) return 'veiled';   // 10% veiled
+      if (roll < 0.65) return 'full';    // 55% full
+      return 'modest';                   // 35% modest
+    }
+
+    // Religious leaders' households favor conservative styles
+    if (isReligiousLeader) {
+      const roll = rand();
+      if (roll < 0.15) return 'veiled';  // 15% veiled
+      if (roll < 0.75) return 'full';    // 60% full
+      return 'modest';                   // 25% modest
+    }
+
+    // Wealthy/elite women - slightly less veiled, more variety
+    if (socialClass === SocialClass.NOBILITY) {
+      const roll = rand();
+      if (roll < 0.05) return 'veiled';  // 5% veiled
+      if (roll < 0.6) return 'full';     // 55% full
+      return 'modest';                   // 40% modest
+    }
+
+    // Merchant/artisan class - standard distribution
+    if (socialClass === SocialClass.MERCHANT || isArtisan) {
+      const roll = rand();
+      if (roll < 0.08) return 'veiled';  // 8% veiled
+      if (roll < 0.65) return 'full';    // 57% full
+      return 'modest';                   // 35% modest
+    }
+
+    // Peasants/laborers - standard distribution, practical
+    const roll = rand();
+    if (roll < 0.12) return 'veiled';    // 12% veiled
+    if (roll < 0.65) return 'full';      // 53% full
+    return 'modest';                     // 35% modest
+  })() : 'full'; // Default for males (unused)
 
   const heldItem: NPCStats['heldItem'] = (() => {
     if (isShepherd) return 'staff';
@@ -1603,6 +1679,7 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     hairColor,
     facialHair,
     headwearStyle,
+    headscarfStyle,
     headwearColor,
     sleeveCoverage,
     footwearStyle,
@@ -1616,7 +1693,7 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
 export const generatePlayerStats = (
   seed: number,
   context?: { districtType?: DistrictType }
-): Omit<PlayerStats, 'currency' | 'inventory' | 'maxInventorySlots' | 'plague'> => {
+): Omit<PlayerStats, 'currency' | 'inventory' | 'maxInventorySlots' | 'plague' | 'activeEffects'> => {
   let s = seed * 7 + 13;
   const rand = () => seededRandom(s++);
 
@@ -1689,6 +1766,7 @@ export const generatePlayerStats = (
   const isSoldier = /Guard|Soldier|Mamluk/i.test(profession);
   const isOfficer = /Officer/i.test(profession);
   const isMerchant = /(Merchant|Draper|Trader|Coppersmith|Weaver|Carpenter|Herbalist|Midwife|Dyer)/i.test(profession);
+  const isArtisan = /(Blacksmith|Coppersmith|Weaver|Carpenter|Potter|Dyer|Tanner)/i.test(profession);
   const isLaborer = /(Day-Laborer|Water-Carrier|Tanner|Porter|Bread Seller|Laundry|Servant|Water-Bearer)/i.test(profession);
 
   // Use ethnicity/religion-weighted color selection
@@ -1918,6 +1996,51 @@ export const generatePlayerStats = (
     rand() > 0.7 ? accessoryPool[Math.floor(rand() * accessoryPool.length)] : 'none'
   ].filter(a => a !== 'none');
 
+  // Headscarf style for female player (same logic as NPCs)
+  // Distribution: 10% veiled, 60% full, 30% modest
+  const headscarfStyle: 'veiled' | 'full' | 'modest' = gender === 'Female' ? (() => {
+    if (age >= 70) {
+      const roll = rand();
+      if (roll < 0.2) return 'veiled';
+      if (roll < 0.75) return 'full';
+      return 'modest';
+    }
+    if (age >= 60) {
+      const roll = rand();
+      if (roll < 0.12) return 'veiled';
+      if (roll < 0.7) return 'full';
+      return 'modest';
+    }
+    if (age >= 40) {
+      const roll = rand();
+      if (roll < 0.1) return 'veiled';
+      if (roll < 0.65) return 'full';
+      return 'modest';
+    }
+    if (isReligiousLeader) {
+      const roll = rand();
+      if (roll < 0.15) return 'veiled';
+      if (roll < 0.75) return 'full';
+      return 'modest';
+    }
+    if (socialClass === SocialClass.NOBILITY) {
+      const roll = rand();
+      if (roll < 0.05) return 'veiled';
+      if (roll < 0.6) return 'full';
+      return 'modest';
+    }
+    if (socialClass === SocialClass.MERCHANT || isArtisan) {
+      const roll = rand();
+      if (roll < 0.08) return 'veiled';
+      if (roll < 0.65) return 'full';
+      return 'modest';
+    }
+    const roll = rand();
+    if (roll < 0.12) return 'veiled';
+    if (roll < 0.65) return 'full';
+    return 'modest';
+  })() : 'full';
+
   const ailmentPool = [
     { id: 'blurred_vision', label: 'Blurred vision', zone: 'eyes' },
     { id: 'hard_of_hearing', label: 'Hard of hearing', zone: 'ears' },
@@ -1950,6 +2073,9 @@ export const generatePlayerStats = (
     height,
     weight,
     family: FAMILY_STRUCTURES[Math.floor(rand() * FAMILY_STRUCTURES.length)],
+    familyMembers: [],  // Populated later by generatePlayerFamily
+    homeBuildingId: null,  // Assigned when game initializes
+    homeMapPosition: null,  // Assigned when game initializes
     healthStatus: HEALTH_STATUSES[Math.floor(rand() * HEALTH_STATUSES.length)],
     skinTone,
     hairColor,
@@ -1970,6 +2096,7 @@ export const generatePlayerStats = (
     robePattern,
     hairStyle,
     headwearStyle,
+    headscarfStyle,
     sleeveCoverage,
     footwearStyle,
     footwearColor,
@@ -2174,6 +2301,11 @@ export const generateBuildingMetadata = (seed: number, x: number, z: number, dis
   } else if (district === 'WEALTHY' && (type === BuildingType.RESIDENTIAL || type === BuildingType.COMMERCIAL)) {
     // Wealthy mansions are 2-3 stories
     storyCount = height > 12 ? 3 : 2;
+  }
+
+  // HOSPITALITY buildings (inns, funduqs, khans, wakalas) need 2-3 stories for guest rooms upstairs
+  if (type === BuildingType.HOSPITALITY) {
+    storyCount = height > 10 ? 3 : 2; // Force minimum 2 stories, 3 for taller buildings
   }
 
   // Adjust footprint based on story count: 3-story buildings are ~10% wider

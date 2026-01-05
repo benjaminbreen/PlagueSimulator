@@ -16,7 +16,8 @@ import {
   Activity,
   X,
   FileText,
-  MessageSquare
+  MessageSquare,
+  Home
 } from 'lucide-react';
 import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
 import { AdhanSynth, MelodyName } from './audio/synthesis/AdhanSynth';
@@ -39,7 +40,10 @@ import { MapModal } from './MapModal';
 import { PlayerDossierModal } from './PlayerDossierModal';
 import { SettingsModal } from './SettingsModal';
 import { ReportsPanel } from './ReportsPanel';
+import { ReportsPanelMockupC } from './ReportsPanelMockupC';
 import { AboutModal } from './AboutModal';
+import { FamilyMemberModal } from './FamilyMemberModal';
+import { FamilyMember } from '../types';
 
 interface UIProps {
   params: SimulationParams;
@@ -73,6 +77,7 @@ interface UIProps {
   simTime: number;
   showPlayerModal: boolean;
   setShowPlayerModal: React.Dispatch<React.SetStateAction<boolean>>;
+  showMerchantModal?: boolean;
   showEncounterModal: boolean;
   setShowEncounterModal: React.Dispatch<React.SetStateAction<boolean>>;
   conversationHistories: ConversationSummary[];
@@ -110,10 +115,14 @@ interface UIProps {
   infectedHouseholds: import('../types').InfectedHouseholdInfo[];
   /** Callback to navigate to an infected household */
   onNavigateToHousehold?: (buildingPosition: [number, number, number]) => void;
+  /** Callback to navigate to deceased NPCs (cycles through all deceased) */
+  onNavigateToDeceased?: () => void;
   /** Drop an inventory item near the player */
   onDropItem?: (item: { inventoryId: string; itemId: string; label: string; appearance?: ItemAppearance }) => void;
   /** Drop an inventory item at a screen coordinate */
   onDropItemAtScreen?: (item: { inventoryId: string; itemId: string; label: string; appearance?: ItemAppearance }, clientX: number, clientY: number) => void;
+  /** Consume an inventory item (use its effects) */
+  onConsumeItem?: (playerItem: import('../types').PlayerItem) => void;
   perfDebug?: {
     schedulePhase: number;
     scheduleActive: boolean;
@@ -122,6 +131,14 @@ interface UIProps {
   };
   /** Callback to trigger entering a building (same as pressing Enter) */
   onTriggerEnterBuilding?: () => void;
+  /** Home building type for dossier display */
+  homeBuildingType?: string;
+  /** District name where home is located */
+  homeDistrictName?: string;
+  /** Whether player is currently on their home tile */
+  isOnHomeTile?: boolean;
+  /** Navigate to home tile */
+  onGoHome?: () => void;
 }
 
 interface InventoryEntry {
@@ -393,6 +410,62 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       });
     }
 
+    // Player home marker - golden house icon with pulsing glow
+    if (data.playerHome) {
+      const p = project(data.playerHome.x, data.playerHome.z);
+      const distSq = p.x * p.x + p.y * p.y;
+      if (distSq <= radius * radius) {
+        const dist = Math.sqrt(distSq) / radius;
+        const alpha = Math.max(0.4, Math.pow(1 - dist, 1.2)); // Stay visible from far
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+
+        // Outer glow pulse
+        const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 400);
+        ctx.shadowBlur = 16 * pulse;
+        ctx.shadowColor = '#fbbf24';
+        ctx.globalAlpha = alpha * 0.6 * pulse;
+        ctx.fillStyle = '#fbbf24';
+        ctx.beginPath();
+        ctx.arc(0, 0, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // House shape - simple peaked roof design
+        ctx.globalAlpha = alpha;
+        ctx.shadowBlur = 10;
+        ctx.fillStyle = '#fbbf24';
+
+        // House body
+        ctx.fillRect(-4, -1, 8, 6);
+
+        // Roof triangle
+        ctx.beginPath();
+        ctx.moveTo(-5, -1);
+        ctx.lineTo(0, -6);
+        ctx.lineTo(5, -1);
+        ctx.closePath();
+        ctx.fill();
+
+        // Door
+        ctx.fillStyle = '#92400e';
+        ctx.fillRect(-1.5, 1, 3, 4);
+
+        // Label
+        ctx.globalAlpha = alpha * 0.9;
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = '#000';
+        ctx.fillStyle = '#fbbf24';
+        ctx.font = 'bold 7px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('HOME', 0, -8);
+
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+    }
+
     ctx.shadowBlur = 12;
     ctx.shadowColor = '#f7c66a';
     ctx.fillStyle = '#f7c66a';
@@ -560,7 +633,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onDropItem, onDropItemAtScreen, perfDebug, onTriggerEnterBuilding }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -585,9 +658,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const prevStatsRef = useRef<{ infected: number; incubating: number; simTime: number } | null>(null);
   const [hasPlayerMoved, setHasPlayerMoved] = useState(false);
   const [showHealthMeter, setShowHealthMeter] = useState(false);
-  const [dossierTab, setDossierTab] = useState<'overview' | 'health' | 'inventory'>('overview');
+  const [dossierTab, setDossierTab] = useState<'overview' | 'health' | 'inventory' | 'family'>('overview');
   const [inventoryView, setInventoryView] = useState<'list' | 'grid'>('list');
   const [selectedInventoryItem, setSelectedInventoryItem] = useState<InventoryEntry | null>(null);
+  const [selectedFamilyMember, setSelectedFamilyMember] = useState<FamilyMember | null>(null);
   const [travelDestination, setTravelDestination] = useState<{ mapX: number; mapY: number; label: string } | null>(null);
   const [minimapVisible, setMinimapVisible] = useState(true);
   const [minimapMode, setMinimapMode] = useState<'local' | 'overworld'>('local');
@@ -1035,7 +1109,49 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           isNight={params.timeOfDay <= 6 || params.timeOfDay >= 18}
         />
       )}
-      
+
+      {/* Go Home button - positioned to left of minimap (responsive for mobile/desktop minimap sizes) */}
+      {playerStats.homeBuildingId && playerStats.homeMapPosition && sceneMode === 'outdoor' && onGoHome && (
+        <div className="absolute top-20 right-[180px] sm:right-[252px] z-20 pointer-events-auto group">
+          <button
+            onClick={onGoHome}
+            className={`
+              w-11 h-11 rounded-xl flex items-center justify-center
+              transition-all duration-200 shadow-lg
+              ${mapX === playerStats.homeMapPosition?.mapX && mapY === playerStats.homeMapPosition?.mapY
+                ? 'bg-amber-900/70 border-2 border-amber-500/60 text-amber-300 hover:bg-amber-800/80 hover:scale-105'
+                : 'bg-black/70 border-2 border-amber-700/50 text-amber-400 hover:bg-amber-900/40 hover:border-amber-500/70 hover:scale-105'
+              }
+            `}
+          >
+            <Home size={20} />
+          </button>
+          {/* Styled tooltip */}
+          <div className="
+            absolute top-full left-1/2 -translate-x-1/2 mt-2
+            px-3 py-2 min-w-[140px]
+            bg-black/95 backdrop-blur-md rounded-lg
+            border border-amber-800/50 shadow-xl
+            opacity-0 group-hover:opacity-100
+            pointer-events-none transition-opacity duration-150
+            z-50 text-center
+          ">
+            <div className="text-amber-400 font-semibold text-xs mb-0.5">
+              {mapX === playerStats.homeMapPosition?.mapX && mapY === playerStats.homeMapPosition?.mapY
+                ? '🏠 View Home'
+                : '🏠 Return Home'
+              }
+            </div>
+            <p className="text-amber-100/70 text-[10px] leading-relaxed">
+              {mapX === playerStats.homeMapPosition?.mapX && mapY === playerStats.homeMapPosition?.mapY
+                ? 'Center camera on your residence'
+                : 'Travel to your residence'
+              }
+            </p>
+          </div>
+        </div>
+      )}
+
       <TopStatusBar
         dateStr={getDateStr()}
         timeStr={getTimeStr()}
@@ -1049,7 +1165,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         plague={playerStats.plague}
         hasPlayerMoved={hasPlayerMoved}
         showHealthMeter={showHealthMeter}
-        onOpenPlayerModal={() => setShowPlayerModal(true)}
+        onOpenPlayerModal={() => {
+          setDossierTab('health');
+          setShowPlayerModal(true);
+        }}
         onToggleMobilePerspectiveMenu={() => setShowMobilePerspectiveMenu(prev => !prev)}
         showSettings={showSettings}
         onToggleSettings={() => setShowSettings(!showSettings)}
@@ -1110,7 +1229,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         {/* Desktop - Original map button */}
         <button
           onClick={() => setShowMap(true)}
-          className="hidden md:flex bg-black/40 hover:bg-black/55 backdrop-blur-md px-5 py-2 rounded-full border border-amber-600/30 text-amber-500 shadow-lg items-center gap-3 pointer-events-auto transition-all group active:scale-95"
+          className="hidden md:flex bg-black/30 hover:bg-black/55 backdrop-blur-md px-4 py-2 rounded-full border border-amber-400/20 text-amber-400 shadow-lg items-center gap-2 pointer-events-auto transition-all group active:scale-95"
         >
           <div className="bg-amber-500/10 p-1 rounded-full group-hover:bg-amber-500/20 transition-colors">
             <MapIcon size={14} />
@@ -1119,7 +1238,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             <span className="historical-font text-[10px] md:text-xs whitespace-nowrap tracking-wider font-bold">
               {getLocationLabel(params.mapX, params.mapY)}
             </span>
-            <span className="text-[8px] uppercase tracking-widest text-amber-500/40 font-light mt-1">Open Overworld Map</span>
+            <span className="text-[8px] uppercase tracking-widest text-amber-400/40 font-light mt-1">Open Overworld Map</span>
           </div>
         </button>
 
@@ -1127,7 +1246,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           const infectionState = buildingInfection?.[nearBuilding.id];
           const isInfected = infectionState?.status === 'infected' || infectionState?.status === 'deceased';
           const isDeceased = infectionState?.status === 'deceased';
-          const canEnter = nearBuilding.isOpen && onTriggerEnterBuilding;
+          // Allow entry to open buildings OR infected/deceased plague houses
+          const canEnter = (nearBuilding.isOpen || isInfected) && onTriggerEnterBuilding;
 
           return (
             <div
@@ -1173,20 +1293,38 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
                 {/* Right side: Enter prompt */}
                 {canEnter && (
-                  <div
-                    className="flex-shrink-0 px-2 sm:px-3 py-1 sm:py-1.5 rounded-md border border-amber-500/40 bg-amber-900/30"
-                    style={{
-                      boxShadow: '0 0 12px rgba(251, 191, 36, 0.3), inset 0 0 8px rgba(251, 191, 36, 0.1)'
-                    }}
-                  >
-                    <span
-                      className="text-[9px] sm:text-[10px] text-amber-200 font-bold uppercase tracking-wider whitespace-nowrap"
+                  <div className="flex flex-col items-end gap-1">
+                    {/* Warning for entering closed plague house */}
+                    {!nearBuilding.isOpen && isInfected && (
+                      <span className="text-[8px] sm:text-[9px] text-red-300/90 italic">
+                        {isDeceased ? 'Door unsealed by death' : 'Quarantine broken'}
+                      </span>
+                    )}
+                    <div
+                      className={`flex-shrink-0 px-2 sm:px-3 py-1 sm:py-1.5 rounded-md border ${
+                        isInfected
+                          ? 'border-red-500/50 bg-red-900/40'
+                          : 'border-amber-500/40 bg-amber-900/30'
+                      }`}
                       style={{
-                        textShadow: '0 0 8px rgba(251, 191, 36, 0.8), 0 0 16px rgba(251, 191, 36, 0.5)'
+                        boxShadow: isInfected
+                          ? '0 0 12px rgba(239, 68, 68, 0.3), inset 0 0 8px rgba(239, 68, 68, 0.1)'
+                          : '0 0 12px rgba(251, 191, 36, 0.3), inset 0 0 8px rgba(251, 191, 36, 0.1)'
                       }}
                     >
-                      <span className="hidden sm:inline">Press </span>RETURN<span className="hidden sm:inline"> to enter</span>
-                    </span>
+                      <span
+                        className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-wider whitespace-nowrap ${
+                          isInfected ? 'text-red-200' : 'text-amber-200'
+                        }`}
+                        style={{
+                          textShadow: isInfected
+                            ? '0 0 8px rgba(239, 68, 68, 0.8), 0 0 16px rgba(239, 68, 68, 0.5)'
+                            : '0 0 8px rgba(251, 191, 36, 0.8), 0 0 16px rgba(251, 191, 36, 0.5)'
+                        }}
+                      >
+                        <span className="hidden sm:inline">Press </span>RETURN<span className="hidden sm:inline"> to enter</span>
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1220,12 +1358,13 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
       {/* FLOATING WINDOWS */}
       <div className={`flex flex-col flex-1 justify-between p-4 md:p-6 transition-all duration-500 ${params.uiMinimized ? 'opacity-0 scale-95 pointer-events-none translate-y-4' : 'opacity-100 scale-100'}`}>
         {/* Reports Panel - Hidden by default on mobile, slides in from left with swipe-to-dismiss */}
+        {/* Also hidden when merchant modal is open */}
         <div
           className={`
             fixed md:relative top-0 left-0 h-full md:h-auto z-50 md:z-auto
             w-[85vw] max-w-[360px] md:w-auto md:max-w-none
-            transition-transform duration-300 ease-out
-            md:transform-none md:opacity-100
+            transition-all duration-300 ease-out
+            ${showMerchantModal ? 'opacity-0 pointer-events-none md:-translate-x-full' : 'md:transform-none md:opacity-100'}
             ${mobileReportsPanelVisible ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
           `}
           onTouchStart={(e) => {
@@ -1271,6 +1410,70 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             </button>
           </div>
           <div className="h-full md:h-auto overflow-y-auto md:overflow-visible bg-black/95 md:bg-transparent pt-14 pb-8 md:pt-0 md:pb-0 max-h-screen">
+            <ReportsPanelMockupC
+              stats={{
+                healthy: stats.healthy,
+                incubating: stats.incubating,
+                infected: stats.infected,
+                deceased: stats.deceased,
+              }}
+              moraleStats={{
+                avgPanic: moraleStats.avgPanic,
+                avgAwareness: moraleStats.avgAwareness,
+              }}
+              infectedHouseholds={infectedHouseholds}
+              playerStats={{
+                name: playerStats.name,
+                profession: playerStats.profession,
+                health: playerStats.health,
+                reputation: playerStats.reputation,
+                currency: playerStats.currency,
+                socialClass: playerStats.socialClass,
+                age: playerStats.age,
+                gender: playerStats.gender,
+                family: playerStats.family,
+                familyMembers: playerStats.familyMembers,
+                inventory: playerStats.inventory,
+                maxInventorySlots: playerStats.maxInventorySlots,
+                // Appearance fields for portrait
+                skinTone: playerStats.skinTone,
+                hairColor: playerStats.hairColor,
+                hairStyle: playerStats.hairStyle,
+                headwearStyle: playerStats.headwearStyle,
+                headwearColor: playerStats.headwearColor,
+                healthState: playerStats.plague?.state,
+              }}
+              daysSinceOutbreak={(simTime / 24) + 1}
+              onNavigateToHousehold={onNavigateToHousehold}
+              onNavigateToDeceased={onNavigateToDeceased}
+              onShowPlayerModal={() => setShowPlayerModal(true)}
+              onOpenFamilyDossier={() => {
+                setDossierTab('family');
+                setShowPlayerModal(true);
+              }}
+              onOpenInventoryDossier={() => {
+                setDossierTab('inventory');
+                setInventoryView('grid');
+                setShowPlayerModal(true);
+              }}
+              onSelectFamilyMember={setSelectedFamilyMember}
+              params={{
+                infectionRate: params.infectionRate,
+                hygieneLevel: params.hygieneLevel,
+                quarantine: params.quarantine,
+              }}
+              onChangeParam={handleChange}
+              showDemographicsOverlay={showDemographicsOverlay}
+              setShowDemographicsOverlay={setShowDemographicsOverlay}
+              inventoryEntries={inventoryEntries}
+              onSelectInventoryItem={setSelectedInventoryItem}
+              currentBiomeLabel={getLocationLabel(params.mapX, params.mapY)}
+              nearbyNPCs={nearbyNPCs}
+              onOpenGuideModal={onOpenGuideModal}
+              onSelectGuideEntry={onSelectGuideEntry}
+              playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
+            />
+            {/* ORIGINAL ReportsPanel - kept for reference
             <ReportsPanel
               reportTab={reportTab}
               setReportTab={setReportTab}
@@ -1281,6 +1484,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               stats={stats}
               infectedHouseholds={infectedHouseholds}
               onNavigateToHousehold={onNavigateToHousehold}
+              onNavigateToDeceased={onNavigateToDeceased}
               moraleStats={moraleStats}
               alchemistTableCollapsed={alchemistTableCollapsed}
               setAlchemistTableCollapsed={setAlchemistTableCollapsed}
@@ -1302,7 +1506,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               onOpenGuideModal={onOpenGuideModal}
               onSelectGuideEntry={onSelectGuideEntry}
               playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
+              onOpenFamilyDossier={() => {
+                setDossierTab('family');
+                setShowPlayerModal(true);
+              }}
             />
+            */}
           </div>
         </div>
 
@@ -1546,7 +1755,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         {pushCharge > 0 && (
           <div className="absolute bottom-48 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none">
             <div className="text-[9px] uppercase tracking-widest text-amber-400/80">
-              {pushCharge >= 1 ? 'Release to Push!' : 'Hold Shift...'}
+              {pushCharge >= 1 ? 'Release to Shove!' : 'Hold Shift to Push...'}
             </div>
             <div className="w-32 h-2 bg-black/60 rounded-full border border-amber-700/50 overflow-hidden">
               <div
@@ -1764,10 +1973,15 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         inventoryEntries={inventoryEntries}
         onSelectInventoryItem={setSelectedInventoryItem}
         onDropItem={onDropItem}
+        onConsumeItem={onConsumeItem}
         buildApparelEntry={buildApparelEntry}
         onClose={() => setShowPlayerModal(false)}
         getHealthStatusLabel={getHealthStatusLabel}
         getPlagueTypeLabel={getPlagueTypeLabel}
+        homeBuildingType={homeBuildingType}
+        homeDistrictName={homeDistrictName}
+        isOnHomeTile={isOnHomeTile}
+        onGoHome={onGoHome}
       />
 
       {selectedInventoryItem && (
@@ -1860,6 +2074,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
       {showEncounterModal && selectedNpc && (
         <EncounterModal
           npc={selectedNpc.stats}
+          npcState={selectedNpc.state}
           player={playerStats}
           environment={{
             timeOfDay: params.timeOfDay,
@@ -1893,8 +2108,20 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         />
       )}
 
-      {/* Action Bar - only show in outdoor mode */}
-      {sceneMode === 'outdoor' && (
+      {/* Family Member Modal - opened from Reports Panel */}
+      <FamilyMemberModal
+        isOpen={selectedFamilyMember !== null}
+        onClose={() => setSelectedFamilyMember(null)}
+        member={selectedFamilyMember}
+        playerGender={playerStats.gender}
+        playerProfession={playerStats.profession}
+        socialClass={playerStats.socialClass}
+        skinTone={playerStats.skinTone}
+        hairColor={playerStats.hairColor}
+      />
+
+      {/* Action Bar - show in both outdoor and interior modes */}
+      {(sceneMode === 'outdoor' || sceneMode === 'interior') && (
           <ActionBar
             actionSlots={actionSlots}
             onTriggerAction={onTriggerAction}

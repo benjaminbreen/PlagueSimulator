@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { UI } from './UI';
 import { MerchantModal } from './MerchantModal';
+import { MedicalTreatmentModal } from './MedicalTreatmentModal';
 import { GuideModal } from './HistoricalGuide';
 import { LootModal, LootModalData, LootItem } from './LootModal';
 import { ObserveController } from './observe/ObserveController';
 import { PlagueUI } from './PlagueUI';
 import { Toast, ToastMessage } from './Toast';
-import { BuildingMetadata, MerchantNPC, MerchantItem, PlayerItem } from '../types';
+import { BuildingMetadata, MerchantNPC, MerchantItem, PlayerItem, MedicalEstablishmentType } from '../types';
+import { MedicalModalState } from '../hooks/useModalState';
+import { ESTABLISHMENTS, TreatmentOutcome } from '../utils/medicalTreatments';
+import { TreatmentOutcomeModal } from './medical/TreatmentOutcomeModal';
 
 // Format time of day to readable string
 const formatTimeOfDay = (hour: number): string => {
@@ -42,6 +46,7 @@ interface AppShellProps {
   onTriggerMerchant?: () => void;  // Mobile/touch trigger for trading
   onPurchase: (item: MerchantItem, quantity: number) => void;
   onSell: (item: PlayerItem, quantity: number) => void;
+  onCompound?: (recipe: import('../types').CompoundRecipe, totalCost: number, ingredientsToBuy: { name: string; price: number }[]) => void;
   showGuideModal: boolean;
   selectedGuideEntryId: string | null;
   onCloseGuideModal: () => void;
@@ -54,6 +59,11 @@ interface AppShellProps {
   nearStairs: { id: string; label: string; position: [number, number, number]; type: import('../types').InteriorPropType } | null;
   stairsPromptLabel: string | null;
   onTriggerUseStairs?: () => void;
+  nearRoofHatch: { id: string; position: [number, number, number] } | null;
+  roofHatchPromptLabel: string | null;
+  onTriggerExitViaRoofHatch?: () => void;
+  nearRooftopHatch: { buildingId: string; position: [number, number, number] } | null;
+  onTriggerEnterViaRooftopHatch?: () => void;
   nearBirdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null;
   onTriggerOpenBirdcage?: () => void;
   showEncounterModal: boolean;
@@ -76,6 +86,19 @@ interface AppShellProps {
   onLootAccept: (items: LootItem[]) => void;
   onLootDecline: () => void;
   onLootClose: () => void;
+  // Medical treatment modal
+  medicalModal: MedicalModalState | null;
+  onCloseMedicalModal: () => void;
+  onMedicalTreatment: (treatmentId: string, cost: number) => void;
+  playerCurrency: number;
+  // Medical building detection
+  isInMedicalBuilding: boolean;
+  onTriggerMedicalTreatment?: () => void;
+  // Player skin tone for medical animations
+  playerSkinTone?: string;
+  // Treatment outcome modal
+  treatmentOutcome: TreatmentOutcome | null;
+  onCloseTreatmentOutcome: () => void;
 }
 
 export const AppShell = React.memo(({
@@ -95,6 +118,7 @@ export const AppShell = React.memo(({
   onTriggerMerchant,
   onPurchase,
   onSell,
+  onCompound,
   showGuideModal,
   selectedGuideEntryId,
   onCloseGuideModal,
@@ -107,6 +131,11 @@ export const AppShell = React.memo(({
   nearStairs,
   stairsPromptLabel,
   onTriggerUseStairs,
+  nearRoofHatch,
+  roofHatchPromptLabel,
+  onTriggerExitViaRoofHatch,
+  nearRooftopHatch,
+  onTriggerEnterViaRooftopHatch,
   nearBirdcage,
   onTriggerOpenBirdcage,
   showEncounterModal,
@@ -129,9 +158,19 @@ export const AppShell = React.memo(({
   lootModalData,
   onLootAccept,
   onLootDecline,
-  onLootClose
+  onLootClose,
+  medicalModal,
+  onCloseMedicalModal,
+  onMedicalTreatment,
+  playerCurrency,
+  isInMedicalBuilding,
+  onTriggerMedicalTreatment,
+  playerSkinTone,
+  treatmentOutcome,
+  onCloseTreatmentOutcome
 }: AppShellProps) => {
   const [showAbout, setShowAbout] = useState(false);
+  const [skipIntro, setSkipIntro] = useState(false);
 
   // Allow Enter key to start game from loading screen
   useEffect(() => {
@@ -156,39 +195,40 @@ export const AppShell = React.memo(({
 
       {/* Initial loading overlay - fades out after assets load */}
       <div
+        onClick={() => setSkipIntro(true)}
         className={`absolute inset-0 z-[200] bg-stone-950 flex flex-col items-center justify-center transition-opacity duration-1000 ${
-          gameLoading ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          gameLoading ? 'opacity-100 cursor-pointer' : 'opacity-0 pointer-events-none'
         }`}
       >
-        <h1 className="text-5xl md:text-7xl text-amber-100/90 tracking-[0.25em] font-light mb-4 animate-[fadeIn_1s_ease-out_forwards]"
-            style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
+        <h1 className={`text-5xl md:text-7xl text-amber-100/90 tracking-[0.25em] font-light mb-4 ${!skipIntro && 'animate-[fadeIn_1s_ease-out_forwards]'}`}
+            style={{ fontFamily: 'Cinzel, Georgia, serif', opacity: skipIntro ? 1 : undefined }}>
           DAMASCUS
         </h1>
-        <p className="text-2xl md:text-3xl text-amber-200/60 tracking-[0.5em] font-light animate-[fadeIn_1s_ease-out_forwards]"
-           style={{ fontFamily: 'Cinzel, Georgia, serif' }}>
+        <p className={`text-2xl md:text-3xl text-amber-200/60 tracking-[0.5em] font-light ${!skipIntro && 'animate-[fadeIn_1s_ease-out_forwards]'}`}
+           style={{ fontFamily: 'Cinzel, Georgia, serif', opacity: skipIntro ? 1 : undefined }}>
           1348
         </p>
-        <div className="mt-8 w-24 h-[1px] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent animate-[fadeIn_1s_ease-out_0.5s_forwards]"
-             style={{ opacity: 0 }} />
+        <div className={`mt-8 w-24 h-[1px] bg-gradient-to-r from-transparent via-amber-400/40 to-transparent ${!skipIntro && 'animate-[fadeIn_1s_ease-out_0.5s_forwards]'}`}
+             style={{ opacity: skipIntro ? 1 : 0 }} />
 
         {/* Contextual introduction - staggered fade-in */}
         {uiProps.playerStats && (
           <div className="mt-8 max-w-lg text-center px-6">
-            <p className="text-amber-200/70 text-sm md:text-base leading-relaxed animate-[fadeIn_1s_ease-out_1s_forwards]"
-               style={{ fontFamily: 'Lato, Georgia, serif', opacity: 0 }}>
+            <p className={`text-amber-200/70 text-sm md:text-base leading-relaxed ${!skipIntro && 'animate-[fadeIn_1s_ease-out_1s_forwards]'}`}
+               style={{ fontFamily: 'Lato, Georgia, serif', opacity: skipIntro ? 1 : 0 }}>
               It is {formatTimeOfDay(uiProps.params?.timeOfDay ?? 12)} in the{' '}
               <span className="text-amber-100">Al-Buzuriyah Souq</span> of Damascus.
             </p>
-            <p className="text-amber-200/70 text-sm md:text-base leading-relaxed mt-3 animate-[fadeIn_1s_ease-out_2s_forwards]"
-               style={{ fontFamily: 'Lato, Georgia, serif', opacity: 0 }}>
+            <p className={`text-amber-200/70 text-sm md:text-base leading-relaxed mt-3 ${!skipIntro && 'animate-[fadeIn_1s_ease-out_2s_forwards]'}`}
+               style={{ fontFamily: 'Lato, Georgia, serif', opacity: skipIntro ? 1 : 0 }}>
               You are <span className="text-amber-100">{uiProps.playerStats.name}</span>,{' '}
               a {uiProps.playerStats.profession.toLowerCase()},{' '}
               aged {uiProps.playerStats.age} years.
             </p>
-            <p className="text-amber-200/80 text-lg md:text-xl mt-6 italic animate-[fadeIn_1s_ease-out_3s_forwards]"
+            <p className={`text-amber-200/80 text-lg md:text-xl mt-6 italic ${!skipIntro && 'animate-[fadeIn_1s_ease-out_3s_forwards]'}`}
                style={{
                  fontFamily: 'Lato, Georgia, serif',
-                 opacity: 0
+                 opacity: skipIntro ? 1 : 0
                }}>
               It is the year of the <span className="plague-word">plague</span>...
             </p>
@@ -196,8 +236,8 @@ export const AppShell = React.memo(({
             {/* Begin button */}
             <button
               onClick={onStartGame}
-              className="mt-8 px-8 py-3 bg-transparent border border-amber-600/50 text-amber-200/90 rounded-full tracking-[0.2em] uppercase text-sm hover:bg-amber-900/30 hover:border-amber-500/70 transition-all duration-300 animate-[fadeIn_1s_ease-out_4s_forwards]"
-              style={{ fontFamily: 'Cinzel, Georgia, serif', opacity: 0 }}
+              className={`mt-8 px-8 py-3 bg-transparent border border-amber-600/50 text-amber-200/90 rounded-full tracking-[0.2em] uppercase text-sm hover:bg-amber-900/30 hover:border-amber-500/70 transition-all duration-300 ${!skipIntro && 'animate-[fadeIn_1s_ease-out_4s_forwards]'}`}
+              style={{ fontFamily: 'Cinzel, Georgia, serif', opacity: skipIntro ? 1 : 0 }}
             >
               Begin My Day
             </button>
@@ -207,8 +247,8 @@ export const AppShell = React.memo(({
         {/* About button at bottom */}
         <button
           onClick={() => setShowAbout(!showAbout)}
-          className="absolute bottom-6 text-amber-200/40 text-xs tracking-widest hover:text-amber-200/70 transition-colors animate-[fadeIn_1s_ease-out_5s_forwards]"
-          style={{ opacity: 0 }}
+          className={`absolute bottom-6 text-amber-200/40 text-xs tracking-widest hover:text-amber-200/70 transition-colors ${!skipIntro && 'animate-[fadeIn_1s_ease-out_5s_forwards]'}`}
+          style={{ opacity: skipIntro ? 1 : 0 }}
         >
           About
         </button>
@@ -329,41 +369,68 @@ export const AppShell = React.memo(({
 
 
       {/* Building Interaction Modal */}
-      {!observeMode && showEnterModal && nearBuilding && (
-        <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="bg-[#f2e7d5] border-4 border-amber-900/50 p-8 rounded-lg shadow-2xl max-w-md w-full text-center historical-font relative overflow-hidden">
-            {/* Parchment effect */}
-            <div className="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]"></div>
+      {!observeMode && showEnterModal && nearBuilding && (() => {
+        const isPlayerHome = uiProps.playerStats?.homeBuildingId === nearBuilding.id;
+        return (
+          <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-in fade-in duration-300">
+            <div className={`${isPlayerHome
+              ? 'bg-gradient-to-b from-emerald-50 to-green-100 border-4 border-emerald-700/60'
+              : 'bg-[#f2e7d5] border-4 border-amber-900/50'
+            } p-8 rounded-lg shadow-2xl max-w-md w-full text-center historical-font relative overflow-hidden`}>
+              {/* Parchment/texture effect */}
+              <div className="absolute inset-0 opacity-10 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]"></div>
 
-            <h2 className="text-3xl text-amber-900 mb-6 tracking-tighter uppercase font-bold border-b border-amber-900/20 pb-4">
-              Enter {getBuildingLabel(nearBuilding.type)}?
-            </h2>
+              {/* Home glow effect */}
+              {isPlayerHome && (
+                <div className="absolute inset-0 bg-gradient-to-t from-emerald-200/20 to-transparent pointer-events-none"></div>
+              )}
 
-            <p className="text-amber-950 text-xl mb-8 leading-relaxed">
-              Enter the {getBuildingLabel(nearBuilding.type)} of the {nearBuilding.ownerProfession} <span className="font-bold text-amber-900">{nearBuilding.ownerName}</span>?
-            </p>
+              <h2 className={`text-3xl mb-6 tracking-tighter uppercase font-bold border-b pb-4 ${
+                isPlayerHome
+                  ? 'text-emerald-800 border-emerald-700/20'
+                  : 'text-amber-900 border-amber-900/20'
+              }`}>
+                {isPlayerHome ? 'Enter Your Home?' : `Enter ${getBuildingLabel(nearBuilding.type)}?`}
+              </h2>
 
-            <div className="flex gap-4 justify-center">
-              <button
-                onClick={onConfirmEnter}
-                className="bg-amber-900 hover:bg-amber-800 text-white px-10 py-3 rounded-full tracking-widest transition-all shadow-lg active:scale-95"
-              >
-                YES
-              </button>
-              <button
-                onClick={onCloseEnterModal}
-                className="bg-transparent border-2 border-amber-900 text-amber-900 hover:bg-amber-900/10 px-10 py-3 rounded-full tracking-widest transition-all active:scale-95"
-              >
-                NOT NOW
-              </button>
-            </div>
+              <p className={`text-xl mb-8 leading-relaxed ${isPlayerHome ? 'text-emerald-950' : 'text-amber-950'}`}>
+                {isPlayerHome ? (
+                  <>Return to your dwelling, where your family awaits.</>
+                ) : (
+                  <>Enter the {getBuildingLabel(nearBuilding.type)} of the {nearBuilding.ownerProfession} <span className={`font-bold ${isPlayerHome ? 'text-emerald-800' : 'text-amber-900'}`}>{nearBuilding.ownerName}</span>?</>
+                )}
+              </p>
 
-            <div className="mt-8 text-[10px] text-amber-900/40 uppercase tracking-widest">
-              Seek refuge or seek fortune within.
+              <div className="flex gap-4 justify-center">
+                <button
+                  onClick={onConfirmEnter}
+                  className={`${isPlayerHome
+                    ? 'bg-emerald-700 hover:bg-emerald-600'
+                    : 'bg-amber-900 hover:bg-amber-800'
+                  } text-white px-10 py-3 rounded-full tracking-widest transition-all shadow-lg active:scale-95`}
+                >
+                  {isPlayerHome ? 'ENTER' : 'YES'}
+                </button>
+                <button
+                  onClick={onCloseEnterModal}
+                  className={`bg-transparent border-2 ${isPlayerHome
+                    ? 'border-emerald-700 text-emerald-800 hover:bg-emerald-700/10'
+                    : 'border-amber-900 text-amber-900 hover:bg-amber-900/10'
+                  } px-10 py-3 rounded-full tracking-widest transition-all active:scale-95`}
+                >
+                  NOT NOW
+                </button>
+              </div>
+
+              <div className={`mt-8 text-[10px] uppercase tracking-widest ${
+                isPlayerHome ? 'text-emerald-700/50' : 'text-amber-900/40'
+              }`}>
+                {isPlayerHome ? 'Home is where the heart finds rest.' : 'Seek refuge or seek fortune within.'}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Merchant Modal */}
       {!observeMode && showMerchantModal && nearMerchant && (
@@ -373,6 +440,7 @@ export const AppShell = React.memo(({
           onClose={onCloseMerchant}
           onPurchase={onPurchase}
           onSell={onSell}
+          onCompound={onCompound}
         />
       )}
 
@@ -383,6 +451,20 @@ export const AppShell = React.memo(({
           onAccept={onLootAccept}
           onDecline={onLootDecline}
           onClose={onLootClose}
+        />
+      )}
+
+      {/* Medical Treatment Modal */}
+      {!observeMode && medicalModal && (
+        <MedicalTreatmentModal
+          isOpen={medicalModal.isOpen}
+          establishmentType={medicalModal.establishmentType}
+          practitionerName={medicalModal.practitionerName}
+          playerPlague={plague}
+          playerCurrency={playerCurrency}
+          playerSkinTone={playerSkinTone}
+          onTreatment={onMedicalTreatment}
+          onClose={onCloseMedicalModal}
         />
       )}
 
@@ -418,13 +500,35 @@ export const AppShell = React.memo(({
       )}
 
       {/* NPC Speak Prompt - clickable for mobile (only when no merchant nearby) */}
-      {!observeMode && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
+      {!observeMode && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !nearRooftopHatch && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerSpeakToNpc}
           className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           Speak to {nearSpeakableNpc.stats.name}
+        </button>
+      )}
+
+      {/* Rooftop Hatch Entry Prompt - outdoor only, when on rooftop near hatch */}
+      {!observeMode && sceneMode === 'outdoor' && nearRooftopHatch && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
+        <button
+          onClick={onTriggerEnterViaRooftopHatch}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-sky-600/60 text-sky-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[E]</span>
+          Enter through roof hatch
+        </button>
+      )}
+
+      {/* Medical Treatment Prompt - interior medical buildings (always visible) */}
+      {!observeMode && sceneMode === 'interior' && isInMedicalBuilding && !medicalModal && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && onTriggerMedicalTreatment && (
+        <button
+          onClick={onTriggerMedicalTreatment}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-emerald-600/60 text-emerald-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-emerald-900/40 hover:border-emerald-500/70 active:bg-emerald-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[T]</span>
+          Seek Medical Treatment
         </button>
       )}
 
@@ -440,13 +544,24 @@ export const AppShell = React.memo(({
       )}
 
       {/* Stairs/Ladder Interaction Prompt - interior only */}
-      {!observeMode && sceneMode === 'interior' && nearStairs && !nearChest && !nearBirdcage && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
+      {!observeMode && sceneMode === 'interior' && nearStairs && !nearChest && !nearBirdcage && !nearRoofHatch && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
         <button
           onClick={onTriggerUseStairs}
           className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           {stairsPromptLabel ?? 'Use stairs'}
+        </button>
+      )}
+
+      {/* Roof Hatch Interaction Prompt - interior only, top floor */}
+      {!observeMode && sceneMode === 'interior' && nearRoofHatch && !nearChest && !nearBirdcage && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
+        <button
+          onClick={onTriggerExitViaRoofHatch}
+          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-sky-600/60 text-sky-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+        >
+          <span className="hidden md:inline opacity-60 mr-1">[E]</span>
+          {roofHatchPromptLabel ?? 'Climb to rooftop'}
         </button>
       )}
 
@@ -515,6 +630,15 @@ export const AppShell = React.memo(({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Treatment Outcome Modal */}
+      {treatmentOutcome && (
+        <TreatmentOutcomeModal
+          outcome={treatmentOutcome}
+          onClose={onCloseTreatmentOutcome}
+          playerSkinTone={playerSkinTone}
+        />
       )}
 
       {/* Toast Notifications */}

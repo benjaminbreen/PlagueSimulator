@@ -11,7 +11,8 @@ import {
   PlayerStats,
   SocialClass,
   ConversationMessage,
-  ConversationSummary
+  ConversationSummary,
+  FamilyMember
 } from '../types';
 
 // Friendliness levels for greeting selection
@@ -38,6 +39,15 @@ export function calculateEffectiveFriendliness(
   player: PlayerStats,
   conversationHistory?: ConversationSummary[]
 ): number {
+  // Check if NPC is a family member - family always has very high friendliness
+  const familyMember = player.familyMembers?.find(m => m.npcId === npc.id);
+  if (familyMember && familyMember.alive) {
+    // Family members are inherently friendly - start at 90+
+    // Still allow some variation based on disposition
+    const baseFamilyFriendliness = 90 + (npc.disposition - 70) / 3;
+    return clamp(Math.round(baseFamilyFriendliness), 85, 100);
+  }
+
   // Base: NPC's innate disposition (0-100)
   let friendliness = npc.disposition;
 

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { CONSTANTS, BuildingMetadata, DistrictType } from '../../types';
 import { TerrainHeightmap } from '../../utils/terrain';
 import { ClimbableAccessory } from './climbables';
+import { RooftopHatches } from './RooftopHatches';
 import { MosqueBackground } from './landmarks/MosqueBackground';
 import { HorizonBackdrop } from './landmarks/HorizonBackdrop';
 import { ComponentType } from 'react';
@@ -78,6 +79,7 @@ export const EnvironmentBase: React.FC<EnvironmentBaseProps> = ({
     {climbables.map((accessory) => (
       <ClimbableAccessory key={accessory.id} accessory={accessory} nightFactor={nightFactor} />
     ))}
+    <RooftopHatches climbables={climbables} />
     <MosqueBackground mapX={mapX} mapY={mapY} />
     <HorizonBackdrop
       timeOfDay={timeOfDay}

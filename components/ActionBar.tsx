@@ -3,6 +3,7 @@ import { ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerStats, ItemAppearance 
 import { AlertTriangle, Heart, Eye, Sparkles, Coins, Cross, Package, Hand } from 'lucide-react';
 import { NarratorPanel } from './NarratorPanel';
 import { NarratorInput } from './NarratorInput';
+import { ItemIcon } from './items/ItemIcon';
 
 interface ActionBarProps {
   actionSlots: ActionSlotState;
@@ -88,10 +89,10 @@ const ActionButton: React.FC<ActionButtonProps> = ({
         onClick={() => isReady && onTrigger()}
         disabled={!isReady}
         className={`
-          relative w-14 h-14 rounded-lg
+          relative w-12 h-12 rounded-lg
           bg-black/50 backdrop-blur-md
           border transition-all duration-200
-          flex flex-col items-center justify-center gap-0.5
+          flex items-center justify-center
           ${isReady
             ? 'border-amber-700/40 hover:border-amber-500/60 hover:bg-amber-900/20 cursor-pointer'
             : 'border-gray-700/30 cursor-not-allowed opacity-60'}
@@ -110,7 +111,7 @@ const ActionButton: React.FC<ActionButtonProps> = ({
 
         {/* Icon */}
         <div className={`relative z-10 ${isReady ? 'text-amber-400' : 'text-gray-500'}`}>
-          {getActionIcon(action.icon, 20)}
+          {getActionIcon(action.icon, 22)}
         </div>
 
         {/* Hotkey badge */}
@@ -176,17 +177,17 @@ const PushButton: React.FC<PushButtonProps> = ({ onTrigger }) => {
       <button
         onClick={onTrigger}
         className="
-          relative w-14 h-14 rounded-lg
+          relative w-12 h-12 rounded-lg
           bg-black/50 backdrop-blur-md
           border border-amber-700/40 hover:border-amber-500/60 hover:bg-amber-900/20
           transition-all duration-200
-          flex flex-col items-center justify-center gap-0.5
+          flex items-center justify-center
           hover:scale-105 active:scale-95 cursor-pointer
         "
       >
         {/* Icon */}
         <div className="relative z-10 text-amber-400">
-          <Hand size={20} />
+          <Hand size={22} />
         </div>
 
         {/* Hotkey badge */}
@@ -289,30 +290,6 @@ export const ActionBar: React.FC<ActionBarProps> = ({
     });
   }
 
-  const getItemIcon = (name: string) => {
-    const lower = name.toLowerCase();
-    if (lower.includes('dagger') || lower.includes('scimitar') || lower.includes('sword')) return '🗡️';
-    if (lower.includes('iron nail') || lower.includes('nail')) return '🔨';
-    if (lower.includes('olive')) return '🫒';
-    if (lower.includes('lemon')) return '🍋';
-    if (lower.includes('fig') || lower.includes('dates') || lower.includes('apricot')) return '🍇';
-    if (lower.includes('bread')) return '🥖';
-    if (lower.includes('satchel') || lower.includes('bag')) return '🧺';
-    if (lower.includes('water') || lower.includes('waterskin')) return '🪣';
-    if (lower.includes('herb') || lower.includes('spice') || lower.includes('mint') || lower.includes('cumin') || lower.includes('cardamom') || lower.includes('saffron')) return '🫙';
-    if (lower.includes('incense') || lower.includes('resin') || lower.includes('myrrh')) return '🪔';
-    if (lower.includes('candle')) return '🕯️';
-    if (lower.includes('lamp') || lower.includes('ewer') || lower.includes('bowl') || lower.includes('plate') || lower.includes('vessel') || lower.includes('amphora')) return '🏺';
-    if (lower.includes('cloth') || lower.includes('robe') || lower.includes('headscarf') || lower.includes('tunic') || lower.includes('cloak') || lower.includes('kaftan')) return '🧵';
-    if (lower.includes('manuscript') || lower.includes('book') || lower.includes('ledger')) return '📜';
-    if (lower.includes('bell')) return '🔔';
-    if (lower.includes('mirror')) return '🪞';
-    if (lower.includes('rug') || lower.includes('carpet')) return '🧿';
-    if (lower.includes('perfume') || lower.includes('rose water')) return '🧴';
-    if (lower.includes('twine') || lower.includes('rope')) return '🪢';
-    return '📦';
-  };
-
   React.useEffect(() => {
     if (!dragging) return;
     const handleMove = (event: PointerEvent) => {
@@ -381,8 +358,8 @@ export const ActionBar: React.FC<ActionBarProps> = ({
           className="fixed z-[120] pointer-events-none"
           style={{ left: dragPosition.x - 24, top: dragPosition.y - 24 }}
         >
-          <div className="h-12 w-12 rounded-xl border border-amber-400/50 bg-black/80 text-amber-100 flex items-center justify-center text-xl shadow-[0_0_20px_rgba(245,158,11,0.35)]">
-            {getItemIcon(dragItemRef.current.name)}
+          <div className="h-12 w-12 rounded-xl border border-amber-400/50 bg-black/80 text-amber-100 flex items-center justify-center shadow-[0_0_20px_rgba(245,158,11,0.35)]">
+            <ItemIcon name={dragItemRef.current.name} size={32} />
           </div>
         </div>
       )}
@@ -406,7 +383,7 @@ export const ActionBar: React.FC<ActionBarProps> = ({
       </div>
       <div
         className={`
-          absolute bottom-20 md:bottom-24 right-0 w-[280px] md:w-[360px]
+          absolute bottom-16 md:bottom-16 right-0 w-[280px] md:w-[360px]
           max-w-[85vw]
           rounded-2xl border border-amber-700/40
           bg-black/85 backdrop-blur-lg shadow-2xl
@@ -453,9 +430,11 @@ export const ActionBar: React.FC<ActionBarProps> = ({
                   flex flex-col items-center justify-center gap-1 text-[10px] transition-all
                 `}
               >
-                <div className="text-lg">{isEmpty ? '•' : getItemIcon(item.name)}</div>
-                <div className="text-[9px] uppercase tracking-widest text-amber-200/70">
-                  {isEmpty ? 'Empty' : item.name.length > 10 ? `${item.name.slice(0, 9)}…` : item.name}
+                <div className="h-7 w-7 flex items-center justify-center">
+                  {isEmpty ? <span className="text-lg text-amber-200/20">•</span> : <ItemIcon name={item.name} size={28} />}
+                </div>
+                <div className="text-[8px] uppercase tracking-widest text-amber-200/70 truncate max-w-[60px]">
+                  {isEmpty ? 'Empty' : item.name.length > 8 ? `${item.name.slice(0, 7)}…` : item.name}
                 </div>
               </button>
             );
@@ -531,16 +510,16 @@ export const ActionBar: React.FC<ActionBarProps> = ({
           <button
             onClick={() => setShowInventory((prev) => !prev)}
             className={`
-              relative w-14 h-14 rounded-lg
+              relative w-12 h-12 rounded-lg
               bg-black/50 backdrop-blur-md
               border transition-all duration-200
-              flex flex-col items-center justify-center gap-0.5
+              flex items-center justify-center
               border-amber-700/40 hover:border-amber-500/60 hover:bg-amber-900/20
               hover:scale-105 active:scale-95
             `}
           >
             <div className="relative z-10 text-amber-400">
-              <Package size={20} />
+              <Package size={22} />
             </div>
             <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center bg-amber-600 text-white">
               2
@@ -596,10 +575,6 @@ export const ActionBar: React.FC<ActionBarProps> = ({
         />
       </div>
 
-      {/* Label - desktop only */}
-      <div className="hidden md:block text-center mt-1.5">
-        <span className="text-[8px] text-amber-600/40 uppercase tracking-[0.2em]">Actions</span>
-      </div>
     </div>
   );
 };

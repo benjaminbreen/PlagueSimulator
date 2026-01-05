@@ -28,7 +28,7 @@ const EntryCard: React.FC<{
   return (
     <button
       onClick={onSelect}
-      className={`w-full text-left p-3 rounded-lg transition-all group border ${accentColors}`}
+      className={`w-full text-left p-2.5 mt-1.5 rounded-lg transition-all group border ${accentColors}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
@@ -40,11 +40,11 @@ const EntryCard: React.FC<{
               {entry.subtitle}
             </span>
           )}
-          <p className="text-xs text-amber-100/70 mt-1.5 line-clamp-2 leading-relaxed">
+          <p className="text-xs text-amber-100/70 mt-1 line-clamp-1 leading-relaxed">
             {entry.shortDescription}
           </p>
           {reason && (
-            <span className="text-[10px] text-amber-500/50 mt-1.5 inline-block uppercase tracking-wider">
+            <span className="text-[10px] text-amber-500/50 mt-1 inline-block uppercase tracking-wider">
               {reason}
             </span>
           )}

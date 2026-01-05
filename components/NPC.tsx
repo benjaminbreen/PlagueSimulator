@@ -210,6 +210,8 @@ interface NPCProps {
   npcStateOverride?: NpcStateOverride | null;
   /** Global cooldown ref shared across all NPCs to prevent approach spam */
   globalApproachCooldownRef?: React.MutableRefObject<number>;
+  /** NPC role - used for family member indicators */
+  role?: string;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
@@ -243,7 +245,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   actionEvent,
   showDemographicsOverlay = false,
   npcStateOverride,
-  globalApproachCooldownRef
+  globalApproachCooldownRef,
+  role
 }) => {
   const ENABLE_SIMPLE_LOD = true;
   const SIMPLE_LOD_DISTANCE = 60;
@@ -401,7 +404,20 @@ export const NPC: React.FC<NPCProps> = memo(({
     // Use stats.hairColor (includes age-based graying) or fallback to generated
     const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626', '#3a2c22'];
     const hair = stats.hairColor ?? hairPalette[Math.floor(seededRandom(seed + 17) * hairPalette.length)];
-    const scarfPalette = ['#d6c2a4', '#c7b08c', '#c2a878', '#bfa57e', '#e1d3b3'];
+    // Headscarf colors vary by social class - historically accurate Damascus 1348
+    const getScarfPaletteByClass = () => {
+      if (stats.socialClass === 'wealthy' || stats.socialClass === 'elite') {
+        // Rich dyes: deep reds (madder), blues (indigo), purples (rare), blacks (mourning/status)
+        return ['#8b3a3a', '#7b2e2e', '#a84c4c', '#3a5f7a', '#2f4a5a', '#4a6a8a', '#4a3a5a', '#5a4a6a', '#1a1a1a', '#f5f0e8'];
+      } else if (stats.socialClass === 'merchant' || stats.socialClass === 'artisan') {
+        // Mid-range: browns, earth tones, muted greens, some reds
+        return ['#7a5a4a', '#6a4a3a', '#8a6a5a', '#5a7a5a', '#4a6a4a', '#8b4a3a', '#c7b08c', '#bfa57e', '#3a5a3a'];
+      } else {
+        // Common folk: undyed linens (cream/beige), cheap browns, occasional dark colors
+        return ['#d6c2a4', '#c2a878', '#e1d3b3', '#c7b08c', '#8a6a5a', '#6a5a4a', '#2a2a2a', '#e8e0d8'];
+      }
+    };
+    const scarfPalette = getScarfPaletteByClass();
     const scarf = scarfPalette[Math.floor(seededRandom(seed + 29) * scarfPalette.length)];
     const robePalette = ['#6f6a3f', '#7b5a4a', '#6b5a45', '#5c4b3a', '#4a4f59', '#8b5a4a', '#5a6e7a'];
     const accentPalette = ['#e1d3b3', '#d9c9a8', '#cbb58c', '#bfa57e', '#d6c8a8'];
@@ -426,8 +442,13 @@ export const NPC: React.FC<NPCProps> = memo(({
       accent = stats.robeAccentColor ?? (isOfficer ? '#b59b6a' : '#8b5e3c');
       headwear = stats.headwearColor ?? (isOfficer ? '#8b2e2e' : '#3a3a3a');
     }
-    return { skin, scarf, robe, accent, hair, headwear };
-  }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, idSeed]);
+    // Fabric roughness varies by social class: wealthy=silk (smooth), merchant=fine cotton, common=coarse linen
+    const scarfRoughness =
+      stats.socialClass === 'wealthy' || stats.socialClass === 'elite' ? 0.7 :
+      stats.socialClass === 'merchant' || stats.socialClass === 'artisan' ? 0.85 :
+      0.95;
+    return { skin, scarf, scarfRoughness, robe, accent, hair, headwear };
+  }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, stats.socialClass, idSeed]);
 
   // Apply mourning colors if NPC's building has deceased residents
   const mourningAdjustedColors = useMemo(() => {
@@ -1423,6 +1444,13 @@ export const NPC: React.FC<NPCProps> = memo(({
           <meshBasicMaterial color={getHealthRingColor(displayState)} transparent opacity={0.7} />
         </mesh>
       )}
+      {/* Family member indicator - teal/cyan ring */}
+      {role === 'family' && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+          <ringGeometry args={[0.5, 0.7, 32]} />
+          <meshBasicMaterial color="#20b2aa" transparent opacity={0.65} side={2} />
+        </mesh>
+      )}
         <group ref={impactGroupRef} position={[0, 2.6, 0]} visible={false}>
           <mesh>
             <cylinderGeometry args={[0.05, 0.05, 0.35, 8]} />
@@ -1448,6 +1476,7 @@ export const NPC: React.FC<NPCProps> = memo(({
           headColor={appearance.skin}
           turbanColor={appearance.headwear}
           headscarfColor={appearance.scarf}
+          headscarfRoughness={appearance.scarfRoughness}
           robeAccentColor={mourningAdjustedColors.accent}
           hairColor={appearance.hair}
           gender={stats.gender}
@@ -1463,6 +1492,7 @@ export const NPC: React.FC<NPCProps> = memo(({
           sashPattern={stats.sashPattern}
           hairStyle={stats.hairStyle}
           headwearStyle={stats.headwearStyle}
+          headscarfStyle={stats.headscarfStyle}
           facialHair={stats.facialHair}
           sleeveCoverage={stats.sleeveCoverage}
           footwearStyle={stats.footwearStyle}
@@ -1486,6 +1516,9 @@ export const NPC: React.FC<NPCProps> = memo(({
           animationLodDistance={ANIMATION_LOD_DISTANCE}
           shadowLodDistance={SHADOW_LOD_DISTANCE}
           shadowMode="proxy"
+          // Gaze tracking - only for nearby NPCs (perf safeguard)
+          gazeTarget={distanceFromCameraRef.current < 12 && playerRef?.current ? playerRef.current.position : undefined}
+          worldPosition={distanceFromCameraRef.current < 12 ? currentPosRef.current : undefined}
         />
         {stats.heldItem && stats.heldItem !== 'none' && (
           <group ref={propGroupRef} position={[0.38, 1.02, 0.15]}>
