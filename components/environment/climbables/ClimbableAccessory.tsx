@@ -33,10 +33,6 @@ export const ClimbableAccessory: React.FC<ClimbableAccessoryProps> = ({
       // TODO: Implement MashrabiyaBalcony component
       return null;
 
-    case 'LEAN_TO':
-      // TODO: Implement LeanToShade component
-      return null;
-
     default:
       return null;
   }

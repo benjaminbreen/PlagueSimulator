@@ -28,6 +28,9 @@ interface CourtyardBuildingProps {
   wireColor: string;
   labelEnabled: boolean;
   wireframeEnabled: boolean;
+  selectionEnabled: boolean;
+  isSelected: boolean;
+  onSelectBuilding?: (buildingId: string | null) => void;
   hovered: boolean;
   setHovered: React.Dispatch<React.SetStateAction<boolean>>;
   groupRef: React.MutableRefObject<THREE.Group | null>;
@@ -48,6 +51,9 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
   wireColor,
   labelEnabled,
   wireframeEnabled,
+  selectionEnabled,
+  isSelected,
+  onSelectBuilding,
   hovered,
   setHovered,
   groupRef,
@@ -68,6 +74,9 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
   const hasMashrabiya = seededRandom(localSeed + 411) > 0.45;
   const hasAblaqBand = seededRandom(localSeed + 413) > 0.35;
   const hasLintel = seededRandom(localSeed + 415) > 0.3;
+  const showSelected = selectionEnabled && isSelected;
+  const showLabel = (labelEnabled && hovered) || showSelected;
+  const showWireframe = (wireframeEnabled && hovered) || showSelected;
 
   const floorMat = otherMaterials?.courtyardFloor ?? new THREE.MeshStandardMaterial({ color: '#d7cfbf', roughness: 0.95, metalness: 0 });
   const vineMat = otherMaterials?.vine ?? new THREE.MeshStandardMaterial({ color: '#3a5a3c', roughness: 0.9, metalness: 0 });
@@ -96,8 +105,13 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
         e.stopPropagation();
         setHovered(false);
       }}
+      onPointerDown={(e) => {
+        if (!selectionEnabled) return;
+        e.stopPropagation();
+        onSelectBuilding?.(data.id);
+      }}
     >
-      {labelEnabled && hovered && (
+      {showLabel && (
         <HoverLabel
           title={data.type === BuildingType.COMMERCIAL ? 'Merchant Residence' : 'Courtyard House'}
           lines={[
@@ -109,7 +123,7 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
           offset={[0, finalHeight / 2 + 1.4, 0]}
         />
       )}
-      {wireframeEnabled && hovered && (
+      {showWireframe && (
         <>
           <HoverOutlineBox size={[finalBuildingSize * 1.02, finalHeight * 1.02, finalBuildingSize * 1.02]} color={wireColor} />
           <HoverOutlineBox size={[finalBuildingSize * 1.06, finalHeight * 1.06, finalBuildingSize * 1.06]} color={wireColor} opacity={0.35} />

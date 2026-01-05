@@ -176,7 +176,7 @@ export function calculateClimbingPosition(
   let z = baseZ;
 
   // For staircases, player moves along the stair path (away from wall) as they climb
-  const isStaircase = climbable.type === 'STONE_STAIRCASE' || climbable.type === 'LEAN_TO';
+  const isStaircase = climbable.type === 'STONE_STAIRCASE';
   const stairDepthOffset = isStaircase ? progress * climbable.depth : 0;
 
   // Player stands OUTSIDE the building, offset away from the wall

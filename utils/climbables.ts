@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { seededRandom } from './procedural';
 import { getBuildingHeight } from './buildingHeights';
+import { getBuildingMultipliers } from './buildingArchitecture';
 
 // ==================== PLACEMENT RULES ====================
 
@@ -38,11 +39,9 @@ const DISTRICT_RULES: Record<DistrictType, ClimbableRule[]> = {
   ],
   HOVELS: [
     { type: 'WOODEN_LADDER', probability: 0.6, minStories: 1, maxPerBuilding: 2 },
-    { type: 'LEAN_TO', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
   ],
   ALLEYS: [
     { type: 'WOODEN_LADDER', probability: 0.6, minStories: 1, maxPerBuilding: 2 },
-    { type: 'LEAN_TO', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
   ],
   JEWISH_QUARTER: [
     { type: 'STONE_STAIRCASE', probability: 0.5, minStories: 2, maxPerBuilding: 1 },
@@ -51,22 +50,18 @@ const DISTRICT_RULES: Record<DistrictType, ClimbableRule[]> = {
   ],
   MARKET: [
     { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
-    { type: 'LEAN_TO', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
     { type: 'GRAPE_TRELLIS', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
   ],
   STRAIGHT_STREET: [
     { type: 'WOODEN_LADDER', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
-    { type: 'LEAN_TO', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
     { type: 'GRAPE_TRELLIS', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
   ],
   SOUQ_AXIS: [
     { type: 'WOODEN_LADDER', probability: 0.35, minStories: 1, maxPerBuilding: 1 },
-    { type: 'LEAN_TO', probability: 0.45, minStories: 1, maxPerBuilding: 1 },
     { type: 'GRAPE_TRELLIS', probability: 0.35, minStories: 1, maxPerBuilding: 1 },
   ],
   MIDAN: [
     { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
-    { type: 'LEAN_TO', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
   ],
   BAB_SHARQI: [
     { type: 'STONE_STAIRCASE', probability: 0.4, minStories: 2, maxPerBuilding: 1 },
@@ -82,7 +77,6 @@ const DISTRICT_RULES: Record<DistrictType, ClimbableRule[]> = {
   ],
   OUTSKIRTS_FARMLAND: [
     { type: 'WOODEN_LADDER', probability: 0.7, minStories: 1, maxPerBuilding: 1 },
-    { type: 'LEAN_TO', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
   ],
   OUTSKIRTS_DESERT: [
     { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
@@ -96,7 +90,6 @@ const DISTRICT_RULES: Record<DistrictType, ClimbableRule[]> = {
   ],
   SOUTHERN_ROAD: [
     { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
-    { type: 'LEAN_TO', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
   ],
   CHRISTIAN_QUARTER: [
     { type: 'STONE_STAIRCASE', probability: 0.5, minStories: 2, maxPerBuilding: 1 },
@@ -143,7 +136,8 @@ function calculateWallPosition(
   district: DistrictType
 ): [number, number, number] {
   const districtScale = getDistrictScale(district);
-  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1);
+  const { footprintScale } = getBuildingMultipliers(building);
+  const buildingSize = CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1) * footprintScale;
   const halfSize = buildingSize / 2;
   const [bx, , bz] = building.position;
 
@@ -177,9 +171,10 @@ function createClimbable(
   const config = CLIMBABLE_CONFIG[type];
   const rand = () => seededRandom(seed++);
   const districtScale = getDistrictScale(district);
+  const { footprintScale } = getBuildingMultipliers(building);
 
   // Calculate building half size (needed for roof entry calculations)
-  const buildingHalfSize = (CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1)) / 2;
+  const buildingHalfSize = (CONSTANTS.BUILDING_SIZE * districtScale * (building.sizeScale ?? 1) * footprintScale) / 2;
 
   // Vary dimensions slightly
   const width = config.baseWidth * (0.9 + rand() * 0.2);
@@ -190,12 +185,12 @@ function createClimbable(
   const stairStepDepth = 0.45;
   const stairStepCount = Math.max(4, Math.floor(height / stairStepHeight));
   const stairRun = stairStepCount * stairStepDepth * 0.8;
-  const depth = (type === 'STONE_STAIRCASE' || type === 'LEAN_TO') ? stairRun : config.baseDepth;
+  const depth = type === 'STONE_STAIRCASE' ? stairRun : config.baseDepth;
 
   const basePosition = calculateWallPosition(building, wallSide, wallOffset, placementDepth, district);
 
   // For staircases, top position is offset by stair depth (they extend outward)
-  const isStaircase = type === 'STONE_STAIRCASE' || type === 'LEAN_TO';
+  const isStaircase = type === 'STONE_STAIRCASE';
   const stairTopOffset = isStaircase ? depth : 0;
 
   let topX = basePosition[0];
@@ -376,7 +371,7 @@ export function buildingHasExteriorLadder(
 ): boolean {
   return climbables.some(c =>
     c.buildingId === buildingId &&
-    (c.type === 'WOODEN_LADDER' || c.type === 'LEAN_TO')
+    c.type === 'WOODEN_LADDER'
   );
 }
 

@@ -98,6 +98,7 @@ function App() {
     selectedNpcRumors,
     setSelectedNpcRumors
   } = useEncounterState();
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
   const lastOutdoorIdsRef = useRef<string[]>([]);
   const lastStatsUpdateRef = useRef(0);
   const lastMoraleUpdateRef = useRef(0);
@@ -619,7 +620,10 @@ function App() {
     }
   }, [params.simulationSpeed, setParams]);
 
-  const handleClearSelectedNpc = useCallback(() => setSelectedNpc(null), []);
+  const handleClearSelectedNpc = useCallback(() => {
+    setSelectedNpc(null);
+    setSelectedBuildingId(null);
+  }, []);
   const handlePlayerPositionUpdate = useCallback((pos: THREE.Vector3) => {
     playerPositionRef.current.copy(pos);
   }, []);
@@ -3018,6 +3022,8 @@ function App() {
     onNpcSelect: handleNpcSelect,
     onNpcUpdate: handleNpcUpdate,
     selectedNpcId: selectedNpc?.stats.id ?? null,
+    selectedBuildingId,
+    onSelectBuilding: setSelectedBuildingId,
     onMinimapUpdate: setMinimapData,
     onPickupPrompt: setPickupPrompt,
     onClimbablePrompt: setClimbablePrompt,
@@ -3089,6 +3095,7 @@ function App() {
     params,
     performanceMonitorConfig,
     playerStats,
+    selectedBuildingId,
     sceneMode,
     selectedNpc?.stats.id,
     setIsClimbing,
@@ -3105,6 +3112,7 @@ function App() {
     setPushCharge,
     setCurrentWeather,
     setSelectedNpc,
+    setSelectedBuildingId,
     showDemographicsOverlay,
     showMerchantModal,
     showPlayerModal,

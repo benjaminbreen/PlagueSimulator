@@ -27,6 +27,9 @@ type EnvironmentBaseProps = {
   sessionSeed: number;
   climbables: import('../../types').ClimbableAccessory[];
   isSprinting?: boolean;
+  selectionEnabled?: boolean;
+  selectedBuildingId?: string | null;
+  onSelectBuilding?: (buildingId: string | null) => void;
   GroundComponent: ComponentType<any>;
   BuildingsComponent: ComponentType<any>;
 };
@@ -50,6 +53,9 @@ export const EnvironmentBase: React.FC<EnvironmentBaseProps> = ({
   sessionSeed,
   climbables,
   isSprinting,
+  selectionEnabled,
+  selectedBuildingId,
+  onSelectBuilding,
   GroundComponent,
   BuildingsComponent
 }) => (
@@ -75,6 +81,9 @@ export const EnvironmentBase: React.FC<EnvironmentBaseProps> = ({
       nightFactor={nightFactor}
       heightmap={heightmap}
       isSprinting={isSprinting}
+      selectionEnabled={selectionEnabled}
+      selectedBuildingId={selectedBuildingId}
+      onSelectBuilding={onSelectBuilding}
     />
     {climbables.map((accessory) => (
       <ClimbableAccessory key={accessory.id} accessory={accessory} nightFactor={nightFactor} />

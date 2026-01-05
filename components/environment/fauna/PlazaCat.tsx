@@ -5,14 +5,10 @@ import { HoverLabel, HoverLabelContext, HoverWireframeContext, useHoverFade } fr
 
 // Cat color variants
 const CAT_VARIANTS = [
-  { name: 'Brown Tabby', primary: '#6b5a4b', secondary: '#4a3d32', eyeColor: '#3d5c3d' },
-  { name: 'Orange Tabby', primary: '#c4713b', secondary: '#8b4513', eyeColor: '#d4a017' },
-  { name: 'Gray Tabby', primary: '#6e6e6e', secondary: '#4a4a4a', eyeColor: '#7db37d' },
-  { name: 'Siamese', primary: '#e8dcc8', secondary: '#6b5344', eyeColor: '#4a90c2' },
-  { name: 'Tortoiseshell', primary: '#5c4033', secondary: '#c4713b', eyeColor: '#d4a017' },
   { name: 'Black', primary: '#1a1a1a', secondary: '#0a0a0a', eyeColor: '#d4a017' },
-  { name: 'White', primary: '#f0ebe0', secondary: '#d8d0c0', eyeColor: '#4a90c2' },
-  { name: 'Ginger', primary: '#d4711a', secondary: '#a05010', eyeColor: '#3d5c3d' },
+  { name: 'Tabby', primary: '#6b5a4b', secondary: '#4a3d32', eyeColor: '#3d5c3d' },
+  { name: 'Gray', primary: '#6e6e6e', secondary: '#4a4a4a', eyeColor: '#7db37d' },
+  { name: 'Tuxedo', primary: '#151515', secondary: '#e6e0d6', eyeColor: '#4a90c2' },
 ];
 
 const CAT_HUNT_RANGE = 8.0;
@@ -23,6 +19,7 @@ const CAT_FLEE_SPEED = 1.8;
 const CAT_FLEE_RANGE = 3.0;
 const CAT_SPRINT_STARTLE_RANGE = 3.5;
 const CAT_COLLISION_RADIUS = 0.7;
+const CAT_FACE_YAW_OFFSET = Math.PI / 2;
 
 export interface BallPhysics {
   position: THREE.Vector3;
@@ -49,6 +46,7 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
   const tailSegments = useRef<THREE.Group[]>([]);
   const legRefs = useRef<{ upper: THREE.Group; lower: THREE.Group }[]>([]);
   const earRefs = useRef<THREE.Mesh[]>([]);
+  const lookTargetRef = useRef(new THREE.Vector3());
   const wireframeEnabled = useContext(HoverWireframeContext);
   const labelEnabled = useContext(HoverLabelContext);
   const [hovered, setHovered] = useState(false);
@@ -203,6 +201,12 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       }
     }
 
+    const faceTarget = (target: THREE.Vector3) => {
+      lookTargetRef.current.set(target.x, current.y, target.z);
+      groupRef.current.lookAt(lookTargetRef.current);
+      groupRef.current.rotation.y += CAT_FACE_YAW_OFFSET;
+    };
+
     const breathScale = 1 + Math.sin(state.current.breathCycle * 2) * 0.015;
     bodyRef.current.scale.setScalar(breathScale);
 
@@ -245,7 +249,7 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       const phase = t < 0.3 ? 'aim' : (t < 0.6 ? 'swipe' : 'follow');
 
       if (phase === 'aim') {
-        groupRef.current.lookAt(new THREE.Vector3(ball.position.x, current.y, ball.position.z));
+        faceTarget(ball.position);
 
         if (headRef.current) {
           headRef.current.rotation.y = 0;
@@ -553,7 +557,7 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
         current.copy(nextPos);
       }
 
-      groupRef.current.lookAt(new THREE.Vector3(target.x, current.y, target.z));
+      faceTarget(target);
       state.current.walkCycle += delta * 18;
 
       if (headRef.current) {
@@ -617,7 +621,7 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
         current.copy(nextPos);
       }
 
-      groupRef.current.lookAt(new THREE.Vector3(target.x, current.y, target.z));
+      faceTarget(target);
       state.current.walkCycle += delta * 14;
 
       if (headRef.current) {
@@ -657,11 +661,33 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
       }
       dir.normalize();
       const nextPos = current.clone().add(dir.multiplyScalar(delta * CAT_WALK_SPEED));
-      if (!isPositionBlocked(nextPos)) {
+      if (isPositionBlocked(nextPos)) {
+        let foundPath = false;
+        const angles = [Math.PI / 4, -Math.PI / 4, Math.PI / 2, -Math.PI / 2];
+        for (const angleOffset of angles) {
+          const altDir = dir.clone();
+          const cos = Math.cos(angleOffset);
+          const sin = Math.sin(angleOffset);
+          const newX = altDir.x * cos - altDir.z * sin;
+          const newZ = altDir.x * sin + altDir.z * cos;
+          altDir.set(newX, 0, newZ);
+          const altPos = current.clone().add(altDir.multiplyScalar(delta * CAT_WALK_SPEED));
+          if (!isPositionBlocked(altPos)) {
+            current.copy(altPos);
+            foundPath = true;
+            break;
+          }
+        }
+        if (!foundPath) {
+          state.current.targetIndex = (state.current.targetIndex + 1) % waypoints.length;
+          state.current.timer = 1 + Math.random() * 2;
+          return;
+        }
+      } else {
         current.copy(nextPos);
       }
 
-      groupRef.current.lookAt(new THREE.Vector3(target.x, current.y, target.z));
+      faceTarget(target);
 
       if (headRef.current) {
         headRef.current.rotation.y = Math.sin(state.current.walkCycle * 0.3) * 0.08;
@@ -699,7 +725,7 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
         />
       )}
 
-      <group ref={bodyRef} position={[0, 0.12, 0]} rotation={[0, Math.PI / 2, 0]}>
+      <group ref={bodyRef} position={[0, 0.12, 0]}>
         <mesh position={[0, 0.12, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
           <capsuleGeometry args={[0.07, 0.24, 6, 10]} />
           {furMaterial}
@@ -717,36 +743,31 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
 
         <group ref={headRef} position={[0.2, 0.13, 0]}>
           <mesh castShadow>
-            <sphereGeometry args={[0.065, 10, 10]} />
+            <sphereGeometry args={[0.055, 10, 10]} />
             {furMaterial}
           </mesh>
 
-          <mesh position={[0.07, -0.01, 0]} castShadow>
-            <boxGeometry args={[0.07, 0.05, 0.05]} />
-            {darkFurMaterial}
-          </mesh>
-
-          <mesh position={[0.1, -0.01, 0]}>
-            <sphereGeometry args={[0.013, 6, 6]} />
-            <meshStandardMaterial color="#1a1a1a" roughness={0.4} />
+          <mesh position={[0.06, -0.006, 0]}>
+            <sphereGeometry args={[0.009, 6, 6]} />
+            <meshStandardMaterial color="#d18b8b" roughness={0.35} />
           </mesh>
 
           <mesh
             ref={el => { if (el) earRefs.current[0] = el; }}
             position={[-0.02, 0.06, 0.05]}
-            rotation={[0.2, 0, 0.4]}
+            rotation={[0.1, 0.3, 0.6]}
             castShadow
           >
-            <boxGeometry args={[0.03, 0.07, 0.02]} />
+            <coneGeometry args={[0.018, 0.07, 8]} />
             {darkFurMaterial}
           </mesh>
           <mesh
             ref={el => { if (el) earRefs.current[1] = el; }}
             position={[-0.02, 0.06, -0.05]}
-            rotation={[-0.2, 0, -0.4]}
+            rotation={[-0.1, -0.3, -0.6]}
             castShadow
           >
-            <boxGeometry args={[0.03, 0.07, 0.02]} />
+            <coneGeometry args={[0.018, 0.07, 8]} />
             {darkFurMaterial}
           </mesh>
 
@@ -812,25 +833,25 @@ export const PlazaCat: React.FC<PlazaCatProps> = ({ waypoints, seed = 0, catPosi
           </group>
         </group>
 
-        <group position={[-0.14, 0.1, 0]} rotation={[0, 0, 0.3]}>
+        <group position={[-0.16, 0.1, 0]} rotation={[0, 0, 0.25]}>
           <group ref={el => { if (el) tailSegments.current[0] = el; }}>
             <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
-              <capsuleGeometry args={[0.014, 0.035, 3, 6]} />
+              <capsuleGeometry args={[0.02, 0.08, 3, 6]} />
               {furMaterial}
             </mesh>
-            <group position={[-0.045, 0, 0]} ref={el => { if (el) tailSegments.current[1] = el; }}>
+            <group position={[-0.07, 0, 0]} ref={el => { if (el) tailSegments.current[1] = el; }}>
               <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
-                <capsuleGeometry args={[0.012, 0.03, 3, 6]} />
+                <capsuleGeometry args={[0.018, 0.075, 3, 6]} />
                 {furMaterial}
               </mesh>
-              <group position={[-0.04, 0, 0]} ref={el => { if (el) tailSegments.current[2] = el; }}>
+              <group position={[-0.065, 0, 0]} ref={el => { if (el) tailSegments.current[2] = el; }}>
                 <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
-                  <capsuleGeometry args={[0.01, 0.025, 3, 6]} />
+                  <capsuleGeometry args={[0.016, 0.07, 3, 6]} />
                   {furMaterial}
                 </mesh>
-                <group position={[-0.035, 0, 0]} ref={el => { if (el) tailSegments.current[3] = el; }}>
+                <group position={[-0.055, 0, 0]} ref={el => { if (el) tailSegments.current[3] = el; }}>
                   <mesh rotation={[0, 0, Math.PI / 2]} castShadow>
-                    <capsuleGeometry args={[0.006, 0.02, 3, 6]} />
+                    <capsuleGeometry args={[0.012, 0.06, 3, 6]} />
                     {darkFurMaterial}
                   </mesh>
                 </group>

@@ -543,8 +543,7 @@ export type ClimbableType =
   | 'STONE_STAIRCASE'    // External stairs to rooftops (common, multi-story buildings)
   | 'WOODEN_LADDER'      // Removable ladders (poor homes, storage access)
   | 'GRAPE_TRELLIS'      // Wooden frame on walls (ubiquitous in Damascus)
-  | 'MASHRABIYA'         // Lattice balcony projections (wealthy/commercial)
-  | 'LEAN_TO';           // Reed/wood shade structures (markets, poor districts)
+  | 'MASHRABIYA';        // Lattice balcony projections (wealthy/commercial)
 
 export interface ClimbableAccessory {
   id: string;
@@ -618,13 +617,6 @@ export const CLIMBABLE_CONFIG: Record<ClimbableType, {
     baseWidth: 2.5,
     baseHeight: 1.8,
     baseDepth: 1.2,
-  },
-  LEAN_TO: {
-    climbSpeed: 3.5,
-    requiresHold: false,
-    baseWidth: 2.5,
-    baseHeight: 2.5,
-    baseDepth: 2.0,
   },
 };
 

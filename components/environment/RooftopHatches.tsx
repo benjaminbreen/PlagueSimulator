@@ -75,7 +75,7 @@ export const RooftopHatches: React.FC<RooftopHatchesProps> = ({ climbables }) =>
   const hatches = useMemo(() => {
     // Filter for ladder-type climbables that are marked as multi-story
     const eligibleClimbables = climbables.filter(c =>
-      (c.type === 'WOODEN_LADDER' || c.type === 'LEAN_TO') && c.isMultiStory
+      c.type === 'WOODEN_LADDER' && c.isMultiStory
     );
 
     // Group by building to avoid multiple hatches per building

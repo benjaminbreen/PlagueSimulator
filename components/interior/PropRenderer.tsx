@@ -2189,9 +2189,9 @@ const InteriorPropMesh: React.FC<{
             <meshStandardMaterial color={brassColor} roughness={0.45} metalness={0.85} />
           </mesh>
 
-          {/* Decorative base ring */}
-          <mesh position={[0, 0.07, 0]} receiveShadow castShadow>
-            <torusGeometry args={[0.26, 0.02, 8, 16]} />
+          {/* Decorative base ring - horizontal rim around bottom of base */}
+          <mesh position={[0, 0.01, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow castShadow>
+            <torusGeometry args={[0.33, 0.02, 8, 16]} />
             <meshStandardMaterial color={darkBrass} roughness={0.4} metalness={0.9} />
           </mesh>
 

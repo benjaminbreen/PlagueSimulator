@@ -256,6 +256,9 @@ interface EnvironmentProps {
   timeOfDay?: number;
   enableHoverWireframe?: boolean;
   enableHoverLabel?: boolean;
+  selectionEnabled?: boolean;
+  selectedBuildingId?: string | null;
+  onSelectBuilding?: (buildingId: string | null) => void;
   pushables?: PushableObject[];
   fogColor?: THREE.Color;
   heightmap?: TerrainHeightmap | null;
@@ -374,7 +377,10 @@ const Building: React.FC<{
   noiseTextures?: THREE.Texture[];
   grimeTexture?: THREE.Texture | null;
   allowOrnate: boolean;
-}> = ({ data, mainMaterial, otherMaterials, isNear, torchIntensity, district, nightFactor, noiseTextures, grimeTexture, allowOrnate }) => {
+  selectionEnabled?: boolean;
+  isSelected?: boolean;
+  onSelectBuilding?: (buildingId: string | null) => void;
+}> = ({ data, mainMaterial, otherMaterials, isNear, torchIntensity, district, nightFactor, noiseTextures, grimeTexture, allowOrnate, selectionEnabled = false, isSelected = false, onSelectBuilding }) => {
   const wireframeEnabled = useContext(HoverWireframeContext);
   const labelEnabled = useContext(HoverLabelContext);
   const [hovered, setHovered] = useState(false);
@@ -667,9 +673,12 @@ const Building: React.FC<{
   else if (data.doorSide === 2) doorPos[2] = -doorOffset; // S
   else if (data.doorSide === 3) doorPos[0] = -doorOffset; // W
 
-  const activeGlow = isNear || hovered;
+  const showSelected = selectionEnabled && isSelected;
+  const activeGlow = isNear || hovered || showSelected;
   const wireColor = data.isQuarantined ? HOVER_WIREFRAME_COLORS.danger : data.isPointOfInterest ? HOVER_WIREFRAME_COLORS.poi : HOVER_WIREFRAME_COLORS.default;
-  useHoverFade(groupRef, wireframeEnabled && hovered, 0.35);
+  const showWireframe = (wireframeEnabled && hovered) || showSelected;
+  const showLabel = (labelEnabled && hovered) || showSelected;
+  useHoverFade(groupRef, showWireframe, 0.35);
   // PERFORMANCE: Torches disabled (user reported 10 FPS)
   const torchCount = 0;
   const torchOffsets: [number, number, number][] = [];
@@ -762,6 +771,9 @@ const Building: React.FC<{
         wireColor={wireColor}
         labelEnabled={labelEnabled}
         wireframeEnabled={wireframeEnabled}
+        selectionEnabled={selectionEnabled}
+        isSelected={isSelected}
+        onSelectBuilding={onSelectBuilding}
         hovered={hovered}
         setHovered={setHovered}
         groupRef={groupRef}
@@ -783,8 +795,13 @@ const Building: React.FC<{
         e.stopPropagation();
         setHovered(false);
       }}
+      onPointerDown={(e) => {
+        if (!selectionEnabled) return;
+        e.stopPropagation();
+        onSelectBuilding?.(data.id);
+      }}
     >
-      {labelEnabled && hovered && (
+      {showLabel && (
         <HoverLabel
           title={
             data.type === BuildingType.RELIGIOUS ? 'Holy Sanctuary'
@@ -804,7 +821,7 @@ const Building: React.FC<{
           offset={[0, finalHeight / 2 + 1.4, 0]}
         />
       )}
-      {wireframeEnabled && hovered && (
+      {showWireframe && (
         <>
           <HoverOutlineBox size={[finalBuildingSize * 1.02, finalHeight * 1.02, finalBuildingSize * 1.02]} color={wireColor} />
           <HoverOutlineBox size={[finalBuildingSize * 1.06, finalHeight * 1.06, finalBuildingSize * 1.06]} color={wireColor} opacity={0.35} />
@@ -2342,7 +2359,10 @@ export const Buildings: React.FC<{
   nightFactor: number;
   heightmap?: TerrainHeightmap | null;
   isSprinting?: boolean;
-}> = ({ mapX, mapY, sessionSeed = 0, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap, isSprinting = false }) => {
+  selectionEnabled?: boolean;
+  selectedBuildingId?: string | null;
+  onSelectBuilding?: (buildingId: string | null) => void;
+}> = ({ mapX, mapY, sessionSeed = 0, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap, isSprinting = false, selectionEnabled = false, selectedBuildingId = null, onSelectBuilding }) => {
   // PERFORMANCE: Use cached textures instead of recreating on every mount
   const noiseTextures = CACHED_NOISE_TEXTURES;
   const grimeTexture = useMemo(() => createGrimeTexture(256), []);
@@ -2942,6 +2962,9 @@ export const Buildings: React.FC<{
           mainMaterial={materials.get(data.type) || materials.get(BuildingType.RESIDENTIAL)!}
           otherMaterials={otherMaterials}
           isNear={nearBuildingId === data.id}
+          selectionEnabled={selectionEnabled}
+          isSelected={selectionEnabled && selectedBuildingId === data.id}
+          onSelectBuilding={onSelectBuilding}
           torchIntensity={torchIntensity}
           district={district}
           nightFactor={nightFactor}
@@ -3304,7 +3327,7 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
 // CaravanseraiComplex extracted to ./environment/districts/CaravanseraiComplex.tsx
 
 
-export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, pushables = [], fogColor, heightmap, laundryLines = [], hangingCarpets = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true }) => {
+export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, selectionEnabled = false, selectedBuildingId = null, onSelectBuilding, pushables = [], fogColor, heightmap, laundryLines = [], hangingCarpets = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
   const terrainSeed = mapX * 1000 + mapY * 13 + 19;
@@ -3351,7 +3374,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
     // Mark climbables and buildings with rooftop hatch data
     // Only applies to multi-story buildings (matching interior hatch generation)
     for (const climbable of allClimbables) {
-      if (climbable.type === 'WOODEN_LADDER' || climbable.type === 'LEAN_TO') {
+      if (climbable.type === 'WOODEN_LADDER') {
         const building = buildingMap.get(climbable.buildingId);
         if (building) {
           const isMultiStory = buildingCanHaveRooftopHatch(building);
@@ -3361,11 +3384,12 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
           const baseHeight = getBuildingHeight(building, district);
           const { heightMultiplier } = getBuildingMultipliers(building);
           const finalHeight = baseHeight * heightMultiplier;
-          climbable.roofY = finalHeight;
+          const hatchYOffset = district === 'WEALTHY' ? 0.32 : 0;
+          climbable.roofY = finalHeight + hatchYOffset;
           if (isMultiStory && !building.hasRoofHatch) {
             const { position } = calculateRooftopHatchPosition(climbable);
             building.hasRoofHatch = true;
-            building.roofHatchWorldPos = [position[0], finalHeight, position[2]];
+            building.roofHatchWorldPos = [position[0], finalHeight + hatchYOffset, position[2]];
           }
         }
       }
@@ -3402,6 +3426,9 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
             sessionSeed={sessionSeed}
             climbables={climbablesForRendering}
             isSprinting={isSprinting}
+            selectionEnabled={selectionEnabled}
+            selectedBuildingId={selectedBuildingId}
+            onSelectBuilding={onSelectBuilding}
             GroundComponent={Ground}
             BuildingsComponent={Buildings}
           />

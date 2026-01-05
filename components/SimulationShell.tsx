@@ -29,6 +29,8 @@ interface SimulationShellProps {
   onNpcSelect: (npc: any | null) => void;
   onNpcUpdate: (npc: any) => void;
   selectedNpcId: string | null;
+  selectedBuildingId: string | null;
+  onSelectBuilding: (buildingId: string | null) => void;
   onMinimapUpdate: (data: any | null) => void;
   onPickupPrompt: (prompt: string | null) => void;
   onClimbablePrompt: (prompt: string | null) => void;
@@ -107,6 +109,8 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   onNpcSelect,
   onNpcUpdate,
   selectedNpcId,
+  selectedBuildingId,
+  onSelectBuilding,
   onMinimapUpdate,
   onPickupPrompt,
   onClimbablePrompt,
@@ -209,6 +213,8 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onNpcSelect={onNpcSelect}
             onNpcUpdate={onNpcUpdate}
             selectedNpcId={selectedNpcId}
+            selectedBuildingId={selectedBuildingId}
+            onSelectBuilding={onSelectBuilding}
             onMinimapUpdate={onMinimapUpdate}
             onPickupPrompt={onPickupPrompt}
             onClimbablePrompt={onClimbablePrompt}

@@ -12,16 +12,7 @@ export type WornItemType =
   | 'scimitar'
   | 'satchel'
   | 'amulet'
-  | 'key'
-  | 'writing_reed'
-  | 'hemp_rope'
-  | 'bronze_bell'
-  | 'herb_bundle'
-  | 'medicine_pouch'
-  | 'scroll'
-  | 'food_bundle'
-  | 'oil_lamp'
-  | 'small_pouch';
+  | 'oil_lamp';
 
 export interface WornItemConfig {
   type: WornItemType;
@@ -105,102 +96,12 @@ export const getWornItemConfig = (itemName: string): WornItemConfig | null => {
     };
   }
 
-  if (name.includes('key')) {
-    return {
-      type: 'key',
-      attachment: 'belt_left',
-      scale: 0.25,
-      offset: [-0.2, -0.15, 0.06],
-      rotation: [0, 0, Math.PI / 4]
-    };
-  }
-
-  if (name.includes('writing reed')) {
-    return {
-      type: 'writing_reed',
-      attachment: 'belt_right',
-      scale: 0.3,
-      offset: [0.22, 0.05, 0.05],
-      rotation: [0, 0, -Math.PI / 10]
-    };
-  }
-
-  if (name.includes('hemp rope') || name.includes('rope')) {
-    return {
-      type: 'hemp_rope',
-      attachment: 'belt_back',
-      scale: 0.35,
-      offset: [-0.15, -0.05, -0.08],
-      rotation: [Math.PI / 2, 0, 0]
-    };
-  }
-
-  if (name.includes('bell')) {
-    return {
-      type: 'bronze_bell',
-      attachment: 'belt_left',
-      scale: 0.3,
-      offset: [-0.22, -0.12, 0.1],
-      rotation: [0, 0, 0]
-    };
-  }
-
-  if (name.includes('mint') || name.includes('herb')) {
-    return {
-      type: 'herb_bundle',
-      attachment: 'belt_left',
-      scale: 0.35,
-      offset: [-0.15, 0.02, 0.1],
-      rotation: [0, 0, 0.2]
-    };
-  }
-
-  if (name.includes('theriac') || name.includes('camphor') || name.includes('myrrh')) {
-    return {
-      type: 'medicine_pouch',
-      attachment: 'belt_right',
-      scale: 0.32,
-      offset: [0.18, -0.05, 0.1],
-      rotation: [0, 0, 0]
-    };
-  }
-
-  if (name.includes('manuscript') || name.includes('scroll')) {
-    return {
-      type: 'scroll',
-      attachment: 'belt_back',
-      scale: 0.35,
-      offset: [0.12, 0.08, -0.1],
-      rotation: [0, 0, Math.PI / 8]
-    };
-  }
-
-  if (name.includes('dates') || name.includes('figs') || name.includes('apricot')) {
-    return {
-      type: 'food_bundle',
-      attachment: 'belt_left',
-      scale: 0.3,
-      offset: [-0.2, -0.08, 0.1],
-      rotation: [0, 0, 0]
-    };
-  }
-
   if (name.includes('oil lamp') || name.includes('brass lamp')) {
     return {
       type: 'oil_lamp',
       attachment: 'belt_right',
       scale: 0.28,
       offset: [0.2, -0.1, 0.08],
-      rotation: [0, 0, 0]
-    };
-  }
-
-  if (name.includes('pouch')) {
-    return {
-      type: 'small_pouch',
-      attachment: 'belt_left',
-      scale: 0.3,
-      offset: [-0.18, -0.08, 0.08],
       rotation: [0, 0, 0]
     };
   }
@@ -447,195 +348,6 @@ const WornAmulet: React.FC<{ scale: number }> = ({ scale }) => (
   </group>
 );
 
-// Iron key on belt
-const WornKey: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Key bow (handle ring) */}
-    <mesh position={[0, 0.2, 0]} castShadow>
-      <torusGeometry args={[0.08, 0.025, 8, 14]} />
-      <meshStandardMaterial color="#4a4a4a" roughness={0.5} metalness={0.7} />
-    </mesh>
-    {/* Key shank */}
-    <mesh position={[0, -0.05, 0]} castShadow>
-      <boxGeometry args={[0.035, 0.35, 0.02]} />
-      <meshStandardMaterial color="#4a4a4a" roughness={0.5} metalness={0.7} />
-    </mesh>
-    {/* Key bit (teeth) */}
-    <mesh position={[0.035, -0.2, 0]} castShadow>
-      <boxGeometry args={[0.05, 0.08, 0.02]} />
-      <meshStandardMaterial color="#4a4a4a" roughness={0.5} metalness={0.7} />
-    </mesh>
-    <mesh position={[-0.025, -0.18, 0]} castShadow>
-      <boxGeometry args={[0.03, 0.05, 0.02]} />
-      <meshStandardMaterial color="#4a4a4a" roughness={0.5} metalness={0.7} />
-    </mesh>
-  </group>
-);
-
-// Writing reed tucked in belt
-const WornWritingReed: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Main reed shaft */}
-    <mesh castShadow>
-      <cylinderGeometry args={[0.018, 0.025, 0.6, 8]} />
-      <meshStandardMaterial color="#c4a574" roughness={0.75} />
-    </mesh>
-    {/* Node rings */}
-    <mesh position={[0, 0.1, 0]}>
-      <torusGeometry args={[0.022, 0.005, 6, 10]} />
-      <meshStandardMaterial color="#a08060" roughness={0.7} />
-    </mesh>
-    <mesh position={[0, -0.1, 0]}>
-      <torusGeometry args={[0.02, 0.004, 6, 10]} />
-      <meshStandardMaterial color="#a08060" roughness={0.7} />
-    </mesh>
-    {/* Carved nib */}
-    <mesh position={[0, -0.32, 0]} castShadow>
-      <coneGeometry args={[0.018, 0.08, 6]} />
-      <meshStandardMaterial color="#8b7355" roughness={0.6} />
-    </mesh>
-  </group>
-);
-
-// Hemp rope coiled at belt
-const WornHempRope: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Coiled rope loops */}
-    {[0, 0.06, 0.12].map((y, i) => (
-      <mesh key={i} position={[0, y, 0]} castShadow>
-        <torusGeometry args={[0.15 - i * 0.02, 0.03, 8, 16]} />
-        <meshStandardMaterial color="#a08060" roughness={0.9} />
-      </mesh>
-    ))}
-    {/* Rope end hanging */}
-    <mesh position={[0.12, -0.08, 0]} rotation={[0, 0, 0.5]} castShadow>
-      <cylinderGeometry args={[0.025, 0.03, 0.2, 8]} />
-      <meshStandardMaterial color="#a08060" roughness={0.9} />
-    </mesh>
-  </group>
-);
-
-// Bronze bell hanging from belt
-const WornBronzeBell: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Bell body */}
-    <mesh position={[0, -0.08, 0]} castShadow>
-      <cylinderGeometry args={[0.03, 0.12, 0.18, 12]} />
-      <meshStandardMaterial color="#b87333" roughness={0.4} metalness={0.65} />
-    </mesh>
-    {/* Bell rim */}
-    <mesh position={[0, -0.18, 0]} castShadow>
-      <torusGeometry args={[0.11, 0.02, 8, 14]} />
-      <meshStandardMaterial color="#8b5a2b" roughness={0.45} metalness={0.6} />
-    </mesh>
-    {/* Handle loop */}
-    <mesh position={[0, 0.05, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-      <torusGeometry args={[0.04, 0.015, 6, 10]} />
-      <meshStandardMaterial color="#b87333" roughness={0.4} metalness={0.65} />
-    </mesh>
-    {/* Clapper inside (partially visible) */}
-    <mesh position={[0, -0.12, 0]} castShadow>
-      <sphereGeometry args={[0.03, 8, 6]} />
-      <meshStandardMaterial color="#4a4a4a" roughness={0.5} metalness={0.7} />
-    </mesh>
-  </group>
-);
-
-// Herb bundle (mint, etc.) tucked in belt
-const WornHerbBundle: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Tied stem bundle */}
-    <mesh position={[0, -0.1, 0]} castShadow>
-      <cylinderGeometry args={[0.04, 0.05, 0.15, 8]} />
-      <meshStandardMaterial color="#4a7a3a" roughness={0.75} />
-    </mesh>
-    {/* Twine tie */}
-    <mesh position={[0, -0.05, 0]}>
-      <torusGeometry args={[0.045, 0.012, 6, 10]} />
-      <meshStandardMaterial color="#8b7355" roughness={0.85} />
-    </mesh>
-    {/* Leaf clusters */}
-    {[[0, 0.08, 0], [-0.04, 0.04, 0.02], [0.03, 0.06, -0.02]].map((pos, i) => (
-      <mesh key={i} position={pos as [number, number, number]} castShadow>
-        <sphereGeometry args={[0.045, 8, 6]} />
-        <meshStandardMaterial color={i % 2 === 0 ? '#3d8b3d' : '#4a9a4a'} roughness={0.7} />
-      </mesh>
-    ))}
-  </group>
-);
-
-// Medicine pouch for apothecary items
-const WornMedicinePouch: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Leather pouch body */}
-    <mesh castShadow>
-      <boxGeometry args={[0.18, 0.22, 0.1]} />
-      <meshStandardMaterial color="#5c3a1e" roughness={0.85} />
-    </mesh>
-    {/* Flap */}
-    <mesh position={[0, 0.08, 0.06]} rotation={[-0.3, 0, 0]} castShadow>
-      <boxGeometry args={[0.19, 0.1, 0.02]} />
-      <meshStandardMaterial color="#4a2a10" roughness={0.85} />
-    </mesh>
-    {/* Buckle */}
-    <mesh position={[0, 0.02, 0.07]} castShadow>
-      <boxGeometry args={[0.05, 0.04, 0.015]} />
-      <meshStandardMaterial color="#b87333" roughness={0.4} metalness={0.6} />
-    </mesh>
-    {/* Stitching */}
-    <mesh position={[0.08, 0, 0.052]}>
-      <boxGeometry args={[0.01, 0.18, 0.005]} />
-      <meshStandardMaterial color="#3a2a1a" roughness={0.9} />
-    </mesh>
-  </group>
-);
-
-// Rolled scroll/manuscript tucked in belt
-const WornScroll: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Rolled parchment */}
-    <mesh castShadow>
-      <cylinderGeometry args={[0.05, 0.05, 0.35, 12]} />
-      <meshStandardMaterial color="#d4c4a8" roughness={0.8} />
-    </mesh>
-    {/* Decorative end caps */}
-    <mesh position={[0, 0.18, 0]} castShadow>
-      <cylinderGeometry args={[0.055, 0.055, 0.02, 10]} />
-      <meshStandardMaterial color="#8b6914" roughness={0.6} />
-    </mesh>
-    <mesh position={[0, -0.18, 0]} castShadow>
-      <cylinderGeometry args={[0.055, 0.055, 0.02, 10]} />
-      <meshStandardMaterial color="#8b6914" roughness={0.6} />
-    </mesh>
-    {/* Ribbon tie */}
-    <mesh position={[0, 0, 0.055]} castShadow>
-      <boxGeometry args={[0.08, 0.03, 0.01]} />
-      <meshStandardMaterial color="#8b0000" roughness={0.7} />
-    </mesh>
-  </group>
-);
-
-// Food bundle (dates, figs wrapped in cloth)
-const WornFoodBundle: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Cloth wrap - lumpy to suggest contents */}
-    <mesh castShadow>
-      <sphereGeometry args={[0.14, 12, 10]} />
-      <meshStandardMaterial color="#c4a882" roughness={0.9} />
-    </mesh>
-    {/* Tied top */}
-    <mesh position={[0, 0.12, 0]} castShadow>
-      <coneGeometry args={[0.06, 0.1, 8]} />
-      <meshStandardMaterial color="#b8986a" roughness={0.88} />
-    </mesh>
-    {/* Twine */}
-    <mesh position={[0, 0.08, 0]}>
-      <torusGeometry args={[0.055, 0.012, 6, 10]} />
-      <meshStandardMaterial color="#6a5a40" roughness={0.85} />
-    </mesh>
-  </group>
-);
-
 // Brass oil lamp at belt
 const WornOilLamp: React.FC<{ scale: number }> = ({ scale }) => (
   <group scale={scale}>
@@ -662,27 +374,6 @@ const WornOilLamp: React.FC<{ scale: number }> = ({ scale }) => (
   </group>
 );
 
-// Small pouch for cosmetics/small items
-const WornSmallPouch: React.FC<{ scale: number }> = ({ scale }) => (
-  <group scale={scale}>
-    {/* Rounded pouch */}
-    <mesh castShadow>
-      <sphereGeometry args={[0.1, 12, 10]} />
-      <meshStandardMaterial color="#6a4a2a" roughness={0.88} />
-    </mesh>
-    {/* Gathered top */}
-    <mesh position={[0, 0.08, 0]} castShadow>
-      <cylinderGeometry args={[0.04, 0.07, 0.06, 8]} />
-      <meshStandardMaterial color="#5a3a1a" roughness={0.88} />
-    </mesh>
-    {/* Drawstring */}
-    <mesh position={[0, 0.06, 0]}>
-      <torusGeometry args={[0.055, 0.01, 6, 10]} />
-      <meshStandardMaterial color="#3a2a1a" roughness={0.85} />
-    </mesh>
-  </group>
-);
-
 // Main worn item renderer
 export const WornItemMesh: React.FC<{
   type: WornItemType;
@@ -703,26 +394,8 @@ export const WornItemMesh: React.FC<{
       return <WornSatchel scale={scale} />;
     case 'amulet':
       return <WornAmulet scale={scale} />;
-    case 'key':
-      return <WornKey scale={scale} />;
-    case 'writing_reed':
-      return <WornWritingReed scale={scale} />;
-    case 'hemp_rope':
-      return <WornHempRope scale={scale} />;
-    case 'bronze_bell':
-      return <WornBronzeBell scale={scale} />;
-    case 'herb_bundle':
-      return <WornHerbBundle scale={scale} />;
-    case 'medicine_pouch':
-      return <WornMedicinePouch scale={scale} />;
-    case 'scroll':
-      return <WornScroll scale={scale} />;
-    case 'food_bundle':
-      return <WornFoodBundle scale={scale} />;
     case 'oil_lamp':
       return <WornOilLamp scale={scale} />;
-    case 'small_pouch':
-      return <WornSmallPouch scale={scale} />;
     default:
       return null;
   }

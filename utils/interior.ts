@@ -1064,6 +1064,9 @@ const pickProps = (
   });
 
   rooms.forEach((room) => {
+    // Skip narrow corridors (inn hallways) - they shouldn't have furniture/lighting
+    if (room.type === InteriorRoomType.HALL && room.size[0] < 3.5) return;
+
     const hasLight = props.some((prop) => prop.roomId === room.id && (
       prop.type === InteriorPropType.LAMP
       || prop.type === InteriorPropType.BRAZIER
@@ -1096,9 +1099,10 @@ const pickProps = (
   });
 
   if (socialClass !== SocialClass.PEASANT) {
-    const hall = rooms.find((room) => room.type === InteriorRoomType.HALL) ?? rooms[0];
+    // Find a hall that isn't a narrow corridor (corridor width is 2.8, normal halls are 4.5+)
+    const hall = rooms.find((room) => room.type === InteriorRoomType.HALL && room.size[0] >= 3.5) ?? rooms[0];
     const hasRug = props.some((prop) => prop.type === InteriorPropType.RUG);
-    if (!hasRug) {
+    if (!hasRug && hall.size[0] >= 3.5) {
       const placement = placePropPosition(InteriorPropType.RUG, hall, rand);
       const clamped = clampToRoom(hall, placement.position, 3.5); // Rugs are very large (8.8 wide)
       props.push({
@@ -1246,6 +1250,9 @@ const pickProps = (
   // Ordinary people (peasant, merchant) get oil lamps and candles.
   // Wealthy (nobility, clergy) and religious/civic buildings get ornate Damascus lanterns.
   rooms.forEach((room) => {
+    // Skip narrow corridors (inn hallways) - they shouldn't have furniture/lighting
+    if (room.type === InteriorRoomType.HALL && room.size[0] < 3.5) return;
+
     const hasFireSource = props.some((prop) => prop.roomId === room.id && (
       prop.type === InteriorPropType.BRAZIER || prop.type === InteriorPropType.FIRE_PIT
     ));
@@ -1487,7 +1494,8 @@ const applyRoomLayouts = (
   entrySide: 'north' | 'south' | 'east' | 'west',
   doorMap: Map<string, 'north' | 'south' | 'east' | 'west' | null>,
   sharedWallsMap: Map<string, ('north' | 'south' | 'east' | 'west')[]>,
-  floorType: 'public' | 'private'
+  floorType: 'public' | 'private',
+  familyContext?: FamilyInteriorContext
 ) => {
   let s = seed;
   const rand = () => seededRandom(s++);
@@ -1557,7 +1565,7 @@ const applyRoomLayouts = (
     InteriorPropType.RAISED_BED,
     InteriorPropType.LOW_BED,
     InteriorPropType.DESK,
-    InteriorPropType.STAIRCASE,
+    InteriorPropType.STAIRS,
     InteriorPropType.LADDER,
   ]);
 
@@ -1758,18 +1766,43 @@ const applyRoomLayouts = (
 
       // Sleeping clusters for private upper rooms (family sleeping near primary bed)
       if (floorType === 'private') {
+        // For player's home, ensure enough beds for family members
+        let extraBedsNeeded = 0;
+        if (familyContext?.isPlayerHome && familyContext.familyMembers.length > 0) {
+          const childCount = familyContext.familyMembers.filter(m => m.relationship === 'child').length;
+          const siblingCount = familyContext.familyMembers.filter(m => m.relationship === 'sibling').length;
+          const hasElderParent = familyContext.familyMembers.some(m => m.relationship === 'parent');
+          // Main bed covers player + spouse, others need separate sleeping spots
+          // Children/siblings share (2 per bed), elders get their own
+          extraBedsNeeded = Math.ceil((childCount + siblingCount) / 2) + (hasElderParent ? 1 : 0);
+        }
+
         const clusterRoll = rand();
-        const clusterCount = clusterRoll > 0.7 ? 2 : clusterRoll > 0.35 ? 1 : 0;
-        const lateralSide = bedWall === 'north' || bedWall === 'south' ? 'east' : 'north';
+        const baseClusterCount = clusterRoll > 0.7 ? 2 : clusterRoll > 0.35 ? 1 : 0;
+        const clusterCount = Math.max(baseClusterCount, extraBedsNeeded);
+
+        // Distribute beds around different walls
+        const allSides: ('north' | 'south' | 'east' | 'west')[] = ['east', 'west', 'north', 'south']
+          .filter(s => s !== bedWall) as ('north' | 'south' | 'east' | 'west')[];
+
         for (let i = 0; i < clusterCount; i += 1) {
-          const offset = i === 0 ? 1.8 : -1.8;
+          // Cycle through available walls, with smaller offsets to stay in room
+          const side = allSides[i % allSides.length];
+          const offsetIndex = Math.floor(i / allSides.length);
+          const offset = (offsetIndex * 1.5 + 0.8) * (i % 2 === 0 ? 1 : -1);
+
+          // Bed quality based on social class - children/servants get simpler bedding
           const clusterType = socialClass === SocialClass.NOBILITY
-            ? InteriorPropType.BEDROLL
+            ? InteriorPropType.LOW_BED  // Noble children get low beds
             : socialClass === SocialClass.MERCHANT || socialClass === SocialClass.CLERGY
               ? InteriorPropType.BEDROLL
               : InteriorPropType.SLEEPING_MAT;
-          const clusterLabel = clusterType === InteriorPropType.BEDROLL ? 'Sleeping pallet' : 'Sleeping mat';
-          const clusterPos = clampToRoom(room, wallAnchorSafe(room, lateralSide, 1.1, offset));
+          const clusterLabel = clusterType === InteriorPropType.LOW_BED
+            ? 'Low wooden bed'
+            : clusterType === InteriorPropType.BEDROLL
+              ? 'Sleeping pallet'
+              : 'Sleeping mat';
+          const clusterPos = clampToRoom(room, wallAnchorSafe(room, side, 1.1, offset));
           if (canPlaceSleepProp(clusterPos)) {
             upsertProp(props, room, clusterType, clusterLabel, clusterPos);
           }
@@ -1883,6 +1916,9 @@ const applyRoomLayouts = (
       return;
     }
     if (room.type === InteriorRoomType.HALL) {
+      // Skip narrow corridors (inn hallways) - they shouldn't have furniture
+      if (room.size[0] < 3.5) return;
+
       if (floorType === 'public' && isCommercial && !isInnLike) {
         const counterSide = oppositeSide(entrySide);
 
@@ -2113,8 +2149,16 @@ const createNPCs = (
   if (familyContext?.isPlayerHome && familyContext.familyMembers.length > 0) {
     console.log('[Family Debug interior.ts] Adding family members as NPCs');
     // Add family members as NPCs
-    const seatProp = findProp([InteriorPropType.CUSHION, InteriorPropType.FLOOR_PILLOWS, InteriorPropType.BENCH]);
-    const cookProp = findProp([InteriorPropType.FIRE_PIT, InteriorPropType.BRAZIER, InteriorPropType.STOVE]);
+    const seatProps = props.filter(p =>
+      p.type === InteriorPropType.CUSHION ||
+      p.type === InteriorPropType.FLOOR_PILLOWS ||
+      p.type === InteriorPropType.BENCH
+    );
+    const cookProp = findProp([InteriorPropType.FIRE_PIT, InteriorPropType.BRAZIER]);
+
+    // Track child-specific index for spacing
+    let childIndex = 0;
+    let siblingIndex = 0;
 
     familyContext.familyMembers.forEach((member, idx) => {
       const stats = familyContext.familyNpcStats.get(member.npcId);
@@ -2126,25 +2170,33 @@ const createNPCs = (
       });
       if (!stats || !member.alive) return;
 
-      // Position based on relationship
+      // Position based on relationship with better spacing
       let position: [number, number, number];
       let rotation: [number, number, number] = [0, rand() * Math.PI * 2, 0];
+
+      // Use different seat props for different family members to spread them out
+      const getSeatProp = (preferredIdx: number) => seatProps[preferredIdx % Math.max(1, seatProps.length)];
 
       if (member.relationship === 'spouse') {
         // Spouse near hearth or cooking area
         position = cookProp
-          ? placeByProp(cookProp, entryRoom, [0.6, 0, 0.3])
-          : placeByProp(seatProp, entryRoom, [0.5, 0, 0.4]);
+          ? placeByProp(cookProp, entryRoom, [0.6 + rand() * 0.3, 0, 0.3 + rand() * 0.3])
+          : placeByProp(getSeatProp(0), entryRoom, [0.5 + rand() * 0.4, 0, 0.4 + rand() * 0.4]);
       } else if (member.relationship === 'child') {
-        // Children in the main room
-        const childOffset = idx * 0.8;
-        position = placeByProp(seatProp, otherRoom || entryRoom, [0.3 + childOffset * 0.2, 0, 0.3]);
+        // Children spread around the room - use child-specific index
+        const room = otherRoom || entryRoom;
+        const spreadX = (childIndex % 2) * 1.5 - 0.75; // Alternate left/right
+        const spreadZ = Math.floor(childIndex / 2) * 1.2; // Stack front/back
+        position = placeByProp(getSeatProp(childIndex + 1), room, [spreadX + rand() * 0.3, 0, spreadZ + rand() * 0.3]);
+        childIndex++;
       } else if (member.relationship === 'parent') {
-        // Elder parent seated on cushions
-        position = placeByProp(seatProp, otherRoom || entryRoom, [0.7, 0, 0.5]);
+        // Elder parent seated on cushions - different corner
+        position = placeByProp(getSeatProp(idx), otherRoom || entryRoom, [0.7 + rand() * 0.4, 0, -0.5 + rand() * 0.3]);
       } else {
-        // Siblings
-        position = placeByProp(seatProp, entryRoom, [0.4, 0, 0.4 + idx * 0.3]);
+        // Siblings - spread along wall
+        const spreadZ = siblingIndex * 1.5;
+        position = placeByProp(getSeatProp(siblingIndex + 3), entryRoom, [-0.4 + rand() * 0.3, 0, spreadZ + rand() * 0.3]);
+        siblingIndex++;
       }
 
       npcs.push({
@@ -2473,7 +2525,7 @@ export const generateInteriorSpec = (
       rooms.map((room) => [room.id, getSharedWalls(room, rooms)])
     );
     const props = pickProps(rooms, socialClass, building.type, profession, localSeed, entrySide, interiorDoorMap, sharedWallsMap, floorType);
-    applyRoomLayouts(props, rooms, building.type, profession, socialClass, localSeed + 31, entrySide, interiorDoorMap, sharedWallsMap, floorType);
+    applyRoomLayouts(props, rooms, building.type, profession, socialClass, localSeed + 31, entrySide, interiorDoorMap, sharedWallsMap, floorType, familyContext);
     adjustPropsForDoorways(props, rooms, interiorDoorMap);
     localSeed += 80;
 

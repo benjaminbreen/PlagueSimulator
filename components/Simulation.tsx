@@ -51,6 +51,8 @@ interface SimulationProps {
   onNpcSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   onNpcUpdate?: (id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: import('../types').NPCPlagueMeta) => void;
   selectedNpcId?: string | null;
+  selectedBuildingId?: string | null;
+  onSelectBuilding?: (buildingId: string | null) => void;
   onMinimapUpdate?: (data: MiniMapData) => void;
   onPickupPrompt?: (label: string | null) => void;
   onClimbablePrompt?: (label: string | null) => void;
@@ -1232,7 +1234,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -2223,6 +2225,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const nightFactor = 1 - Math.max(dayFactor, twilightFactor);
   const enableHoverWireframe = params.cameraMode === CameraMode.OVERHEAD || devSettings.showHoverWireframe;
   const enableHoverLabel = params.cameraMode === CameraMode.OVERHEAD;
+  const selectionEnabled = params.cameraMode !== CameraMode.OVERHEAD;
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
@@ -2957,6 +2960,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
   });
 
+  const handleGroundClick = useCallback((point: THREE.Vector3) => {
+    if (selectionEnabled) {
+      onSelectBuilding?.(null);
+    }
+    setPlayerTarget(point);
+  }, [onSelectBuilding, selectionEnabled]);
+
   return (
     <>
       {/* Tier 1: Reduced ambient for darker, more vivid shadows */}
@@ -3029,7 +3039,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         mapX={params.mapX}
         mapY={params.mapY}
         sessionSeed={sessionSeed}
-        onGroundClick={setPlayerTarget}
+        onGroundClick={handleGroundClick}
         onBuildingsGenerated={handleBuildingsGenerated}
         onClimbablesGenerated={setClimbablesState}
         onHeightmapBuilt={(heightmap) => {
@@ -3040,6 +3050,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         timeOfDay={params.timeOfDay}
         enableHoverWireframe={enableHoverWireframe}
         enableHoverLabel={enableHoverLabel}
+        selectionEnabled={selectionEnabled}
+        selectedBuildingId={selectedBuildingId ?? null}
+        onSelectBuilding={onSelectBuilding}
         showCityWalls={devSettings.showCityWalls}
         pushables={pushables}
         fogColor={colorCache.current.fogColor}
