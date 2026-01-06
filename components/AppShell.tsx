@@ -187,8 +187,9 @@ export const AppShell = React.memo(({
 
   return (
     <>
+      {/* Scene transition fade overlay */}
       <div
-        className={`absolute inset-0 z-50 bg-black transition-opacity duration-500 pointer-events-none ${
+        className={`absolute inset-0 z-50 bg-black transition-opacity duration-300 ease-in-out pointer-events-none ${
           transitioning ? 'opacity-100' : 'opacity-0'
         }`}
       />

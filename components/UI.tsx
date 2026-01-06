@@ -47,6 +47,7 @@ import { FamilyMember } from '../types';
 import { buildNarratorPrompt, NarratorContext } from '../utils/narratorPrompt';
 import { NarratorHighlightEntry } from './NarratorPanel';
 import { LLMTransparencyModal } from './LLMTransparencyModal';
+import { NpcListModal, NpcListEntry } from './NpcListModal';
 
 interface UIProps {
   params: SimulationParams;
@@ -130,6 +131,8 @@ interface UIProps {
   getNarratorContext?: () => NarratorContext;
   /** Highlight a narrator target in-world */
   onNarratorHighlight?: (entry: NarratorHighlightEntry) => void;
+  /** Build NPC list entries for debugging */
+  getNpcListEntries?: () => NpcListEntry[];
   perfDebug?: {
     schedulePhase: number;
     scheduleActive: boolean;
@@ -146,6 +149,16 @@ interface UIProps {
   isOnHomeTile?: boolean;
   /** Navigate to home tile */
   onGoHome?: () => void;
+  /** Unequip headwear to reveal hair */
+  onUnequipHeadwear?: () => void;
+  /** Equip headwear from inventory */
+  onEquipHeadwear?: () => void;
+  /** Whether player is in a private space (bedroom, upper floor) - NPCs react with alarm */
+  isInPrivateSpace?: boolean;
+  /** Current building type for social appropriateness checks */
+  currentBuildingType?: import('../types').BuildingType;
+  /** Current building profession for context */
+  currentBuildingProfession?: string;
 }
 
 interface InventoryEntry {
@@ -203,69 +216,95 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     ctx.fillStyle = bg;
     ctx.fillRect(-radius, -radius, radius * 2, radius * 2);
 
-    ctx.strokeStyle = 'rgba(102, 133, 160, 0.15)';
+    // Subtle grid lines
+    ctx.strokeStyle = 'rgba(102, 133, 160, 0.12)';
     ctx.lineWidth = 1;
-    [0.3, 0.55, 0.8].forEach((t) => {
+    [0.35, 0.65, 0.9].forEach((t) => {
       ctx.beginPath();
       ctx.arc(0, 0, radius * t, 0, Math.PI * 2);
       ctx.stroke();
     });
-    ctx.beginPath();
-    ctx.moveTo(-radius, 0);
-    ctx.lineTo(radius, 0);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, -radius);
-    ctx.lineTo(0, radius);
-    ctx.stroke();
 
+    // Fixed north-up map projection (no rotation)
     const scale = radius / data.radius;
     const viewYaw = Number.isFinite(data.player.cameraYaw) ? data.player.cameraYaw : data.player.yaw;
-    const cos = Math.cos(-viewYaw);
-    const sin = Math.sin(-viewYaw);
+
+    // Project function - NO rotation, north is always up
+    // In Three.js: +Z is typically "into screen" / south, -Z is forward/north
+    // On canvas: -Y is up. We negate Z so things ahead of player appear above.
     const project = (x: number, z: number) => {
       const dx = x - data.player.x;
       const dz = z - data.player.z;
-      const rx = dx * cos - dz * sin;
-      const rz = dx * sin + dz * cos;
-      return { x: rx * scale, y: rz * scale };
+      // X maps to horizontal, -Z maps to up (north)
+      return { x: dx * scale, y: -dz * scale };
     };
+
+    // Helper to get edge position for off-screen POIs
+    const getEdgePosition = (x: number, z: number) => {
+      const dx = x - data.player.x;
+      const dz = z - data.player.z;
+      const angle = Math.atan2(-dz, dx); // Negate dz to match projection
+      const edgeRadius = radius - 12;
+      return {
+        x: Math.cos(angle) * edgeRadius,
+        y: Math.sin(angle) * edgeRadius,
+        angle
+      };
+    };
+
+    // Track off-screen POIs for edge indicators
+    const offScreenPOIs: Array<{ x: number; z: number; color: string; label: string }> = [];
+
+    // Get building color and label based on type
+    const getBuildingInfo = (type: BuildingType) => {
+      switch (type) {
+        case BuildingType.COMMERCIAL: return { color: '#8a6a3e', label: 'SHOP' };
+        case BuildingType.RELIGIOUS: return { color: '#6d8a97', label: 'MOSQUE' };
+        case BuildingType.CIVIC: return { color: '#8b6a5a', label: 'CIVIC' };
+        case BuildingType.SCHOOL: return { color: '#7b7aa6', label: 'SCHOOL' };
+        case BuildingType.MEDICAL: return { color: '#6f8a76', label: 'HOSPITAL' };
+        case BuildingType.HOSPITALITY: return { color: '#8a7a5c', label: 'INN' };
+        default: return { color: '#58616b', label: '' };
+      }
+    };
+
+    // Collect labeled buildings (non-residential) for smart labeling
+    const labeledBuildings: Array<{
+      p: { x: number; y: number };
+      dist: number;
+      alpha: number;
+      bSize: number;
+      color: string;
+      label: string;
+      doorSide: number;
+    }> = [];
 
     data.buildings.forEach((b) => {
       const p = project(b.x, b.z);
       const distSq = p.x * p.x + p.y * p.y;
       if (distSq > radius * radius) return;
       const dist = Math.sqrt(distSq) / radius;
-      // Exponential fade for buildings - more aggressive
       const alpha = Math.pow(1 - dist, 2.2);
-      if (alpha < 0.15) return; // Cull very faint buildings
+      if (alpha < 0.15) return;
 
-      let color = '#58616b';
-      if (b.type === BuildingType.COMMERCIAL) color = '#8a6a3e';
-      else if (b.type === BuildingType.RELIGIOUS) color = '#6d8a97';
-      else if (b.type === BuildingType.CIVIC) color = '#8b6a5a';
-      else if (b.type === BuildingType.SCHOOL) color = '#7b7aa6';
-      else if (b.type === BuildingType.MEDICAL) color = '#6f8a76';
-      else if (b.type === BuildingType.HOSPITALITY) color = '#8a7a5c';
+      const { color, label } = getBuildingInfo(b.type);
+      const bSize = Math.max(6, Math.min(24, b.size * scale));
 
-      const size = Math.max(6, Math.min(24, b.size * scale));
-
-      // Fill the building footprint for better visibility
+      // Draw building shape
       ctx.fillStyle = color;
       ctx.shadowBlur = 8;
       ctx.shadowColor = color;
-      ctx.globalAlpha = alpha * 0.35; // Semi-transparent fill
-      ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+      ctx.globalAlpha = alpha * 0.35;
+      ctx.fillRect(p.x - bSize / 2, p.y - bSize / 2, bSize, bSize);
 
-      // Stroke for definition
       ctx.strokeStyle = color;
-      ctx.globalAlpha = alpha * 0.85; // Stronger stroke
+      ctx.globalAlpha = alpha * 0.85;
       ctx.lineWidth = 1.6;
-      ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
+      ctx.strokeRect(p.x - bSize / 2, p.y - bSize / 2, bSize, bSize);
 
       // Door notch
-      const notch = Math.max(3, size * 0.18);
-      const half = size / 2;
+      const notch = Math.max(3, bSize * 0.18);
+      const half = bSize / 2;
       let nx = 0;
       let ny = 0;
       if (b.doorSide === 0) ny = half;
@@ -279,12 +318,56 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       ctx.lineTo(p.x + nx + (ny !== 0 ? notch : 0), p.y + ny + (nx !== 0 ? notch : 0));
       ctx.stroke();
       ctx.globalAlpha = 1;
+
+      // Track non-residential buildings for labeling
+      if (label) {
+        labeledBuildings.push({ p, dist, alpha, bSize, color, label, doorSide: b.doorSide });
+      }
     });
 
-    // Sort NPCs by distance and limit to closest 15 (like Witcher 3/Skyrim)
+    // Draw labels for closest 6 non-residential buildings
+    const maxLabels = 6;
+    const labelFadeStart = 0.4; // Start fading labels at 40% radius
+
+    labeledBuildings
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, maxLabels)
+      .forEach(({ p, dist, alpha, bSize, color, label }) => {
+        // Extra fade for labels - only show clearly for close buildings
+        let labelAlpha = alpha;
+        if (dist > labelFadeStart) {
+          const fadeProgress = (dist - labelFadeStart) / (1 - labelFadeStart);
+          labelAlpha = alpha * Math.pow(1 - fadeProgress, 1.8);
+        }
+        if (labelAlpha < 0.25) return;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+
+        // Label background for readability
+        ctx.font = 'bold 6px monospace';
+        const textWidth = ctx.measureText(label).width;
+
+        ctx.globalAlpha = labelAlpha * 0.6;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-textWidth / 2 - 2, bSize / 2 + 1, textWidth + 4, 8);
+
+        // Label text
+        ctx.globalAlpha = labelAlpha * 0.9;
+        ctx.fillStyle = color;
+        ctx.shadowBlur = 3;
+        ctx.shadowColor = '#000';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(label, 0, bSize / 2 + 2);
+
+        ctx.restore();
+      });
+
+    // NPCs
     const maxNpcsShown = 15;
-    const npcFadeStartRadius = 0.5; // Start fading at 50% of radius
-    const npcCullRadius = 0.75; // Don't show beyond 75% of radius
+    const npcFadeStartRadius = 0.5;
+    const npcCullRadius = 0.75;
 
     const sortedNpcs = data.npcs
       .map((npc) => {
@@ -293,17 +376,16 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         const dist = Math.sqrt(distSq) / radius;
         return { npc, p, dist, distSq };
       })
-      .filter(({ dist }) => dist < npcCullRadius) // Cull distant NPCs
-      .sort((a, b) => a.distSq - b.distSq) // Sort by distance
-      .slice(0, maxNpcsShown); // Limit to closest N
+      .filter(({ dist }) => dist < npcCullRadius)
+      .sort((a, b) => a.distSq - b.distSq)
+      .slice(0, maxNpcsShown);
 
     sortedNpcs.forEach(({ npc, p, dist }) => {
-      // Exponential fade - aggressive falloff beyond fade start
       let alpha = 1.0;
       if (dist > npcFadeStartRadius) {
         const fadeRange = npcCullRadius - npcFadeStartRadius;
         const fadeProgress = (dist - npcFadeStartRadius) / fadeRange;
-        alpha = Math.pow(1 - fadeProgress, 2.5); // Cubic falloff
+        alpha = Math.pow(1 - fadeProgress, 2.5);
       }
       alpha = Math.max(0.2, alpha);
 
@@ -321,32 +403,34 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       ctx.globalAlpha = 1;
     });
 
-    // Special NPCs - distinct markers with labels
+    // Special NPCs - with edge indicators for off-screen
     data.specialNPCs.forEach((specialNPC) => {
       const p = project(specialNPC.x, specialNPC.z);
       const distSq = p.x * p.x + p.y * p.y;
-      if (distSq > radius * radius) return;
-      const dist = Math.sqrt(distSq) / radius;
 
-      // Less aggressive fade for special NPCs so they're visible from farther
-      const alpha = Math.pow(1 - dist, 1.5);
-      if (alpha < 0.15) return;
-
-      // Colors and labels for each type
       let color = '#fff';
       let label = '';
       if (specialNPC.type === 'SUFI_MYSTIC') {
-        color = '#a78bfa'; // Purple for mystic
+        color = '#a78bfa';
         label = 'SUFI';
       } else if (specialNPC.type === 'ASTROLOGER') {
-        color = '#60a5fa'; // Blue for scholar/astronomer
+        color = '#60a5fa';
         label = 'ASTRO';
       } else if (specialNPC.type === 'SCRIBE') {
-        color = '#fbbf24'; // Gold for scribe
+        color = '#fbbf24';
         label = 'SCRIBE';
       }
 
-      // Draw star shape marker
+      // If off-screen, add to edge indicators
+      if (distSq > radius * radius) {
+        offScreenPOIs.push({ x: specialNPC.x, z: specialNPC.z, color, label });
+        return;
+      }
+
+      const dist = Math.sqrt(distSq) / radius;
+      const alpha = Math.pow(1 - dist, 1.5);
+      if (alpha < 0.15) return;
+
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.shadowBlur = 14;
@@ -357,27 +441,25 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       // 5-pointed star
       ctx.beginPath();
       const spikes = 5;
-      const outerRadius = 5;
-      const innerRadius = 2.5;
+      const outerRad = 5;
+      const innerRad = 2.5;
       for (let i = 0; i < spikes * 2; i++) {
-        const r = i % 2 === 0 ? outerRadius : innerRadius;
+        const r = i % 2 === 0 ? outerRad : innerRad;
         const angle = (i * Math.PI) / spikes - Math.PI / 2;
-        const x = Math.cos(angle) * r;
-        const y = Math.sin(angle) * r;
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        const sx = Math.cos(angle) * r;
+        const sy = Math.sin(angle) * r;
+        if (i === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
       }
       ctx.closePath();
       ctx.fill();
 
-      // Inner glow
       ctx.globalAlpha = alpha * 0.5;
       ctx.fillStyle = '#fff';
       ctx.beginPath();
       ctx.arc(0, 0, 2, 0, Math.PI * 2);
       ctx.fill();
 
-      // Label text above star
       ctx.globalAlpha = alpha * 0.85;
       ctx.shadowBlur = 8;
       ctx.shadowColor = '#000';
@@ -391,6 +473,7 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       ctx.globalAlpha = 1;
     });
 
+    // Landmarks
     if (data.landmarks && data.landmarks.length > 0) {
       data.landmarks.forEach((lm) => {
         const p = project(lm.x, lm.z);
@@ -417,18 +500,21 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       });
     }
 
-    // Player home marker - golden house icon with pulsing glow
+    // Player home marker
     if (data.playerHome) {
       const p = project(data.playerHome.x, data.playerHome.z);
       const distSq = p.x * p.x + p.y * p.y;
-      if (distSq <= radius * radius) {
+
+      // If home is off-screen, add edge indicator
+      if (distSq > radius * radius) {
+        offScreenPOIs.push({ x: data.playerHome.x, z: data.playerHome.z, color: '#fbbf24', label: 'HOME' });
+      } else {
         const dist = Math.sqrt(distSq) / radius;
-        const alpha = Math.max(0.4, Math.pow(1 - dist, 1.2)); // Stay visible from far
+        const alpha = Math.max(0.4, Math.pow(1 - dist, 1.2));
 
         ctx.save();
         ctx.translate(p.x, p.y);
 
-        // Outer glow pulse
         const pulse = 0.7 + 0.3 * Math.sin(Date.now() / 400);
         ctx.shadowBlur = 16 * pulse;
         ctx.shadowColor = '#fbbf24';
@@ -438,15 +524,11 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         ctx.arc(0, 0, 8, 0, Math.PI * 2);
         ctx.fill();
 
-        // House shape - simple peaked roof design
         ctx.globalAlpha = alpha;
         ctx.shadowBlur = 10;
         ctx.fillStyle = '#fbbf24';
-
-        // House body
         ctx.fillRect(-4, -1, 8, 6);
 
-        // Roof triangle
         ctx.beginPath();
         ctx.moveTo(-5, -1);
         ctx.lineTo(0, -6);
@@ -454,11 +536,9 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         ctx.closePath();
         ctx.fill();
 
-        // Door
         ctx.fillStyle = '#92400e';
         ctx.fillRect(-1.5, 1, 3, 4);
 
-        // Label
         ctx.globalAlpha = alpha * 0.9;
         ctx.shadowBlur = 6;
         ctx.shadowColor = '#000';
@@ -473,15 +553,114 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       }
     }
 
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = '#f7c66a';
-    ctx.fillStyle = '#f7c66a';
+    // === EDGE INDICATORS for off-screen POIs ===
+    offScreenPOIs.forEach((poi) => {
+      const edge = getEdgePosition(poi.x, poi.z);
+
+      ctx.save();
+      ctx.translate(edge.x, edge.y);
+      ctx.rotate(edge.angle);
+
+      // Chevron arrow pointing outward
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = poi.color;
+      ctx.fillStyle = poi.color;
+      ctx.globalAlpha = 0.85;
+
+      ctx.beginPath();
+      ctx.moveTo(6, 0);
+      ctx.lineTo(-2, -4);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(-2, 4);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    });
+
+    // === COMPASS ROSE in top-left corner ===
+    ctx.save();
+    const compassX = -radius + 18;
+    const compassY = -radius + 18;
+    ctx.translate(compassX, compassY);
+
+    // Compass background
+    ctx.globalAlpha = 0.7;
+    ctx.fillStyle = '#0a0d10';
     ctx.beginPath();
-    ctx.moveTo(0, -8);
-    ctx.lineTo(5, 6);
-    ctx.lineTo(-5, 6);
+    ctx.arc(0, 0, 14, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(210, 180, 120, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // North pointer (red/gold)
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#d4a056';
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = '#d4a056';
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    ctx.lineTo(3, 0);
+    ctx.lineTo(-3, 0);
     ctx.closePath();
     ctx.fill();
+
+    // South pointer (darker)
+    ctx.fillStyle = '#4a4a4a';
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.moveTo(0, 10);
+    ctx.lineTo(3, 0);
+    ctx.lineTo(-3, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    // N label
+    ctx.fillStyle = '#d4a056';
+    ctx.font = 'bold 7px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowBlur = 4;
+    ctx.shadowColor = '#000';
+    ctx.fillText('N', 0, -10);
+
+    ctx.restore();
+
+    // === PLAYER ARROW - Rotates based on camera direction ===
+    ctx.save();
+    // Rotate arrow to show camera facing direction
+    // viewYaw: 0 = looking north (-Z), π/2 = looking east (+X), etc.
+    // Negate to match the flipped Z projection
+    ctx.rotate(-viewYaw);
+
+    // Outer glow
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = '#f7c66a';
+
+    // Arrow body
+    ctx.fillStyle = '#f7c66a';
+    ctx.beginPath();
+    ctx.moveTo(0, -9);      // Tip (points in facing direction)
+    ctx.lineTo(5, 7);       // Bottom right
+    ctx.lineTo(0, 3);       // Notch
+    ctx.lineTo(-5, 7);      // Bottom left
+    ctx.closePath();
+    ctx.fill();
+
+    // Inner highlight
+    ctx.fillStyle = '#fffaed';
+    ctx.globalAlpha = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(0, -6);
+    ctx.lineTo(2, 3);
+    ctx.lineTo(0, 1);
+    ctx.lineTo(-2, 3);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
 
     ctx.restore();
   }, [data, minimapSize, sceneMode]);
@@ -640,7 +819,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, getNarratorContext, onNarratorHighlight, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, getNarratorContext, onNarratorHighlight, getNpcListEntries, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome, onUnequipHeadwear, onEquipHeadwear, isInPrivateSpace = false, currentBuildingType, currentBuildingProfession }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -688,6 +867,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const [narratorExchanges, setNarratorExchanges] = useState<Array<{ player: string; narrator: string }>>([]);
   const narratorPendingQuestionRef = useRef<string | null>(null);
   const [llmTransparencyOpen, setLlmTransparencyOpen] = useState(false);
+  const [npcListModalOpen, setNpcListModalOpen] = useState(false);
+  const [npcListEntries, setNpcListEntries] = useState<NpcListEntry[]>([]);
   const [llmTransparencyEntries, setLlmTransparencyEntries] = useState<Array<{ id: string; prompt: string; response: string }>>([]);
   const perspectiveTimeoutRef = useRef<number | null>(null);
 
@@ -1098,7 +1279,13 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   };
 
   const cyclePerspective = () => {
-    const order = [CameraMode.FIRST_PERSON, CameraMode.OVER_SHOULDER, CameraMode.THIRD_PERSON, CameraMode.OVERHEAD];
+    const order = [
+      CameraMode.FIRST_PERSON,
+      CameraMode.OVER_SHOULDER,
+      CameraMode.THIRD_PERSON,
+      CameraMode.ISOMETRIC,
+      CameraMode.OVERHEAD
+    ];
     const idx = order.indexOf(params.cameraMode);
     const next = order[(idx + 1) % order.length];
     handleChange('cameraMode', next);
@@ -1594,27 +1781,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 avgAwareness: moraleStats.avgAwareness,
               }}
               infectedHouseholds={infectedHouseholds}
-              playerStats={{
-                name: playerStats.name,
-                profession: playerStats.profession,
-                health: playerStats.health,
-                reputation: playerStats.reputation,
-                currency: playerStats.currency,
-                socialClass: playerStats.socialClass,
-                age: playerStats.age,
-                gender: playerStats.gender,
-                family: playerStats.family,
-                familyMembers: playerStats.familyMembers,
-                inventory: playerStats.inventory,
-                maxInventorySlots: playerStats.maxInventorySlots,
-                // Appearance fields for portrait
-                skinTone: playerStats.skinTone,
-                hairColor: playerStats.hairColor,
-                hairStyle: playerStats.hairStyle,
-                headwearStyle: playerStats.headwearStyle,
-                headwearColor: playerStats.headwearColor,
-                healthState: playerStats.plague?.state,
-              }}
+              playerStats={playerStats}
               daysSinceOutbreak={(simTime / 24) + 1}
               onNavigateToHousehold={onNavigateToHousehold}
               onNavigateToDeceased={onNavigateToDeceased}
@@ -1644,6 +1811,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               onOpenGuideModal={onOpenGuideModal}
               onSelectGuideEntry={onSelectGuideEntry}
               playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
+              onPopulationChartClick={() => {
+                if (getNpcListEntries) {
+                  setNpcListEntries(getNpcListEntries());
+                }
+                setNpcListModalOpen(true);
+              }}
             />
             {/* ORIGINAL ReportsPanel - kept for reference
             <ReportsPanel
@@ -2154,6 +2327,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         homeDistrictName={homeDistrictName}
         isOnHomeTile={isOnHomeTile}
         onGoHome={onGoHome}
+        onUnequipHeadwear={onUnequipHeadwear}
+        onEquipHeadwear={onEquipHeadwear}
       />
 
       {selectedInventoryItem && (
@@ -2256,7 +2431,11 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             nearbyInfected: selectedNpcNearbyInfected,
             nearbyDeceased: selectedNpcNearbyDeceased,
             currentActivity: selectedNpcActivity,
-            localRumors: selectedNpcRumors
+            localRumors: selectedNpcRumors,
+            isInterior: sceneMode === 'interior',
+            isPrivateSpace: isInPrivateSpace,
+            buildingType: currentBuildingType,
+            buildingProfession: currentBuildingProfession
           }}
           publicMorale={moraleStats}
           simulationStats={stats}
@@ -2326,6 +2505,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         isOpen={llmTransparencyOpen}
         onClose={() => setLlmTransparencyOpen(false)}
         entries={llmTransparencyEntries}
+      />
+
+      <NpcListModal
+        isOpen={npcListModalOpen}
+        onClose={() => setNpcListModalOpen(false)}
+        entries={npcListEntries}
       />
     </div>
   );

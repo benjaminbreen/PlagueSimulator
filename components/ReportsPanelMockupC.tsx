@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, Heart, Shield, Coins, PieChart, List, Skull, ShieldAlert, Package, Users } from 'lucide-react';
 import { GuideTab } from './HistoricalGuide';
-import { NPCStats, FamilyMember, AgentState } from '../types';
+import { NPCStats, FamilyMember, AgentState, PlayerStats } from '../types';
 import { FamilyPortrait } from './FamilyPortrait';
 
 /**
@@ -29,28 +29,7 @@ interface ReportsPanelProps {
     deceasedCount: number;
     status: string;
   }>;
-  playerStats: {
-    name: string;
-    profession: string;
-    health: number;
-    reputation: number;
-    currency: number;
-    socialClass: string;
-    age: number;
-    gender: 'Male' | 'Female';
-    family: string;
-    familyMembers: FamilyMember[];
-    inventory: any[];
-    maxInventorySlots: number;
-    // Appearance fields for portrait
-    skinTone?: string;
-    hairColor?: string;
-    hairStyle?: 'short' | 'medium' | 'long' | 'covered';
-    headwearStyle?: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah' | 'none';
-    headwearColor?: string;
-    facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
-    healthState?: AgentState;
-  };
+  playerStats: PlayerStats;
   daysSinceOutbreak?: number;
   // Callbacks
   onNavigateToHousehold?: (buildingPosition: [number, number, number]) => void;
@@ -83,10 +62,11 @@ interface ReportsPanelProps {
   onOpenGuideModal?: () => void;
   onSelectGuideEntry?: (entryId: string) => void;
   playerInfected?: boolean;
+  onPopulationChartClick?: () => void;
 }
 
 // Donut chart component
-const DonutChart: React.FC<{ stats: ReportsPanelProps['stats']; size?: number }> = ({ stats, size = 80 }) => {
+const DonutChart: React.FC<{ stats: ReportsPanelProps['stats']; size?: number; onClick?: () => void }> = ({ stats, size = 80, onClick }) => {
   const total = stats.healthy + stats.incubating + stats.infected + stats.deceased;
   if (total === 0) return null;
 
@@ -103,7 +83,15 @@ const DonutChart: React.FC<{ stats: ReportsPanelProps['stats']; size?: number }>
   let offset = 0;
 
   return (
-    <div className="relative" style={{ width: size, height: size }}>
+    <div
+      className={`group relative ${onClick ? 'cursor-pointer' : ''}`}
+      style={{ width: size, height: size }}
+      onClick={onClick}
+    >
+      <div className="pointer-events-none absolute inset-0 rounded-full overflow-hidden">
+        <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_35%_30%,rgba(255,196,90,0.18),transparent_65%)] opacity-0 blur-[2px] transition-opacity duration-500 group-hover:opacity-70" />
+        <div className="absolute -inset-[10%] rounded-full bg-[conic-gradient(from_90deg,rgba(34,197,94,0.22),rgba(234,179,8,0.22),rgba(220,38,38,0.22),rgba(55,65,81,0.22),rgba(34,197,94,0.22))] opacity-0 blur-[6px] transition-opacity duration-500 group-hover:opacity-60 group-hover:animate-[spin_10s_linear_infinite]" />
+      </div>
       <svg viewBox="0 0 80 80" className="w-full h-full -rotate-90">
         {segments.map((seg, i) => {
           const pct = seg.value / total;
@@ -121,7 +109,7 @@ const DonutChart: React.FC<{ stats: ReportsPanelProps['stats']; size?: number }>
               strokeWidth="10"
               strokeDasharray={`${dashArray} ${circumference}`}
               strokeDashoffset={dashOffset}
-              className="transition-all duration-500"
+              className="transition-all duration-500 group-hover:drop-shadow-[0_0_6px_rgba(255,200,120,0.25)]"
             />
           );
         })}
@@ -226,7 +214,8 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
   nearbyNPCs = [],
   onOpenGuideModal,
   onSelectGuideEntry,
-  playerInfected = false
+  playerInfected = false,
+  onPopulationChartClick
 }) => {
   const [activeTab, setActiveTab] = useState<'epidemic' | 'player' | 'guide'>('epidemic');
   const [collapsed, setCollapsed] = useState(false);
@@ -321,7 +310,7 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
                     {viewMode === 'chart' ? (
                       /* Chart view - donut with legend */
                       <div className="flex items-center gap-5">
-                        <DonutChart stats={stats} size={90} />
+                        <DonutChart stats={stats} size={90} onClick={onPopulationChartClick} />
                         <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-2.5">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
@@ -583,7 +572,7 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
                           headwearStyle={playerStats.headwearStyle}
                           headwearColor={playerStats.headwearColor}
                           facialHair={playerStats.facialHair}
-                          healthState={playerStats.healthState}
+                          healthState={playerStats.plague?.state}
                           size={64}
                         />
                       </div>

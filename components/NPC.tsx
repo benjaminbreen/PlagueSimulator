@@ -252,8 +252,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   familyRelationship
 }) => {
   const ENABLE_SIMPLE_LOD = true;
-  const SIMPLE_LOD_DISTANCE = 60;
-  const ANIMATION_LOD_DISTANCE = 30;
+  const SIMPLE_LOD_DISTANCE = 80;
+  const ANIMATION_LOD_DISTANCE = 60;
   const SHADOW_LOD_DISTANCE = 26;
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
@@ -458,11 +458,12 @@ export const NPC: React.FC<NPCProps> = memo(({
     const turbanPattern = stats.turbanPattern || 'none';
     const turbanAccent = stats.turbanAccentColor || headwear;
 
-    // Embroidery for wealthy women (tiraz panels - decorative gold/silver bands)
-    const hasEmbroidery = (stats.socialClass === 'wealthy' || stats.socialClass === 'elite') && stats.gender === 'Female';
+    // Embroidery for wealthy/high-status characters (tiraz panels - decorative gold/silver bands)
+    const hasEmbroidery = stats.hasEmbroidery ??
+      ((stats.socialClass === 'wealthy' || stats.socialClass === 'elite') && stats.gender === 'Female');
 
     return { skin, scarf, scarfRoughness, scarfPattern, scarfAccent, garmentType, turbanPattern, turbanAccent, robe, accent, hair, headwear, hasEmbroidery };
-  }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, stats.socialClass, stats.gender, stats.headscarfPattern, stats.headscarfAccentColor, stats.headwearGarmentType, stats.turbanPattern, stats.turbanAccentColor, idSeed]);
+  }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, stats.socialClass, stats.gender, stats.headscarfPattern, stats.headscarfAccentColor, stats.headwearGarmentType, stats.turbanPattern, stats.turbanAccentColor, stats.hasEmbroidery, idSeed]);
 
   // Apply mourning colors if NPC's building has deceased residents
   const mourningAdjustedColors = useMemo(() => {
@@ -1003,16 +1004,32 @@ export const NPC: React.FC<NPCProps> = memo(({
         approachCheckCountRef.current += 1;
 
         const distToPlayer = Math.sqrt(distSq);
-        const APPROACH_NOTICE_DISTANCE = 12; // NPCs notice player within this range
+        const isFamilyMember = role === 'family';
+
+        // Family members have larger notice range and always approach
+        const APPROACH_NOTICE_DISTANCE = isFamilyMember ? 15 : 12; // Family members notice from further away
         const APPROACH_INITIATE_DISTANCE = 2.5; // Close enough to trigger encounter
 
         // Only consider approaching if player is in notice range
         if (distToPlayer < APPROACH_NOTICE_DISTANCE && distToPlayer > APPROACH_INITIATE_DISTANCE) {
-          // Calculate approach probability based on disposition and factors
-          const baseDisposition = stats.disposition ?? 50;
+          // Family members ALWAYS approach (bypass all disposition/charisma checks)
+          if (isFamilyMember) {
+            // Start approaching the player immediately!
+            isApproachingPlayerRef.current = true;
+            const offsetSeed = idSeed + approachCheckCountRef.current * 7919;
+            currentTargetRef.current.set(
+              playerPos.x + (seededRandom(offsetSeed) - 0.5) * 2,
+              0,
+              playerPos.z + (seededRandom(offsetSeed + 1) - 0.5) * 2
+            );
+            targetBuildingRef.current = null; // Cancel any building destination
+          }
+          // Regular NPCs: Calculate approach probability based on disposition and factors
+          else {
+            const baseDisposition = stats.disposition ?? 50;
 
-          // Disposition must be high enough (friendly NPCs)
-          if (baseDisposition >= 60 && panicRef.current < 40) {
+            // Disposition must be high enough (friendly NPCs)
+            if (baseDisposition >= 60 && panicRef.current < 40) {
             // Calculate effective friendliness with player factors
             let approachScore = baseDisposition;
 
@@ -1049,18 +1066,21 @@ export const NPC: React.FC<NPCProps> = memo(({
               );
               targetBuildingRef.current = null; // Cancel any building destination
             }
+            }
           }
         }
 
         // Check if approaching NPC should abort or has reached the player
         if (isApproachingPlayerRef.current) {
+          const isFamilyMember = role === 'family';
+
           // Abort if player moved out of range
           if (distToPlayer > APPROACH_NOTICE_DISTANCE + 5) {
             isApproachingPlayerRef.current = false;
-            approachCooldownRef.current = simTime + 5; // Short cooldown for range abort
+            approachCooldownRef.current = simTime + (isFamilyMember ? 2 : 5); // Family members have shorter cooldown
           }
-          // Abort if panic increased past threshold
-          else if (panicRef.current >= 40) {
+          // Abort if panic increased past threshold (but NOT for family members - they push through panic to reach you)
+          else if (!isFamilyMember && panicRef.current >= 40) {
             isApproachingPlayerRef.current = false;
             approachCooldownRef.current = simTime + 8; // Medium cooldown for panic abort
           }
@@ -1072,7 +1092,7 @@ export const NPC: React.FC<NPCProps> = memo(({
           // NPC reached player - trigger encounter!
           else if (distToPlayer < APPROACH_INITIATE_DISTANCE) {
             isApproachingPlayerRef.current = false;
-            approachCooldownRef.current = simTime + 10; // Don't approach again for 10 sim minutes
+            approachCooldownRef.current = simTime + (isFamilyMember ? 5 : 10); // Family members can approach more frequently
 
             // Call the encounter handler
             onNPCInitiatedEncounter({

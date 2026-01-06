@@ -10,6 +10,7 @@ import { applyCompoundEffects } from './utils/apothecaryRecipes';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
 import { generateInteriorSpec, FamilyInteriorContext } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
+import { NpcListEntry } from './components/NpcListModal';
 import { shouldNpcBeHome } from './utils/npcSchedule';
 import { generatePlayerFamily, getRelationshipLabel } from './utils/family';
 import { advanceNpcHealth, applyHouseholdExposure, ensureNpcPlagueMeta, resetNpcPlagueMeta } from './utils/npcHealth';
@@ -41,7 +42,7 @@ function App() {
     quarantine: false,
     simulationSpeed: 1,
     timeOfDay: 12,
-    cameraMode: CameraMode.THIRD_PERSON,
+    cameraMode: CameraMode.ISOMETRIC,
     mapX: 0,
     mapY: 0,
     uiMinimized: false,
@@ -61,6 +62,8 @@ function App() {
   const overworldPath = useOverworldPath(params.mapX, params.mapY, stats.simTime);
   const [gameLoading, setGameLoading] = useState(true); // Initial loading state
   const [nearBuilding, setNearBuilding] = useState<BuildingMetadata | null>(null);
+  const dossierPrevCameraModeRef = useRef<CameraMode | null>(null);
+  const merchantPrevCameraModeRef = useRef<CameraMode | null>(null);
   const {
     showEnterModal,
     setShowEnterModal,
@@ -241,13 +244,19 @@ function App() {
   }, []);
 
   const exitInterior = useCallback(() => {
+    if (transitioning) return;
+
     if (!interiorBuilding) {
-      setSceneMode('outdoor');
-      setInteriorSpec(null);
-      setInteriorNarrator(null);
-      setInteriorBuilding(null);
-      setActiveInteriorFloor(0);
-      setNearStairs(null);
+      setTransitioning(true);
+      setTimeout(() => {
+        setSceneMode('outdoor');
+        setInteriorSpec(null);
+        setInteriorNarrator(null);
+        setInteriorBuilding(null);
+        setActiveInteriorFloor(0);
+        setNearStairs(null);
+        setTransitioning(false);
+      }, 300);
       return;
     }
     const district = interiorBuilding.district ?? getDistrictType(params.mapX, params.mapY);
@@ -263,14 +272,19 @@ function App() {
         : doorSide === 2
           ? [bx + offset, by, bz]
           : [bx - offset, by, bz];
-    setMapEntrySpawn({ mapX: params.mapX, mapY: params.mapY, position: spawn });
-    setSceneMode('outdoor');
-    setInteriorSpec(null);
-    setInteriorNarrator(null);
-    setInteriorBuilding(null);
-    setActiveInteriorFloor(0);
-    setNearStairs(null);
-  }, [getDistrictScale, interiorBuilding, params.mapX, params.mapY]);
+
+    setTransitioning(true);
+    setTimeout(() => {
+      setMapEntrySpawn({ mapX: params.mapX, mapY: params.mapY, position: spawn });
+      setSceneMode('outdoor');
+      setInteriorSpec(null);
+      setInteriorNarrator(null);
+      setInteriorBuilding(null);
+      setActiveInteriorFloor(0);
+      setNearStairs(null);
+      setTransitioning(false);
+    }, 300);
+  }, [getDistrictScale, interiorBuilding, params.mapX, params.mapY, transitioning]);
 
   // Calculate infected households for epidemic report
   const infectedHouseholds = useMemo(() => {
@@ -1053,18 +1067,23 @@ function App() {
   }, [nearBirdcage, lootModalData, showMerchantModal, showEncounterModal, handleOpenBirdcage]);
 
   const handleTriggerUseStairs = useCallback(() => {
-    if (sceneMode !== 'interior' || !interiorSpec || !nearStairs) return;
+    if (sceneMode !== 'interior' || !interiorSpec || !nearStairs || transitioning) return;
     const floors = interiorSpec.floors ?? [];
     if (floors.length < 2) return;
     const nextFloor = activeInteriorFloor === 0 ? 1 : 0;
-    setActiveInteriorFloor(nextFloor);
-    setInteriorNarrator(floors[nextFloor]?.narratorState ?? interiorSpec.narratorState);
-    setNearStairs(null);
-  }, [sceneMode, interiorSpec, nearStairs, activeInteriorFloor]);
+
+    setTransitioning(true);
+    setTimeout(() => {
+      setActiveInteriorFloor(nextFloor);
+      setInteriorNarrator(floors[nextFloor]?.narratorState ?? interiorSpec.narratorState);
+      setNearStairs(null);
+      setTransitioning(false);
+    }, 300);
+  }, [sceneMode, interiorSpec, nearStairs, activeInteriorFloor, transitioning]);
 
   // Exit to rooftop via roof hatch
   const handleExitViaRoofHatch = useCallback(() => {
-    if (sceneMode !== 'interior' || !interiorBuilding || !nearRoofHatch) return;
+    if (sceneMode !== 'interior' || !interiorBuilding || !nearRoofHatch || transitioning) return;
 
     // Calculate roof height for this building
     const district = getDistrictType(params.mapX, params.mapY);
@@ -1077,31 +1096,39 @@ function App() {
       interiorBuilding.position[2]
     ];
 
-    // Set player position to rooftop at hatch location
-    playerPositionRef.current.set(exitPos[0], roofHeight + 0.2, exitPos[2]);
+    setTransitioning(true);
+    setTimeout(() => {
+      // Set player position to rooftop at hatch location
+      playerPositionRef.current.set(exitPos[0], roofHeight + 0.2, exitPos[2]);
 
-    // Exit interior to outdoor scene
-    setSceneMode('outdoor');
-    setInteriorSpec(null);
-    setInteriorNarrator(null);
-    setInteriorBuilding(null);
-    setActiveInteriorFloor(0);
-    setNearStairs(null);
-    setNearRoofHatch(null);
-  }, [sceneMode, interiorBuilding, nearRoofHatch, params.mapX, params.mapY]);
+      // Exit interior to outdoor scene
+      setSceneMode('outdoor');
+      setInteriorSpec(null);
+      setInteriorNarrator(null);
+      setInteriorBuilding(null);
+      setActiveInteriorFloor(0);
+      setNearStairs(null);
+      setNearRoofHatch(null);
+      setTransitioning(false);
+    }, 300);
+  }, [sceneMode, interiorBuilding, nearRoofHatch, params.mapX, params.mapY, transitioning]);
 
   // Global Key Listener for Interaction
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if ((e.target as HTMLElement | null)?.isContentEditable) return;
-      if (sceneMode === 'interior' && e.key === 'Escape') {
-        setSceneMode('outdoor');
-        setInteriorSpec(null);
-        setInteriorNarrator(null);
-        setInteriorBuilding(null);
-        setActiveInteriorFloor(0);
-        setNearStairs(null);
+      if (sceneMode === 'interior' && e.key === 'Escape' && !transitioning) {
+        setTransitioning(true);
+        setTimeout(() => {
+          setSceneMode('outdoor');
+          setInteriorSpec(null);
+          setInteriorNarrator(null);
+          setInteriorBuilding(null);
+          setActiveInteriorFloor(0);
+          setNearStairs(null);
+          setTransitioning(false);
+        }, 300);
         return;
       }
       if (e.key === 'e' && sceneMode === 'interior' && nearStairs && !lootModalData && !showMerchantModal && !showEncounterModal && !showEnterModal && !showPlayerModal) {
@@ -1225,7 +1252,7 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, nearBirdcage, lootModalData, handleOpenChest, handleOpenBirdcage, nearStairs, handleTriggerUseStairs, nearRoofHatch, handleExitViaRoofHatch, medicalModal, setMedicalModal, interiorSpec, interiorBuilding, handleTriggerMedicalTreatment]);
+  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, nearBirdcage, lootModalData, handleOpenChest, handleOpenBirdcage, nearStairs, handleTriggerUseStairs, nearRoofHatch, handleExitViaRoofHatch, medicalModal, setMedicalModal, interiorSpec, interiorBuilding, handleTriggerMedicalTreatment, transitioning]);
 
   // Push trigger function
   const triggerPush = useCallback(() => {
@@ -1336,6 +1363,40 @@ function App() {
     window.addEventListener('keydown', handleActionKey);
     return () => window.removeEventListener('keydown', handleActionKey);
   }, [actionSlots.slot1, actionSlots.slot2, actionSlots.slot3, triggerAction, triggerPush, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, sceneMode, selectedNpc]);
+
+  useEffect(() => {
+    if (showPlayerModal) {
+      if (!dossierPrevCameraModeRef.current) {
+        dossierPrevCameraModeRef.current = params.cameraMode;
+      }
+      if (params.cameraMode !== CameraMode.OVER_SHOULDER) {
+        setParams(prev => ({ ...prev, cameraMode: CameraMode.OVER_SHOULDER }));
+      }
+    } else if (dossierPrevCameraModeRef.current) {
+      const restoreMode = dossierPrevCameraModeRef.current;
+      dossierPrevCameraModeRef.current = null;
+      if (restoreMode !== params.cameraMode) {
+        setParams(prev => ({ ...prev, cameraMode: restoreMode }));
+      }
+    }
+  }, [params.cameraMode, setParams, showPlayerModal]);
+
+  useEffect(() => {
+    if (showMerchantModal && !showPlayerModal) {
+      if (!merchantPrevCameraModeRef.current) {
+        merchantPrevCameraModeRef.current = params.cameraMode;
+      }
+      if (params.cameraMode !== CameraMode.OVER_SHOULDER) {
+        setParams(prev => ({ ...prev, cameraMode: CameraMode.OVER_SHOULDER }));
+      }
+    } else if (merchantPrevCameraModeRef.current && !showPlayerModal) {
+      const restoreMode = merchantPrevCameraModeRef.current;
+      merchantPrevCameraModeRef.current = null;
+      if (restoreMode !== params.cameraMode) {
+        setParams(prev => ({ ...prev, cameraMode: restoreMode }));
+      }
+    }
+  }, [params.cameraMode, setParams, showMerchantModal, showPlayerModal]);
 
   const handleMapChange = useCallback((dx: number, dy: number, entrySpawn?: [number, number, number]) => {
     setTransitioning(true);
@@ -1619,9 +1680,6 @@ function App() {
     const districtType = getDistrictType(params.mapX, params.mapY);
     const districtLabel = formatDistrictName(districtType);
     const locationLabel = getLocationLabel(params.mapX, params.mapY);
-    const tileKey = getTileKey(params.mapX, params.mapY);
-    const registry = tileRegistriesRef.current.get(tileKey);
-    const npcRecords = registry ? Array.from(registry.npcMap.values()) : [];
     const npcRadius = 18;
     const specialNpcRadius = 26;
     const buildingRadius = 34;
@@ -1656,36 +1714,25 @@ function App() {
           .slice(0, 4)
       : [];
 
-    const recentNpcWindow = 0.5;
-    const nearbyNpcs = sceneMode === 'outdoor'
-      ? npcRecords
-          .map((record) => {
-            const activity = npcActivityRef.current.get(record.id);
-            const location = activity?.location ?? record.location;
-            if (location !== 'outdoor') return null;
-            if (activity && stats.simTime - activity.lastSimTime > recentNpcWindow) return null;
-            const posVec = activity?.lastPos;
-            const position: [number, number, number] = posVec
-              ? [posVec.x, posVec.y, posVec.z]
-              : record.lastOutdoorPos;
-            const familyMember = record.role === 'family'
-              ? playerStats.familyMembers.find(m => m.npcId === record.id)
-              : null;
+    const nearbyNpcs = sceneMode === 'outdoor' && minimapData?.npcs
+      ? minimapData.npcs
+          .map((npc) => {
+            const position: [number, number, number] = [npc.x, 0, npc.z];
+            const familyMember = playerStats.familyMembers.find(m => m.npcId === npc.id);
             const detail = familyMember
               ? `your ${getRelationshipLabel(familyMember.relationship, familyMember.gender).toLowerCase()}`
-              : record.stats.profession;
+              : npc.profession ?? 'local resident';
             const distance = distanceFor(position);
             return {
-              label: record.stats.name,
+              label: npc.name ?? npc.profession ?? 'local resident',
               detail,
               direction: directionFor(position),
               distance,
-              id: record.id,
+              id: npc.id,
               kind: familyMember ? 'family' as const : 'npc' as const,
               position
             };
           })
-          .filter((item): item is { label: string; detail: string; direction: string; distance: number } => Boolean(item))
           .filter((item) => item.distance <= npcRadius)
           .sort((a, b) => a.distance - b.distance)
           .slice(0, 6)
@@ -1749,9 +1796,9 @@ function App() {
     }
 
     if (sceneMode === 'outdoor' && nearSpeakableNpc) {
-      const activity = npcActivityRef.current.get(nearSpeakableNpc.stats.id);
-      if (activity?.lastPos) {
-        const position: [number, number, number] = [activity.lastPos.x, activity.lastPos.y, activity.lastPos.z];
+      const npcEntry = minimapData?.npcs.find((npc) => npc.id === nearSpeakableNpc.stats.id);
+      if (npcEntry) {
+        const position: [number, number, number] = [npcEntry.x, 0, npcEntry.z];
         const distance = distanceFor(position);
         if (distance <= npcRadius) {
           merchantNpcs.unshift({
@@ -1901,9 +1948,47 @@ function App() {
     params.timeOfDay,
     playerStats,
     sceneMode,
-    stats.simTime,
     tileBuildings
   ]);
+
+  const getNpcListEntries = useCallback((): NpcListEntry[] => {
+    const playerPos = playerPositionRef.current;
+    const directionFor = (pos: [number, number, number]) => calculateDirection(playerPos.x, playerPos.z, pos[0], pos[2]);
+
+    if (sceneMode === 'interior') {
+      const interiorFloor = interiorSpec?.floors?.[activeInteriorFloor] ?? interiorSpec ?? null;
+      if (!interiorFloor) return [];
+      return interiorFloor.npcs.map((npc) => {
+        const distance = Math.hypot(npc.position[0] - playerPos.x, npc.position[2] - playerPos.z);
+        return {
+          id: npc.id,
+          name: npc.stats.name,
+          age: npc.stats.age,
+          gender: npc.stats.gender,
+          profession: npc.stats.profession,
+          location: 'interior',
+          direction: directionFor(npc.position),
+          distance
+        };
+      }).sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    if (!minimapData?.npcs?.length) return [];
+    return minimapData.npcs.map((npc) => {
+      const position: [number, number, number] = [npc.x, 0, npc.z];
+      const distance = Math.hypot(position[0] - playerPos.x, position[2] - playerPos.z);
+      return {
+        id: npc.id,
+        name: npc.name ?? npc.profession ?? 'local resident',
+        age: npc.age ?? null,
+        gender: npc.gender ?? null,
+        profession: npc.profession ?? null,
+        location: 'outdoor',
+        direction: directionFor(position),
+        distance
+      };
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, [activeInteriorFloor, interiorSpec, minimapData, sceneMode]);
 
   const buildNpcActivityLabel = useCallback((location: 'outdoor' | 'interior', isMoving: boolean) => {
     if (location === 'interior') {
@@ -2210,9 +2295,14 @@ function App() {
     const homeTileKey = getTileKey(params.mapX, params.mapY);
     const district = getDistrictType(params.mapX, params.mapY);
     const tileSeed = hashToSeedTile(homeTileKey);
-    const newRegistry = createTileNPCRegistry(tileBuildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, false, npcRecords);
+    // Check if we need to seed initial infections (if not already done)
+    const seedInitial = !seededInitialInfectionsRef.current;
+    const newRegistry = createTileNPCRegistry(tileBuildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, seedInitial, npcRecords);
+    if (seedInitial) {
+      seededInitialInfectionsRef.current = true;
+    }
     tileRegistriesRef.current.set(homeTileKey, newRegistry);
-    console.log('[Family Debug] Registry recreated with family NPCs, registry size:', newRegistry.npcMap.size, 'family count:', npcRecords.length);
+    console.log('[Family Debug] Registry recreated with family NPCs, registry size:', newRegistry.npcMap.size, 'family count:', npcRecords.length, 'seedInitial:', seedInitial);
 
     // Update player stats with home and family
     setPlayerStats(prev => ({
@@ -2326,245 +2416,261 @@ function App() {
   }, []);
 
   const enterInterior = useCallback((building: BuildingMetadata) => {
-    const seed = hashToSeed(building.id);
+    if (transitioning) return;
 
-    // Check if this is the player's home and prepare family context
-    const isPlayerHome = building.id === playerStats.homeBuildingId;
-    let familyContext: FamilyInteriorContext | undefined;
+    setTransitioning(true);
 
-    console.log('[Family Debug] enterInterior called:', {
-      buildingId: building.id,
-      playerHomeBuildingId: playerStats.homeBuildingId,
-      isPlayerHome,
-      familyMembersCount: playerStats.familyMembers.length,
-      familyMembers: playerStats.familyMembers.map(m => ({ name: m.name, npcId: m.npcId, relationship: m.relationship }))
-    });
+    // Start fade, then do the actual entry after fade completes
+    setTimeout(() => {
+      const seed = hashToSeed(building.id);
 
-    if (isPlayerHome && playerStats.familyMembers.length > 0) {
-      const registry = ensureTileRegistry(tileBuildings);
-      const familyNpcStats = new Map<string, NPCStats>();
+      // Check if this is the player's home and prepare family context
+      const isPlayerHome = building.id === playerStats.homeBuildingId;
+      let familyContext: FamilyInteriorContext | undefined;
 
-      console.log('[Family Debug] Creating familyContext, registry exists:', !!registry);
+      console.log('[Family Debug] enterInterior called:', {
+        buildingId: building.id,
+        playerHomeBuildingId: playerStats.homeBuildingId,
+        isPlayerHome,
+        familyMembersCount: playerStats.familyMembers.length,
+        familyMembers: playerStats.familyMembers.map(m => ({ name: m.name, npcId: m.npcId, relationship: m.relationship }))
+      });
 
-      // Get family NPC stats from registry
-      if (registry) {
-        playerStats.familyMembers.forEach(member => {
-          const record = registry.npcMap.get(member.npcId);
-          console.log('[Family Debug] Looking up family member in registry:', {
-            npcId: member.npcId,
-            found: !!record,
-            recordStats: record?.stats?.name
+      if (isPlayerHome && playerStats.familyMembers.length > 0) {
+        const registry = ensureTileRegistry(tileBuildings);
+        const familyNpcStats = new Map<string, NPCStats>();
+
+        console.log('[Family Debug] Creating familyContext, registry exists:', !!registry);
+
+        // Get family NPC stats from registry
+        if (registry) {
+          playerStats.familyMembers.forEach(member => {
+            const record = registry.npcMap.get(member.npcId);
+            console.log('[Family Debug] Looking up family member in registry:', {
+              npcId: member.npcId,
+              found: !!record,
+              recordStats: record?.stats?.name
+            });
+            if (record) {
+              familyNpcStats.set(member.npcId, record.stats);
+            }
           });
-          if (record) {
-            familyNpcStats.set(member.npcId, record.stats);
-          }
+        }
+
+        familyContext = {
+          isPlayerHome: true,
+          familyMembers: playerStats.familyMembers,
+          familyNpcStats
+        };
+        console.log('[Family Debug] familyContext created:', {
+          isPlayerHome: familyContext.isPlayerHome,
+          familyMembersCount: familyContext.familyMembers.length,
+          familyNpcStatsSize: familyContext.familyNpcStats.size
+        });
+      } else {
+        console.log('[Family Debug] NOT creating familyContext because:', {
+          isPlayerHome,
+          familyMembersLength: playerStats.familyMembers.length
         });
       }
 
-      familyContext = {
-        isPlayerHome: true,
-        familyMembers: playerStats.familyMembers,
-        familyNpcStats
-      };
-      console.log('[Family Debug] familyContext created:', {
-        isPlayerHome: familyContext.isPlayerHome,
-        familyMembersCount: familyContext.familyMembers.length,
-        familyNpcStatsSize: familyContext.familyNpcStats.size
-      });
-    } else {
-      console.log('[Family Debug] NOT creating familyContext because:', {
-        isPlayerHome,
-        familyMembersLength: playerStats.familyMembers.length
-      });
-    }
-
-    const spec = generateInteriorSpec(building, seed, undefined, familyContext);
-    console.log('[Family Debug] Interior spec generated, NPCs:', spec.npcs.map(n => ({ id: n.id, role: n.role, name: n.stats.name })));
-    const registry = ensureTileRegistry(tileBuildings);
-    if (registry) {
-      const syncedNpcs = spec.npcs.map((npc) => {
-        const record = registry.npcMap.get(npc.id);
-        if (!record) return npc;
-        record.location = 'interior';
-        return {
-          ...npc,
-          stats: record.stats,
-          state: record.state,
-          plagueMeta: record.plagueMeta
-        };
-      });
-      spec.npcs = syncedNpcs;
-      if (spec.floors?.[0]) {
-        spec.floors[0].npcs = syncedNpcs;
+      const spec = generateInteriorSpec(building, seed, undefined, familyContext);
+      console.log('[Family Debug] Interior spec generated, NPCs:', spec.npcs.map(n => ({ id: n.id, role: n.role, name: n.stats.name })));
+      const registry = ensureTileRegistry(tileBuildings);
+      if (registry) {
+        const syncedNpcs = spec.npcs.map((npc) => {
+          const record = registry.npcMap.get(npc.id);
+          if (!record) return npc;
+          record.location = 'interior';
+          return {
+            ...npc,
+            stats: record.stats,
+            state: record.state,
+            plagueMeta: record.plagueMeta
+          };
+        });
+        spec.npcs = syncedNpcs;
+        if (spec.floors?.[0]) {
+          spec.floors[0].npcs = syncedNpcs;
+        }
       }
-    }
-    setInteriorSpec(spec);
-    setInteriorNarrator(spec.floors?.[0]?.narratorState ?? spec.narratorState);
-    setInteriorBuilding(building);
-    setActiveInteriorFloor(0);
-    setNearStairs(null);
-    lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
-    setNearBuilding(null);
-    setSceneMode('interior');
+      setInteriorSpec(spec);
+      setInteriorNarrator(spec.floors?.[0]?.narratorState ?? spec.narratorState);
+      setInteriorBuilding(building);
+      setActiveInteriorFloor(0);
+      setNearStairs(null);
+      lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
+      setNearBuilding(null);
+      setSceneMode('interior');
 
-    tryTriggerEvent({
-      when: 'interiorEnter',
-      targetType: 'interiorAny',
-      targetId: 'any',
-      contextOverrides: {
-        environment: {
-          district: getDistrictType(params.mapX, params.mapY),
-          timeOfDay: params.timeOfDay,
-          weather: currentWeather
-        }
-      },
-      source: 'environment'
-    });
-
-    tryTriggerEvent({
-      when: 'interiorEnter',
-      targetType: 'buildingType',
-      targetId: building.type,
-      contextOverrides: {
-        environment: {
-          district: getDistrictType(params.mapX, params.mapY),
-          timeOfDay: params.timeOfDay,
-          weather: currentWeather
-        }
-      },
-      source: 'environment'
-    });
-
-    if (building.district) {
       tryTriggerEvent({
         when: 'interiorEnter',
-        targetType: 'buildingDistrict',
-        targetId: building.district,
+        targetType: 'interiorAny',
+        targetId: 'any',
         contextOverrides: {
           environment: {
-            district: building.district,
+            district: getDistrictType(params.mapX, params.mapY),
             timeOfDay: params.timeOfDay,
             weather: currentWeather
           }
         },
         source: 'environment'
       });
-    }
-  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers]);
+
+      tryTriggerEvent({
+        when: 'interiorEnter',
+        targetType: 'buildingType',
+        targetId: building.type,
+        contextOverrides: {
+          environment: {
+            district: getDistrictType(params.mapX, params.mapY),
+            timeOfDay: params.timeOfDay,
+            weather: currentWeather
+          }
+        },
+        source: 'environment'
+      });
+
+      if (building.district) {
+        tryTriggerEvent({
+          when: 'interiorEnter',
+          targetType: 'buildingDistrict',
+          targetId: building.district,
+          contextOverrides: {
+            environment: {
+              district: building.district,
+              timeOfDay: params.timeOfDay,
+              weather: currentWeather
+            }
+          },
+          source: 'environment'
+        });
+      }
+
+      setTransitioning(false);
+    }, 300);
+  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers, transitioning]);
 
   // Enter building via rooftop hatch (from outdoor scene on roof)
   // Similar to enterInterior but starts at top floor instead of ground floor
   const handleEnterViaRooftopHatch = useCallback(() => {
-    if (sceneMode !== 'outdoor' || !nearRooftopHatch) return;
+    if (sceneMode !== 'outdoor' || !nearRooftopHatch || transitioning) return;
 
     const building = nearRooftopHatch.building;
-    const seed = hashToSeed(building.id);
 
-    // Build family context if entering player's home
-    const isPlayerHome = building.id === playerStats.homeBuildingId;
-    let familyContext: FamilyInteriorContext | undefined;
+    setTransitioning(true);
 
-    if (isPlayerHome && playerStats.familyMembers.length > 0) {
-      const registry = ensureTileRegistry(tileBuildings);
-      const familyNpcStats = new Map<string, NPCStats>();
-      if (registry) {
-        playerStats.familyMembers.forEach(member => {
-          const record = registry.npcMap.get(member.npcId);
-          if (record) {
-            familyNpcStats.set(member.npcId, record.stats);
-          }
-        });
-      }
-      familyContext = {
-        isPlayerHome: true,
-        familyMembers: playerStats.familyMembers,
-        familyNpcStats
-      };
-    }
+    setTimeout(() => {
+      const seed = hashToSeed(building.id);
 
-    // Generate interior spec for this building
-    const spec = generateInteriorSpec(building, seed, undefined, familyContext);
+      // Build family context if entering player's home
+      const isPlayerHome = building.id === playerStats.homeBuildingId;
+      let familyContext: FamilyInteriorContext | undefined;
 
-    // Sync NPC stats from registry
-    const registry = ensureTileRegistry(tileBuildings);
-    if (registry) {
-      const syncedNpcs = spec.npcs.map((npc) => {
-        const record = registry.npcMap.get(npc.id);
-        if (!record) return npc;
-        record.location = 'interior';
-        return {
-          ...npc,
-          stats: record.stats,
-          state: record.state,
-          plagueMeta: record.plagueMeta
+      if (isPlayerHome && playerStats.familyMembers.length > 0) {
+        const registry = ensureTileRegistry(tileBuildings);
+        const familyNpcStats = new Map<string, NPCStats>();
+        if (registry) {
+          playerStats.familyMembers.forEach(member => {
+            const record = registry.npcMap.get(member.npcId);
+            if (record) {
+              familyNpcStats.set(member.npcId, record.stats);
+            }
+          });
+        }
+        familyContext = {
+          isPlayerHome: true,
+          familyMembers: playerStats.familyMembers,
+          familyNpcStats
         };
-      });
-      spec.npcs = syncedNpcs;
-      // Sync to top floor (where player enters via hatch)
-      const topFloorIndex = spec.floors ? spec.floors.length - 1 : 0;
-      if (spec.floors?.[topFloorIndex]) {
-        spec.floors[topFloorIndex].npcs = syncedNpcs;
       }
-    }
 
-    // Enter at top floor
-    const topFloorIndex = spec.floors ? spec.floors.length - 1 : 0;
+      // Generate interior spec for this building
+      const spec = generateInteriorSpec(building, seed, undefined, familyContext);
 
-    setInteriorSpec(spec);
-    setInteriorNarrator(spec.floors?.[topFloorIndex]?.narratorState ?? spec.narratorState);
-    setInteriorBuilding(building);
-    setActiveInteriorFloor(topFloorIndex);
-    setNearStairs(null);
-    lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
-    setNearBuilding(null);
-    setNearRooftopHatch(null);
-    setSceneMode('interior');
-
-    // Trigger interior enter events
-    tryTriggerEvent({
-      when: 'interiorEnter',
-      targetType: 'interiorAny',
-      targetId: 'any',
-      contextOverrides: {
-        environment: {
-          district: getDistrictType(params.mapX, params.mapY),
-          timeOfDay: params.timeOfDay,
-          weather: currentWeather
+      // Sync NPC stats from registry
+      const registry = ensureTileRegistry(tileBuildings);
+      if (registry) {
+        const syncedNpcs = spec.npcs.map((npc) => {
+          const record = registry.npcMap.get(npc.id);
+          if (!record) return npc;
+          record.location = 'interior';
+          return {
+            ...npc,
+            stats: record.stats,
+            state: record.state,
+            plagueMeta: record.plagueMeta
+          };
+        });
+        spec.npcs = syncedNpcs;
+        // Sync to top floor (where player enters via hatch)
+        const topFloorIndex = spec.floors ? spec.floors.length - 1 : 0;
+        if (spec.floors?.[topFloorIndex]) {
+          spec.floors[topFloorIndex].npcs = syncedNpcs;
         }
-      },
-      source: 'environment'
-    });
+      }
 
-    tryTriggerEvent({
-      when: 'interiorEnter',
-      targetType: 'buildingType',
-      targetId: building.type,
-      contextOverrides: {
-        environment: {
-          district: getDistrictType(params.mapX, params.mapY),
-          timeOfDay: params.timeOfDay,
-          weather: currentWeather
-        }
-      },
-      source: 'environment'
-    });
+      // Enter at top floor
+      const topFloorIndex = spec.floors ? spec.floors.length - 1 : 0;
 
-    if (building.district) {
+      setInteriorSpec(spec);
+      setInteriorNarrator(spec.floors?.[topFloorIndex]?.narratorState ?? spec.narratorState);
+      setInteriorBuilding(building);
+      setActiveInteriorFloor(topFloorIndex);
+      setNearStairs(null);
+      lastOutdoorMap.current = { mapX: params.mapX, mapY: params.mapY };
+      setNearBuilding(null);
+      setNearRooftopHatch(null);
+      setSceneMode('interior');
+
+      // Trigger interior enter events
       tryTriggerEvent({
         when: 'interiorEnter',
-        targetType: 'buildingDistrict',
-        targetId: building.district,
+        targetType: 'interiorAny',
+        targetId: 'any',
         contextOverrides: {
           environment: {
-            district: building.district,
+            district: getDistrictType(params.mapX, params.mapY),
             timeOfDay: params.timeOfDay,
             weather: currentWeather
           }
         },
         source: 'environment'
       });
-    }
-  }, [sceneMode, nearRooftopHatch, currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers]);
+
+      tryTriggerEvent({
+        when: 'interiorEnter',
+        targetType: 'buildingType',
+        targetId: building.type,
+        contextOverrides: {
+          environment: {
+            district: getDistrictType(params.mapX, params.mapY),
+            timeOfDay: params.timeOfDay,
+            weather: currentWeather
+          }
+        },
+        source: 'environment'
+      });
+
+      if (building.district) {
+        tryTriggerEvent({
+          when: 'interiorEnter',
+          targetType: 'buildingDistrict',
+          targetId: building.district,
+          contextOverrides: {
+            environment: {
+              district: building.district,
+              timeOfDay: params.timeOfDay,
+              weather: currentWeather
+            }
+          },
+          source: 'environment'
+        });
+      }
+
+      setTransitioning(false);
+    }, 300);
+  }, [sceneMode, nearRooftopHatch, currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers, transitioning]);
 
   // Separate key handler for rooftop hatch entry (must be after handleEnterViaRooftopHatch is defined)
   useEffect(() => {
@@ -3087,6 +3193,17 @@ function App() {
     return goingUp ? 'Go upstairs' : 'Go downstairs';
   }, [nearStairs, activeInteriorFloor]);
 
+  // Determine if player is in a private space (for NPC alarm reactions)
+  const isInPrivateSpace = useMemo(() => {
+    if (sceneMode !== 'interior' || !interiorSpec) return false;
+    const activeFloor = interiorSpec.floors?.[activeInteriorFloor];
+    return activeFloor?.floorType === 'private';
+  }, [sceneMode, interiorSpec, activeInteriorFloor]);
+
+  // Get building type and profession for social appropriateness checks
+  const currentBuildingType = sceneMode === 'interior' && interiorSpec ? interiorSpec.buildingType : undefined;
+  const currentBuildingProfession = sceneMode === 'interior' && interiorSpec ? interiorSpec.profession : undefined;
+
   const roofHatchPromptLabel = useMemo(() => {
     if (!nearRoofHatch) return null;
     return 'Exit to rooftop';
@@ -3173,6 +3290,65 @@ function App() {
     return { buildingType, districtName };
   }, [playerStats.homeBuildingId, playerStats.homeMapPosition, isOnHomeTile, tileBuildings]);
 
+  // Handle unequipping headwear to reveal hair - stores it for re-equipping
+  const handleUnequipHeadwear = useCallback(() => {
+    setPlayerStats(prev => {
+      // Don't unequip if already none
+      if (prev.headwearStyle === 'none') return prev;
+
+      // Store current headwear for later re-equipping
+      // Also store original hairStyle if it was 'covered' (for women with headscarves)
+      const unequippedHeadwear = {
+        description: prev.headwearDescription,
+        style: prev.headwearStyle as 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah',
+        color: prev.headwearColor,
+        headscarfStyle: prev.headscarfStyle,
+        headscarfPattern: prev.headscarfPattern,
+        headscarfAccentColor: prev.headscarfAccentColor,
+        headwearGarmentType: prev.headwearGarmentType,
+        turbanPattern: prev.turbanPattern,
+        turbanAccentColor: prev.turbanAccentColor,
+        originalHairStyle: prev.hairStyle === 'covered' ? 'covered' as const : undefined
+      };
+
+      // If hair was 'covered', reveal long hair (typical for women in medieval period)
+      const newHairStyle = prev.hairStyle === 'covered' ? 'long' : prev.hairStyle;
+
+      return {
+        ...prev,
+        headwearStyle: 'none',
+        headwearDescription: 'None',
+        hairStyle: newHairStyle,
+        unequippedHeadwear
+      };
+    });
+  }, []);
+
+  // Handle equipping headwear from inventory
+  const handleEquipHeadwear = useCallback(() => {
+    setPlayerStats(prev => {
+      if (!prev.unequippedHeadwear) return prev;
+
+      // Restore original hairStyle if it was 'covered'
+      const restoredHairStyle = prev.unequippedHeadwear.originalHairStyle || prev.hairStyle;
+
+      return {
+        ...prev,
+        headwearStyle: prev.unequippedHeadwear.style,
+        headwearDescription: prev.unequippedHeadwear.description,
+        headwearColor: prev.unequippedHeadwear.color,
+        headscarfStyle: prev.unequippedHeadwear.headscarfStyle,
+        headscarfPattern: prev.unequippedHeadwear.headscarfPattern,
+        headscarfAccentColor: prev.unequippedHeadwear.headscarfAccentColor,
+        headwearGarmentType: prev.unequippedHeadwear.headwearGarmentType,
+        turbanPattern: prev.unequippedHeadwear.turbanPattern,
+        turbanAccentColor: prev.unequippedHeadwear.turbanAccentColor,
+        hairStyle: restoredHairStyle,
+        unequippedHeadwear: undefined
+      };
+    });
+  }, []);
+
   const uiProps = useMemo(() => ({
     params,
     setParams,
@@ -3238,6 +3414,7 @@ function App() {
     onDropItemAtScreen: handleDropItemAtScreen,
     onConsumeItem: handleConsumeItem,
     getNarratorContext,
+    getNpcListEntries,
     onNarratorHighlight: handleNarratorHighlight,
     perfDebug,
     onTriggerEnterBuilding: () => {
@@ -3254,7 +3431,12 @@ function App() {
     homeBuildingType: homeDisplayInfo.buildingType,
     homeDistrictName: homeDisplayInfo.districtName,
     isOnHomeTile,
-    onGoHome: handleGoHome
+    onGoHome: handleGoHome,
+    onUnequipHeadwear: handleUnequipHeadwear,
+    onEquipHeadwear: handleEquipHeadwear,
+    isInPrivateSpace,
+    currentBuildingType,
+    currentBuildingProfession
   }), [
     actionSlots,
     activeEvent,
@@ -3272,6 +3454,7 @@ function App() {
     handleDropItemAtScreen,
     handleConsumeItem,
     getNarratorContext,
+    getNpcListEntries,
     handleNarratorHighlight,
     handleFastTravel,
     handleForceAllNpcState,
@@ -3319,7 +3502,12 @@ function App() {
     triggerPush,
     homeDisplayInfo,
     isOnHomeTile,
-    handleGoHome
+    handleGoHome,
+    handleUnequipHeadwear,
+    handleEquipHeadwear,
+    isInPrivateSpace,
+    currentBuildingType,
+    currentBuildingProfession
   ]);
 
   const simulationShellProps = useMemo(() => ({

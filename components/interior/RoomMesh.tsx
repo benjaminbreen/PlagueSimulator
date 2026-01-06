@@ -366,37 +366,37 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
     return (
       <group>
         {/* Perimeter border - outer frame */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, d / 2 - borderWidth / 2]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, d / 2 - borderWidth / 2]} receiveShadow>
           <planeGeometry args={[w, borderWidth]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, -d / 2 + borderWidth / 2]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, -d / 2 + borderWidth / 2]} receiveShadow>
           <planeGeometry args={[w, borderWidth]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w / 2 - borderWidth / 2, 0.005, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w / 2 - borderWidth / 2, 0.015, 0]} receiveShadow>
           <planeGeometry args={[borderWidth, d]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-w / 2 + borderWidth / 2, 0.005, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-w / 2 + borderWidth / 2, 0.015, 0]} receiveShadow>
           <planeGeometry args={[borderWidth, d]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
 
         {/* Inner decorative border */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, d / 2 - innerInset]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, d / 2 - innerInset]} receiveShadow>
           <planeGeometry args={[w - innerInset * 2, 0.08]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.005, -d / 2 + innerInset]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.015, -d / 2 + innerInset]} receiveShadow>
           <planeGeometry args={[w - innerInset * 2, 0.08]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w / 2 - innerInset, 0.005, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[w / 2 - innerInset, 0.015, 0]} receiveShadow>
           <planeGeometry args={[0.08, d - innerInset * 2]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-w / 2 + innerInset, 0.005, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-w / 2 + innerInset, 0.015, 0]} receiveShadow>
           <planeGeometry args={[0.08, d - innerInset * 2]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>
@@ -410,12 +410,12 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
         ].map(([x, z], idx) => (
           <group key={`corner-${idx}`}>
             {/* Octagonal medallion */}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.006, z]} receiveShadow>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.016, z]} receiveShadow>
               <cylinderGeometry args={[cornerSize, cornerSize, 0.01, 8]} />
               <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
             </mesh>
             {/* Inner star pattern */}
-            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.007, z]} receiveShadow>
+            <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.018, z]} receiveShadow>
               <cylinderGeometry args={[cornerSize * 0.5, cornerSize * 0.5, 0.01, 8]} />
               <meshStandardMaterial color={inlayColor} roughness={0.25} metalness={0.15} />
             </mesh>
@@ -423,11 +423,11 @@ export const InteriorRoomMesh: React.FC<InteriorRoomMeshProps> = ({
         ))}
 
         {/* Center medallion */}
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.006, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.016, 0]} receiveShadow>
           <cylinderGeometry args={[0.6, 0.6, 0.01, 12]} />
           <meshStandardMaterial color={inlayColor} roughness={0.25} metalness={0.15} />
         </mesh>
-        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.007, 0]} receiveShadow>
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.018, 0]} receiveShadow>
           <cylinderGeometry args={[0.35, 0.35, 0.01, 8]} />
           <meshStandardMaterial color={inlayColor} roughness={0.3} metalness={0.1} />
         </mesh>

@@ -43,6 +43,10 @@ interface PlayerDossierModalProps {
   isOnHomeTile?: boolean;
   /** Navigate to home tile */
   onGoHome?: () => void;
+  /** Unequip headwear to reveal hair */
+  onUnequipHeadwear?: () => void;
+  /** Equip headwear from inventory */
+  onEquipHeadwear?: () => void;
 }
 
 export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
@@ -63,7 +67,9 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
   homeBuildingType,
   homeDistrictName,
   isOnHomeTile,
-  onGoHome
+  onGoHome,
+  onUnequipHeadwear,
+  onEquipHeadwear
 }) => {
   const [hoveredZone, setHoveredZone] = useState<string | null>(null);
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<FamilyMember | null>(null);
@@ -928,15 +934,28 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                       {playerStats.robeDescription}
                     </div>
                   </button>
-                  <button
-                    onClick={() => onSelectInventoryItem(buildApparelEntry('headwear'))}
-                    className="text-left group"
-                  >
-                    <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Headwear</span>
-                    <div className="text-amber-100/80 mt-1 group-hover:text-amber-200 transition-colors">
-                      {playerStats.headwearDescription}
-                    </div>
-                  </button>
+                  <div className="group relative">
+                    <button
+                      onClick={() => onSelectInventoryItem(buildApparelEntry('headwear'))}
+                      className="text-left w-full"
+                    >
+                      <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Headwear</span>
+                      <div className="text-amber-100/80 mt-1 group-hover:text-amber-200 transition-colors">
+                        {playerStats.headwearStyle === 'none' ? 'None (hair visible)' : playerStats.headwearDescription}
+                      </div>
+                    </button>
+                    {playerStats.headwearStyle !== 'none' && onUnequipHeadwear && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onUnequipHeadwear();
+                        }}
+                        className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] px-2 py-1 rounded bg-amber-900/60 hover:bg-amber-800/80 text-amber-200 border border-amber-700/50"
+                      >
+                        Unequip
+                      </button>
+                    )}
+                  </div>
                 </div>
                 {appearanceExpanded && (
                   <div className="mt-4 border-t border-white/10 pt-4 text-[11px] text-amber-100/80 space-y-1">
@@ -1386,6 +1405,38 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
 
               {inventoryView === 'list' ? (
                 <div className="space-y-3">
+                  {/* Unequipped headwear - shows at top of inventory */}
+                  {playerStats.unequippedHeadwear && (
+                    <div className="w-full text-left rounded-xl border border-amber-500/30 bg-amber-900/20 p-4">
+                      <div className="flex items-center gap-4">
+                        <div className="relative h-10 w-10 rounded-lg bg-black/40 border border-amber-500/40 flex items-center justify-center overflow-hidden">
+                          <div
+                            className="w-6 h-6 rounded-full"
+                            style={{ backgroundColor: playerStats.unequippedHeadwear.color }}
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between">
+                            <div className="font-semibold text-amber-100">{playerStats.unequippedHeadwear.description}</div>
+                          </div>
+                          <div className="text-[10px] text-amber-200/50 mt-1">Unequipped headwear</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-2">
+                          <span className="text-[9px] uppercase tracking-widest px-2 py-1 rounded-full border border-amber-400/30 text-amber-300/70">
+                            Apparel
+                          </span>
+                          {onEquipHeadwear && (
+                            <button
+                              onClick={onEquipHeadwear}
+                              className="text-[9px] uppercase tracking-widest px-3 py-1 rounded-full bg-amber-600/80 text-white hover:bg-amber-500 transition-colors"
+                            >
+                              Equip
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                   {inventoryEntries.map((entry) => {
                     const canConsume = isConsumableItem(entry.effects as any);
                     const effectDescription = getItemEffectDescription(entry.effects as any);
@@ -1453,6 +1504,34 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {/* Unequipped headwear - shows in grid */}
+                  {playerStats.unequippedHeadwear && (
+                    <div className="rounded-2xl border border-amber-500/30 bg-amber-900/20 p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="relative h-12 w-12 rounded-lg bg-black/40 border border-amber-500/40 flex items-center justify-center overflow-hidden">
+                          <div
+                            className="w-8 h-8 rounded-full"
+                            style={{ backgroundColor: playerStats.unequippedHeadwear.color }}
+                          />
+                        </div>
+                        <span className="text-[9px] uppercase tracking-widest px-2 py-1 rounded-full border border-amber-400/30 text-amber-300/70">
+                          Apparel
+                        </span>
+                      </div>
+                      <div className="text-sm font-semibold text-amber-100">{playerStats.unequippedHeadwear.description}</div>
+                      <div className="text-[10px] text-amber-200/50 mt-1">Unequipped</div>
+                      <div className="mt-3 flex items-center justify-end">
+                        {onEquipHeadwear && (
+                          <button
+                            onClick={onEquipHeadwear}
+                            className="text-[9px] uppercase tracking-widest px-3 py-1 rounded-full bg-amber-600/80 text-white hover:bg-amber-500 transition-colors"
+                          >
+                            Equip
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {inventoryEntries.map((entry) => {
                     const canConsume = isConsumableItem(entry.effects as any);
                     return (

@@ -935,100 +935,144 @@ export const HorizonBackdrop: React.FC<{
       })()}
 
       {/* ============================================ */}
-      {/* FAR LAYER: Atmospheric haze & Mountains */}
-      {/* Most distant, heavily faded by atmosphere */}
+      {/* FAR LAYER: Enhanced Atmospheric Haze System */}
+      {/* Smooth fog bands, glowing horizon, heat shimmer */}
       {/* ============================================ */}
+
+      {/* VERTICAL FOG WALL - Continuous band around horizon */}
+      {/* Creates sense of atmospheric depth without harsh edges */}
       {(() => {
-        const hazeLayersRef = useRef<THREE.InstancedMesh>(null);
-        const hazeData = [
-          { x: scaleRadius(100), z: scaleRadius(100), height: 8, size: 1.5 },
-          { x: scaleRadius(-110), z: scaleRadius(95), height: 10, size: 1.8 },
-          { x: scaleRadius(105), z: scaleRadius(-100), height: 7, size: 1.4 },
-          { x: scaleRadius(-95), z: scaleRadius(-105), height: 9, size: 1.6 },
-          { x: scaleRadius(120), z: scaleRadius(-80), height: 11, size: 2.0 },
-          { x: scaleRadius(-130), z: scaleRadius(110), height: 8, size: 1.7 },
+        const fogBands = [
+          { radius: scaleRadius(95), height: 15, opacity: 0.12 },
+          { radius: scaleRadius(110), height: 18, opacity: 0.15 },
+          { radius: scaleRadius(125), height: 22, opacity: 0.18 },
+          { radius: scaleRadius(140), height: 25, opacity: 0.20 },
+          { radius: scaleRadius(155), height: 28, opacity: 0.22 },
         ];
 
-        React.useEffect(() => {
-          if (!hazeLayersRef.current) return;
-          const tempObj = new THREE.Object3D();
-          hazeData.forEach((haze, i) => {
-            tempObj.position.set(haze.x, haze.height, haze.z);
-            tempObj.scale.set(haze.size, 1, haze.size);
-            tempObj.updateMatrix();
-            hazeLayersRef.current.setMatrixAt(i, tempObj.matrix);
-          });
-          hazeLayersRef.current.instanceMatrix.needsUpdate = true;
-        }, []);
-
         return (
-          <instancedMesh ref={hazeLayersRef} args={[undefined, undefined, 6]} castShadow={false}>
-            <cylinderGeometry args={[1.5, 0.5, 6, 6]} />
-            <meshStandardMaterial color={hazeColor} roughness={1} transparent opacity={hazeOpacity} depthWrite={false} />
-          </instancedMesh>
+          <>
+            {fogBands.map((band, i) => (
+              <mesh key={`fog-band-${i}`} position={[0, band.height / 2, 0]} castShadow={false}>
+                <cylinderGeometry args={[band.radius, band.radius, band.height, 64, 1, true]} />
+                <meshStandardMaterial
+                  color={hazeColor}
+                  transparent
+                  opacity={band.opacity * (nightFactor > 0.8 ? 0.4 : twilightFactor > 0 ? 1.2 : 1.0) * (1 + atmosphericHaze * 0.3)}
+                  roughness={1}
+                  depthWrite={false}
+                  side={THREE.BackSide}
+                />
+              </mesh>
+            ))}
+          </>
         );
       })()}
 
-      {/* Mount Qasioun - very distant mountain ring with atmospheric fade */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 10, 0]}>
-        <ringGeometry args={[scaleRadius(165), scaleRadius(180), 64]} />
+      {/* GLOWING HORIZON LINE - Soft bright band where sky meets land */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.5, 0]} castShadow={false}>
+        <ringGeometry args={[scaleRadius(90), scaleRadius(180), 96]} />
         <meshStandardMaterial
-          color={mountainColor}
+          color={isDesert
+            ? (nightFactor > 0.8 ? '#3a2a18' : twilightFactor > 0 ? '#ffb060' : '#ffe8c0')
+            : (nightFactor > 0.8 ? '#3a2a18' : twilightFactor > 0 ? '#ffc070' : '#f8e0b8')}
           transparent
-          opacity={mountainOpacity}
+          opacity={(nightFactor > 0.8 ? 0.15 : twilightFactor > 0 ? 0.45 : 0.35) * (1 + atmosphericHaze * 0.4)}
           roughness={1}
           depthWrite={false}
-          emissive={twilightFactor > 0 ? mountainColor : '#000000'}
-          emissiveIntensity={twilightFactor * 0.1}
+          emissive={nightFactor > 0.8 ? '#000000' : (twilightFactor > 0 ? '#ff8040' : '#ffd090')}
+          emissiveIntensity={nightFactor > 0.8 ? 0 : (twilightFactor > 0 ? 0.4 : 0.15)}
         />
       </mesh>
 
-      {/* HORIZON LINE GRADIENT - Ultra-smooth atmospheric blending */}
-      {/* Enhanced multi-layer gradient for seamless ground-to-sky transition */}
+      {/* HEAT SHIMMER LAYERS - Subtle wavy distortion suggestion */}
+      {dayFactor > 0.5 && !isDesert && (
+        <>
+          {[0.8, 1.6, 2.5].map((height, i) => (
+            <mesh key={`shimmer-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, height, 0]} castShadow={false}>
+              <ringGeometry args={[scaleRadius(85 + i * 8), scaleRadius(95 + i * 12), 48]} />
+              <meshStandardMaterial
+                color="#f8e8d0"
+                transparent
+                opacity={0.08 - i * 0.02}
+                roughness={1}
+                depthWrite={false}
+              />
+            </mesh>
+          ))}
+        </>
+      )}
+
+      {/* Mount Qasioun - Layered mountain silhouettes for depth */}
+      {/* Multiple overlapping layers create atmospheric perspective */}
+      {[
+        { radius: [scaleRadius(160), scaleRadius(172)], height: 8, opacity: 0.35 },
+        { radius: [scaleRadius(168), scaleRadius(178)], height: 12, opacity: 0.25 },
+        { radius: [scaleRadius(175), scaleRadius(185)], height: 16, opacity: 0.15 },
+      ].map((layer, i) => (
+        <mesh key={`mountain-layer-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, layer.height, 0]} castShadow={false}>
+          <ringGeometry args={[layer.radius[0], layer.radius[1], 64]} />
+          <meshStandardMaterial
+            color={mountainColor}
+            transparent
+            opacity={layer.opacity * (nightFactor > 0.8 ? 0.6 : twilightFactor > 0 ? 0.9 : 1.0)}
+            roughness={1}
+            depthWrite={false}
+            emissive={twilightFactor > 0 ? mountainColor : '#000000'}
+            emissiveIntensity={twilightFactor * (0.15 - i * 0.04)}
+          />
+        </mesh>
+      ))}
+
+      {/* HORIZON GRADIENT BLEND - Ultra-smooth ground-to-sky transition */}
       {(() => {
         // WARM TONES ONLY - no blue! This is hot, dusty Syria in June
         const horizonSkyColor = isDesert
-          ? (nightFactor > 0.8 ? '#2a1e14' : twilightFactor > 0 ? '#f2a24f' : '#fae4b8')  // Night: warm charcoal-brown, Twilight: golden, Day: pale sandy-cream
-          : (nightFactor > 0.8 ? '#2a1e14' : twilightFactor > 0 ? '#f7b25a' : '#f0d8b0'); // Night: warm charcoal-brown, Twilight: amber-gold, Day: dusty cream
+          ? (nightFactor > 0.8 ? '#2a1e14' : twilightFactor > 0 ? '#f2a24f' : '#fae4b8')
+          : (nightFactor > 0.8 ? '#2a1e14' : twilightFactor > 0 ? '#f7b25a' : '#f0d8b0');
 
-        // ENHANCED: 12 gradient layers for ultra-smooth blending
+        // 16 gradient layers for even smoother blending
         const gradientLayers = [
-          { height: 0.05, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.45, colorMix: 0 },      // Near ground
-          { height: 0.2, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.42, colorMix: 0.08 },
-          { height: 0.5, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.38, colorMix: 0.16 },
-          { height: 0.9, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.35, colorMix: 0.24 },
-          { height: 1.4, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.32, colorMix: 0.34 },
-          { height: 2.0, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.28, colorMix: 0.44 },
-          { height: 2.8, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.25, colorMix: 0.54 },
-          { height: 3.8, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.22, colorMix: 0.64 },
-          { height: 5.0, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.18, colorMix: 0.74 },
-          { height: 6.5, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.14, colorMix: 0.84 },
-          { height: 8.5, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.10, colorMix: 0.92 },
-          { height: 11.0, radius: [scaleRadius(100), scaleRadius(180)], opacity: 0.06, colorMix: 0.98 },   // Blend to sky
+          { height: 0.02, opacity: 0.50, colorMix: 0 },
+          { height: 0.1, opacity: 0.46, colorMix: 0.05 },
+          { height: 0.25, opacity: 0.42, colorMix: 0.10 },
+          { height: 0.5, opacity: 0.38, colorMix: 0.16 },
+          { height: 0.8, opacity: 0.35, colorMix: 0.22 },
+          { height: 1.2, opacity: 0.32, colorMix: 0.30 },
+          { height: 1.7, opacity: 0.28, colorMix: 0.38 },
+          { height: 2.3, opacity: 0.25, colorMix: 0.46 },
+          { height: 3.0, opacity: 0.22, colorMix: 0.54 },
+          { height: 4.0, opacity: 0.19, colorMix: 0.62 },
+          { height: 5.2, opacity: 0.16, colorMix: 0.70 },
+          { height: 6.5, opacity: 0.13, colorMix: 0.78 },
+          { height: 8.0, opacity: 0.10, colorMix: 0.85 },
+          { height: 10.0, opacity: 0.07, colorMix: 0.91 },
+          { height: 12.5, opacity: 0.04, colorMix: 0.96 },
+          { height: 15.0, opacity: 0.02, colorMix: 0.99 },
         ];
 
         return (
           <>
             {gradientLayers.map((layer, i) => {
-              // Blend from sun-bleached ground to warm atmospheric horizon
-              const groundColor = new THREE.Color(isDesert ? '#e4b878' : '#e8c8a0');  // More sun-bleached, warm
+              const groundColor = new THREE.Color(isDesert ? '#e4b878' : '#e8c8a0');
               const skyColor = new THREE.Color(horizonSkyColor);
               const blendedColor = groundColor.clone().lerp(skyColor, layer.colorMix);
 
-              // Intense atmospheric haze during hot summer days
               const adjustedOpacity = layer.opacity
-                * (nightFactor > 0.8 ? 0.45 : twilightFactor > 0 ? 0.95 : 0.80)  // Higher daytime opacity for heat shimmer
-                * (1.0 + atmosphericHaze * 0.35);
+                * (nightFactor > 0.8 ? 0.4 : twilightFactor > 0 ? 1.0 : 0.85)
+                * (1.0 + atmosphericHaze * 0.3);
 
               return (
-                <mesh key={`horizon-gradient-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, layer.height, 0]}>
-                  <ringGeometry args={[layer.radius[0], layer.radius[1], 64]} />
+                <mesh key={`horizon-gradient-${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, layer.height, 0]} castShadow={false}>
+                  <ringGeometry args={[scaleRadius(90), scaleRadius(185), 64]} />
                   <meshStandardMaterial
                     color={blendedColor}
                     transparent
                     opacity={adjustedOpacity}
                     roughness={1}
                     depthWrite={false}
+                    emissive={i < 4 && twilightFactor > 0 ? blendedColor : '#000000'}
+                    emissiveIntensity={i < 4 ? twilightFactor * 0.1 : 0}
                   />
                 </mesh>
               );

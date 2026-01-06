@@ -30,6 +30,7 @@ interface CourtyardBuildingProps {
   wireframeEnabled: boolean;
   selectionEnabled: boolean;
   isSelected: boolean;
+  isOccluded: boolean;
   onSelectBuilding?: (buildingId: string | null) => void;
   hovered: boolean;
   setHovered: React.Dispatch<React.SetStateAction<boolean>>;
@@ -53,6 +54,7 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
   wireframeEnabled,
   selectionEnabled,
   isSelected,
+  isOccluded,
   onSelectBuilding,
   hovered,
   setHovered,
@@ -76,7 +78,7 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
   const hasLintel = seededRandom(localSeed + 415) > 0.3;
   const showSelected = selectionEnabled && isSelected;
   const showLabel = (labelEnabled && hovered) || showSelected;
-  const showWireframe = (wireframeEnabled && hovered) || showSelected;
+  const showWireframe = (wireframeEnabled && hovered) || showSelected || isOccluded;
 
   const floorMat = otherMaterials?.courtyardFloor ?? new THREE.MeshStandardMaterial({ color: '#d7cfbf', roughness: 0.95, metalness: 0 });
   const vineMat = otherMaterials?.vine ?? new THREE.MeshStandardMaterial({ color: '#3a5a3c', roughness: 0.9, metalness: 0 });
@@ -97,6 +99,7 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
     <group
       ref={groupRef}
       position={[data.position[0], finalHeight / 2, data.position[2]]}
+      userData={{ buildingId: data.id }}
       onPointerOver={(e) => {
         e.stopPropagation();
         setHovered(true);

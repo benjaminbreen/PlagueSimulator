@@ -8,7 +8,8 @@ import {
   SimulationStats,
   EncounterEnvironment,
   FamilyMember,
-  FamilyRelationship
+  FamilyRelationship,
+  BuildingType
 } from '../types';
 import { MoraleStats } from '../components/Agents';
 import { seededRandom } from './procedural';
@@ -33,6 +34,125 @@ function getTimeDescription(hour: number): string {
   if (hour >= 18 && hour < 20) return "evening, lanterns begin to glow";
   if (hour >= 20 && hour < 22) return "night, the streets thin";
   return "deep night, when most folk sleep";
+}
+
+// Get alarm level for strangers in interior spaces at night
+function getNightIntrusionLevel(hour: number): 'none' | 'guarded' | 'suspicious' | 'alarmed' {
+  // Deep night (10 PM - 4 AM) - highly alarmed
+  if (hour >= 22 || hour < 4) return 'alarmed';
+  // Evening/early night (8 PM - 10 PM) - suspicious
+  if (hour >= 20 && hour < 22) return 'suspicious';
+  // Dusk (6 PM - 8 PM) - slightly guarded
+  if (hour >= 18 && hour < 20) return 'guarded';
+  // Daytime - normal
+  return 'none';
+}
+
+// Check social appropriateness of player in building based on gender and class
+interface SocialAppropriatenessResult {
+  isAppropriate: boolean;
+  reason?: 'gender' | 'class' | 'both';
+  severity: 'none' | 'mild' | 'moderate' | 'severe';
+  details?: string;
+}
+
+function checkSocialAppropriateness(
+  playerGender: 'Male' | 'Female',
+  playerClass: SocialClass,
+  buildingType?: BuildingType,
+  buildingProfession?: string
+): SocialAppropriatenessResult {
+  if (!buildingType) return { isAppropriate: true, severity: 'none' };
+
+  const profLower = (buildingProfession || '').toLowerCase();
+
+  // RELIGIOUS buildings (mosques, madrasas)
+  if (buildingType === BuildingType.RELIGIOUS || buildingType === BuildingType.SCHOOL) {
+    // Women generally not welcome in madrasas or main mosque areas
+    if (playerGender === 'Female') {
+      // Madrasas are strictly male educational institutions
+      if (profLower.includes('madrasa') || profLower.includes('scholar') || profLower.includes('teacher') || profLower.includes('faqih')) {
+        return {
+          isAppropriate: false,
+          reason: 'gender',
+          severity: 'severe',
+          details: 'A woman has no business in a madrasa - this is a place of male religious scholarship!'
+        };
+      }
+      // Main mosque prayer halls during prayer times
+      if (profLower.includes('imam') || profLower.includes('mosque') || profLower.includes('muezzin')) {
+        return {
+          isAppropriate: false,
+          reason: 'gender',
+          severity: 'moderate',
+          details: 'This is the men\'s prayer area. Women pray in the designated section, not here!'
+        };
+      }
+    }
+    // Peasants might be looked down upon in elite scholarly institutions
+    if (playerClass === SocialClass.PEASANT && (profLower.includes('madrasa') || profLower.includes('scholar'))) {
+      return {
+        isAppropriate: false,
+        reason: 'class',
+        severity: 'mild',
+        details: 'What business does a common laborer have in a place of learning?'
+      };
+    }
+  }
+
+  // CIVIC buildings (government, courts)
+  if (buildingType === BuildingType.CIVIC) {
+    // Women very unusual in government buildings
+    if (playerGender === 'Female') {
+      if (profLower.includes('qadi') || profLower.includes('judge') || profLower.includes('wali') || profLower.includes('official') || profLower.includes('governor')) {
+        return {
+          isAppropriate: false,
+          reason: 'gender',
+          severity: 'moderate',
+          details: 'A woman in the halls of government? This is most irregular!'
+        };
+      }
+    }
+    // Peasants definitely out of place in noble/government spaces
+    if (playerClass === SocialClass.PEASANT) {
+      if (profLower.includes('governor') || profLower.includes('wali') || profLower.includes('emir') || profLower.includes('noble')) {
+        return {
+          isAppropriate: false,
+          reason: 'class',
+          severity: 'moderate',
+          details: 'A peasant wandering into the halls of power? Who let you in here?'
+        };
+      }
+    }
+  }
+
+  // MEDICAL buildings (bimaristans)
+  if (buildingType === BuildingType.MEDICAL) {
+    // Hospitals were more egalitarian, but still some gender separation
+    if (playerGender === 'Female' && (profLower.includes('physician') || profLower.includes('hakim'))) {
+      return {
+        isAppropriate: false,
+        reason: 'gender',
+        severity: 'mild',
+        details: 'The women\'s ward is separate. What are you doing in the men\'s area?'
+      };
+    }
+  }
+
+  // HOSPITALITY buildings (inns, caravanserais) - more open but still norms
+  if (buildingType === BuildingType.HOSPITALITY) {
+    // Unaccompanied women in inns might raise eyebrows
+    if (playerGender === 'Female' && (profLower.includes('inn') || profLower.includes('khan') || profLower.includes('caravanserai'))) {
+      return {
+        isAppropriate: false,
+        reason: 'gender',
+        severity: 'mild',
+        details: 'An unaccompanied woman in a travelers\' inn? That is... unusual.'
+      };
+    }
+  }
+
+  return { isAppropriate: true, severity: 'none' };
 }
 
 function getAwarenessDescription(level: number): string {
@@ -306,6 +426,89 @@ ${isFollowingAfterDismissal ? `
 - You may threaten to call for guards, yell for help, or flee
 - Make it clear this interaction is unwelcome and they are behaving threateningly
 - DO NOT be friendly or reset to normal conversation - you are being stalked` : ''}
+${environment.isPrivateSpace && !getFamilyRelationship(npc.id, player.familyMembers || []).isFamily ? `
+## CRITICAL: INTRUDER IN YOUR PRIVATE SPACE!!!
+- THIS PERSON HAS BROKEN INTO YOUR PRIVATE QUARTERS - YOUR BEDROOM, YOUR SANCTUARY!
+- You are TERRIFIED and OUTRAGED - a stranger has violated your home!
+- You have NO IDEA how they got in here - perhaps through the roof? A thief? An assassin?!
+- RESPOND IN ALL CAPITAL LETTERS WITH MANY EXCLAMATION POINTS!!!
+- Examples: "GET OUT NOW!!!! WHAT ARE YOU DOING HERE?! HELP!!!! GUARDS!!!!"
+- You are screaming, panicking, threatening to call for help
+- You may grab a weapon, throw objects, or flee
+- DO NOT treat this as a normal conversation - this is a home invasion!
+- DO NOT ask "what can I do for you" or any polite greeting - DEMAND THEY LEAVE!
+- Your first instinct is FEAR and FURY - act on it!!!` : ''}
+${(() => {
+  // Night intrusion in public interior spaces (shops, ground floors)
+  if (!environment.isInterior || environment.isPrivateSpace) return '';
+  if (getFamilyRelationship(npc.id, player.familyMembers || []).isFamily) return '';
+  const nightLevel = getNightIntrusionLevel(environment.timeOfDay);
+  if (nightLevel === 'none') return '';
+  if (nightLevel === 'alarmed') return `
+## CRITICAL: NIGHTTIME INTRUDER!!!
+- It is DEEP NIGHT and a stranger is inside your establishment - THIS IS NOT NORMAL!
+- The shop/building is CLOSED. No legitimate person should be here at this hour!
+- You are ALARMED and FRIGHTENED - are they a thief? An assassin? A demon?!
+- RESPOND IN ALL CAPITAL LETTERS WITH EXCLAMATION POINTS!!!
+- Examples: "WHO ARE YOU?! HOW DID YOU GET IN HERE?! GET OUT!!! HELP!!!"
+- You are shouting, grabbing for a weapon, backing away in fear
+- DEMAND to know how they entered and what they want
+- You may threaten to call the night watch, scream for neighbors, or attack
+- DO NOT be polite - this is a break-in at the worst possible hour!!!`;
+  if (nightLevel === 'suspicious') return `
+## WARNING: LATE NIGHT VISITOR
+- It is late at night and a stranger has appeared inside - this is highly unusual
+- Most honest folk are home by now. Why is this person here so late?
+- You are SUSPICIOUS and ON GUARD - your hand may rest on a knife or club
+- Speak with wariness and suspicion. Demand to know their business.
+- You are NOT friendly - question why they are here at such a late hour
+- Be ready to call for help or defend yourself if they seem threatening
+- Examples: "What are you doing here at this hour? The shop is closed. State your business quickly!"`;
+  if (nightLevel === 'guarded') return `
+## NOTE: EVENING VISITOR
+- It is getting late and dusk is falling. Most business is concluding for the day.
+- You are slightly on guard - visitors at this hour are less common
+- You may question why they've come so late or note that you're about to close
+- Be polite but not overly welcoming - the hour calls for some caution`;
+  return '';
+})()}
+${(() => {
+  // Social appropriateness check - gender and class restrictions
+  if (!environment.isInterior) return '';
+  if (getFamilyRelationship(npc.id, player.familyMembers || []).isFamily) return '';
+  const social = checkSocialAppropriateness(player.gender, player.socialClass, environment.buildingType, environment.buildingProfession);
+  if (social.isAppropriate) return '';
+
+  if (social.severity === 'severe') return `
+## CRITICAL: SOCIAL VIOLATION - COMPLETELY INAPPROPRIATE PRESENCE!!!
+- THIS PERSON HAS NO BUSINESS BEING HERE - their presence is a SHOCKING breach of social norms!
+- ${social.details}
+- You are OUTRAGED and SCANDALIZED - this violates everything proper!
+- RESPOND WITH ANGER AND DEMAND THEY LEAVE IMMEDIATELY!
+- Use firm, harsh language: "How DARE you enter here! Leave at ONCE!"
+- You may threaten to call guards or physically remove them
+- DO NOT engage in normal conversation - demand they leave first!`;
+
+  if (social.severity === 'moderate') return `
+## WARNING: SOCIALLY INAPPROPRIATE VISITOR
+- This person's presence here is irregular and improper
+- ${social.details}
+- You are uncomfortable and disapproving of their presence
+- Speak with clear disapproval and question why they are here
+- You may refuse to help them or suggest they leave
+- Be cold and unwelcoming - they do not belong here
+- Examples: "You should not be here. What is your business?" or "This is no place for the likes of you."`;
+
+  if (social.severity === 'mild') return `
+## NOTE: MILDLY UNUSUAL VISITOR
+- This person's presence is somewhat unexpected or irregular
+- ${social.details}
+- You may raise an eyebrow or make a comment about their unusual presence
+- Be somewhat reserved but not hostile
+- You might ask what brings them here or note that they're out of place`;
+
+  return '';
+})()}
 
 ## ROLEPLAY GUIDELINES
 1. Speak in character as a medieval Damascus resident. Use plain, practical language, not theatrical or ceremonial.

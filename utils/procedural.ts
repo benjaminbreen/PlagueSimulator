@@ -640,48 +640,55 @@ const generateDyeBasedColor = (rand: () => number, socialClass: SocialClass): st
 
 const ROBE_OPTIONS_BY_CLASS: Record<SocialClass, Array<{ desc: string; base: string; accent: string; sash: boolean; sleeves: boolean }>> = {
   [SocialClass.PEASANT]: [
-    // Undyed natural fibers (most common - weighted heavily)
-    { desc: 'threadbare linen qamis in beige', base: '#c8b892', accent: '#e6d8b7', sash: false, sleeves: false },
-    { desc: 'undyed flax thawb with a simple izar belt', base: '#d6c8a8', accent: '#cdbb9a', sash: false, sleeves: false },
-    { desc: 'washed linen thawb in pale sand', base: '#d9cdb2', accent: '#c8b892', sash: false, sleeves: false },
-    { desc: 'raw wool qamis in natural cream', base: '#d4c9b0', accent: '#bfb294', sash: false, sleeves: false },
-    { desc: 'sun-bleached linen in off-white', base: '#e2d8c4', accent: '#d4c9a8', sash: false, sleeves: false },
-    { desc: 'simple flax qamis in pale oat', base: '#d0c4a4', accent: '#c4b898', sash: false, sleeves: false },
-    { desc: 'worn linen thawb in dusty cream', base: '#cfc5a8', accent: '#c0b090', sash: false, sleeves: false },
-    // Earth tones from cheap local dyes
-    { desc: 'patched wool qaba in earth tones', base: '#8a6b4f', accent: '#c8b892', sash: true, sleeves: true },
-    { desc: 'rough wool qabāʾ in walnut brown', base: '#7a5a3f', accent: '#bfae8a', sash: true, sleeves: true },
-    { desc: 'pomegranate-dyed thawb in dull tan', base: '#8f7656', accent: '#c8b892', sash: false, sleeves: false },
-    { desc: 'mud-brown wool qaba', base: '#6b5343', accent: '#b8a880', sash: true, sleeves: true },
-    // Rare colored pieces (hand-me-downs or lucky finds)
-    { desc: 'faded indigo thawb', base: '#5a6e7a', accent: '#c8b892', sash: false, sleeves: false },
-    { desc: 'madder-dyed qamis in brick red', base: '#8b5a4a', accent: '#d6c8a8', sash: true, sleeves: false },
-    { desc: 'weld-dyed thawb in faded yellow-green', base: '#9a9858', accent: '#c8c0a0', sash: false, sleeves: false },
-    { desc: 'faded turquoise thawb from a wealthy household', base: '#5a8a8a', accent: '#c8c0a0', sash: false, sleeves: false },
-    { desc: 'sun-bleached green qamis of salvaged cloth', base: '#6a7a5a', accent: '#c8b892', sash: false, sleeves: false },
+    // Undyed natural fibers (common but not overwhelming)
+    { desc: 'threadbare linen qamis in beige', base: '#c8b892', accent: '#a08060', sash: false, sleeves: false },
+    { desc: 'undyed flax thawb with rope belt', base: '#d6c8a8', accent: '#8a7a5a', sash: false, sleeves: false },
+    { desc: 'raw wool qamis in natural cream', base: '#d4c9b0', accent: '#9a8a6a', sash: false, sleeves: false },
+    { desc: 'worn linen thawb in dusty cream', base: '#cfc5a8', accent: '#7a6a4a', sash: false, sleeves: false },
+    // Cheap local dyes - madder (very common, affordable)
+    { desc: 'madder-dyed qamis in brick red', base: '#9b5a4a', accent: '#d6c8a8', sash: false, sleeves: false },
+    { desc: 'faded madder thawb in dusty rose', base: '#a07068', accent: '#c8b8a0', sash: false, sleeves: false },
+    { desc: 'patched madder qamis in rust', base: '#8a5040', accent: '#c0a888', sash: false, sleeves: false },
+    // Weld dye (common yellow plant dye)
+    { desc: 'weld-dyed thawb in straw yellow', base: '#c8a858', accent: '#8a7a5a', sash: false, sleeves: false },
+    { desc: 'onion-skin dyed qamis in pale gold', base: '#c4a060', accent: '#7a6848', sash: false, sleeves: false },
+    // Earth tones from walnut, pomegranate
+    { desc: 'walnut-brown wool qaba', base: '#6a4a38', accent: '#c8b892', sash: true, sleeves: true },
+    { desc: 'pomegranate-dyed thawb in rust-brown', base: '#8a5a48', accent: '#d0c0a0', sash: false, sleeves: false },
+    { desc: 'rough wool qabāʾ in deep brown', base: '#5a4030', accent: '#b8a880', sash: true, sleeves: true },
+    // Woad blue (cheaper than indigo, available locally)
+    { desc: 'woad-dyed thawb in soft blue', base: '#6080a0', accent: '#c8c0b0', sash: false, sleeves: false },
+    { desc: 'faded woad qamis in grey-blue', base: '#7088a0', accent: '#b8a888', sash: false, sleeves: false },
+    // Overdyed greens (weld + woad)
+    { desc: 'olive wool qaba from mixed dyes', base: '#6a7050', accent: '#c8b892', sash: true, sleeves: true },
+    { desc: 'dull green thawb of salvaged cloth', base: '#607858', accent: '#b8a880', sash: false, sleeves: false },
+    // Iron-tannin blacks and greys (cheap, common for laborers)
+    { desc: 'iron-black wool qaba', base: '#3a3835', accent: '#8a8070', sash: true, sleeves: true },
+    { desc: 'charcoal grey thawb', base: '#4a4845', accent: '#a09888', sash: false, sleeves: false },
   ],
   [SocialClass.MERCHANT]: [
-    // Quality local dyes
-    { desc: 'dyed wool qaba in muted olive with a beige izar', base: '#6f6a3f', accent: '#e1d3b3', sash: true, sleeves: true },
-    { desc: 'soft wool thawb in deep olive', base: '#5d5b2f', accent: '#cbb58c', sash: true, sleeves: true },
-    { desc: 'pomegranate-brown qaba with woven trim', base: '#7a5a42', accent: '#d6c8a8', sash: true, sleeves: true },
-    { desc: 'henna-dyed thawb in warm orange-brown', base: '#8b6844', accent: '#e3d2ad', sash: true, sleeves: true },
-    { desc: 'madder-dyed thawb in russet red', base: '#8b4a3a', accent: '#e1d3b3', sash: true, sleeves: true },
-    { desc: 'madder-dyed qaba in terracotta', base: '#a65a42', accent: '#d9c9a8', sash: true, sleeves: true },
-    // Good quality basics
-    { desc: 'well-kept linen thawb in warm tan', base: '#b89b6a', accent: '#d9c9a8', sash: true, sleeves: true },
-    { desc: 'trimmed qaba with a woven izar', base: '#7b5a4a', accent: '#e3d2ad', sash: true, sleeves: true },
-    { desc: 'fine linen thawb with patterned izar', base: '#a68c6a', accent: '#e3d2ad', sash: true, sleeves: true },
-    // Imported dyes (sign of trade success)
-    { desc: 'dyed wool qaba in slate blue', base: '#4a5a6b', accent: '#d9c9a8', sash: true, sleeves: true },
-    { desc: 'indigo-dyed thawb in deep blue', base: '#3d4f5f', accent: '#c8b892', sash: true, sleeves: true },
-    { desc: 'weld-and-indigo green qaba', base: '#4a5f4a', accent: '#d4c9a8', sash: true, sleeves: true },
-    // Vibrant trade goods colors (showing wealth from trade)
-    { desc: 'rich madder qaba in vivid red', base: '#a04040', accent: '#e3d2ad', sash: true, sleeves: true },
-    { desc: 'lapis-blue thawb from Persian trade', base: '#3a5a8a', accent: '#d4c9a8', sash: true, sleeves: true },
-    { desc: 'copper-henna qaba in warm orange', base: '#a06040', accent: '#e1d3b3', sash: true, sleeves: true },
+    // Quality local dyes - olives and earth tones
+    { desc: 'dyed wool qaba in muted olive', base: '#6f6a3f', accent: '#c8a050', sash: true, sleeves: true },
+    { desc: 'soft wool thawb in deep olive', base: '#5d5b2f', accent: '#b89858', sash: true, sleeves: true },
+    { desc: 'henna-dyed thawb in warm orange-brown', base: '#9b6844', accent: '#d8c098', sash: true, sleeves: true },
+    // Rich madder reds (sign of good trade)
+    { desc: 'madder-dyed thawb in russet red', base: '#9b4a3a', accent: '#d4c4a0', sash: true, sleeves: true },
+    { desc: 'madder-dyed qaba in terracotta', base: '#a65a42', accent: '#c8b888', sash: true, sleeves: true },
+    { desc: 'rich madder qaba in vivid red', base: '#a84040', accent: '#e0d0b0', sash: true, sleeves: true },
+    // Good quality basics with contrasting accents
+    { desc: 'well-kept linen thawb in warm tan', base: '#b89b6a', accent: '#6a5040', sash: true, sleeves: true },
+    { desc: 'trimmed qaba with striped izar', base: '#7b5a4a', accent: '#c8a050', sash: true, sleeves: true },
+    { desc: 'fine linen thawb in honey', base: '#c8a060', accent: '#5a4a38', sash: true, sleeves: true },
+    // Imported dyes - blues and greens
+    { desc: 'dyed wool qaba in slate blue', base: '#4a5a6b', accent: '#c8b080', sash: true, sleeves: true },
+    { desc: 'indigo-dyed thawb in deep blue', base: '#3d4f5f', accent: '#c8a858', sash: true, sleeves: true },
+    { desc: 'weld-and-indigo green qaba', base: '#4a6048', accent: '#c8b070', sash: true, sleeves: true },
+    { desc: 'teal qaba from Syrian trade', base: '#4a7878', accent: '#c8b888', sash: true, sleeves: true },
+    // Vibrant trade goods colors
+    { desc: 'lapis-blue thawb from Persian trade', base: '#3a5a8a', accent: '#d0b870', sash: true, sleeves: true },
+    { desc: 'copper-henna qaba in warm orange', base: '#a86040', accent: '#d8c8a0', sash: true, sleeves: true },
     { desc: 'olive qaba with saffron-gold trim', base: '#5d5b2f', accent: '#d4a030', sash: true, sleeves: true },
-    { desc: 'fine brown thawb with saffron sash', base: '#7a5a42', accent: '#d4a030', sash: true, sleeves: true },
+    { desc: 'plum-dyed thawb in muted purple', base: '#6a4858', accent: '#c8b888', sash: true, sleeves: true },
   ],
   [SocialClass.CLERGY]: [
     // Austere, dark colors befitting religious scholars
@@ -1475,10 +1482,12 @@ const buildHeadwearPick = (
     return { desc: 'woven straw brimmed cap', color: '#cbb48a', pattern: 'none' };
   }
   if (headwearStyle === 'taqiyah') {
-    return { desc: 'simple skullcap in dark cloth', color: '#3a3a3a', pattern: 'none' };
+    const palette = ['#3a3a3a', '#1f1f1f', '#5a4a3a', '#2f2b26', '#6b5a4b'];
+    return { desc: 'simple skullcap in dark cloth', color: palette[Math.floor(rand() * palette.length)], pattern: 'none' };
   }
   if (headwearStyle === 'cap') {
-    return { desc: 'plain linen cap', color: '#5a4a3a', pattern: 'none' };
+    const palette = ['#5a4a3a', '#6f5a43', '#cbb48a', '#9b7b4f'];
+    return { desc: 'plain linen cap', color: palette[Math.floor(rand() * palette.length)], pattern: 'none' };
   }
   if (headwearStyle === 'none') {
     return { desc: 'uncovered head', color: '#cbb48a', pattern: 'none' };
@@ -1629,11 +1638,12 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
         return clamp(0.78 + rand() * 0.16 + (weightBase - 0.8) * 0.2, 0.72, 1.0);
       })()
     : 1.0;
-  const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.4);
-  const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.4 : 0.6);
+  const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.5 : 0.35);
+  const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.35 : 0.45);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.75 : 0.4);
   let robePattern: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric' = (() => {
-    if (rand() > 0.75) {
+    // Stripes are common even for poor - simple weaving technique
+    if (rand() > 0.6) {
       // Pattern pools vary by social class - expensive patterns for wealthy
       const patternPool: Array<'stripe' | 'chevron' | 'damask' | 'ikat' | 'tiraz' | 'geometric'> =
         socialClass === SocialClass.NOBILITY
@@ -1700,7 +1710,8 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   };
 
   if (districtType === 'HOVELS') {
-    robePattern = 'none';
+    // Even poor areas have some simple stripes - basic weaving technique
+    robePattern = (robePattern === 'stripe' && rand() > 0.6) ? 'stripe' : 'none';
   } else if (districtType === 'WEALTHY' && robePattern === 'none') {
     robePattern = gender === 'Female' ? (rand() > 0.5 ? 'damask' : 'stripe') : 'stripe';
   } else if (districtType === 'MARKET' && robePattern === 'none' && rand() > 0.6) {
@@ -1775,15 +1786,15 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
 
   // Facial hair for men (historically, beards were common in medieval Damascus)
   const facialHair: NPCStats['facialHair'] = gender === 'Male' ? (() => {
-    // Children never have facial hair
-    if (age < 12) return 'none';
-    // Youth (12-17) rarely have stubble
-    if (age < 18) return rand() > 0.85 ? 'stubble' : 'none';
-    // Young men (18-20) typically clean-shaven or stubble
-    if (age < 21) return rand() > 0.6 ? 'stubble' : 'none';
-    // Religious leaders almost always have beards
+    // Children and early adolescents never have facial hair
+    if (age < 15) return 'none';
+    // Mid-teens (15-17) very rarely have light stubble
+    if (age < 18) return rand() > 0.95 ? 'stubble' : 'none';
+    // Young men (18-20) sometimes have stubble
+    if (age < 21) return rand() > 0.5 ? 'stubble' : 'none';
+    // Religious leaders almost always have beards (only if 21+)
     if (isReligiousLeader) return rand() > 0.2 ? 'full_beard' : 'short_beard';
-    // Soldiers often have mustaches or short beards
+    // Soldiers often have mustaches or short beards (only if 21+)
     if (isSoldier) return rand() > 0.5 ? 'mustache' : (rand() > 0.5 ? 'short_beard' : 'stubble');
     // Older men more likely to have beards
     if (age > 40) {
@@ -1970,6 +1981,10 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     heldItem,
     accessories,
     goalOfDay,
+    hasEmbroidery: socialClass === SocialClass.NOBILITY ||
+                   socialClass === SocialClass.ELITE ||
+                   (socialClass === SocialClass.MERCHANT && rand() > 0.6) ||
+                   (socialClass === SocialClass.CLERGY && rand() > 0.5),
   };
 };
 
@@ -2168,11 +2183,12 @@ export const generatePlayerStats = (
         return clamp(0.78 + rand() * 0.16 + (weight - 0.8) * 0.2, 0.72, 1.0);
       })()
     : 1.0;
-  const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.65 : 0.4);
-  const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.35 : 0.6);
+  const robeHasTrim = rand() > (socialClass === SocialClass.PEASANT ? 0.45 : 0.35);
+  const robeHemBand = rand() > (socialClass === SocialClass.NOBILITY ? 0.3 : 0.4);
   const robeOverwrap = gender === 'Female' && rand() > (socialClass === SocialClass.PEASANT ? 0.7 : 0.35);
   let robePattern: 'none' | 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric' = (() => {
-    if (rand() > 0.75) {
+    // Stripes are common even for poor - simple weaving technique
+    if (rand() > 0.55) {
       // Pattern pools vary by social class - expensive patterns for wealthy
       const patternPool: Array<'stripe' | 'chevron' | 'damask' | 'ikat' | 'tiraz' | 'geometric'> =
         socialClass === SocialClass.NOBILITY
@@ -2199,9 +2215,9 @@ export const generatePlayerStats = (
         : socialClass === SocialClass.CLERGY ? (rand() > 0.6 ? 'short' : 'medium')
         : rand() > 0.5 ? 'medium' : 'short');
   const facialHair: PlayerStats['facialHair'] = gender === 'Male' ? (() => {
-    if (age < 12) return 'none';
-    if (age < 18) return rand() > 0.85 ? 'stubble' : 'none';
-    if (age < 21) return rand() > 0.6 ? 'stubble' : 'none';
+    if (age < 15) return 'none';
+    if (age < 18) return rand() > 0.95 ? 'stubble' : 'none';
+    if (age < 21) return rand() > 0.5 ? 'stubble' : 'none';
     if (isReligiousLeader) return rand() > 0.2 ? 'full_beard' : 'short_beard';
     if (isSoldier) return rand() > 0.5 ? 'mustache' : (rand() > 0.5 ? 'short_beard' : 'stubble');
     if (age > 40) {
@@ -2404,7 +2420,10 @@ export const generatePlayerStats = (
     wealth,
     humors,
     humoralBalance,
-    baselineAilments
+    baselineAilments,
+    hasEmbroidery: socialClass === SocialClass.NOBILITY ||
+                   (socialClass === SocialClass.MERCHANT && rand() > 0.5) ||
+                   (socialClass === SocialClass.CLERGY && rand() > 0.4),
   };
 };
 

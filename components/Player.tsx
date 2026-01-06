@@ -58,6 +58,12 @@ const GRAVITY = -24;
 const OVERHEAD_ZOOM_SPEED = 1.2;
 const OVERHEAD_ROTATE_SPEED = 1.5;
 const OVERHEAD_POLAR_ANGLE = 0.3;
+const ISO_AZIMUTH = Math.PI / 4;
+const ISO_POLAR_ANGLE = 0.955316618; // ~54.7356 degrees (true isometric)
+const ISO_POLAR_ANGLE_CLOSE = 1.35; // Closer to ground-level when zoomed in
+const ISO_ZOOM_SPEED = 2.3;
+const ISO_ROTATE_SPEED = 2.6;
+const ISO_MOUSE_SENSITIVITY = 0.008;
 const MARKER_COLOR = '#fbbf24';
 const ORBIT_DAMPING = 0.18;
 const ORBIT_RECENTER_SPEED = 1.6;
@@ -105,6 +111,9 @@ interface PlayerProps {
   onShatterLoot?: (loot: ShatterLootItem[], sourceObjectKind: import('../utils/pushables').PushableKind) => void;
   interiorEntrySide?: 'north' | 'south' | 'east' | 'west' | null;
   interiorEntryToken?: string | null;
+  onIsometricOcclusionChange?: (ids: string[]) => void;
+  mapEntryToken?: string;
+  isInterior?: boolean;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -149,7 +158,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   gameLoading = true,
   onShatterLoot,
   interiorEntrySide = null,
-  interiorEntryToken = null
+  interiorEntryToken = null,
+  onIsometricOcclusionChange,
+  mapEntryToken,
+  isInterior = false
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -232,7 +244,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const lastMouseRef = useRef({ x: 0, y: 0 });
   const mouseDeltaRef = useRef({ x: 0, y: 0 });
 
-  const { camera, size } = useThree();
+  const { camera, size, scene } = useThree();
   const [isWalking, setIsWalking] = useState(false);
   const [isSprinting, setIsSprinting] = useState(false);
   const walkingRef = useRef(false);
@@ -346,6 +358,35 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const modeTransitionProgressRef = useRef(1); // 0 = just switched, 1 = complete
   const transitionStartPosRef = useRef<THREE.Vector3 | null>(null);
   const transitionStartTargetRef = useRef<THREE.Vector3 | null>(null);
+
+  // Isometric camera follow distance + temp vectors
+  const isoDistanceRef = useRef<number | null>(null);
+  const isoAzimuthRef = useRef(ISO_AZIMUTH);
+  const isoDraggingRef = useRef(false);
+  const isoMouseDeltaRef = useRef({ x: 0, y: 0 });
+  const isoManualZoomHoldRef = useRef(0);
+  const isoCinematicRef = useRef({
+    active: false,
+    phase: 'zoom' as 'zoom' | 'rotate',
+    t: 0,
+    zoomDuration: 2.6,
+    rotateDuration: 2.0,
+    startDistance: 0,
+    endDistance: 0,
+    startAzimuth: 0,
+    endAzimuth: 0
+  });
+  const isoTempsRef = useRef({
+    target: new THREE.Vector3(),
+    desired: new THREE.Vector3(),
+    offset: new THREE.Vector3(),
+    spherical: new THREE.Spherical()
+  });
+  const isoOcclusionFrameRef = useRef(0);
+  const isoOccludedKeyRef = useRef('');
+  const isoOcclusionTempsRef = useRef({
+    direction: new THREE.Vector3()
+  });
 
   // Cinematic dolly zoom for third-person mode
   const thirdPersonDollyProgress = useRef(0); // 0 = start, 1 = fully zoomed in
@@ -605,10 +646,14 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (cameraMode === CameraMode.FIRST_PERSON) {
         isDraggingRef.current = true;
         lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      } else if (cameraMode === CameraMode.ISOMETRIC) {
+        isoDraggingRef.current = true;
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
       }
     };
     const onMouseUp = () => {
       isDraggingRef.current = false;
+      isoDraggingRef.current = false;
     };
     const onMouseMove = (e: MouseEvent) => {
       if (observeMode) return;
@@ -617,6 +662,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         const dy = e.clientY - lastMouseRef.current.y;
         mouseDeltaRef.current.x += dx;
         mouseDeltaRef.current.y += dy;
+        lastMouseRef.current = { x: e.clientX, y: e.clientY };
+      } else if (cameraMode === CameraMode.ISOMETRIC && isoDraggingRef.current) {
+        const dx = e.clientX - lastMouseRef.current.x;
+        isoMouseDeltaRef.current.x += dx;
         lastMouseRef.current = { x: e.clientX, y: e.clientY };
       }
     };
@@ -888,12 +937,54 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    if (cameraMode === CameraMode.OVERHEAD) {
+    if (cameraMode === CameraMode.ISOMETRIC) {
+      const isoTarget = group.current.position.clone().add(new THREE.Vector3(0, 1.2, 0));
+      orbitRef.current.target.copy(isoTarget);
+      isoAzimuthRef.current = ISO_AZIMUTH;
+      const offset = camera.position.clone().sub(isoTarget);
+      const distance = offset.length();
+      if (distance > 0.001) {
+        const clamped = THREE.MathUtils.clamp(
+          distance,
+          orbitRef.current.minDistance,
+          orbitRef.current.maxDistance
+        );
+        camera.position.copy(isoTarget.clone().add(offset.normalize().multiplyScalar(clamped)));
+        isoDistanceRef.current = clamped;
+      }
+      orbitRef.current.setAzimuthalAngle(ISO_AZIMUTH);
+      orbitRef.current.setPolarAngle(ISO_POLAR_ANGLE);
+      orbitRef.current.update();
+    } else if (cameraMode === CameraMode.OVERHEAD) {
       lastPlayerPos.current.copy(group.current.position);
       orbitRef.current.target.copy(group.current.position);
       orbitRef.current.update();
     }
   }, [cameraMode, camera]);
+
+  useEffect(() => {
+    if (cameraMode !== CameraMode.ISOMETRIC || !orbitRef.current) return;
+    if (!mapEntryToken) return;
+    const minDistance = orbitRef.current.minDistance;
+    const maxDistance = orbitRef.current.maxDistance;
+    const defaultEnd = THREE.MathUtils.clamp(32, minDistance, maxDistance);
+    const endDistance = isoDistanceRef.current ?? defaultEnd;
+    const endAzimuth = isoAzimuthRef.current;
+    const startAzimuth = endAzimuth - Math.PI / 3;
+    isoDistanceRef.current = maxDistance;
+    isoAzimuthRef.current = startAzimuth;
+    isoCinematicRef.current = {
+      active: true,
+      phase: 'zoom',
+      t: 0,
+      zoomDuration: 2.6,
+      rotateDuration: 2.0,
+      startDistance: maxDistance,
+      endDistance,
+      startAzimuth,
+      endAzimuth
+    };
+  }, [cameraMode, mapEntryToken]);
 
   useEffect(() => {
     if (!interiorEntryToken) {
@@ -1256,6 +1347,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     // === END CLIMBING SYSTEM ===
 
     // 1. Camera Adjustment Logic
+    if (isoManualZoomHoldRef.current > 0) {
+      isoManualZoomHoldRef.current = Math.max(0, isoManualZoomHoldRef.current - delta);
+    }
+
     if (cameraMode === CameraMode.FIRST_PERSON) {
       if (observeMode) {
         const PAN_SPEED = (Math.PI * 2) / 180; // 360 deg over ~180s
@@ -1275,6 +1370,46 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         // Clear mouse delta after applying
         mouseDeltaRef.current.x = 0;
         mouseDeltaRef.current.y = 0;
+      }
+    } else if (cameraMode === CameraMode.ISOMETRIC && orbitRef.current) {
+      if (isoCinematicRef.current.active) {
+        const inputActive = keys.a || keys.d || keys.w || keys.s || isoDraggingRef.current || Math.abs(isoMouseDeltaRef.current.x) > 0.01;
+        if (inputActive) {
+          isoCinematicRef.current.active = false;
+        } else {
+          const state = isoCinematicRef.current;
+          const duration = state.phase === 'zoom' ? state.zoomDuration : state.rotateDuration;
+          state.t = Math.min(1, state.t + delta / Math.max(0.01, duration));
+          const eased = 1 - Math.pow(1 - state.t, 3);
+          if (state.phase === 'zoom') {
+            isoDistanceRef.current = THREE.MathUtils.lerp(state.startDistance, state.endDistance, eased);
+            if (state.t >= 1) {
+              state.phase = 'rotate';
+              state.t = 0;
+            }
+          } else {
+            isoAzimuthRef.current = THREE.MathUtils.lerp(state.startAzimuth, state.endAzimuth, eased);
+            if (state.t >= 1) {
+              state.active = false;
+            }
+          }
+        }
+      }
+      if (keys.a) isoAzimuthRef.current += ISO_ROTATE_SPEED * delta;
+      if (keys.d) isoAzimuthRef.current -= ISO_ROTATE_SPEED * delta;
+      if (Math.abs(isoMouseDeltaRef.current.x) > 0.01) {
+        isoAzimuthRef.current -= isoMouseDeltaRef.current.x * ISO_MOUSE_SENSITIVITY;
+        isoMouseDeltaRef.current.x = 0;
+      }
+      if (keys.w || keys.s) {
+        const currentDistance = isoDistanceRef.current ?? camera.position.distanceTo(orbitRef.current.target);
+        const zoomFactor = 1 + (keys.s ? ISO_ZOOM_SPEED : -ISO_ZOOM_SPEED) * delta;
+        isoDistanceRef.current = THREE.MathUtils.clamp(
+          currentDistance * zoomFactor,
+          orbitRef.current.minDistance,
+          orbitRef.current.maxDistance
+        );
+        isoManualZoomHoldRef.current = 0.2;
       }
     } else if (cameraMode === CameraMode.OVERHEAD && orbitRef.current) {
       const angle = OVERHEAD_ROTATE_SPEED * delta;
@@ -2511,6 +2646,38 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       camera.rotation.set(fpPitch.current, fpYaw.current, 0);
       camera.rotation.z = 0;
       group.current.rotation.y = fpYaw.current;
+    } else if (cameraMode === CameraMode.ISOMETRIC && orbitRef.current) {
+      const temps = isoTempsRef.current;
+      temps.target.copy(group.current.position);
+      temps.target.y += 1.2;
+      orbitRef.current.target.lerp(temps.target, 0.1);
+
+      const minDistance = orbitRef.current.minDistance;
+      const maxDistance = orbitRef.current.maxDistance;
+      const liveDistance = camera.position.distanceTo(orbitRef.current.target);
+      const storedDistance = isoDistanceRef.current ?? liveDistance;
+      if (isoManualZoomHoldRef.current <= 0 && Math.abs(liveDistance - storedDistance) > 0.02) {
+        isoDistanceRef.current = THREE.MathUtils.clamp(liveDistance, minDistance, maxDistance);
+      }
+      const baseDistance = isoDistanceRef.current ?? liveDistance;
+      const clampedDistance = THREE.MathUtils.clamp(baseDistance, minDistance, maxDistance);
+      isoDistanceRef.current = clampedDistance;
+      const zoomT = maxDistance > minDistance
+        ? THREE.MathUtils.clamp((maxDistance - clampedDistance) / (maxDistance - minDistance), 0, 1)
+        : 0;
+      const zoomEase = zoomT * zoomT * (3 - 2 * zoomT);
+      const targetPolar = THREE.MathUtils.lerp(ISO_POLAR_ANGLE, ISO_POLAR_ANGLE_CLOSE, zoomEase);
+
+      temps.spherical.radius = clampedDistance;
+      temps.spherical.phi = targetPolar;
+      temps.spherical.theta = isoAzimuthRef.current;
+      temps.offset.setFromSpherical(temps.spherical);
+      temps.desired.copy(orbitRef.current.target).add(temps.offset);
+
+      camera.position.lerp(temps.desired, 0.08);
+      orbitRef.current.setAzimuthalAngle(isoAzimuthRef.current);
+      orbitRef.current.setPolarAngle(targetPolar);
+      orbitRef.current.update();
     } else if (cameraMode === CameraMode.OVERHEAD && orbitRef.current) {
       // Use cameraViewTarget if provided (e.g. when clicking infected household), otherwise follow player
       const targetPos = cameraViewTarget
@@ -2702,7 +2869,47 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    if ((cameraMode === CameraMode.THIRD_PERSON || cameraMode === CameraMode.OVERHEAD) && orbitRef.current) {
+    if (cameraMode === CameraMode.ISOMETRIC && onIsometricOcclusionChange && group.current) {
+      isoOcclusionFrameRef.current += 1;
+      if (isoOcclusionFrameRef.current >= 4) {
+        isoOcclusionFrameRef.current = 0;
+        const playerPos = group.current.position;
+        const cameraPos = camera.position;
+        const direction = isoOcclusionTempsRef.current.direction.copy(playerPos).sub(cameraPos);
+        const distance = direction.length();
+        if (distance > 0.01) {
+          raycasterRef.current.set(cameraPos, direction.normalize());
+          raycasterRef.current.far = distance;
+          const hits = raycasterRef.current.intersectObjects(scene.children, true);
+          const ids = new Set<string>();
+          for (const hit of hits) {
+            if (hit.distance >= distance) continue;
+            let cursor: THREE.Object3D | null = hit.object;
+            let buildingId: string | undefined;
+            while (cursor && !buildingId) {
+              buildingId = cursor.userData?.buildingId;
+              cursor = cursor.parent;
+            }
+            if (buildingId) {
+              ids.add(buildingId);
+            }
+          }
+          const sorted = Array.from(ids).sort();
+          const key = sorted.join('|');
+          if (key !== isoOccludedKeyRef.current) {
+            isoOccludedKeyRef.current = key;
+            onIsometricOcclusionChange(sorted);
+          }
+        }
+      }
+    } else if (cameraMode !== CameraMode.ISOMETRIC && onIsometricOcclusionChange) {
+      if (isoOccludedKeyRef.current !== '') {
+        isoOccludedKeyRef.current = '';
+        onIsometricOcclusionChange([]);
+      }
+    }
+
+    if ((cameraMode === CameraMode.THIRD_PERSON || cameraMode === CameraMode.OVERHEAD || cameraMode === CameraMode.ISOMETRIC) && orbitRef.current) {
       if (pendingInteriorPanRef.current) {
         const { side, duration } = pendingInteriorPanRef.current;
         const startAngle = orbitRef.current.getAzimuthalAngle();
@@ -2881,8 +3088,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
 
     // PHASE 2: Wall Occlusion System - Make walls transparent when blocking camera view
-    // Only active in over-shoulder mode for cinematic camera
-    if (cameraMode === CameraMode.OVER_SHOULDER && group.current) {
+    // Active in over-shoulder and isometric modes for readable framing
+    if ((cameraMode === CameraMode.OVER_SHOULDER || cameraMode === CameraMode.ISOMETRIC) && group.current) {
       // Performance: Only check every 3 frames
       occlusionCheckFrameRef.current++;
       if (occlusionCheckFrameRef.current >= 3) {
@@ -3141,21 +3348,25 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         enabled={cameraMode !== CameraMode.FIRST_PERSON}
         minDistance={
           cameraMode === CameraMode.OVERHEAD ? 12 :
+          cameraMode === CameraMode.ISOMETRIC ? 14 * (isInterior ? 0.5 : 1) :
           cameraMode === CameraMode.OVER_SHOULDER ? 4 :
           7
         }
         maxDistance={
-          cameraMode === CameraMode.OVERHEAD ? 120 :
-          cameraMode === CameraMode.OVER_SHOULDER ? 10 :
+          cameraMode === CameraMode.OVERHEAD ? 140 :
+          cameraMode === CameraMode.ISOMETRIC ? 80 * (isInterior ? 0.5 : 1) :
+          cameraMode === CameraMode.OVER_SHOULDER ? 16 :
           50
         }
         minPolarAngle={
           cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
+          cameraMode === CameraMode.ISOMETRIC ? ISO_POLAR_ANGLE :
           cameraMode === CameraMode.OVER_SHOULDER ? 0.5 :
           0.1
         }
         maxPolarAngle={
           cameraMode === CameraMode.OVERHEAD ? OVERHEAD_POLAR_ANGLE :
+          cameraMode === CameraMode.ISOMETRIC ? ISO_POLAR_ANGLE_CLOSE :
           cameraMode === CameraMode.OVER_SHOULDER ? Math.PI / 1.7 :
           Math.PI / 2.1
         }
@@ -3203,6 +3414,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             footwearStyle={playerStats?.footwearStyle}
             footwearColor={playerStats?.footwearColor}
             accessories={playerStats?.accessories}
+            hasEmbroidery={playerStats?.hasEmbroidery}
             visibleItems={visibleItems}
             cosmeticEffects={cosmeticEffects}
             isWalking={isWalking}

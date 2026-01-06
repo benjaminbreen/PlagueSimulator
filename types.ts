@@ -96,6 +96,7 @@ export enum CameraMode {
   FIRST_PERSON = 'FIRST_PERSON',
   OVER_SHOULDER = 'OVER_SHOULDER',
   THIRD_PERSON = 'THIRD_PERSON',
+  ISOMETRIC = 'ISOMETRIC',
   OVERHEAD = 'OVERHEAD',
 }
 
@@ -298,6 +299,20 @@ export interface PlayerStats {
   maxInventorySlots: number; // Start with 20
   plague: PlagueStatus;      // Plague infection status
   activeEffects: ActiveEffect[]; // Temporary effects from consumed items
+  /** Stored headwear when unequipped - can be re-equipped from inventory */
+  unequippedHeadwear?: {
+    description: string;
+    style: 'scarf' | 'cap' | 'turban' | 'fez' | 'straw' | 'taqiyah';
+    color: string;
+    headscarfStyle?: 'veiled' | 'full' | 'modest';
+    headscarfPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+    headscarfAccentColor?: string;
+    headwearGarmentType?: 'khimar' | 'milhafa' | 'hijab';
+    turbanPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+    turbanAccentColor?: string;
+    /** Original hair style before unequipping (for women with 'covered' hair) */
+    originalHairStyle?: 'short' | 'medium' | 'long' | 'covered';
+  };
 }
 
 export interface BuildingMetadata {
@@ -806,7 +821,7 @@ export type SpecialNPCType = 'SUFI_MYSTIC' | 'ASTROLOGER' | 'SCRIBE';
 export interface MiniMapData {
   player: { x: number; z: number; yaw: number; cameraYaw: number };
   buildings: Array<{ x: number; z: number; type: BuildingType; size: number; doorSide: number }>;
-  npcs: Array<{ x: number; z: number; state: AgentState }>;
+  npcs: Array<{ id: string; x: number; z: number; state: AgentState; name?: string; profession?: string; age?: number; gender?: 'Male' | 'Female' }>;
   specialNPCs: Array<{ x: number; z: number; type: SpecialNPCType }>;
   merchants?: Array<{ x: number; z: number; name?: string; profession?: string }>;
   landmarks?: Array<{ x: number; z: number; label: string }>;
@@ -1235,6 +1250,14 @@ export interface EncounterEnvironment {
   nearbyDeceased: number;
   currentActivity: string;
   localRumors: string[];
+  /** Whether the encounter is happening inside a building */
+  isInterior?: boolean;
+  /** Whether this is a private space (bedroom, private quarters) - NPC should react with alarm if intruded upon */
+  isPrivateSpace?: boolean;
+  /** Type of building the encounter is in (for social appropriateness checks) */
+  buildingType?: BuildingType;
+  /** Owner's profession (for context on what kind of establishment) */
+  buildingProfession?: string;
 }
 
 // Note: Also defined in components/Agents.tsx - keep in sync

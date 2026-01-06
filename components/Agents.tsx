@@ -163,6 +163,18 @@ export const Agents: React.FC<AgentsProps> = ({
     const shouldUpdateStats = statsDirtyRef.current || forceUpdate;
     if (!shouldRebuildHash && !shouldUpdateStats) return;
 
+    // Remove NPCs that are no longer in the active slice to prevent stale minimap entries.
+    const activeIds = new Set(activeSlice.map((record) => record.id));
+    if (activeIds.size > 0) {
+      agentRegistry.current.forEach((_, id) => {
+        if (!activeIds.has(id)) {
+          agentRegistry.current.delete(id);
+          lastHashPosRef.current.delete(id);
+          lastSyncByIdRef.current.delete(id);
+        }
+      });
+    }
+
     let healthy = 0, incubating = 0, infected = 0, deceased = 0;
     let totalAwareness = 0, totalPanic = 0, agentCount = 0;
 

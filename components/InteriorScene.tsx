@@ -1111,6 +1111,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   }, [npcStateOverride, simTime]);
 
   useFrame((state, delta) => {
+    // Apply simulation speed to delta for NPC movement
+    if (params.simulationSpeed <= 0) return;
+    const simDelta = Math.min(delta, 0.1) * params.simulationSpeed;
+
     let walkChanged = false;
     const nextWalkState: Record<string, boolean> = { ...npcWalkState };
     let healthChanged = false;
@@ -1132,7 +1136,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         return;
       }
       if (npc.wait > 0) {
-        npc.wait = Math.max(0, npc.wait - delta);
+        npc.wait = Math.max(0, npc.wait - simDelta);
       } else {
         const dir = npc.target.clone().sub(npc.position);
         dir.y = 0;
@@ -1169,7 +1173,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           }
         } else {
           dir.normalize();
-          const step = dir.clone().multiplyScalar(npc.speed * delta);
+          const step = dir.clone().multiplyScalar(npc.speed * simDelta);
           const nextPos = npc.position.clone().add(step);
 
           // COLLISION DETECTION: Check if path is blocked by interior obstacles
@@ -1209,7 +1213,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
                 dir.x * cos - dir.z * sin,
                 0,
                 dir.x * sin + dir.z * cos
-              ).normalize().multiplyScalar(npc.speed * delta * 1.2);
+              ).normalize().multiplyScalar(npc.speed * simDelta * 1.2);
 
               const tryPos = npc.position.clone().add(rotatedDir);
 
@@ -2014,6 +2018,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         targetPosition={playerTarget}
         setTargetPosition={setPlayerTarget}
         observeMode={observeMode}
+        isInterior={true}
         interiorEntrySide={activeFloorIndex === 0 && activeExteriorDoorSide !== undefined
           ? (activeExteriorDoorSide === 0 ? 'north' : activeExteriorDoorSide === 1 ? 'south' : activeExteriorDoorSide === 2 ? 'east' : 'west')
           : null}

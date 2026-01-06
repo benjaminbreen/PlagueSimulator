@@ -31,6 +31,10 @@ interface EncounterModalProps {
     nearbyDeceased: number;
     currentActivity: string;
     localRumors: string[];
+    isInterior?: boolean;
+    isPrivateSpace?: boolean;
+    buildingType?: import('../../types').BuildingType;
+    buildingProfession?: string;
   };
   publicMorale: MoraleStats;
   simulationStats: SimulationStats;
@@ -416,7 +420,11 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
       nearbyInfected: environment.nearbyInfected,
       nearbyDeceased: environment.nearbyDeceased,
       currentActivity: environment.currentActivity,
-      localRumors: environment.localRumors
+      localRumors: environment.localRumors,
+      isInterior: environment.isInterior,
+      isPrivateSpace: environment.isPrivateSpace,
+      buildingType: environment.buildingType,
+      buildingProfession: environment.buildingProfession
     },
     publicMorale,
     simulationStats,

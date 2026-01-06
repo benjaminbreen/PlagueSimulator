@@ -1299,6 +1299,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   });
   const [buildingsState, setBuildingsState] = useState<BuildingMetadata[]>([]);
   const buildingsRef = useRef<BuildingMetadata[]>([]);
+  const [isometricOccludedIds, setIsometricOccludedIds] = useState<string[]>([]);
   const [climbablesState, setClimbablesState] = useState<import('../types').ClimbableAccessory[]>([]);
   const [currentNearBuilding, setCurrentNearBuilding] = useState<BuildingMetadata | null>(null);
   const [currentNearMerchant, setCurrentNearMerchant] = useState<MerchantNPCType | null>(null);
@@ -1317,6 +1318,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const terrainSeed = useMemo(() => params.mapX * 1000 + params.mapY * 13 + 19, [params.mapX, params.mapY]);
   const sessionSeed = useMemo(() => Math.floor(Math.random() * 1000000), []);
   const district = useMemo(() => getDistrictType(params.mapX, params.mapY), [params.mapX, params.mapY]);
+  const handleIsometricOcclusionChange = useCallback((ids: string[]) => {
+    setIsometricOccludedIds((prev) => {
+      if (prev.length === ids.length && prev.every((id, index) => id === ids[index])) {
+        return prev;
+      }
+      return ids;
+    });
+  }, []);
 
   // Memoized player home building lookup (avoid repeated .find() in render)
   const isOnHomeTile = playerStats.homeMapPosition?.mapX === params.mapX &&
@@ -2156,6 +2165,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     weatherBlend: 0,
   });
   const envPreset = params.timeOfDay < 6 || params.timeOfDay > 18 ? 'night' : 'sunset';
+  const npcStatsById = useMemo(() => {
+    const map = new Map<string, NPCStats>();
+    npcPool.forEach((record) => {
+      map.set(record.stats.id, record.stats);
+    });
+    return map;
+  }, [npcPool]);
   const handleAgentImpact = useCallback((id: string, intensity: number) => {
     impactMapRef.current.set(id, { time: performance.now(), intensity });
   }, []);
@@ -2629,9 +2645,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           const altitudeFactor = 0.0008; // Ground-level fog accumulation
 
           const overheadFactor = params.cameraMode === CameraMode.OVERHEAD ? 0.25 : 1;
+          const isoFactor = params.cameraMode === CameraMode.ISOMETRIC ? 0.8 : 1;
           const fogTarget = (baseFog + horizonHaze + altitudeFactor + humidity * 0.003 + cloudCover * 0.003 + nightAtmosphere)
             * devSettings.fogDensityScale
-            * overheadFactor;
+            * overheadFactor
+            * isoFactor;
           fogRef.current.density = THREE.MathUtils.lerp(
             fogRef.current.density,
             fogTarget * (1 - nightFactor * 0.7),
@@ -2892,7 +2910,17 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
                 const dx = agent.pos.x - pos.x;
                 const dz = agent.pos.z - pos.z;
                 if ((dx * dx + dz * dz) <= maxDistSq) {
-                  npcs.push({ x: agent.pos.x, z: agent.pos.z, state: agent.state as AgentState });
+                  const stats = npcStatsById.get(agent.id);
+                  npcs.push({
+                    id: agent.id,
+                    x: agent.pos.x,
+                    z: agent.pos.z,
+                    state: agent.state as AgentState,
+                    name: stats?.name,
+                    profession: stats?.profession,
+                    age: stats?.age,
+                    gender: stats?.gender
+                  });
                 }
               });
             });
@@ -3093,6 +3121,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         npcPositions={npcPositionsRef.current}
         playerPosition={playerRef.current?.position}
         isSprinting={sprintStateRef.current}
+        occludedBuildingIds={isometricOccludedIds}
       />
 
       {/* Market Stalls - procedurally generated with variety */}
@@ -3260,6 +3289,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         observeMode={observeMode}
         gameLoading={gameLoading}
         onShatterLoot={handleShatterLoot}
+        onIsometricOcclusionChange={handleIsometricOcclusionChange}
+        mapEntryToken={`${params.mapX},${params.mapY}`}
       />
       <BoundaryHeadingIndicator playerRef={playerRef} mapX={params.mapX} mapY={params.mapY} />
 

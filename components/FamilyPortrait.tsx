@@ -179,8 +179,8 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
     const rand = () => seededRandom(s++);
 
     // Determine age category
-    const isChild = age < 12;
-    const isYouth = age >= 12 && age < 18;
+    const isChild = age < 15;
+    const isYouth = age >= 15 && age < 18;
     const isElder = age >= 55;
 
     // Eye shape variation
@@ -226,17 +226,17 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
     );
 
     // Facial hair - age-appropriate validation
-    // Children (< 12): never have facial hair
-    // Youth (12-17): stubble only possible
+    // Children (< 15): never have facial hair
+    // Youth (15-17): stubble only possible (rare)
     // Adults (18+): any type allowed
     const resolvedFacialHair: FacialHairStyle = (() => {
-      if (isChild) return 'none';  // Children never have facial hair
+      if (isChild) return 'none';  // Children and early adolescents never have facial hair
       if (gender !== 'Male') return 'none';  // Only males have facial hair
 
       const propValue = facialHair ?? 'none';
 
       if (isYouth) {
-        // Youth can only have stubble or none
+        // Youth (15-17) can only have stubble or none
         return propValue === 'stubble' ? 'stubble' : 'none';
       }
 

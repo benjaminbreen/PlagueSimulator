@@ -1,6 +1,6 @@
 import React from 'react';
 import { CameraMode } from '../types';
-import { Eye, User, Camera, Layers } from 'lucide-react';
+import { Eye, User, Camera, Layers, Grid3x3 } from 'lucide-react';
 
 interface MobilePerspectiveMenuProps {
   visible: boolean;
@@ -44,6 +44,15 @@ export const MobilePerspectiveMenu: React.FC<MobilePerspectiveMenuProps> = ({ vi
           className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${cameraMode === CameraMode.THIRD_PERSON ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
         >
           <Camera size={12} /> Orbit View
+        </button>
+        <button
+          onClick={() => {
+            onChange(CameraMode.ISOMETRIC);
+            onClose();
+          }}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] uppercase font-bold transition-all ${cameraMode === CameraMode.ISOMETRIC ? 'bg-amber-700 text-white shadow-md' : 'text-gray-400 hover:bg-white/5'}`}
+        >
+          <Grid3x3 size={12} /> Isometric
         </button>
         <button
           onClick={() => {
