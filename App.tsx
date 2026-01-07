@@ -789,6 +789,29 @@ function App() {
     setShowEncounterModal(true);
   }, [activeEvent, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, tryTriggerEvent]);
 
+  // Handle crime witnessed by NPCs (theft, vandalism)
+  const handleCrimeWitnessed = useCallback(({ type, witnessCount }: { type: 'theft' | 'vandalism'; witnessCount: number }) => {
+    const penalty = type === 'theft' ? -10 : -3;
+    const totalPenalty = penalty * witnessCount;
+
+    setPlayerStats(prev => ({
+      ...prev,
+      reputation: Math.max(0, prev.reputation + totalPenalty)
+    }));
+
+    // Show toast notification
+    const message = type === 'theft'
+      ? `You were caught stealing! Reputation ${totalPenalty}`
+      : `You were seen breaking property! Reputation ${totalPenalty}`;
+
+    setToasts(prev => [...prev, {
+      id: `crime-${Date.now()}`,
+      message,
+      type: 'warning',
+      timestamp: Date.now()
+    }]);
+  }, []);
+
   useEffect(() => {
     if (forcedPlagueTriggeredRef.current) return;
     if (playerStats.plague.state !== AgentState.HEALTHY) {
@@ -2362,6 +2385,11 @@ function App() {
       const outdoor = Array.from(work.registry.npcMap.values())
         .filter((record) => record.location === 'outdoor')
         .sort((a, b) => {
+          // ALWAYS prioritize family members first so they're never filtered out
+          const aIsFamily = a.role === 'family' ? 0 : 1;
+          const bIsFamily = b.role === 'family' ? 0 : 1;
+          if (aIsFamily !== bIsFamily) return aIsFamily - bIsFamily;
+
           const priority = (state: AgentState) => {
             if (state === AgentState.INFECTED) return 0;
             if (state === AgentState.INCUBATING) return 1;
@@ -3556,6 +3584,7 @@ function App() {
     merchantFocusPosition: showMerchantModal && nearMerchant ? nearMerchant.position : null,
     onPlagueExposure: handlePlagueExposure,
     onNPCInitiatedEncounter: handleNPCInitiatedEncounter,
+    onCrimeWitnessed: handleCrimeWitnessed,
     onFallDamage: handleFallDamage,
     cameraViewTarget,
     onPlayerStartMove: handlePlayerStartMove,
@@ -3589,6 +3618,7 @@ function App() {
     handleMapChange,
     handleMoraleUpdate,
     handleNPCInitiatedEncounter,
+    handleCrimeWitnessed,
     handleNpcUpdate,
     handlePickupItem,
     handlePlayerPositionUpdate,

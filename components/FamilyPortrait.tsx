@@ -20,7 +20,17 @@ interface FamilyPortraitProps {
   hairStyle?: HairStyle;
   headwearStyle?: HeadwearStyle;
   headwearColor?: string;
+  headscarfStyle?: 'veiled' | 'full' | 'modest';
+  headscarfPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  headscarfAccentColor?: string;
+  headscarfColor?: string;
+  turbanPattern?: 'none' | 'stripe' | 'band' | 'geometric' | 'simple';
+  turbanAccentColor?: string;
   facialHair?: FacialHairStyle;
+  facialHairColor?: string;
+  eyeColor?: string;
+  mouthExpression?: number;
+  accessories?: string[];
   healthState?: AgentState;
   isDeceased?: boolean;
   size?: number; // width/height in pixels
@@ -146,7 +156,17 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
   hairStyle: hairStyleProp,
   headwearStyle,
   headwearColor: propHeadwearColor,
+  headscarfStyle = 'full',
+  headscarfPattern = 'none',
+  headscarfAccentColor,
+  headscarfColor,
+  turbanPattern = 'none',
+  turbanAccentColor,
   facialHair,
+  facialHairColor: facialHairColorProp,
+  eyeColor: eyeColorProp,
+  mouthExpression: mouthExpressionProp,
+  accessories = [],
   healthState = AgentState.HEALTHY,
   isDeceased = false,
   size = 48,
@@ -170,6 +190,27 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
     return normalized;
   }, [rawHairColor]);
 
+  const facialHairColor = useMemo(() => {
+    const normalized = normalizeToHex(facialHairColorProp || rawHairColor || DEFAULT_HAIR_COLOR);
+    if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+      return DEFAULT_HAIR_COLOR;
+    }
+    return normalized;
+  }, [facialHairColorProp, rawHairColor]);
+
+  const scarfColor = useMemo(
+    () => normalizeToHex(headscarfColor || propHeadwearColor || hairColor),
+    [headscarfColor, propHeadwearColor, hairColor]
+  );
+  const scarfAccent = useMemo(
+    () => normalizeToHex(headscarfAccentColor || scarfColor),
+    [headscarfAccentColor, scarfColor]
+  );
+  const turbanAccent = useMemo(
+    () => normalizeToHex(turbanAccentColor || propHeadwearColor || hairColor),
+    [turbanAccentColor, propHeadwearColor, hairColor]
+  );
+
   const seed = hashToSeed(name || 'Unknown');
   // Create truly unique ID combining seed with name length and gender to prevent collisions
   const uniqueId = `${seed}-${(name || 'Unknown').length}-${gender[0]}`;
@@ -187,7 +228,7 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
     const eyeShape = Math.floor(rand() * 3); // 0: round, 1: almond, 2: narrow
 
     // Eye color - use same algorithm as Humanoid for consistency
-    const eyeColor = generateEyeColorFromHair(hairColor);
+    const eyeColor = eyeColorProp ?? generateEyeColorFromHair(hairColor);
 
     // Nose variation
     const noseType = Math.floor(rand() * 3);
@@ -264,7 +305,8 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
     // Hair visibility - hidden when wearing full head covering
     const showHair = resolvedHeadwear === 'none' ||
       (gender === 'Male' && !['turban', 'scarf'].includes(resolvedHeadwear)) ||
-      (gender === 'Female' && resolvedHeadwear !== 'scarf');
+      (gender === 'Female' && resolvedHeadwear !== 'scarf') ||
+      (gender === 'Female' && resolvedHeadwear === 'scarf' && headscarfStyle === 'modest');
 
     // Hair volume variation for distinctive silhouettes
     const hairVolumeRoll = rand();
@@ -298,7 +340,7 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
       hairVolume,
       hairAsymmetry
     };
-  }, [seed, gender, age, hairColor, hairStyleProp, facialHair, headwearStyle]);
+  }, [seed, gender, age, hairColor, hairStyleProp, facialHair, headwearStyle, eyeColorProp, headscarfStyle]);
 
   // Apply health/deceased effects to colors
   const effectiveSkinTone = useMemo(() => {
@@ -387,6 +429,19 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
     }
   }, [hairColor, isDeceased, features.isElder]);
 
+  const effectiveFacialHairColor = useMemo(() => {
+    if (isDeceased) {
+      return mixColors(facialHairColor, '#606060', 0.5);
+    }
+    if (healthState === AgentState.SYMPTOMATIC) {
+      return mixColors(facialHairColor, '#5a6050', 0.25);
+    }
+    if (healthState === AgentState.INFECTED) {
+      return mixColors(facialHairColor, '#6a6658', 0.15);
+    }
+    return facialHairColor;
+  }, [facialHairColor, healthState, isDeceased]);
+
   // Headwear color - use prop if provided, otherwise generate
   const headwearColor = useMemo(() => {
     if (propHeadwearColor) return propHeadwearColor;
@@ -399,6 +454,9 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
   const skinDark = darkenColor(effectiveSkinTone, 0.85);
   const skinLight = lightenColor(effectiveSkinTone, 0.15);
   const hairDark = darkenColor(effectiveHairColor, 0.7);
+  const facialHairDark = darkenColor(effectiveFacialHairColor, 0.7);
+  const hasAccessory = (value: string) => accessories.some((item) => item.toLowerCase().includes(value));
+  const mouthExpression = Math.max(-1, Math.min(1, mouthExpressionProp ?? 0));
 
   // Scale factor for viewBox
   const viewBox = "0 0 100 100";
@@ -451,10 +509,38 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
           {/* Scarf/Hijab - renders for any gender */}
           {features.headwearStyle === 'scarf' && (
             <>
-              <ellipse cx="50" cy="32" rx="34" ry="28" fill={headwearColor} />
-              <path d={`M16 38 Q16 80 50 88 Q84 80 84 38`} fill={headwearColor} />
-              <path d="M24 52 Q30 58 26 70" stroke={darkenColor(headwearColor, 0.8)} strokeWidth="0.7" fill="none" opacity="0.5" />
-              <path d="M76 52 Q70 58 74 70" stroke={darkenColor(headwearColor, 0.8)} strokeWidth="0.7" fill="none" opacity="0.5" />
+              <ellipse cx="50" cy="32" rx={headscarfStyle === 'modest' ? 30 : 34} ry={headscarfStyle === 'modest' ? 24 : 28} fill={scarfColor} />
+              <path
+                d={`M16 38 Q16 ${headscarfStyle === 'modest' ? 72 : 80} 50 ${headscarfStyle === 'modest' ? 82 : 88} Q84 ${headscarfStyle === 'modest' ? 72 : 80} 84 38`}
+                fill={scarfColor}
+              />
+              <path d="M24 52 Q30 58 26 70" stroke={darkenColor(scarfColor, 0.8)} strokeWidth="0.7" fill="none" opacity="0.5" />
+              <path d="M76 52 Q70 58 74 70" stroke={darkenColor(scarfColor, 0.8)} strokeWidth="0.7" fill="none" opacity="0.5" />
+              {headscarfStyle === 'veiled' && (
+                <path d="M32 50 Q50 58 68 50 Q68 64 50 68 Q32 64 32 50" fill={darkenColor(scarfColor, 0.85)} opacity="0.55" />
+              )}
+              {headscarfPattern !== 'none' && (
+                <>
+                  {headscarfPattern === 'band' && (
+                    <rect x="22" y="36" width="56" height="6" fill={scarfAccent} opacity="0.5" />
+                  )}
+                  {headscarfPattern === 'stripe' && (
+                    <>
+                      <path d="M22 42 L78 70" stroke={scarfAccent} strokeWidth="1.2" opacity="0.45" />
+                      <path d="M18 52 L74 80" stroke={scarfAccent} strokeWidth="1.2" opacity="0.35" />
+                    </>
+                  )}
+                  {headscarfPattern === 'geometric' && (
+                    <>
+                      <path d="M36 44 L40 48 L36 52 L32 48 Z" fill={scarfAccent} opacity="0.45" />
+                      <path d="M64 44 L68 48 L64 52 L60 48 Z" fill={scarfAccent} opacity="0.45" />
+                    </>
+                  )}
+                  {headscarfPattern === 'simple' && (
+                    <path d="M24 72 Q50 78 76 72" stroke={scarfAccent} strokeWidth="1.4" opacity="0.5" fill="none" />
+                  )}
+                </>
+              )}
             </>
           )}
 
@@ -465,6 +551,28 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
               <ellipse cx="50" cy="24" rx="26" ry="13" fill={lightenColor(headwearColor, 0.1)} />
               <path d="M24 24 Q36 30 48 24" stroke={darkenColor(headwearColor, 0.7)} strokeWidth="1.2" fill="none" opacity="0.5" />
               <path d="M52 24 Q64 30 76 24" stroke={darkenColor(headwearColor, 0.7)} strokeWidth="1.2" fill="none" opacity="0.5" />
+              {turbanPattern !== 'none' && (
+                <>
+                  {turbanPattern === 'band' && (
+                    <ellipse cx="50" cy="26" rx="24" ry="5.5" fill={turbanAccent} opacity="0.55" />
+                  )}
+                  {turbanPattern === 'stripe' && (
+                    <>
+                      <path d="M26 22 Q38 28 50 22" stroke={turbanAccent} strokeWidth="1.1" opacity="0.5" fill="none" />
+                      <path d="M50 22 Q62 28 74 22" stroke={turbanAccent} strokeWidth="1.1" opacity="0.5" fill="none" />
+                    </>
+                  )}
+                  {turbanPattern === 'geometric' && (
+                    <>
+                      <circle cx="38" cy="26" r="1.6" fill={turbanAccent} opacity="0.6" />
+                      <circle cx="62" cy="26" r="1.6" fill={turbanAccent} opacity="0.6" />
+                    </>
+                  )}
+                  {turbanPattern === 'simple' && (
+                    <path d="M28 30 Q50 34 72 30" stroke={turbanAccent} strokeWidth="1.2" opacity="0.45" fill="none" />
+                  )}
+                </>
+              )}
             </>
           )}
 
@@ -729,7 +837,7 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
         const mouthY = features.isChild ? 64 : 62;
         const baseMouthWidth = features.isChild ? 6 : 8;
         const mouthW = baseMouthWidth * features.mouthWidth;
-        const curve = features.mouthCurve * 2;
+        const curve = features.mouthCurve * 2 + mouthExpression * 4;
 
         return (
           <path
@@ -741,6 +849,17 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
         );
       })()}
 
+      {/* Minimal jewelry hints */}
+      {hasAccessory('earring') && (
+        <>
+          <circle cx="28" cy="52" r="2" fill="#d1b06a" opacity="0.75" />
+          <circle cx="72" cy="52" r="2" fill="#d1b06a" opacity="0.75" />
+        </>
+      )}
+      {hasAccessory('nose ring') && (
+        <circle cx="53" cy="58" r="1.2" fill="#d1b06a" opacity="0.8" />
+      )}
+
       {/* Facial hair for adult men only - enhanced visibility */}
       {features.facialHairStyle !== 'none' && gender === 'Male' && !features.isChild && (
         <>
@@ -751,7 +870,7 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
               cy="66"
               rx={12 * features.faceWidth}
               ry="8"
-              fill={hairDark}
+              fill={facialHairDark}
               opacity={0.4}
             />
           )}
@@ -759,17 +878,17 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
           {/* Short beard - with shadow layer for depth */}
           {features.facialHairStyle === 'short_beard' && (
             <>
-              <ellipse cx="50" cy="66" rx={13 * features.faceWidth} ry="9" fill={hairDark} opacity={0.5} />
-              <ellipse cx="50" cy="70" rx={11 * features.faceWidth} ry="7" fill={effectiveHairColor} />
+              <ellipse cx="50" cy="66" rx={13 * features.faceWidth} ry="9" fill={facialHairDark} opacity={0.5} />
+              <ellipse cx="50" cy="70" rx={11 * features.faceWidth} ry="7" fill={effectiveFacialHairColor} />
             </>
           )}
 
           {/* Full beard - larger and more prominent */}
           {features.facialHairStyle === 'full_beard' && (
             <>
-              <ellipse cx="50" cy="66" rx={15 * features.faceWidth} ry="11" fill={hairDark} opacity={0.5} />
-              <ellipse cx="50" cy="72" rx={13 * features.faceWidth} ry="11" fill={effectiveHairColor} />
-              <ellipse cx="50" cy="78" rx={11 * features.faceWidth} ry="7" fill={effectiveHairColor} />
+              <ellipse cx="50" cy="66" rx={15 * features.faceWidth} ry="11" fill={facialHairDark} opacity={0.5} />
+              <ellipse cx="50" cy="72" rx={13 * features.faceWidth} ry="11" fill={effectiveFacialHairColor} />
+              <ellipse cx="50" cy="78" rx={11 * features.faceWidth} ry="7" fill={effectiveFacialHairColor} />
             </>
           )}
 
@@ -779,7 +898,7 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
               {/* Dark outline */}
               <path
                 d={`M${38} 60 Q50 66 ${62} 60`}
-                stroke={hairDark}
+                stroke={facialHairDark}
                 strokeWidth="6"
                 strokeLinecap="round"
                 fill="none"
@@ -787,7 +906,7 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
               {/* Lighter inner stroke */}
               <path
                 d={`M${38} 60 Q50 66 ${62} 60`}
-                stroke={effectiveHairColor}
+                stroke={effectiveFacialHairColor}
                 strokeWidth="4"
                 strokeLinecap="round"
                 fill="none"
@@ -799,11 +918,11 @@ export const FamilyPortrait: React.FC<FamilyPortraitProps> = ({
           {features.facialHairStyle === 'goatee' && (
             <>
               {/* Mustache with outline */}
-              <path d={`M${40} 60 Q50 65 ${60} 60`} stroke={hairDark} strokeWidth="5" strokeLinecap="round" fill="none" />
-              <path d={`M${40} 60 Q50 65 ${60} 60`} stroke={effectiveHairColor} strokeWidth="3" strokeLinecap="round" fill="none" />
+              <path d={`M${40} 60 Q50 65 ${60} 60`} stroke={facialHairDark} strokeWidth="5" strokeLinecap="round" fill="none" />
+              <path d={`M${40} 60 Q50 65 ${60} 60`} stroke={effectiveFacialHairColor} strokeWidth="3" strokeLinecap="round" fill="none" />
               {/* Chin beard with shadow */}
-              <ellipse cx="50" cy="70" rx={7 * features.faceWidth} ry="7" fill={hairDark} opacity={0.4} />
-              <ellipse cx="50" cy="70" rx={6 * features.faceWidth} ry="6" fill={effectiveHairColor} />
+              <ellipse cx="50" cy="70" rx={7 * features.faceWidth} ry="7" fill={facialHairDark} opacity={0.4} />
+              <ellipse cx="50" cy="70" rx={6 * features.faceWidth} ry="6" fill={effectiveFacialHairColor} />
             </>
           )}
         </>

@@ -55,6 +55,7 @@ export const GROUND_PALETTE = {
   RESIDENTIAL: ['#c8b8a8', '#b8a898', '#d8c8b8'],
   CIVIC: ['#d8c2a0', '#d1b896'],
   SALHIYYA: ['#6a8a4a', '#5f7d45', '#548040'],
+  CEMETERY: ['#7a7a5a', '#6f6f52', '#73735a', '#686850'], // Somber gray-brown earth with dry grass
   OUTSKIRTS_FARMLAND: ['#6e8f4a', '#5f7f42', '#6a934f', '#57823f'],
   OUTSKIRTS_DESERT: ['#d89556', '#c8904e', '#db9e62', '#c87d42'], // Warm amber-yellow-orange desert sand
   OUTSKIRTS_SCRUBLAND: ['#8d8465', '#7f7658', '#9a8f6b', '#8a7d5e'], // Dusty scrub soil

@@ -571,7 +571,17 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
                           hairStyle={playerStats.hairStyle}
                           headwearStyle={playerStats.headwearStyle}
                           headwearColor={playerStats.headwearColor}
+                          headscarfStyle={playerStats.headscarfStyle}
+                          headscarfPattern={playerStats.headscarfPattern}
+                          headscarfAccentColor={playerStats.headscarfAccentColor}
+                          headscarfColor={playerStats.headscarfColor}
+                          turbanPattern={playerStats.turbanPattern}
+                          turbanAccentColor={playerStats.turbanAccentColor}
                           facialHair={playerStats.facialHair}
+                          facialHairColor={playerStats.facialHairColor}
+                          eyeColor={playerStats.eyeColor}
+                          mouthExpression={Math.max(-1, Math.min(1, (playerStats.charisma - 8) / 6))}
+                          accessories={playerStats.accessories}
                           healthState={playerStats.plague?.state}
                           size={64}
                         />

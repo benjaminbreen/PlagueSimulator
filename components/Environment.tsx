@@ -7,6 +7,7 @@ import { CONSTANTS, BuildingMetadata, BuildingType, DistrictType, getDistrictTyp
 import { generateBuildingMetadata, seededRandom } from '../utils/procedural';
 import { getBuildingHeight } from '../utils/buildingHeights';
 import { getTerrainHeight, buildHeightmapFromGeometry, TerrainHeightmap, sampleTerrainHeight } from '../utils/terrain';
+import { calculateSlope } from './environment/placement';
 import { PushableObject } from '../utils/pushables';
 import { LaundryLine, getCatenaryPoint } from '../utils/laundry';
 import { HangingCarpet } from '../utils/hangingCarpets';
@@ -790,7 +791,7 @@ const Building: React.FC<{
   return (
     <group
       ref={groupRef}
-      position={[data.position[0], finalHeight / 2, data.position[2]]}
+      position={[data.position[0], data.position[1] + finalHeight / 2, data.position[2]]}
       userData={{ buildingId: data.id }}
       onPointerOver={(e) => {
         e.stopPropagation();
@@ -2522,6 +2523,10 @@ export const Buildings: React.FC<{
       // No regular buildings on the mountain - just the shrine (handled separately)
       return [];
     }
+    if (district === 'CEMETERY') {
+      // No regular buildings in cemetery - small keeper shacks handled by CemeteryDecor
+      return [];
+    }
     if (district === 'OUTSKIRTS_SCRUBLAND') {
       // Scrublands have 0-3 buildings handled by decorative system
       // No regular procedural buildings
@@ -2794,6 +2799,14 @@ export const Buildings: React.FC<{
         if (jewishQuarterBufferRadius > 0 && (x * x + z * z) < jewishQuarterBufferRadius * jewishQuarterBufferRadius) continue;
         const data = generateBuildingMetadata(localSeed, x, z, district);
         if (district === 'SALHIYYA') {
+          // Check slope constraints - skip buildings on steep terrain
+          if (heightmap) {
+            const slope = calculateSlope(x, z, heightmap);
+            const MAX_BUILDING_SLOPE = 0.35; // ~20 degrees maximum slope
+            if (slope > MAX_BUILDING_SLOPE) {
+              continue; // Skip this building position - too steep
+            }
+          }
           const h = heightmap ? sampleTerrainHeight(heightmap, x, z) : getTerrainHeight(district, x, z, terrainSeed);
           data.position = [x, h, z];
         }
@@ -3017,22 +3030,22 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
   };
   const terrainGeometry = useMemo(() => {
     if (district !== 'SALHIYYA' && district !== 'MOUNTAIN_SHRINE') return null;
-    const gridSize = district === 'SALHIYYA' ? scaleSize(80) : scaleSize(250);
-    const segments = district === 'SALHIYYA' ? scaleSegments(60) : scaleSegments(120);
+    const gridSize = scaleSize(250); // Same size for both districts - fills entire visible area
+    const segments = district === 'SALHIYYA' ? scaleSegments(120) : scaleSegments(120);
     return buildTerrain(gridSize, segments);
   }, [district, terrainSeed]);
   const innerTerrainGeometry = useMemo(() => {
     if (district !== 'SALHIYYA' && district !== 'MOUNTAIN_SHRINE') return null;
-    const gridSize = district === 'SALHIYYA' ? scaleSize(30) : scaleSize(60);
-    const segments = district === 'SALHIYYA' ? scaleSegments(30) : scaleSegments(40);
+    const gridSize = scaleSize(60); // Same size for both districts
+    const segments = scaleSegments(40);
     return buildTerrain(gridSize, segments);
   }, [district, terrainSeed]);
 
   // BUGFIX: Build heightmap from main terrain geometry for accurate character positioning
   const heightmap = useMemo(() => {
     if (!terrainGeometry) return null;
-    const gridSize = district === 'SALHIYYA' ? scaleSize(80) : scaleSize(250);
-    const segments = district === 'SALHIYYA' ? scaleSegments(60) : scaleSegments(120);
+    const gridSize = scaleSize(250); // Match terrain geometry
+    const segments = district === 'SALHIYYA' ? scaleSegments(120) : scaleSegments(120);
     return buildHeightmapFromGeometry(terrainGeometry, gridSize, segments);
   }, [terrainGeometry, district]);
 
@@ -3053,6 +3066,7 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
     : (district === 'ALLEYS' || district === 'BAB_SHARQI') ? pick(GROUND_PALETTE.ALLEYS)
     : district === 'JEWISH_QUARTER' ? pick(GROUND_PALETTE.JEWISH_QUARTER)
     : district === 'SALHIYYA' ? pick(GROUND_PALETTE.SALHIYYA)
+    : district === 'CEMETERY' ? pick(GROUND_PALETTE.CEMETERY)
     : district === 'OUTSKIRTS_FARMLAND' ? pick(GROUND_PALETTE.OUTSKIRTS_FARMLAND)
     : district === 'OUTSKIRTS_DESERT' ? pick(GROUND_PALETTE.OUTSKIRTS_DESERT)
     : district === 'OUTSKIRTS_SCRUBLAND' ? pick(GROUND_PALETTE.OUTSKIRTS_SCRUBLAND)
@@ -3066,6 +3080,7 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
     : district === 'HOVELS' || district === 'ALLEYS' || district === 'BAB_SHARQI' ? '#9a734d'
     : district === 'JEWISH_QUARTER' ? '#b09a7d' // Lighter stone, distinct from alleys
     : district === 'SALHIYYA' ? '#4a6a3a' // Grass overlay
+    : district === 'CEMETERY' ? '#5a5a48' // Somber dried grass patches
     : district === 'OUTSKIRTS_FARMLAND' ? '#4f6f3b'
     : district === 'OUTSKIRTS_DESERT' ? '#d17a4a' // Warm terracotta overlay (unused - overlay disabled for desert)
     : district === 'OUTSKIRTS_SCRUBLAND' ? '#8a845f' // Dry scrub overlay

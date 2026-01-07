@@ -271,7 +271,8 @@ function getPlayerRelationLabel(relationship: FamilyRelationship, playerGender: 
 function buildFamilyContext(
   npcId: string,
   familyMembers: FamilyMember[],
-  playerGender: 'Male' | 'Female'
+  playerGender: 'Male' | 'Female',
+  npcAge: number
 ): string {
   const familyInfo = getFamilyRelationship(npcId, familyMembers);
   if (!familyInfo.isFamily || !familyInfo.relationship) return '';
@@ -282,22 +283,61 @@ function buildFamilyContext(
   let context = `\n## CRITICAL: FAMILY RELATIONSHIP
 - This person is your ${playerLabel}. You are their ${relationshipType}.
 - You love and care deeply for them - they are your family.
-- You speak with familial warmth, intimacy, and concern.
-- You share a home and daily life together.
-- You worry about their safety during these dangerous plague times.`;
+- You share a home and daily life together.`;
 
   if (relationshipType === 'spouse') {
     context += `\n- As their spouse, you discuss household matters, the children (if any), and your shared concerns.
-- You may express affection, worry about their work, or ask about their day.`;
+- You may express affection, worry about their work, or ask about their day.
+- Speak with familial warmth and intimacy.`;
   } else if (relationshipType === 'child') {
-    context += `\n- As their child, you look up to them with respect and love.
-- You may ask for guidance, share what you learned today, or express your worries.`;
+    // AGE-APPROPRIATE SPEECH FOR CHILDREN
+    if (npcAge <= 5) {
+      context += `
+## CRITICAL: YOU ARE A VERY YOUNG CHILD (${npcAge} years old)
+- You speak like a REAL toddler/young child - NOT like an adult!
+- Use VERY simple words and SHORT sentences (2-5 words typically)
+- You might repeat words when excited: "Mama! Mama!" or "Look look look!"
+- You get distracted easily and might talk about random things
+- You might whine, ask for things, or just want attention
+- NO complex vocabulary, NO formal speech, NO adult reasoning
+- Examples of how you talk: "Papa, hungry!" or "Want that!" or "Mama play?" or "Look! Bird!"
+- You call your parent "Mama" or "Papa" or "Baba" - NOT "Mother" or "Father"`;
+    } else if (npcAge <= 8) {
+      context += `
+## CRITICAL: YOU ARE A YOUNG CHILD (${npcAge} years old)
+- You speak like a real child - simple sentences, easily excited or upset
+- You share random observations, ask lots of questions, seek attention
+- You might interrupt, change subjects suddenly, or repeat yourself
+- You're curious about everything and might ask "why?" a lot
+- NO formal adult speech - keep vocabulary simple and childlike
+- You call your parent "Mama" or "Papa" or informal terms, rarely "Mother/Father"
+- Examples: "Mama, guess what!" or "Papa, why is that man sick?" or "Can we get a cat?"`;
+    } else if (npcAge <= 12) {
+      context += `
+## YOU ARE A CHILD (${npcAge} years old)
+- You're old enough to have real conversations but still a kid
+- You might be excited, sullen, distracted, or talkative depending on mood
+- You have your own interests and opinions but still need your parents
+- Speak naturally for your age - not too formal, not baby talk
+- You might complain, share news from friends, or ask for things`;
+    } else {
+      // Teenager
+      context += `
+## YOU ARE A TEENAGER (${npcAge} years old)
+- You speak like a real teenager - might be brief, embarrassed, genuinely engaged, or moody
+- You're developing independence but still connected to family
+- You might use shorter responses, show some attitude, or actually open up
+- Not every teen is sullen - you could be enthusiastic about things you care about
+- Speak naturally, not overly formal with your own parent`;
+    }
   } else if (relationshipType === 'parent') {
     context += `\n- As their parent, you offer wisdom, concern, and perhaps unsolicited advice.
-- You may fuss over their health, remind them of duties, or share family wisdom.`;
+- You may fuss over their health, remind them of duties, or share family wisdom.
+- Speak with parental warmth and perhaps a touch of worry.`;
   } else if (relationshipType === 'sibling') {
     context += `\n- As their sibling, you share a lifelong bond and perhaps some rivalry.
-- You speak with casual familiarity that only siblings share.`;
+- You speak with casual familiarity that only siblings share.
+- You might tease, support, or compete - all within love.`;
   }
 
   context += `\n- IGNORE social class dynamics - you are family and speak as equals in love.
@@ -414,7 +454,7 @@ ${sharedReligion ? `- KINSHIP: You share the same faith (${npc.religion}). This 
 ${sharedEthnicity ? `- KINSHIP: You are both ${npc.ethnicity}. This creates a sense of community.` : ""}
 ${!sharedReligion && !sharedEthnicity ? "- They are a stranger of different background. You are cautious but not hostile." : ""}
 ${getPlayerInfluence(player, npc)}
-${buildFamilyContext(npc.id, player.familyMembers || [], player.gender)}
+${buildFamilyContext(npc.id, player.familyMembers || [], player.gender, npc.age)}
 
 ${relationshipContext}
 ${isFollowingAfterDismissal ? `

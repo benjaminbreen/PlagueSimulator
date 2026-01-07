@@ -443,6 +443,8 @@ interface HumanoidProps {
   age?: number;
   // Eye color - if not provided, generated based on hairColor seed
   eyeColor?: string;
+  // Facial expression: -1 frown to +1 smile
+  mouthExpression?: number;
   // Portrait mode - enables enhanced facial animations (only for encounter modal)
   portraitMode?: boolean;
   isSpeaking?: boolean;
@@ -533,6 +535,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   isIncubating = false,
   age,
   eyeColor: eyeColorProp,
+  mouthExpression: mouthExpressionProp = 0,
   // Portrait mode props (only used in encounter modal)
   portraitMode = false,
   isSpeaking = false,
@@ -748,6 +751,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const noseRadius = isFemale ? 0.025 : 0.017;
   const mouthWidth = isFemale ? 0.045 : 0.05;
   const mouthY = (isFemale ? -0.095 : -0.09) + faceVariant.mouthYOffset;
+  const mouthExpression = useMemo(
+    () => THREE.MathUtils.clamp(mouthExpressionProp, -1, 1),
+    [mouthExpressionProp]
+  );
+  const mouthCornerLift = mouthExpression * 0.012;
+  const mouthCornerTilt = mouthExpression * 0.45;
 
   // Jaw prominence - gender and age based
   const jawProminence = useMemo(() => {
@@ -762,11 +771,6 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const ageJawModifier = age && age > 50 ? 1.15 : age && age < 25 ? 0.85 : 1.0;
   const finalJawSize = jawProminence * ageJawModifier;
 
-  const upperArmColor = sleeveCoverage === 'full' ? color : sleeveCoverage === 'lower' ? headColor : headColor;
-  const lowerArmColor = sleeveCoverage === 'none' ? headColor : color;
-  const hasAccessory = (value: string) => accessories.includes(value);
-  const clothRoughness = useMemo(() => 0.88 + (Math.random() - 0.5) * 0.08, []);
-  const accentRoughness = useMemo(() => 0.9 + (Math.random() - 0.5) * 0.06, []);
   const adjustColor = (hex: string, factor: number) => {
     const clean = hex.replace('#', '');
     if (clean.length !== 6) return hex;
@@ -776,6 +780,16 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     const b = Math.min(255, Math.max(0, Math.round((num & 0xff) * factor)));
     return `#${[r, g, b].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
   };
+  const clothRoughness = useMemo(() => 0.92 + (Math.random() - 0.5) * 0.06, []);
+  const accentRoughness = useMemo(() => 0.9 + (Math.random() - 0.5) * 0.06, []);
+  const clothUpperColor = useMemo(() => adjustColor(color, 1.04), [color]);
+  const clothLowerColor = useMemo(() => adjustColor(color, 0.92), [color]);
+  const clothFoldColor = useMemo(() => adjustColor(color, 0.82), [color]);
+  const skinRoughness = useMemo(() => 0.62 + (Math.random() - 0.5) * 0.05, []);
+  const skinMetalness = 0.02;
+  const upperArmColor = sleeveCoverage === 'full' ? clothUpperColor : headColor;
+  const lowerArmColor = sleeveCoverage === 'none' ? headColor : clothLowerColor;
+  const hasAccessory = (value: string) => accessories.includes(value);
   const strawMap = useMemo(() => {
     if (headwearStyle !== 'straw') return null;
     return getStrawTexture('#d2b889', '#b7925e') ?? null;
@@ -857,6 +871,37 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     return 0.7;
   }, [age]);
 
+  // CHILD BODY SCALING - makes children physically smaller
+  // Based on real growth charts: toddlers ~50% adult height, pre-teens ~70%, teens ~85%
+  const childBodyScale = useMemo(() => {
+    if (age === undefined || age >= 18) return 1;
+    if (age <= 2) return 0.35;  // Toddlers - very small
+    if (age <= 5) return 0.45;  // Young children
+    if (age <= 8) return 0.55;  // Children
+    if (age <= 12) return 0.70; // Pre-teens
+    if (age <= 15) return 0.82; // Early teens
+    return 0.92; // Late teens (16-17)
+  }, [age]);
+
+  // Children have proportionally larger heads - apply inverse scale to head
+  const childHeadProportion = useMemo(() => {
+    if (age === undefined || age >= 18) return 1;
+    if (age <= 2) return 1.6;   // Toddlers have much bigger heads proportionally
+    if (age <= 5) return 1.4;   // Young children
+    if (age <= 8) return 1.25;  // Children
+    if (age <= 12) return 1.12; // Pre-teens
+    return 1.05; // Teens approaching adult proportions
+  }, [age]);
+
+  // Compute final scale including child body scaling
+  const effectiveScale = useMemo((): [number, number, number] => {
+    return [
+      scale[0] * childBodyScale,
+      scale[1] * childBodyScale,
+      scale[2] * childBodyScale
+    ];
+  }, [scale, childBodyScale]);
+
   const healthScale = useMemo(() => Math.max(0.6, 1 - sicknessLevel * 0.35), [sicknessLevel]);
 
   // Under-eye bags/dark circles for aged (50+) or sick/infected characters
@@ -885,6 +930,125 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     baseColor.lerp(purpleTint, 0.3 + underEyeBagIntensity * 0.2);
     return baseColor.getStyle();
   }, [sickHeadColor, underEyeBagIntensity]);
+
+  // Forehead wrinkles - age-based (40+)
+  const foreheadWrinkleCount = useMemo(() => {
+    if (age === undefined || age < 40) return 0;
+    if (age < 50) return 1;
+    if (age < 60) return 2;
+    if (age < 70) return 3;
+    return 4; // 70+
+  }, [age]);
+
+  // Wrinkle color - darker than skin
+  const wrinkleColor = useMemo(() => {
+    return new THREE.Color(sickHeadColor).multiplyScalar(0.7).getStyle();
+  }, [sickHeadColor]);
+
+  // Moles/beauty marks - seeded random for consistency per character
+  const moleData = useMemo(() => {
+    // Create seed from hairColor for consistent moles per character
+    const seed = hairColor.split('').reduce((acc, char, i) => acc + char.charCodeAt(0) * (i + 1), 0);
+    const seededRandom = (offset: number) => {
+      const x = Math.sin(seed + offset) * 10000;
+      return x - Math.floor(x);
+    };
+
+    // ~35% of characters have moles
+    if (seededRandom(0) > 0.35) return [];
+
+    const moles: Array<{ x: number; y: number; z: number; size: number }> = [];
+    const moleCount = seededRandom(1) > 0.6 ? 2 : 1; // 40% chance of 2 moles
+
+    // Possible mole positions (relative to face center)
+    const positions = [
+      { x: -0.04, y: -0.02, z: 0.165, name: 'left cheek' },
+      { x: 0.045, y: -0.03, z: 0.163, name: 'right cheek' },
+      { x: -0.025, y: -0.07, z: 0.16, name: 'near left mouth' },
+      { x: 0.03, y: -0.065, z: 0.158, name: 'near right mouth' },
+      { x: -0.02, y: 0.08, z: 0.16, name: 'left forehead' },
+      { x: 0.025, y: 0.075, z: 0.158, name: 'right forehead' },
+      { x: 0, y: -0.12, z: 0.155, name: 'chin' },
+    ];
+
+    for (let i = 0; i < moleCount; i++) {
+      const posIndex = Math.floor(seededRandom(10 + i) * positions.length);
+      const pos = positions[posIndex];
+      // Slight position variation
+      const xVar = (seededRandom(20 + i) - 0.5) * 0.01;
+      const yVar = (seededRandom(30 + i) - 0.5) * 0.01;
+      // Size variation (0.003 to 0.006)
+      const size = 0.003 + seededRandom(40 + i) * 0.003;
+      moles.push({
+        x: pos.x + xVar,
+        y: pos.y + yVar,
+        z: pos.z,
+        size
+      });
+    }
+    return moles;
+  }, [hairColor]);
+
+  // Mole color - dark brown, slightly varied
+  const moleColor = useMemo(() => {
+    const base = new THREE.Color('#3a2a1a');
+    // Slight variation based on skin tone
+    const skinBase = new THREE.Color(sickHeadColor);
+    base.lerp(skinBase, 0.15);
+    return base.multiplyScalar(0.6).getStyle();
+  }, [sickHeadColor]);
+
+  // Cheek flush/rosy cheeks - based on age, gender, health
+  const cheekFlushIntensity = useMemo(() => {
+    // Create seed for consistent flush per character
+    const seed = hairColor.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const seededRandom = (offset: number) => {
+      const x = Math.sin(seed + offset) * 10000;
+      return x - Math.floor(x);
+    };
+
+    let baseChance = 0.25; // Default 25% base chance
+    let intensity = 0;
+
+    // Children have higher chance and stronger flush
+    if (age !== undefined && age < 12) {
+      baseChance = 0.6;
+      intensity = 0.7;
+    } else if (age !== undefined && age < 25) {
+      baseChance = 0.4;
+      intensity = 0.5;
+    } else if (age !== undefined && age > 60) {
+      baseChance = 0.15; // Elderly less likely
+      intensity = 0.3;
+    } else {
+      intensity = 0.4;
+    }
+
+    // Women slightly more likely
+    if (isFemale) {
+      baseChance += 0.1;
+      intensity += 0.1;
+    }
+
+    // Sick or infected = reduced flush (pallor dominates)
+    if (sicknessLevel > 0.3 || isInfected) {
+      return 0;
+    }
+
+    // Random chance based on seed
+    if (seededRandom(100) > baseChance) return 0;
+
+    return Math.min(1, intensity);
+  }, [age, isFemale, sicknessLevel, isInfected, hairColor]);
+
+  // Cheek flush color - warm rosy pink/red
+  const cheekFlushColor = useMemo(() => {
+    // Mix between skin tone and rosy pink
+    const skinBase = new THREE.Color(sickHeadColor);
+    const rosyPink = new THREE.Color('#c47070');
+    skinBase.lerp(rosyPink, 0.4 + cheekFlushIntensity * 0.2);
+    return skinBase.getStyle();
+  }, [sickHeadColor, cheekFlushIntensity]);
 
   const upperLidLeft = useRef<THREE.Mesh>(null);
   const upperLidRight = useRef<THREE.Mesh>(null);
@@ -1083,7 +1247,9 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     // ANIMATION: Calculate pivot/turn adjustments
     // During sharp turns, add cross-step motion
     const turnDirection = angularVel > 0 ? 1 : -1; // Positive = turning right
-    const pivotCrossStep = turnPhase * 0.4 * turnDirection; // Cross-step offset
+    const turnScale = THREE.MathUtils.clamp(strideScale, 0.75, 1);
+    const pivotScale = (1 - turnPhase * 0.35) * turnScale;
+    const pivotCrossStep = turnPhase * 0.4 * turnDirection * pivotScale; // Cross-step offset
 
     // Leg swinging with eased motion for weight transfer feel
     if (leftLeg.current) {
@@ -1109,7 +1275,8 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     // ANIMATION: More knee bend when running, smooth blend
     const walkKnee = 0.5;
     const runKnee = 1.1;
-    const kneeFlexAmount = walkKnee + (runKnee - walkKnee) * sprintBlend;
+    const kneeBlend = walkKnee + (runKnee - walkKnee) * sprintBlend;
+    const kneeFlexAmount = Math.min(1.0, kneeBlend * (0.9 + strideScale * 0.1));
     const leftKneeFlexion = (isWalking || movementInertia > 0.01) ? Math.max(0, -leftPhase) * kneeFlexAmount * movementInertia : 0;
     const rightKneeFlexion = (isWalking || movementInertia > 0.01) ? Math.max(0, -rightPhase) * kneeFlexAmount * movementInertia : 0;
     if (leftKnee.current) {
@@ -1123,11 +1290,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     // ANIMATION: Add pivot rotation to hips during sharp turns
     const hipWalkRot = 0.22;
     const hipRunRot = 0.28;
-    const hipRotAmount = hipWalkRot + (hipRunRot - hipWalkRot) * sprintBlend;
+    const hipRotAmount = (hipWalkRot + (hipRunRot - hipWalkRot) * sprintBlend) * turnScale;
     if (hipGroup.current && (isWalking || movementInertia > 0.01)) {
       const baseHipRotation = leftPhase * amp * hipRotAmount;
       // During pivot, hips lead the turn
-      const pivotHipTurn = turnPhase * 0.3 * turnDirection;
+      const pivotHipTurn = turnPhase * 0.3 * turnDirection * pivotScale;
       hipGroup.current.rotation.y = baseHipRotation + pivotHipTurn;
       hipGroup.current.rotation.z = leftPhase * amp * 0.06 * movementInertia;
     } else if (hipGroup.current) {
@@ -1141,7 +1308,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       const torsoTwist = -leftPhase * amp * 0.15; // Opposite to hip rotation
       const torsoLean = leftPhase * amp * 0.04 * movementInertia; // Subtle side lean
       // During pivot, torso follows hips with delay (twist into turn)
-      const pivotTorsoTurn = turnPhase * 0.2 * turnDirection;
+      const pivotTorsoTurn = turnPhase * 0.2 * turnDirection * pivotScale;
       torsoGroup.current.rotation.y = THREE.MathUtils.lerp(torsoGroup.current.rotation.y, torsoTwist + pivotTorsoTurn, 0.15);
       torsoGroup.current.rotation.z = THREE.MathUtils.lerp(torsoGroup.current.rotation.z, torsoLean, 0.12);
       // Age-based forward lean while walking
@@ -1311,12 +1478,13 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     // Robe/clothing secondary motion - follows movement with delay
     if (robeHemRef.current) {
-      if (isWalking) {
+      if (isWalking || movementInertia > 0.01) {
         // Cloth sways with delayed follow-through
         const clothDelay = Math.sin(t - 0.4) * amp * 0.12;
         const clothSway = Math.sin(t * 0.7) * amp * 0.06;
+        const gaitHemSway = isFemale ? Math.sin(t * 0.5) * amp * 0.04 : 0;
         robeHemRef.current.rotation.x = THREE.MathUtils.lerp(robeHemRef.current.rotation.x, clothDelay, 0.08);
-        robeHemRef.current.rotation.z = THREE.MathUtils.lerp(robeHemRef.current.rotation.z, clothSway, 0.06);
+        robeHemRef.current.rotation.z = THREE.MathUtils.lerp(robeHemRef.current.rotation.z, clothSway + gaitHemSway, 0.06);
       } else if (jumping) {
         // Cloth billows during jump
         const jumpBillow = Math.sin(jumpT * Math.PI) * 0.15;
@@ -1330,9 +1498,10 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     const footBaseY = isFemale ? 0.05 : -0.45;
     const footBaseZ = 0.1;
+    const effectiveWalking = isWalking || movementInertia > 0.01;
     // Foot rotation for heel-to-toe movement - only when walking
     if (leftFoot.current) {
-      if (isWalking) {
+      if (effectiveWalking) {
         leftFoot.current.position.z = footBaseZ + leftPhase * (isSprinting ? 0.12 : 0.08);
         leftFoot.current.position.y = footBaseY + Math.max(0, -leftPhase) * (isSprinting ? 0.06 : 0.04);
         leftFoot.current.rotation.x = leftPhase * 0.3;
@@ -1344,7 +1513,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       }
     }
     if (rightFoot.current) {
-      if (isWalking) {
+      if (effectiveWalking) {
         rightFoot.current.position.z = footBaseZ + rightPhase * (isSprinting ? 0.12 : 0.08);
         rightFoot.current.position.y = footBaseY + Math.max(0, -rightPhase) * (isSprinting ? 0.06 : 0.04);
         rightFoot.current.rotation.x = rightPhase * 0.3;
@@ -2040,14 +2209,14 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
   if (simpleLodActive) {
     return (
-      <group ref={rootRef} scale={scale}>
+      <group ref={rootRef} scale={effectiveScale}>
         <mesh position={[0, 1.0, 0]} castShadow={castsFullShadow}>
           <cylinderGeometry args={[0.35, 0.45, 1.2, 8]} />
-          <meshStandardMaterial color={color} roughness={0.9} />
+          <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
         </mesh>
         <mesh position={[0, 1.65, 0]} castShadow={castsFullShadow}>
           <sphereGeometry args={[0.26, 10, 8]} />
-          <meshStandardMaterial color={sickHeadColor} roughness={0.8} />
+          <meshStandardMaterial color={sickHeadColor} roughness={skinRoughness} metalness={skinMetalness} />
         </mesh>
         {!castsFullShadow && (
           <mesh ref={shadowProxyRef} position={[0, 0.95, 0]} castShadow>
@@ -2060,7 +2229,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   }
 
   return (
-    <group ref={rootRef} scale={scale}>
+    <group ref={rootRef} scale={effectiveScale}>
       <group ref={bodyGroup}>
         {!castsFullShadow && (
           <mesh ref={shadowProxyRef} position={[0, 0.95, 0]} castShadow>
@@ -2093,7 +2262,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           <group>
             <mesh position={[0, 1.05, 0]} castShadow>
               <coneGeometry args={[0.55 * femaleRobeSpread, 1.2, 8]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} />
+              <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
             </mesh>
             {motifMap && (
               <mesh position={[0, 1.05, 0.01]} castShadow>
@@ -2110,7 +2279,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             )}
             <mesh position={[0, 1.35, 0]} castShadow>
               <cylinderGeometry args={[0.22, 0.28, 0.35, 8]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} />
+              <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
             </mesh>
             {/* Collar neckline - round neck opening with decorative band */}
             <mesh position={[0, 1.50, 0.08]} castShadow>
@@ -2120,7 +2289,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             {/* Inner collar band - suggests modest layering */}
             <mesh position={[0, 1.48, 0.04]} castShadow>
               <cylinderGeometry args={[0.13, 0.14, 0.06, 8]} />
-              <meshStandardMaterial color={headwearShadow} roughness={0.9} />
+              <meshStandardMaterial color={clothFoldColor} roughness={clothRoughness} />
             </mesh>
             {/* Embroidered collar detail - for wealthier characters */}
             {hasEmbroidery && (
@@ -2151,7 +2320,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             </mesh>
             <mesh position={[0, 0.6, 0]} castShadow>
               <coneGeometry args={[0.75 * femaleRobeSpread, 0.9, 8]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} />
+              <meshStandardMaterial color={clothLowerColor} roughness={clothRoughness} />
             </mesh>
             <mesh position={[0, 0.2, 0]} castShadow>
               <cylinderGeometry args={[0.78 * femaleRobeSpread, 0.78 * femaleRobeSpread, 0.1, 8]} />
@@ -2181,16 +2350,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             )}
             <mesh position={[-0.22, 1.34, 0]} castShadow>
               <boxGeometry args={[0.14, 0.14, 0.14]} />
-              <meshStandardMaterial color={color} roughness={0.9} />
+              <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
             </mesh>
             <mesh position={[0.22, 1.34, 0]} castShadow>
               <boxGeometry args={[0.14, 0.14, 0.14]} />
-              <meshStandardMaterial color={color} roughness={0.9} />
+              <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
             </mesh>
             <group ref={leftArm} position={[-0.26, 1.14, 0.02]}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.055, 0.055, 0.36, 8]} />
-              <meshStandardMaterial color={upperArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
+              <meshStandardMaterial
+                color={upperArmColor}
+                roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+              />
               </mesh>
               {/* Upper arm band - decorative stripe */}
               {sleeveCoverage === 'full' && robeHasTrim && (
@@ -2203,12 +2376,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
                 <sphereGeometry args={[0.048, 8, 8]} />
-                <meshStandardMaterial color={upperArmColor} roughness={0.9} />
+                <meshStandardMaterial
+                  color={upperArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Forearm cylinder - offset down so it pivots from elbow */}
               <mesh position={[0, -0.11, 0]} castShadow>
                 <cylinderGeometry args={[0.048, 0.042, 0.22, 8]} />
-                <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
+                <meshStandardMaterial
+                  color={lowerArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Sleeve cuff - decorative band at wrist */}
               {sleeveCoverage !== 'none' && (
@@ -2221,11 +2402,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <group position={[0, -0.24, 0]} rotation={[0, Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>
                   <boxGeometry args={[0.035, 0.08, 0.065]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 <mesh position={[0.01, 0.01, 0.04]} rotation={[0, 0, 0.4]} castShadow>
                   <capsuleGeometry args={[0.018, 0.035, 4, 6]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 {/* Henna pattern on left hand */}
                 {cosmeticEffects?.hasHenna && (
@@ -2265,7 +2446,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             <group ref={rightArm} position={[0.26, 1.14, 0.02]}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.055, 0.055, 0.36, 8]} />
-              <meshStandardMaterial color={upperArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
+              <meshStandardMaterial
+                color={upperArmColor}
+                roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+              />
               </mesh>
               {/* Upper arm band - decorative stripe */}
               {sleeveCoverage === 'full' && robeHasTrim && (
@@ -2278,12 +2463,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
                 <sphereGeometry args={[0.048, 8, 8]} />
-                <meshStandardMaterial color={upperArmColor} roughness={0.9} />
+                <meshStandardMaterial
+                  color={upperArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Forearm cylinder - offset down so it pivots from elbow */}
               <mesh position={[0, -0.11, 0]} castShadow>
                 <cylinderGeometry args={[0.048, 0.042, 0.22, 8]} />
-                <meshStandardMaterial color={lowerArmColor} roughness={sleeveCoverage === 'none' ? 0.9 : clothRoughness} />
+                <meshStandardMaterial
+                  color={lowerArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Sleeve cuff - decorative band at wrist */}
               {sleeveCoverage !== 'none' && (
@@ -2296,11 +2489,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <group position={[0, -0.24, 0]} rotation={[0, -Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>
                   <boxGeometry args={[0.035, 0.08, 0.065]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 <mesh position={[-0.01, 0.01, 0.04]} rotation={[0, 0, -0.4]} castShadow>
                   <capsuleGeometry args={[0.018, 0.035, 4, 6]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 {/* Henna pattern on right hand */}
                 {cosmeticEffects?.hasHenna && (
@@ -2351,7 +2544,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             {/* Upper torso */}
             <mesh position={[0, 1.1, 0]} castShadow>
               <cylinderGeometry args={[0.25, 0.35, 0.9, 8]} />
-              <meshStandardMaterial color={color} roughness={clothRoughness} />
+              <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
             </mesh>
             {/* Collar neckline - v-neck opening typical of thawb/qamis */}
             <mesh position={[-0.05, 1.46, 0.18]} rotation={[0.35, 0.2, 0.12]} castShadow>
@@ -2391,7 +2584,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             <group ref={robeHemRef}>
               <mesh position={[0, 0.7, 0]} castShadow>
                 <boxGeometry args={[0.5, 0.5, 0.3]} />
-                <meshStandardMaterial color={color} roughness={clothRoughness} />
+                <meshStandardMaterial color={clothLowerColor} roughness={clothRoughness} />
               </mesh>
               <mesh position={[0, 0.55, 0.16]} castShadow>
                 <boxGeometry args={[0.32, 0.25, 0.05]} />
@@ -2495,7 +2688,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         {/* Neck - properly connects head to shoulders */}
         <mesh position={[0, 1.58, 0]} castShadow>
           <cylinderGeometry args={[0.06, 0.09, 0.24, 10]} />
-          <meshStandardMaterial color={sickHeadColor} roughness={0.9} />
+          <meshStandardMaterial color={sickHeadColor} roughness={skinRoughness} metalness={skinMetalness} />
         </mesh>
         {/* Collar/neckline */}
         <mesh position={[0, 1.47, 0]} castShadow>
@@ -2512,7 +2705,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             0.9 * faceVariant.craniumDepth
           ]}>
             <sphereGeometry args={[0.2, 12, 12]} />
-            <meshStandardMaterial color={headColor} />
+            <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
           </mesh>
           {/* Face - follows cranium width with individual variation */}
           <mesh position={[0, 0.0, 0.085]} scale={[
@@ -2521,7 +2714,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             0.45
           ]} castShadow>
             <sphereGeometry args={[0.16, 12, 10]} />
-            <meshStandardMaterial color={headColor} />
+            <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
           </mesh>
           {/* Ears - visible unless covered by headwear */}
           {(headwearStyle === 'none' || headwearStyle === 'cap' || headwearStyle === 'fez' || headwearStyle === 'straw' || headwearStyle === 'taqiyah') && (
@@ -2531,7 +2724,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 {/* Outer ear structure */}
                 <mesh castShadow>
                   <sphereGeometry args={[0.04, 10, 10, 0, Math.PI]} />
-                  <meshStandardMaterial color={headColor} roughness={0.92} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 {/* Inner concha depression */}
                 <mesh position={[0, 0, 0.01]} castShadow>
@@ -2549,7 +2742,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 {/* Outer ear structure */}
                 <mesh castShadow>
                   <sphereGeometry args={[0.04, 10, 10, Math.PI, Math.PI]} />
-                  <meshStandardMaterial color={headColor} roughness={0.92} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 {/* Inner concha depression */}
                 <mesh position={[0, 0, 0.01]} castShadow>
@@ -3389,7 +3582,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 </>
               )}
               {/* Tear ducts */}
-              <mesh position={[-(faceVariant.eyeSpacing + 0.013), eyeY - 0.008, 0.166]} castShadow>
+              <mesh position={[-(faceVariant.eyeSpacing - 0.013), eyeY - 0.008, 0.166]} castShadow>
                 <planeGeometry args={[0.006, 0.006]} />
                 <meshStandardMaterial color="#cfa88c" roughness={1} />
               </mesh>
@@ -3477,6 +3670,88 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   )}
                 </>
               )}
+              {/* Forehead wrinkles - horizontal lines for aged characters (40+) */}
+              {foreheadWrinkleCount > 0 && (
+                <>
+                  {/* Wrinkle lines - positioned on forehead, spacing based on count */}
+                  {Array.from({ length: foreheadWrinkleCount }).map((_, i) => {
+                    const baseY = 0.07; // Base forehead position
+                    const spacing = 0.018; // Space between wrinkles
+                    const yPos = baseY + (i - (foreheadWrinkleCount - 1) / 2) * spacing;
+                    const width = 0.06 - i * 0.008; // Slightly narrower for higher wrinkles
+                    const opacity = 0.35 + (foreheadWrinkleCount - 1) * 0.1; // Deeper with more wrinkles
+                    return (
+                      <mesh
+                        key={`wrinkle-${i}`}
+                        position={[0, yPos, 0.168]}
+                        rotation={[0, 0, (i % 2 === 0 ? 0.02 : -0.02)]} // Slight alternating tilt
+                      >
+                        <planeGeometry args={[width, 0.004]} />
+                        <meshStandardMaterial
+                          color={wrinkleColor}
+                          roughness={1}
+                          transparent
+                          opacity={opacity}
+                        />
+                      </mesh>
+                    );
+                  })}
+                </>
+              )}
+              {/* Moles/beauty marks - small dark spots for ~35% of characters */}
+              {moleData.length > 0 && moleData.map((mole, i) => (
+                <mesh
+                  key={`mole-${i}`}
+                  position={[mole.x, mole.y, mole.z]}
+                >
+                  <sphereGeometry args={[mole.size, 6, 6]} />
+                  <meshStandardMaterial color={moleColor} roughness={0.9} />
+                </mesh>
+              ))}
+              {/* Cheek flush/rosy cheeks - subtle color on cheekbones */}
+              {cheekFlushIntensity > 0 && (
+                <>
+                  {/* Left cheek flush */}
+                  <mesh position={[-0.055, eyeY - 0.04, 0.14]}>
+                    <sphereGeometry args={[0.028, 8, 8]} />
+                    <meshStandardMaterial
+                      color={cheekFlushColor}
+                      roughness={0.95}
+                      transparent
+                      opacity={0.25 + cheekFlushIntensity * 0.25}
+                    />
+                  </mesh>
+                  {/* Right cheek flush */}
+                  <mesh position={[0.055, eyeY - 0.04, 0.14]}>
+                    <sphereGeometry args={[0.028, 8, 8]} />
+                    <meshStandardMaterial
+                      color={cheekFlushColor}
+                      roughness={0.95}
+                      transparent
+                      opacity={0.25 + cheekFlushIntensity * 0.25}
+                    />
+                  </mesh>
+                  {/* Upper cheek highlights - adds to rosy glow */}
+                  <mesh position={[-0.045, eyeY - 0.025, 0.155]}>
+                    <sphereGeometry args={[0.018, 6, 6]} />
+                    <meshStandardMaterial
+                      color={cheekFlushColor}
+                      roughness={0.98}
+                      transparent
+                      opacity={0.15 + cheekFlushIntensity * 0.15}
+                    />
+                  </mesh>
+                  <mesh position={[0.045, eyeY - 0.025, 0.155]}>
+                    <sphereGeometry args={[0.018, 6, 6]} />
+                    <meshStandardMaterial
+                      color={cheekFlushColor}
+                      roughness={0.98}
+                      transparent
+                      opacity={0.15 + cheekFlushIntensity * 0.15}
+                    />
+                  </mesh>
+                </>
+              )}
               {/* Lips */}
               <mesh ref={upperLipRef} position={[0, mouthY, 0.158]} castShadow>
                 <boxGeometry args={[mouthWidth * lipWidthScale * faceVariant.mouthWidthScale, 0.012, 0.015 * faceVariant.lipFullness]} />
@@ -3486,13 +3761,23 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 <boxGeometry args={[mouthWidth * lipWidthScale * lipLowerScale * faceVariant.mouthWidthScale, 0.014, 0.015 * faceVariant.lipFullness]} />
                 <meshStandardMaterial color={lipColor} roughness={1} />
               </mesh>
+
+              {/* Mouth corners - expression tilt for smile/frown */}
+              <mesh position={[-mouthWidth * 0.55, mouthY + mouthCornerLift, 0.159]} rotation={[0, 0, mouthCornerTilt]} castShadow>
+                <boxGeometry args={[mouthWidth * 0.35, 0.008, 0.012]} />
+                <meshStandardMaterial color={lipUpperColor} roughness={1} />
+              </mesh>
+              <mesh position={[mouthWidth * 0.55, mouthY + mouthCornerLift, 0.159]} rotation={[0, 0, -mouthCornerTilt]} castShadow>
+                <boxGeometry args={[mouthWidth * 0.35, 0.008, 0.012]} />
+                <meshStandardMaterial color={lipUpperColor} roughness={1} />
+              </mesh>
             
              
             
               {/* Nose */}
               <mesh position={[0, -0.0, 0.17]} castShadow>
                 <coneGeometry args={[noseRadius, noseLength, 8]} />
-                <meshStandardMaterial color={headColor} roughness={1} />
+                <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
               </mesh>
 
               {/* Jaw - subtle definition for some characters */}
@@ -4457,20 +4742,24 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Capsule shoulder - horizontal for natural slope */}
               <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
                 <capsuleGeometry args={[0.07, 0.12, 4, 8]} />
-                <meshStandardMaterial color={color} roughness={clothRoughness} />
+                <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
               </mesh>
             </group>
             <group ref={rightShoulder} position={[0.3, 1.4, 0]}>
               {/* Capsule shoulder - horizontal for natural slope */}
               <mesh castShadow rotation={[0, 0, Math.PI / 2]}>
                 <capsuleGeometry args={[0.07, 0.12, 4, 8]} />
-                <meshStandardMaterial color={color} roughness={clothRoughness} />
+                <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
               </mesh>
             </group>
             <group ref={leftArm} position={[-0.38, 1.12, 0]}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.065, 0.065, 0.44, 8]} />
-                <meshStandardMaterial color={upperArmColor} />
+                <meshStandardMaterial
+                  color={upperArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Upper arm band - decorative stripe */}
               {sleeveCoverage === 'full' && robeHasTrim && (
@@ -4483,12 +4772,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
                 <sphereGeometry args={[0.058, 8, 8]} />
-                <meshStandardMaterial color={upperArmColor} roughness={0.9} />
+                <meshStandardMaterial
+                  color={upperArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Forearm cylinder - offset down so it pivots from elbow */}
               <mesh position={[0, -0.12, 0]} castShadow>
                 <cylinderGeometry args={[0.055, 0.048, 0.24, 8]} />
-                <meshStandardMaterial color={lowerArmColor} />
+                <meshStandardMaterial
+                  color={lowerArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Sleeve cuff - decorative band at wrist */}
               {sleeveCoverage !== 'none' && (
@@ -4501,11 +4798,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <group position={[0, -0.26, 0]} rotation={[0, Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>
                   <boxGeometry args={[0.04, 0.09, 0.075]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 <mesh position={[0.01, 0.01, 0.045]} rotation={[0, 0, 0.4]} castShadow>
                   <capsuleGeometry args={[0.02, 0.04, 4, 6]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 {/* Henna pattern on left hand (male) */}
                 {cosmeticEffects?.hasHenna && (
@@ -4542,7 +4839,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             <group ref={rightArm} position={[0.38, 1.12, 0]}>
               <mesh castShadow>
                 <cylinderGeometry args={[0.065, 0.065, 0.44, 8]} />
-                <meshStandardMaterial color={upperArmColor} />
+                <meshStandardMaterial
+                  color={upperArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Upper arm band - decorative stripe */}
               {sleeveCoverage === 'full' && robeHasTrim && (
@@ -4555,12 +4856,20 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Elbow joint sphere */}
               <mesh position={[0, 0, 0]} castShadow>
                 <sphereGeometry args={[0.058, 8, 8]} />
-                <meshStandardMaterial color={upperArmColor} roughness={0.9} />
+                <meshStandardMaterial
+                  color={upperArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Forearm cylinder - offset down so it pivots from elbow */}
               <mesh position={[0, -0.12, 0]} castShadow>
                 <cylinderGeometry args={[0.055, 0.048, 0.24, 8]} />
-                <meshStandardMaterial color={lowerArmColor} />
+                <meshStandardMaterial
+                  color={lowerArmColor}
+                  roughness={sleeveCoverage === 'none' ? skinRoughness : clothRoughness}
+                  metalness={sleeveCoverage === 'none' ? skinMetalness : 0}
+                />
               </mesh>
               {/* Sleeve cuff - decorative band at wrist */}
               {sleeveCoverage !== 'none' && (
@@ -4573,11 +4882,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <group position={[0, -0.26, 0]} rotation={[0, -Math.PI / 2, 0]}>
                 <mesh castShadow rotation={[0.1, 0, 0]}>
                   <boxGeometry args={[0.04, 0.09, 0.075]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 <mesh position={[-0.01, 0.01, 0.045]} rotation={[0, 0, -0.4]} castShadow>
                   <capsuleGeometry args={[0.02, 0.04, 4, 6]} />
-                  <meshStandardMaterial color={headColor} roughness={0.9} />
+                  <meshStandardMaterial color={headColor} roughness={skinRoughness} metalness={skinMetalness} />
                 </mesh>
                 {/* Henna pattern on right hand (male) */}
                 {cosmeticEffects?.hasHenna && (
@@ -4621,19 +4930,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Upper leg (thigh) - tapered cylinder for fabric draping */}
               <mesh position={[0, 0.1, 0]} castShadow>
                 <cylinderGeometry args={[0.065, 0.085, 0.45, 10]} />
-                <meshStandardMaterial color={color} roughness={clothRoughness} />
+                <meshStandardMaterial color={clothLowerColor} roughness={clothRoughness} />
               </mesh>
               {/* Knee joint */}
               <group ref={leftKnee} position={[0, -0.15, 0]}>
                 {/* Fabric over knee - hemisphere instead of full sphere */}
                 <mesh position={[0, 0, 0]} castShadow>
                   <sphereGeometry args={[0.09, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.65]} />
-                  <meshStandardMaterial color={color} roughness={clothRoughness} />
+                  <meshStandardMaterial color={clothLowerColor} roughness={clothRoughness} />
                 </mesh>
                 {/* Lower leg (shin) - tapered cylinder for fabric flow */}
                 <mesh position={[0, -0.22, 0]} castShadow>
                   <cylinderGeometry args={[0.055, 0.065, 0.4, 10]} />
-                  <meshStandardMaterial color={color} roughness={clothRoughness} />
+                  <meshStandardMaterial color={clothFoldColor} roughness={clothRoughness} />
                 </mesh>
                 {/* Sirwal (trousers) visible at ankle */}
                 <mesh position={[0, -0.38, 0]} castShadow>
@@ -4660,19 +4969,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               {/* Upper leg (thigh) - tapered cylinder for fabric draping */}
               <mesh position={[0, 0.1, 0]} castShadow>
                 <cylinderGeometry args={[0.065, 0.085, 0.45, 10]} />
-                <meshStandardMaterial color={color} roughness={clothRoughness} />
+                <meshStandardMaterial color={clothLowerColor} roughness={clothRoughness} />
               </mesh>
               {/* Knee joint */}
               <group ref={rightKnee} position={[0, -0.15, 0]}>
                 {/* Fabric over knee - hemisphere instead of full sphere */}
                 <mesh position={[0, 0, 0]} castShadow>
                   <sphereGeometry args={[0.09, 8, 8, 0, Math.PI * 2, 0, Math.PI * 0.65]} />
-                  <meshStandardMaterial color={color} roughness={clothRoughness} />
+                  <meshStandardMaterial color={clothLowerColor} roughness={clothRoughness} />
                 </mesh>
                 {/* Lower leg (shin) - tapered cylinder for fabric flow */}
                 <mesh position={[0, -0.22, 0]} castShadow>
                   <cylinderGeometry args={[0.055, 0.065, 0.4, 10]} />
-                  <meshStandardMaterial color={color} roughness={clothRoughness} />
+                  <meshStandardMaterial color={clothFoldColor} roughness={clothRoughness} />
                 </mesh>
                 {/* Sirwal (trousers) visible at ankle */}
                 <mesh position={[0, -0.38, 0]} castShadow>

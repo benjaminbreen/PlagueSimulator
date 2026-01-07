@@ -76,6 +76,8 @@ interface UseConversationOptions {
   onNPCAction?: (action: ConversationAction, npc: NPCStats) => void;
   /** If true, the NPC initiated this encounter by approaching the player */
   isNPCInitiated?: boolean;
+  /** Family relationship info if this NPC is a family member */
+  familyRelationship?: 'spouse' | 'child' | 'parent' | 'sibling';
 }
 
 interface UseConversationReturn {
@@ -92,7 +94,8 @@ export function useConversation({
   context,
   onConversationEnd,
   onNPCAction,
-  isNPCInitiated = false
+  isNPCInitiated = false,
+  familyRelationship
 }: UseConversationOptions): UseConversationReturn {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true); // Start loading for initial greeting
@@ -125,8 +128,37 @@ export function useConversation({
       let greetingPrompt: string;
       if (isDeceased) {
         greetingPrompt = '[SYSTEM: REMEMBER - You are DEAD, a shade/ghost. This living person has approached your spirit. Generate a brief, melancholy greeting from beyond death. Reference that you are deceased. 1-2 sentences max.]';
+      } else if (familyRelationship) {
+        // Family member greeting - age and relationship appropriate
+        const npcAge = npc.age || 25;
+
+        if (familyRelationship === 'child') {
+          // This NPC is the player's CHILD - speak like a child of their age
+          if (npcAge <= 5) {
+            // Toddler/very young child - simple, excitable, repetitive
+            greetingPrompt = `[SYSTEM: You are a ${npcAge}-year-old child seeing your parent. Speak like a REAL toddler - simple words, excited, maybe repetitive. Examples: "Mama! Mama!" or "Papa look!" or just excited babbling. Keep it to 1-5 words max. NO formal speech!]`;
+          } else if (npcAge <= 8) {
+            // Young child - simple sentences, excitable, might share random thoughts
+            greetingPrompt = `[SYSTEM: You are a ${npcAge}-year-old child seeing your parent. Speak like a real young child - short simple sentences, maybe sharing something random and excited about, seeking attention. Examples: "Mama, look what I found!" or "Papa! I saw a cat!" Keep it brief and childlike.]`;
+          } else if (npcAge <= 12) {
+            // Older child - can be more complex but still childlike, might be sullen or silly
+            greetingPrompt = `[SYSTEM: You are a ${npcAge}-year-old child. Greet your parent naturally - could be excited, sullen, distracted, or sharing news. Don't be overly formal. Speak like a real pre-teen would to their parent. 1-2 short sentences.]`;
+          } else {
+            // Teenager - might be terse, embarrassed, or actually engaged depending on mood
+            greetingPrompt = `[SYSTEM: You are a ${npcAge}-year-old teenager. Greet your parent - could be brief/terse, slightly embarrassed, or genuinely engaged. Teenagers aren't always sullen but they're not usually overly formal with parents. 1-2 sentences, natural teen speech.]`;
+          }
+        } else if (familyRelationship === 'spouse') {
+          greetingPrompt = `[SYSTEM: You see your spouse and approach them with warmth. Generate a brief, loving greeting. You might express concern, share news, or simply be happy to see them. 1-2 sentences. Be warm and familiar - this is your life partner!]`;
+        } else if (familyRelationship === 'parent') {
+          // This NPC is the player's PARENT
+          greetingPrompt = `[SYSTEM: You see your adult child (the player). Greet them with parental warmth - could include concern for their wellbeing, gentle advice, or just happiness to see them. 1-2 sentences.]`;
+        } else if (familyRelationship === 'sibling') {
+          greetingPrompt = `[SYSTEM: You see your sibling. Greet them with the casual familiarity of siblings - could be teasing, warm, concerned, or just casual. 1-2 sentences.]`;
+        } else {
+          greetingPrompt = `[SYSTEM: You see a family member. Greet them warmly and familiarly. 1-2 sentences.]`;
+        }
       } else if (isNPCInitiated) {
-        greetingPrompt = '[SYSTEM: You notice this stranger and decide to approach them. Generate a brief, natural greeting to initiate conversation. 1-2 sentences max.]';
+        greetingPrompt = '[SYSTEM: You notice this person and decide to approach them. Generate a brief, natural greeting to initiate conversation. 1-2 sentences max.]';
       } else {
         greetingPrompt = '[SYSTEM: This person has just approached you. Generate a brief, natural greeting based on what you are currently doing and your mood. 1-2 sentences max.]';
       }

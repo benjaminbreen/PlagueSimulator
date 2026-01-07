@@ -7,6 +7,7 @@ import { WealthyGarden } from './landmarks/WealthyGarden';
 import { CitadelComplex } from './landmarks/CitadelComplex';
 import { MountainShrineDecor } from './districts/MountainShrineDecor';
 import { SalhiyyaDecor } from './districts/SalhiyyaDecor';
+import { CemeteryDecor } from './districts/CemeteryDecor';
 import { MarketplaceDecor } from './districts/MarketplaceDecor';
 import { CaravanseraiComplex } from './districts/CaravanseraiComplex';
 import { OutskirtsFarmlandDecor } from './districts/OutskirtsFarmlandDecor';
@@ -72,6 +73,15 @@ export const EnvironmentDistricts: React.FC<EnvironmentDistrictsProps> = ({
     <SouthernRoadDecor mapX={mapX} mapY={mapY} />
     <BabSharqiGate mapX={mapX} mapY={mapY} />
     <SalhiyyaDecor
+      mapX={mapX}
+      mapY={mapY}
+      timeOfDay={timeOfDay}
+      terrainSeed={terrainSeed}
+      onTreePositionsGenerated={onTreePositionsGenerated}
+      buildingPositions={buildingPositions}
+      heightmap={heightmap}
+    />
+    <CemeteryDecor
       mapX={mapX}
       mapY={mapY}
       timeOfDay={timeOfDay}

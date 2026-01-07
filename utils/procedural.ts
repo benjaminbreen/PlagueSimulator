@@ -7,6 +7,17 @@ import { getBuildingHeight } from './buildingHeights';
 // ETHNICITY-SPECIFIC NAME POOLS
 // ============================================
 
+const generateEyeColorFromHair = (hairColor: string): string => {
+  const seed = hairColor.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const roll = (seed % 100) / 100;
+  if (roll > 0.97) return '#6b8e9f'; // blue-grey (3%)
+  if (roll > 0.90) return '#5a7a50'; // green (7%)
+  if (roll > 0.80) return '#7a6a45'; // hazel (10%)
+  if (roll > 0.65) return '#8b6b3a'; // light brown/amber (15%)
+  if (roll > 0.40) return '#5a4030'; // medium warm brown (25%)
+  return '#3a2a1a'; // dark brown (40%)
+};
+
 // Arab names (Sunni/Shia Muslim Arabs)
 const ARAB_NAMES_MALE = ['Ahmad', 'Yusuf', 'Ibrahim', 'Umar', 'Hassan', 'Mahmud', 'Zayd', 'Malik', 'Nasir', 'Suleiman', 'Ali', 'Muhammad', 'Khalil', 'Rashid', 'Tariq', 'Salah', 'Jamal', 'Faris', 'Khalid', 'Said'];
 const ARAB_NAMES_FEMALE = ['Fatima', 'Zaynab', 'Maryam', 'Aisha', 'Khadija', 'Layla', 'Salma', 'Hafsa', 'Raya', 'Nura', 'Amina', 'Safiya', 'Suhayla', 'Lamia', 'Hana', 'Yasmin'];
@@ -413,28 +424,80 @@ const generateDisposition = (rand: () => number): number => {
   // Clamp to valid range
   return Math.floor(Math.max(0, Math.min(100, base)));
 };
-// Weighted toward larger families - duplicates increase probability
-const FAMILY_STRUCTURES = [
-  // Small/no family (rare)
-  'No immediate family noted',
-  'Widowed, one child',
-  'Single, elder parent',
-  // Medium families (common)
-  'Married, two children',
-  'Married, two children',
-  'Married, three children',
-  'Married, three children',
-  'Married, three children',
-  // Larger families (common)
-  'Married, four children',
-  'Married, four children',
-  'Married, five children',
-  'Extended family in household',
-  'Extended family in household',
-  // Large extended families
-  'Large extended family',  // spouse + 4 children + elder
-  'Widowed, three children',
-];
+// Age-appropriate family structure generation
+// MINIMUM MARRIAGE AGE: 18 (for modern sensibilities while maintaining historical setting)
+function getAgeAppropriateFamilyStructure(age: number, rand: () => number): string {
+  // Under 18: Cannot be married, may live with parents
+  if (age < 18) {
+    const youngOptions = [
+      'Single, elder parent',      // Living with parents (most common)
+      'Single, elder parent',
+      'Single, elder parent',
+      'No immediate family noted', // Orphan/alone (rare)
+    ];
+    return youngOptions[Math.floor(rand() * youngOptions.length)];
+  }
+
+  // 18-22: Just starting out - most likely single or newly married, few/no children
+  if (age <= 22) {
+    const youngAdultOptions = [
+      'No immediate family noted',       // Single
+      'No immediate family noted',
+      'Single, elder parent',            // Still living with parents
+      'Married, one child',              // Just married, maybe one baby
+      'Married, one child',
+    ];
+    return youngAdultOptions[Math.floor(rand() * youngAdultOptions.length)];
+  }
+
+  // 23-28: Establishing family - small families most common
+  if (age <= 28) {
+    const establishingOptions = [
+      'No immediate family noted',
+      'Married, one child',
+      'Married, one child',
+      'Married, two children',
+      'Married, two children',
+      'Married, three children',
+      'Single, elder parent',
+      'Widowed, one child',              // Rare but possible
+    ];
+    return establishingOptions[Math.floor(rand() * establishingOptions.length)];
+  }
+
+  // 29-38: Peak family years - medium to large families
+  if (age <= 38) {
+    const peakFamilyOptions = [
+      'Married, two children',
+      'Married, three children',
+      'Married, three children',
+      'Married, three children',
+      'Married, four children',
+      'Married, four children',
+      'Extended family in household',
+      'Extended family in household',
+      'Widowed, two children',
+      'Widowed, one child',
+    ];
+    return peakFamilyOptions[Math.floor(rand() * peakFamilyOptions.length)];
+  }
+
+  // 39+: Mature families - larger families, more extended family, higher widow rates
+  const matureFamilyOptions = [
+    'Married, three children',
+    'Married, four children',
+    'Married, four children',
+    'Married, five children',
+    'Extended family in household',
+    'Extended family in household',
+    'Large extended family',
+    'Large extended family',
+    'Widowed, three children',
+    'Widowed, two children',
+    'Widowed, one child',
+  ];
+  return matureFamilyOptions[Math.floor(rand() * matureFamilyOptions.length)];
+}
 const HEALTH_STATUSES = ['Sound', 'Wary', 'Recovering', 'Stressed', 'Healthy'];
 
 export const seededRandom = (seed: number) => {
@@ -1783,6 +1846,7 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   const hairPalette = ['#1d1b18', '#2a1a12', '#3b2a1a', '#4a3626', '#3a2c22'];
   const baseHairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
   const hairColor = getAgedHairColor(baseHairColor, age, rand);
+  const eyeColor = generateEyeColorFromHair(hairColor);
 
   // Facial hair for men (historically, beards were common in medieval Damascus)
   const facialHair: NPCStats['facialHair'] = gender === 'Male' ? (() => {
@@ -1937,6 +2001,9 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
   const dispositionPanicReduction = Math.floor(disposition / 20); // 0-5 reduction based on disposition
   const panicLevel = Math.max(0, Math.min(100, basePanic - dispositionPanicReduction));
 
+  const strength = 6 + Math.floor(rand() * 10) + (profession.includes('Laborer') || profession.includes('Porter') ? 2 : 0);
+  const charisma = 6 + Math.floor(rand() * 10) + (socialClass === SocialClass.MERCHANT || socialClass === SocialClass.NOBILITY ? 2 : 0);
+
   return {
     id: `npc-${seed}`,
     name,
@@ -1951,6 +2018,8 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     weight: weightBase,
     disposition,
     mood,
+    strength,
+    charisma,
     awarenessLevel,
     panicLevel,
     robeSpread,
@@ -1965,6 +2034,7 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     sashPattern,
     hairStyle,
     hairColor,
+    eyeColor,
     facialHair,
     facialHairColor,
     headwearStyle,
@@ -2033,6 +2103,7 @@ export const generatePlayerStats = (
   const baseHairColor = hairPalette[Math.floor(rand() * hairPalette.length)];
   // Apply age-based graying (gray/white hair increases with age)
   const hairColor = getAgedHairColor(baseHairColor, age, rand);
+  const eyeColor = generateEyeColorFromHair(hairColor);
 
   // Step 3: Build profession pools (religion-validated)
   const professionPoolsByClass: Record<SocialClass, Record<'Male' | 'Female', string[]>> = {
@@ -2370,13 +2441,14 @@ export const generatePlayerStats = (
     language,
     height,
     weight,
-    family: FAMILY_STRUCTURES[Math.floor(rand() * FAMILY_STRUCTURES.length)],
+    family: getAgeAppropriateFamilyStructure(age, rand),
     familyMembers: [],  // Populated later by generatePlayerFamily
     homeBuildingId: null,  // Assigned when game initializes
     homeMapPosition: null,  // Assigned when game initializes
     healthStatus: HEALTH_STATUSES[Math.floor(rand() * HEALTH_STATUSES.length)],
     skinTone,
     hairColor,
+    eyeColor,
     robeColor: robePick.base,
     headscarfColor: headwearPick.color,
     skinDescription: skinDescriptions[Math.floor(rand() * skinDescriptions.length)],

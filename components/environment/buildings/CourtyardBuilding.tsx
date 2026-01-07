@@ -98,7 +98,7 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
   return (
     <group
       ref={groupRef}
-      position={[data.position[0], finalHeight / 2, data.position[2]]}
+      position={[data.position[0], data.position[1] + finalHeight / 2, data.position[2]]}
       userData={{ buildingId: data.id }}
       onPointerOver={(e) => {
         e.stopPropagation();

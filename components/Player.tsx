@@ -37,8 +37,8 @@ const materialToSound = (mat: PushableMaterial): CollisionMaterial => {
   }
 };
 
-const PLAYER_SPEED = 6;
-const RUN_SPEED = 11;
+const PLAYER_SPEED = 5.2;
+const RUN_SPEED = 9.5;
 const CAMERA_SENSITIVITY = 4.2;
 
 // Helper for smooth angle interpolation that takes the shortest path around the circle
@@ -82,6 +82,7 @@ interface PlayerProps {
   agentHashRef?: React.MutableRefObject<SpatialHash<AgentSnapshot> | null>;
   onAgentImpact?: (id: string, intensity: number) => void;
   pushablesRef?: React.MutableRefObject<PushableObject[]>;
+  swingablesRef?: React.MutableRefObject<import('../utils/pushables').SwingableObject[]>;
   onImpactPuff?: (position: THREE.Vector3, intensity: number) => void;
   district?: DistrictType;
   terrainSeed?: number;
@@ -103,6 +104,7 @@ interface PlayerProps {
   climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
   pickupTriggerRef?: React.MutableRefObject<boolean>;    // Mobile/touch trigger for pickup
   climbTriggerRef?: React.MutableRefObject<boolean>;     // Mobile/touch trigger for initiating climb
+  onPropertyDamaged?: (position: THREE.Vector3) => void; // Crime detection for breaking interior objects
   onFallDamage?: (fallHeight: number, fatal: boolean) => void;
   cameraViewTarget?: [number, number, number] | null;
   onPlayerStartMove?: () => void;
@@ -130,6 +132,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   agentHashRef,
   onAgentImpact,
   pushablesRef,
+  swingablesRef,
   onImpactPuff,
   district,
   terrainSeed,
@@ -151,6 +154,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   climbInputRef,
   pickupTriggerRef,
   climbTriggerRef,
+  onPropertyDamaged,
   onFallDamage,
   cameraViewTarget,
   onPlayerStartMove,
@@ -405,6 +409,35 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   const savedCameraTarget = useRef<THREE.Vector3 | null>(null);
   const savedMerchantCameraPos = useRef<THREE.Vector3 | null>(null);
   const savedMerchantCameraTarget = useRef<THREE.Vector3 | null>(null);
+
+  // PERFORMANCE: Reusable temp vectors to avoid allocations in useFrame
+  const playerTempsRef = useRef({
+    portraitCameraPos: new THREE.Vector3(),
+    portraitTarget: new THREE.Vector3(),
+    merchantPos: new THREE.Vector3(),
+    merchantCameraPos: new THREE.Vector3(),
+    merchantTarget: new THREE.Vector3(),
+    facingVec: new THREE.Vector3(),
+    toObject: new THREE.Vector3(),
+    candidate: new THREE.Vector3(),
+    nextPos: new THREE.Vector3(),
+    moveVec: new THREE.Vector3(),
+    forward: new THREE.Vector3(),
+    right: new THREE.Vector3(),
+    nextX: new THREE.Vector3(),
+    nextZ: new THREE.Vector3(),
+    probedDir: new THREE.Vector3(),
+    playerRight: new THREE.Vector3(),
+    shoulderOffset: new THREE.Vector3(),
+    targetLookAt: new THREE.Vector3(),
+    orbitTarget: new THREE.Vector3(),
+    playerPos: new THREE.Vector3(),
+    playerPosOffset: new THREE.Vector3(),
+    impactPos: new THREE.Vector3(),
+    rollAxis: new THREE.Vector3(),
+    cameraTarget: new THREE.Vector3(),
+    upAxis: new THREE.Vector3(0, 1, 0),
+  });
 
   useImperativeHandle(ref, () => group.current!, []);
 
@@ -1039,20 +1072,21 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
       // Calculate portrait camera position (in front of player at eye level)
       const playerPos = group.current.position;
-      const portraitCameraPos = new THREE.Vector3(
+      const temps = playerTempsRef.current;
+      temps.portraitCameraPos.set(
         playerPos.x,
         playerPos.y + 1.6,  // Eye level
         playerPos.z + 2.5   // 2.5 units in front
       );
-      const portraitTarget = new THREE.Vector3(
+      temps.portraitTarget.set(
         playerPos.x,
         playerPos.y + 1.5,  // Look at face
         playerPos.z
       );
 
       // Smooth lerp to portrait position
-      camera.position.lerp(portraitCameraPos, 0.08);
-      orbitRef.current.target.lerp(portraitTarget, 0.08);
+      camera.position.lerp(temps.portraitCameraPos, 0.08);
+      orbitRef.current.target.lerp(temps.portraitTarget, 0.08);
       orbitRef.current.update();
     }
     // 0b. Merchant Mode Camera Animation - focus on merchant on LEFT side
@@ -1077,25 +1111,26 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
 
       // Calculate camera position to view merchant (slightly elevated, looking at them)
-      const merchantPos = new THREE.Vector3(
+      const temps = playerTempsRef.current;
+      temps.merchantPos.set(
         merchantFocusPosition[0],
         merchantFocusPosition[1],
         merchantFocusPosition[2]
       );
-      const merchantCameraPos = new THREE.Vector3(
-        merchantPos.x,
-        merchantPos.y + 1.8,  // Slightly above eye level
-        merchantPos.z + 3.0   // 3 units in front
+      temps.merchantCameraPos.set(
+        temps.merchantPos.x,
+        temps.merchantPos.y + 1.8,  // Slightly above eye level
+        temps.merchantPos.z + 3.0   // 3 units in front
       );
-      const merchantTarget = new THREE.Vector3(
-        merchantPos.x,
-        merchantPos.y + 1.4,  // Look at upper body/face
-        merchantPos.z
+      temps.merchantTarget.set(
+        temps.merchantPos.x,
+        temps.merchantPos.y + 1.4,  // Look at upper body/face
+        temps.merchantPos.z
       );
 
       // Smooth lerp to merchant view position
-      camera.position.lerp(merchantCameraPos, 0.08);
-      orbitRef.current.target.lerp(merchantTarget, 0.08);
+      camera.position.lerp(temps.merchantCameraPos, 0.08);
+      orbitRef.current.target.lerp(temps.merchantTarget, 0.08);
       orbitRef.current.update();
     } else {
       // Always clear camera view offset when NOT in special mode
@@ -1668,26 +1703,32 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
               onImpactPuff?.(item.position, intensity);
             }
 
-            // PHYSICS: Shatter breakable objects on hard wall impact
+            // PHYSICS: Shatter breakable objects on hard wall impact (probabilistic)
             if (!item.isShattered && canBreak(item.kind, item.material)) {
-              // Shatter threshold: medium speed or higher (0.7+)
-              // Power move with full charge can easily exceed this
+              // Only consider breaking on significant impacts
               const shatterThreshold = 0.65;
               if (intensity > shatterThreshold) {
-                item.isShattered = true;
-                item.shatterTime = now;
-                // Extra impact puff for dramatic shatter
-                onImpactPuff?.(item.position, 1.0);
-                // Play appropriate shatter sound
-                if (item.material === 'wood') {
-                  collisionSounds.playWoodShatter(intensity);
-                } else {
-                  collisionSounds.playShatter(intensity);
-                }
-                // Generate loot from shattered object
-                const loot = generateShatterLoot(item.position, getAllItems);
-                if (loot.length > 0 && onShatterLoot) {
-                  onShatterLoot(loot, item.kind);
+                // Use base break chance, scaled by impact intensity
+                const breakChance = getBreakChance(item.kind, item.material);
+                const impactMultiplier = Math.min(1.5, intensity / 0.65); // 1.0x at threshold, up to 1.5x at very high speed
+                const adjustedChance = breakChance * impactMultiplier;
+
+                if (Math.random() < adjustedChance) {
+                  item.isShattered = true;
+                  item.shatterTime = now;
+                  // Extra impact puff for dramatic shatter
+                  onImpactPuff?.(item.position, 1.0);
+                  // Play appropriate shatter sound
+                  if (item.material === 'wood') {
+                    collisionSounds.playWoodShatter(intensity);
+                  } else {
+                    collisionSounds.playShatter(intensity);
+                  }
+                  // Generate loot from shattered object
+                  const loot = generateShatterLoot(item.position, getAllItems);
+                  if (loot.length > 0 && onShatterLoot) {
+                    onShatterLoot(loot, item.kind);
+                  }
                 }
               }
             }
@@ -1722,9 +1763,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             }
           }
         }
+        // Friction varies by object type
         const friction = item.kind === 'droppedItem'
-          ? 0.6 + item.mass * 0.15
-          : 3.0 + item.mass * 0.4;
+          ? 0.6 + item.mass * 0.15  // Dropped items: moderate friction
+          : item.kind === 'boulder'
+          ? 0.4  // Boulders: VERY LOW friction so they can roll down slopes
+          : 3.0 + item.mass * 0.4;  // Other pushables: high friction (benches, jars, etc.)
         item.velocity.multiplyScalar(Math.max(0, 1 - friction * delta));
         if (item.velocity.lengthSq() < 0.00002) {
           item.velocity.set(0, 0, 0);
@@ -1771,7 +1815,65 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    // 2c. Dropped item slope drift (lightweight)
+    // 2c. Swingable object pendulum physics (lanterns hanging from ceiling)
+    if (swingablesRef?.current && isInterior) {
+      const GRAVITY = 9.8; // m/s²
+      const DAMPING = 0.985; // Light damping - swings for a good while before settling
+
+      for (const swing of swingablesRef.current) {
+        if (swing.isShattered) continue; // Don't update physics for broken lanterns
+
+        // Simple pendulum physics
+        // For 2D pendulum: angular_accel = -g/L * sin(angle)
+        // We have two independent pendulums (x and z axes)
+
+        const angleX = swing.angle.x;
+        const angleZ = swing.angle.y;
+
+        // Restoring force (gravity pulling back to center)
+        const accelX = -(GRAVITY / swing.ropeLength) * Math.sin(angleX);
+        const accelZ = -(GRAVITY / swing.ropeLength) * Math.sin(angleZ);
+
+        // Update angular velocity
+        swing.angularVelocity.x += accelX * delta;
+        swing.angularVelocity.y += accelZ * delta;
+
+        // Apply strong damping (heavy suspended object with air resistance)
+        swing.angularVelocity.x *= DAMPING;
+        swing.angularVelocity.y *= DAMPING;
+
+        // Update angles
+        swing.angle.x += swing.angularVelocity.x * delta;
+        swing.angle.y += swing.angularVelocity.y * delta;
+
+        // Convert pendulum angles to 3D position
+        // X displacement = sin(angleX) * ropeLength
+        // Z displacement = sin(angleZ) * ropeLength
+        // Y displacement = -cos(angle) * ropeLength (negative because hanging down)
+        const xDisp = Math.sin(angleX) * swing.ropeLength;
+        const zDisp = Math.sin(angleZ) * swing.ropeLength;
+        const combinedAngle = Math.sqrt(angleX * angleX + angleZ * angleZ);
+        const yDisp = -Math.cos(combinedAngle) * swing.ropeLength;
+
+        swing.position.set(
+          swing.anchorPoint.x + xDisp,
+          swing.anchorPoint.y + yDisp,
+          swing.anchorPoint.z + zDisp
+        );
+
+        // Stop very small oscillations (performance optimization)
+        if (Math.abs(swing.angularVelocity.x) < 0.001 && Math.abs(swing.angle.x) < 0.01) {
+          swing.angularVelocity.x = 0;
+          swing.angle.x = 0;
+        }
+        if (Math.abs(swing.angularVelocity.y) < 0.001 && Math.abs(swing.angle.y) < 0.01) {
+          swing.angularVelocity.y = 0;
+          swing.angle.y = 0;
+        }
+      }
+    }
+
+    // 2d. Dropped item slope drift (lightweight)
     if (pushablesRef?.current && heightmap) {
       const SLOPE_FORCE = 1.8;
       const MIN_SLOPE = 0.05;
@@ -1799,7 +1901,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     // 2c. Boulder slope gravity
     if (pushablesRef?.current && heightmap) {
       const now = state.clock.elapsedTime;
-      const SLOPE_GRAVITY_FORCE = 4.0; // Acceleration down slopes
+      const SLOPE_GRAVITY_FORCE = 8.0; // Acceleration down slopes (increased to overcome friction)
       const MIN_ROLL_ANGLE = 0.08; // ~4.5 degrees minimum to start rolling
       const TERMINAL_VELOCITY = 12.0; // Max speed on steep slopes
       const ROTATION_DAMPING = 0.95; // Angular velocity decay
@@ -1818,12 +1920,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
         const gradient = calculateTerrainGradient(heightmap, item.position.x, item.position.z);
 
-        // Wake boulder if on significant slope
-        if (gradient.slopeAngle > MIN_ROLL_ANGLE) {
-          item.isSleeping = false;
-        }
-
-        // Skip sleeping boulders (stationary on flat ground)
+        // Skip sleeping boulders (only wake when player interacts with them)
         if (item.isSleeping) continue;
 
         // Apply downhill gravity force
@@ -1975,25 +2072,25 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
 
     // 3. Movement Logic (Arrow Keys)
-    let moveVec = new THREE.Vector3();
-    const forward = new THREE.Vector3();
+    const temps = playerTempsRef.current;
+    temps.moveVec.set(0, 0, 0);
     if (cameraMode === CameraMode.FIRST_PERSON) {
-      camera.getWorldDirection(forward);
+      camera.getWorldDirection(temps.forward);
     } else {
-      forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+      temps.forward.set(0, 0, -1).applyQuaternion(camera.quaternion);
     }
-    forward.y = 0; forward.normalize();
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    right.y = 0; right.normalize();
+    temps.forward.y = 0; temps.forward.normalize();
+    temps.right.set(1, 0, 0).applyQuaternion(camera.quaternion);
+    temps.right.y = 0; temps.right.normalize();
 
     // Arrow keys always control movement
-    if (keys.up) moveVec.add(forward);
-    if (keys.down) moveVec.sub(forward);
-    if (keys.right) moveVec.add(right);
-    if (keys.left) moveVec.sub(right);
+    if (keys.up) temps.moveVec.add(temps.forward);
+    if (keys.down) temps.moveVec.sub(temps.forward);
+    if (keys.right) temps.moveVec.add(temps.right);
+    if (keys.left) temps.moveVec.sub(temps.right);
     // In first-person mode: WASD controls camera look, arrow keys control movement
 
-    const moving = moveVec.lengthSq() > 0.01;
+    const moving = temps.moveVec.lengthSq() > 0.01;
     const now = performance.now() * 0.001;
 
     // ANIMATION: Track movement start/stop for inertia
@@ -2052,32 +2149,33 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
     let currentSpeed = 0;
     if (moving) {
-      moveVec.normalize();
+      temps.moveVec.normalize();
       const airControl = isGrounded.current ? 1 : 0.6;
       const damp = landingDamp.current > 0 ? 0.7 : 1.0;
-      currentSpeed = (keys.shift ? RUN_SPEED : PLAYER_SPEED) * airControl * damp;
-      const moveDelta = moveVec.multiplyScalar(currentSpeed * delta);
-      const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-      const blockedX = isBlockedByBuildings(nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextX, obstacles, 0.6, obstacleHash || undefined);
+      currentSpeed = (keys.shift ? RUN_SPEED : PLAYER_SPEED) * calmSpeedFactor * airControl * damp;
+      const moveX = temps.moveVec.x * currentSpeed * delta;
+      const moveZ = temps.moveVec.z * currentSpeed * delta;
+      temps.nextX.copy(group.current.position).x += moveX;
+      const blockedX = isBlockedByBuildings(temps.nextX, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(temps.nextX, obstacles, 0.6, obstacleHash || undefined);
       if (!blockedX) {
-        group.current.position.x = nextX.x;
-      } else if (Math.abs(moveDelta.x) > 0.02) {
+        group.current.position.x = temps.nextX.x;
+      } else if (Math.abs(moveX) > 0.02) {
         // Play wall collision sound when running into a wall
         const intensity = Math.min(1, currentSpeed / RUN_SPEED);
         playObjectImpact('wall', intensity * 0.6);
       }
-      const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-      const blockedZ = isBlockedByBuildings(nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(nextZ, obstacles, 0.6, obstacleHash || undefined);
+      temps.nextZ.copy(group.current.position).z += moveZ;
+      const blockedZ = isBlockedByBuildings(temps.nextZ, buildings, 0.6, buildingHash || undefined) || isBlockedByObstacles(temps.nextZ, obstacles, 0.6, obstacleHash || undefined);
       if (!blockedZ) {
-        group.current.position.z = nextZ.z;
-      } else if (Math.abs(moveDelta.z) > 0.02) {
+        group.current.position.z = temps.nextZ.z;
+      } else if (Math.abs(moveZ) > 0.02) {
         // Play wall collision sound when running into a wall
         const intensity = Math.min(1, currentSpeed / RUN_SPEED);
         playObjectImpact('wall', intensity * 0.6);
       }
 
       if (cameraMode !== CameraMode.FIRST_PERSON) {
-        const targetRot = Math.atan2(moveVec.x, moveVec.z);
+        const targetRot = Math.atan2(temps.moveVec.x, temps.moveVec.z);
         // OVER_SHOULDER: Fast rotation so character always faces movement direction
         // THIRD_PERSON: Slower rotation for more controllable orbiting
         // Use higher speed when direction change is large (> 90°) for snappy turning
@@ -2279,7 +2377,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             moveDir.z = rotatedZ;
           }
 
-          moveVec = moveDir;
+          temps.moveVec.copy(moveDir);
 
           // Clear camera view target when player auto-walks
           if (cameraViewTarget && onPlayerStartMove) {
@@ -2289,19 +2387,20 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           // Apply movement with wall sliding
           const airControl = isGrounded.current ? 1 : 0.6;
           const damp = landingDamp.current > 0 ? 0.7 : 1.0;
-          currentSpeed = PLAYER_SPEED * airControl * damp;
-          const moveDelta = moveVec.clone().multiplyScalar(currentSpeed * delta);
+          currentSpeed = PLAYER_SPEED * calmSpeedFactor * airControl * damp;
+          const clickMoveX = temps.moveVec.x * currentSpeed * delta;
+          const clickMoveZ = temps.moveVec.z * currentSpeed * delta;
 
           // Try X movement
-          const nextX = group.current.position.clone().add(new THREE.Vector3(moveDelta.x, 0, 0));
-          if (!isBlocked(nextX)) {
-            group.current.position.x = nextX.x;
+          temps.nextX.copy(group.current.position).x += clickMoveX;
+          if (!isBlocked(temps.nextX)) {
+            group.current.position.x = temps.nextX.x;
           }
 
           // Try Z movement
-          const nextZ = group.current.position.clone().add(new THREE.Vector3(0, 0, moveDelta.z));
-          if (!isBlocked(nextZ)) {
-            group.current.position.z = nextZ.z;
+          temps.nextZ.copy(group.current.position).z += clickMoveZ;
+          if (!isBlocked(temps.nextZ)) {
+            group.current.position.z = temps.nextZ.z;
           }
 
           // Update walking state
@@ -2312,7 +2411,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
           // Rotate character to face movement direction
           if (cameraMode !== CameraMode.FIRST_PERSON) {
-            const targetRot = Math.atan2(moveVec.x, moveVec.z);
+            const targetRot = Math.atan2(temps.moveVec.x, temps.moveVec.z);
             const currentRot = group.current.rotation.y;
             let angleDiff = Math.abs(targetRot - currentRot);
             if (angleDiff > Math.PI) angleDiff = Math.PI * 2 - angleDiff;
@@ -2483,9 +2582,13 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           pushDir.y = 0;
           pushDir.normalize();
 
-          // Calculate push force
-          const PUSH_FORCE_BASE = 10.0;  // Reduced from 25 - was causing ice-like sliding
-          const pushForce = PUSH_FORCE_BASE * (0.5 + strength * 0.5) / Math.max(0.3, hitItem.mass * 0.03);
+          // Calculate push force - should be stronger than bump but still respect mass
+          const PUSH_FORCE_BASE = 2.5;  // Intentional push is stronger than accidental bump (1.2), but not crazy
+          // Boulders are easier to push (lower mass resistance) since they roll
+          const massResistance = hitItem.kind === 'boulder'
+            ? Math.max(0.5, hitItem.mass * 0.35)  // Boulders: low resistance (they roll!)
+            : Math.max(0.5, hitItem.mass * 0.8);  // Other objects: normal resistance
+          const pushForce = PUSH_FORCE_BASE * (0.5 + strength * 0.5) / massResistance;
 
           // Apply velocity to the object
           hitItem.velocity.add(pushDir.multiplyScalar(pushForce));
@@ -2592,8 +2695,24 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           const normal = offset.multiplyScalar(1 / dist);
           const overlap = limit - dist;
           const shove = Math.min(1.2, (currentSpeed / RUN_SPEED) * 1.4);
-          const impulse = normal.clone().multiplyScalar(shove / Math.max(0.5, item.mass));
+
+          // Non-linear mass resistance: light objects (mass < 5) use linear scaling,
+          // heavy objects get progressively stronger resistance
+          // EXCEPTION: Boulders roll easily when bumped
+          const effectiveMass = item.kind === 'boulder'
+            ? item.mass * 0.45  // Boulders are easier to bump-roll (50% easier than other heavy objects)
+            : item.mass < 5
+            ? item.mass
+            : item.mass * (1 + (item.mass - 5) * 0.15); // +15% resistance per unit of mass above 5
+
+          const impulse = normal.clone().multiplyScalar(shove / Math.max(0.5, effectiveMass));
           item.velocity.add(impulse);
+
+          // Wake sleeping boulders when bumped
+          if (item.kind === 'boulder' && item.isSleeping) {
+            item.isSleeping = false;
+          }
+
           const next = item.position.clone().add(impulse.clone().multiplyScalar(0.2));
           const blocked = isBlockedByBuildings(next, buildings, item.radius, buildingHash || undefined)
             || isBlockedByObstacles(next, obstacles, item.radius, obstacleHash || undefined);
@@ -2611,6 +2730,95 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           }
           if (intensity > 0.5) {
             onImpactPuff?.(item.position, intensity);
+          }
+        }
+      }
+    }
+
+    // 3e. Swingable object collision (lanterns) - apply angular impulse instead of linear
+    if (swingablesRef?.current && moving && currentSpeed > 0.01 && isInterior) {
+      const playerPos = group.current.position.clone();
+      const playerRadius = 0.6;
+      const now = state.clock.elapsedTime;
+
+      for (const swing of swingablesRef.current) {
+        if (swing.isShattered) continue;
+
+        // Check horizontal distance only (lanterns hang from ceiling)
+        const offset = swing.position.clone().sub(playerPos);
+        offset.y = 0; // Ignore vertical distance
+        const distSq = offset.lengthSq();
+        const limit = playerRadius + swing.radius;
+
+        if (distSq > 0.0001 && distSq < limit * limit) {
+          const dist = Math.sqrt(distSq);
+          const normal = offset.multiplyScalar(1 / dist);
+
+          // Calculate impact force based on player speed
+          const impactForce = Math.min(1.6, (currentSpeed / RUN_SPEED) * 1.4);
+
+          // Convert linear impact to angular impulse
+          // Heavy lantern on chain - has inertia but should still move
+          const effectiveMass = swing.mass * 1.5; // Light multiplier for more reactive swaying
+          const leverArm = swing.ropeLength;
+
+          // Calculate which direction to swing based on hit direction
+          const angularImpulseX = (normal.x * impactForce) / (effectiveMass * leverArm);
+          const angularImpulseZ = (normal.z * impactForce) / (effectiveMass * leverArm);
+
+          // Apply angular impulse with cap on maximum angular velocity
+          swing.angularVelocity.x += angularImpulseX;
+          swing.angularVelocity.y += angularImpulseZ;
+
+          // Cap maximum angular velocity (allow bigger swings)
+          const MAX_ANGULAR_VEL = 4.5; // radians per second - allows substantial swing
+          const currentAngVel = Math.sqrt(
+            swing.angularVelocity.x * swing.angularVelocity.x +
+            swing.angularVelocity.y * swing.angularVelocity.y
+          );
+          if (currentAngVel > MAX_ANGULAR_VEL) {
+            const scale = MAX_ANGULAR_VEL / currentAngVel;
+            swing.angularVelocity.x *= scale;
+            swing.angularVelocity.y *= scale;
+          }
+
+          // Push player back slightly
+          const overlap = limit - dist;
+          group.current.position.add(normal.clone().multiplyScalar(-overlap * 0.4));
+
+          // Sound and VFX
+          const intensity = Math.min(1, impactForce * 0.65);
+          if (now - objectSoundCooldownRef.current > 0.12) {
+            playObjectImpact('metal', intensity * 0.75); // Metal lantern sound
+            objectSoundCooldownRef.current = now;
+          }
+          if (intensity > 0.4) {
+            onImpactPuff?.(swing.position, intensity * 0.5);
+          }
+
+          // Break only on very hard hits (sprinting/power move)
+          if (impactForce > 0.9 && !swing.isShattered) {
+            const breakChance = (impactForce - 0.9) * 0.2; // Moderate chance when sprinting hard
+            if (Math.random() < breakChance) {
+              swing.isShattered = true;
+              swing.shatterTime = now;
+
+              // Play prominent glass shattering sound
+              collisionSounds.playShatter(1.0); // Full volume for dramatic effect
+
+              // Play additional metal impact for the lantern frame hitting ground
+              setTimeout(() => {
+                playObjectImpact('metal', 0.8);
+              }, 100);
+
+              // Large impact puff for dramatic shatter
+              onImpactPuff?.(swing.position, 1.2);
+
+              // Notify crime detection system (for interior witness detection)
+              if (isInterior && onPropertyDamaged) {
+                onPropertyDamaged(swing.position.clone());
+              }
+            }
           }
         }
       }
@@ -2715,11 +2923,12 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
       // Shoulder offset: position camera slightly to the right of player for authentic over-shoulder framing
       const SHOULDER_OFFSET = 0.6; // Units to the right
-      const playerRight = new THREE.Vector3(1, 0, 0).applyAxisAngle(new THREE.Vector3(0, 1, 0), group.current.rotation.y);
-      const shoulderOffset = playerRight.multiplyScalar(SHOULDER_OFFSET);
+      temps.playerRight.set(1, 0, 0).applyAxisAngle(temps.upAxis, group.current.rotation.y);
+      temps.shoulderOffset.copy(temps.playerRight).multiplyScalar(SHOULDER_OFFSET);
 
-      const targetLookAt = playerPos.clone().add(new THREE.Vector3(0, lookHeight, 0)).add(shoulderOffset);
-      orbitRef.current.target.lerp(targetLookAt, lerpSpeed);
+      temps.targetLookAt.copy(playerPos).y += lookHeight;
+      temps.targetLookAt.add(temps.shoulderOffset);
+      orbitRef.current.target.lerp(temps.targetLookAt, lerpSpeed);
 
       // Manual rotation adjustment via A/D keys (subtle, gets smoothly overridden)
       const manualRotateSpeed = 1.2 * delta;
@@ -2766,7 +2975,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         camera.position.copy(orbitRef.current.target.clone().add(direction.multiplyScalar(targetDistance)));
       }
     } else if (cameraMode === CameraMode.THIRD_PERSON && orbitRef.current) {
-      orbitRef.current.target.lerp(group.current.position.clone().add(new THREE.Vector3(0, 1.5, 0)), 0.1);
+      temps.orbitTarget.copy(group.current.position).y += 1.5;
+      orbitRef.current.target.lerp(temps.orbitTarget, 0.1);
 
       // Cinematic dolly zoom - slowly push camera in like a film shot
       const cameraToTarget = camera.position.clone().sub(orbitRef.current.target);
@@ -3340,6 +3550,18 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
   });
 
+  const strengthScale = playerStats
+    ? 0.9 + Math.min(1, Math.max(0, (playerStats.strength - 6) / 10)) * 0.25
+    : 1;
+  const calmness = playerStats
+    ? Math.max(0, Math.min(1, 1 - (playerStats.neuroticism - 6) / 9))
+    : 0.5;
+  const calmWalkSpeed = 10 * (0.9 + (1 - calmness) * 0.2);
+  const calmSpeedFactor = 0.9 + (1 - calmness) * 0.25;
+  const mouthExpression = playerStats
+    ? Math.max(-1, Math.min(1, (playerStats.charisma - 8) / 6))
+    : 0;
+
   return (
     <>
       <OrbitControls
@@ -3348,7 +3570,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         enabled={cameraMode !== CameraMode.FIRST_PERSON}
         minDistance={
           cameraMode === CameraMode.OVERHEAD ? 12 :
-          cameraMode === CameraMode.ISOMETRIC ? 14 * (isInterior ? 0.5 : 1) :
+          cameraMode === CameraMode.ISOMETRIC ? 8 * (isInterior ? 0.5 : 1) :
           cameraMode === CameraMode.OVER_SHOULDER ? 4 :
           7
         }
@@ -3391,7 +3613,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             gender={playerStats?.gender}
             age={playerStats?.age}
             hairColor={playerStats?.hairColor}
-            scale={playerStats ? [playerStats.weight, playerStats.height, playerStats.weight] : undefined}
+            eyeColor={playerStats?.eyeColor}
+            scale={playerStats ? [playerStats.weight * strengthScale, playerStats.height, playerStats.weight * strengthScale] : undefined}
             enableArmSwing
             interactionSwingRef={interactSwingRef}
             interactionChargeRef={interactChargeRef}
@@ -3410,6 +3633,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             headscarfStyle={playerStats?.headscarfStyle}
             facialHair={playerStats?.facialHair}
             facialHairColor={playerStats?.facialHairColor}
+            mouthExpression={mouthExpression}
             sleeveCoverage={playerStats?.sleeveCoverage}
             footwearStyle={playerStats?.footwearStyle}
             footwearColor={playerStats?.footwearColor}
@@ -3419,6 +3643,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             cosmeticEffects={cosmeticEffects}
             isWalking={isWalking}
             isSprinting={isSprinting}
+            walkSpeed={calmWalkSpeed}
             isJumpingRef={isJumpingRef}
             jumpPhaseRef={jumpPhaseRef}
             jumpAnticipationRef={jumpAnticipationRef}

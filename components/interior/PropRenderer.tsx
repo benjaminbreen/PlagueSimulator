@@ -409,11 +409,30 @@ const InteriorPropMesh: React.FC<{
   const base = positionVector ?? new THREE.Vector3(prop.position[0], prop.position[1], prop.position[2]);
   const rotation = prop.rotation as [number, number, number];
   const common = { position: [base.x, base.y, base.z] as [number, number, number], rotation, ref: itemRef };
-  const anchoredPos = (y: number) => positionVector ? [base.x, base.y, base.z] as [number, number, number] : [prop.position[0], y, prop.position[2]] as [number, number, number];
+  // anchoredPos: Use physics X/Z but allow overriding Y for floor-anchored props
+  const anchoredPos = (y: number) => positionVector ? [base.x, y, base.z] as [number, number, number] : [prop.position[0], y, prop.position[2]] as [number, number, number];
+
+  // Track which props should have locked Y positions (not affected by physics Y offset)
+  // These props should stay flat on ground/surfaces even when physics moves them
+  const lockedYTypes = new Set([
+    InteriorPropType.FLOOR_LAMP,
+    InteriorPropType.FLOOR_MAT,
+    InteriorPropType.RUG,
+    InteriorPropType.PRAYER_RUG,
+    InteriorPropType.FLOOR_PILLOWS,
+    InteriorPropType.LAMP // Tabletop lamps should stay on their surface
+  ]);
+  const hasLockedY = lockedYTypes.has(prop.type);
+  const originalY = prop.position[1]; // Store original Y from prop generation
 
   useFrame(() => {
     if (positionVector && itemRef.current) {
-      itemRef.current.position.copy(positionVector);
+      // For Y-locked props, use physics X/Z but preserve original Y
+      if (hasLockedY) {
+        itemRef.current.position.set(positionVector.x, originalY, positionVector.z);
+      } else {
+        itemRef.current.position.copy(positionVector);
+      }
     }
   });
 
@@ -2435,8 +2454,47 @@ const InteriorPropMesh: React.FC<{
         );
       }
 
+      // For swinging lanterns, calculate chain dynamics
+      const isSwinging = positionVector !== undefined;
+      const lanternPosition = isSwinging
+        ? [base.x, base.y, base.z] as [number, number, number]
+        : anchoredPos(prop.position[1] > 0 ? prop.position[1] : 2.2);
+
+      // Calculate chain geometry for swinging lanterns
+      let chainLength = 0.8;
+      let chainMidpoint = [0, 0.85, 0] as [number, number, number];
+      let chainRotation = [0, 0, 0] as [number, number, number];
+
+      if (isSwinging) {
+        // Anchor point is the original prop position (ceiling mount) - in world space
+        const anchor = new THREE.Vector3(prop.position[0], prop.position[1], prop.position[2]);
+        const current = new THREE.Vector3(base.x, base.y, base.z);
+
+        // Vector from lantern to anchor (in world space)
+        const toAnchor = anchor.clone().sub(current);
+        chainLength = toAnchor.length();
+
+        // Chain midpoint in local space (relative to lantern position)
+        // Since lantern group is at 'current', anchor relative to lantern is just toAnchor
+        chainMidpoint = [
+          toAnchor.x / 2,
+          toAnchor.y / 2,
+          toAnchor.z / 2
+        ];
+
+        // Calculate rotation to point chain from lantern to anchor
+        // Rotation around X axis (tilt forward/back)
+        const horizontalDistXZ = Math.sqrt(toAnchor.x * toAnchor.x + toAnchor.z * toAnchor.z);
+        const tiltX = Math.atan2(horizontalDistXZ, toAnchor.y);
+
+        // Rotation around Y axis (swing left/right)
+        const rotY = Math.atan2(toAnchor.x, toAnchor.z);
+
+        chainRotation = [tiltX, rotY, 0];
+      }
+
       return (
-        <group {...common} position={anchoredPos(prop.position[1] > 0 ? prop.position[1] : 2.2)}>
+        <group {...common} position={lanternPosition}>
           {/* Point light for actual illumination - outside scaled group */}
           <pointLight
             position={[0, 0, 0]}
@@ -2452,12 +2510,25 @@ const InteriorPropMesh: React.FC<{
 
           <group scale={[lanternScale, lanternScale, lanternScale]}>
 
-
-          {/* Chain hanging from ceiling */}
-          <mesh position={[0, 0.85, 0]} receiveShadow castShadow>
-            <cylinderGeometry args={[0.015, 0.018, 0.8, 8]} />
-            <meshStandardMaterial color={darkMetal} roughness={0.6} metalness={0.7} />
-          </mesh>
+          {/* Chain hanging from ceiling - dynamically positioned */}
+          {isSwinging ? (
+            // Swinging: chain connects anchor (ceiling) to current lantern position
+            <mesh
+              position={chainMidpoint}
+              rotation={chainRotation}
+              receiveShadow
+              castShadow
+            >
+              <cylinderGeometry args={[0.015, 0.018, chainLength, 8]} />
+              <meshStandardMaterial color={darkMetal} roughness={0.6} metalness={0.7} />
+            </mesh>
+          ) : (
+            // Static: chain hangs straight down
+            <mesh position={[0, 0.85, 0]} receiveShadow castShadow>
+              <cylinderGeometry args={[0.015, 0.018, 0.8, 8]} />
+              <meshStandardMaterial color={darkMetal} roughness={0.6} metalness={0.7} />
+            </mesh>
+          )}
 
           {/* Top decorative cap with geometric pattern */}
           <mesh position={[0, 0.48, 0]} receiveShadow castShadow>

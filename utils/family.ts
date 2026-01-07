@@ -34,6 +34,86 @@ interface FamilyComposition {
 }
 
 /**
+ * Get age, gender, and class-appropriate profession for a child
+ * Reflects historical 14th century Damascus social expectations
+ */
+function getChildProfession(age: number, gender: 'Male' | 'Female', socialClass: SocialClass): string {
+  // Infants and toddlers
+  if (age <= 2) {
+    return 'Infant';
+  }
+
+  // Young children (3-5)
+  if (age <= 5) {
+    return 'Young child';
+  }
+
+  // Children (6-9) - starting to help around the house/learn basics
+  if (age <= 9) {
+    if (gender === 'Male') {
+      if (socialClass === SocialClass.NOBILITY || socialClass === SocialClass.CLERGY) {
+        return 'Quran student';
+      }
+      return 'Child'; // Helping with family work
+    } else {
+      return 'Child'; // Learning domestic skills
+    }
+  }
+
+  // Pre-teens (10-13) - more serious learning/apprenticeship begins
+  if (age <= 13) {
+    if (gender === 'Male') {
+      switch (socialClass) {
+        case SocialClass.NOBILITY:
+          return 'Scholar\'s pupil';
+        case SocialClass.CLERGY:
+          return 'Madrasa student';
+        case SocialClass.MERCHANT:
+          return 'Apprentice merchant';
+        default:
+          return 'Apprentice';
+      }
+    } else {
+      // Girls learning domestic arts, possibly textile work
+      switch (socialClass) {
+        case SocialClass.NOBILITY:
+          return 'Learning household arts';
+        case SocialClass.MERCHANT:
+          return 'Learning the trade';
+        default:
+          return 'Learning homemaking';
+      }
+    }
+  }
+
+  // Teenagers (14-17) - nearly adult, serious work/study
+  if (gender === 'Male') {
+    switch (socialClass) {
+      case SocialClass.NOBILITY:
+        return 'Young scholar';
+      case SocialClass.CLERGY:
+        return 'Seminary student';
+      case SocialClass.MERCHANT:
+        return 'Junior merchant';
+      default:
+        return 'Journeyman';
+    }
+  } else {
+    // Girls of marriageable age - historically accurate
+    switch (socialClass) {
+      case SocialClass.NOBILITY:
+        return 'Young noblewoman';
+      case SocialClass.MERCHANT:
+        return 'Assisting family trade';
+      case SocialClass.CLERGY:
+        return 'Pious young woman';
+      default:
+        return 'Young woman';
+    }
+  }
+}
+
+/**
  * Parse the family string to determine family composition
  */
 export function parseFamilyString(familyString: string): FamilyComposition {
@@ -84,6 +164,59 @@ function parseWordNumber(word: string): number {
 }
 
 /**
+ * Blend two HSL colors, picking traits from either parent
+ * Used for family resemblance in hair/eye colors
+ */
+function inheritColor(
+  parentColor1: string,
+  parentColor2: string | undefined,
+  rand: () => number
+): string {
+  // If no second parent color, use first with slight variation
+  if (!parentColor2) {
+    return parentColor1;
+  }
+
+  // Parse HSL colors
+  const parseHSL = (color: string): { h: number; s: number; l: number } | null => {
+    const match = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+    if (match) {
+      return { h: parseInt(match[1]), s: parseInt(match[2]), l: parseInt(match[3]) };
+    }
+    return null;
+  };
+
+  const c1 = parseHSL(parentColor1);
+  const c2 = parseHSL(parentColor2);
+
+  // If can't parse, randomly pick one
+  if (!c1 || !c2) {
+    return rand() > 0.5 ? parentColor1 : parentColor2;
+  }
+
+  // Randomly inherit from one parent with slight variation
+  const inheritFromFirst = rand() > 0.5;
+  const base = inheritFromFirst ? c1 : c2;
+
+  // Add slight variation (±5 on each component)
+  const variation = () => Math.floor((rand() - 0.5) * 10);
+  const h = Math.max(0, Math.min(360, base.h + variation()));
+  const s = Math.max(0, Math.min(100, base.s + variation()));
+  const l = Math.max(0, Math.min(100, base.l + variation()));
+
+  return `hsl(${h}, ${s}%, ${l}%)`;
+}
+
+/**
+ * Interface for parent appearance data used in family resemblance
+ */
+interface ParentAppearance {
+  hairColor?: string;
+  eyeColor?: string;
+  skinTone?: string;
+}
+
+/**
  * Generate a family member's NPCStats based on player stats
  */
 function generateFamilyMemberStats(
@@ -92,7 +225,8 @@ function generateFamilyMemberStats(
   memberAge: number,
   memberGender: 'Male' | 'Female',
   seed: number,
-  usedNames?: Set<string>
+  usedNames?: Set<string>,
+  otherParentAppearance?: ParentAppearance // For children - the other parent's appearance
 ): NPCStats {
   let s = seed;
   const rand = () => seededRandom(s++);
@@ -147,6 +281,39 @@ function generateFamilyMemberStats(
     disposition: 70 + Math.floor(rand() * 25),  // Family members are friendly
   };
 
+  // FAMILY RESEMBLANCE: Children inherit appearance from parents
+  if (relationship === 'child' && otherParentAppearance) {
+    // Hair color: inherit from either parent
+    stats.hairColor = inheritColor(
+      player.hairColor,
+      otherParentAppearance.hairColor,
+      rand
+    );
+
+    // Eye color: inherit from either parent
+    if (otherParentAppearance.eyeColor) {
+      // Player eye color might be in different format, use base stats as fallback
+      const playerEyeColor = baseStats.eyeColor; // Use generated one as proxy
+      stats.eyeColor = inheritColor(playerEyeColor, otherParentAppearance.eyeColor, rand);
+    }
+
+    // Skin tone: Family shares the same skin tone (already handled by player.skinTone)
+    // but add very slight variation for realism
+    if (player.skinTone) {
+      const parseHSL = (color: string) => {
+        const match = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+        if (match) return { h: parseInt(match[1]), s: parseInt(match[2]), l: parseInt(match[3]) };
+        return null;
+      };
+      const baseSkin = parseHSL(player.skinTone);
+      if (baseSkin) {
+        // Very slight variation (±2%) to look related but not identical
+        const lVariation = Math.floor((rand() - 0.5) * 4);
+        stats.skinTone = `hsl(${baseSkin.h}, ${baseSkin.s}%, ${Math.max(20, Math.min(80, baseSkin.l + lVariation))}%)`;
+      }
+    }
+  }
+
   // Profession based on relationship and gender
   if (relationship === 'spouse') {
     if (memberGender === 'Female') {
@@ -163,7 +330,27 @@ function generateFamilyMemberStats(
           : 'Laborer';
     }
   } else if (relationship === 'child') {
-    stats.profession = memberAge < 7 ? 'Child' : memberAge < 14 ? 'Youth' : 'Apprentice';
+    stats.profession = getChildProfession(memberAge, memberGender, player.socialClass);
+
+    // CHILD-SPECIFIC APPEARANCE OVERRIDES
+    // Children should never have facial hair
+    if (memberAge < 15) {
+      stats.facialHair = 'none';
+    } else if (memberAge < 18) {
+      // Teens might have light stubble at most
+      stats.facialHair = rand() > 0.9 ? 'stubble' : 'none';
+    }
+
+    // Children have simpler/no headwear typically
+    if (memberAge < 10) {
+      if (memberGender === 'Male') {
+        stats.headwearStyle = rand() > 0.7 ? 'taqiyah' : 'none';
+      } else {
+        // Young girls might have simple headscarf or none
+        stats.headwearStyle = rand() > 0.5 ? 'scarf' : 'none';
+        stats.headscarfStyle = 'modest';
+      }
+    }
   } else if (relationship === 'parent') {
     stats.profession = 'Elder';
   }
@@ -185,14 +372,28 @@ export function generatePlayerFamily(
   let memberSeed = seed * 7 + 31;
   const rand = () => seededRandom(memberSeed++);
 
-  // Generate spouse if applicable
-  if (composition.hasSpouse) {
+  // SAFEGUARD: Minimum marriage age is 18
+  // If player is under 18, they cannot have a spouse or children (regardless of family string)
+  const canBeMarried = player.age >= 18;
+
+  // Store spouse appearance for children's family resemblance
+  let spouseAppearance: ParentAppearance | undefined;
+
+  // Generate spouse if applicable (and player is old enough)
+  if (composition.hasSpouse && canBeMarried) {
     const spouseGender = player.gender === 'Male' ? 'Female' : 'Male';
     const spouseAge = Math.max(18, player.age + Math.floor((rand() - 0.5) * 10));
 
     const spouseStats = generateFamilyMemberStats(
       player, 'spouse', spouseAge, spouseGender, memberSeed++
     );
+
+    // Store spouse appearance for children to inherit from
+    spouseAppearance = {
+      hairColor: spouseStats.hairColor,
+      eyeColor: spouseStats.eyeColor,
+      skinTone: spouseStats.skinTone,
+    };
 
     const spouseMember: FamilyMember = {
       id: `family-spouse-${seed}`,
@@ -237,7 +438,8 @@ export function generatePlayerFamily(
 
   // Cap children based on player age for realism
   // A 22-year-old can't realistically have 5 children
-  const maxChildrenByAge = Math.max(0, Math.floor((player.age - 18) / 2)); // ~1 child per 2 years after 18
+  // Players under 18 cannot have children
+  const maxChildrenByAge = canBeMarried ? Math.max(0, Math.floor((player.age - 18) / 2)) : 0; // ~1 child per 2 years after 18
   const actualChildCount = Math.min(composition.childCount, maxChildrenByAge);
 
   // Generate children with realistic age spacing
@@ -268,8 +470,9 @@ export function generatePlayerFamily(
     const childGender: 'Male' | 'Female' = rand() > 0.5 ? 'Male' : 'Female';
     const childAge = childAges[i] ?? Math.max(1, Math.floor(rand() * 10) + 1);
 
+    // Pass spouse appearance for family resemblance inheritance
     const childStats = generateFamilyMemberStats(
-      player, 'child', childAge, childGender, memberSeed++, usedChildNames
+      player, 'child', childAge, childGender, memberSeed++, usedChildNames, spouseAppearance
     );
     usedChildNames.add(childStats.name);
 
@@ -282,12 +485,16 @@ export function generatePlayerFamily(
       gender: childGender,
       alive: true,
       appearance: {
-        skinTone: player.skinTone,  // Family shares player's skin tone
+        // Use inherited skin tone from childStats (has slight variation)
+        skinTone: childStats.skinTone ?? player.skinTone,
+        // Use inherited hair color (blended from parents)
         hairColor: childStats.hairColor ?? player.hairColor,
         hairStyle: childStats.hairStyle,
         headwearStyle: childStats.headwearStyle,
         headwearColor: childStats.headwearColor,
         facialHair: childStats.facialHair,  // Usually 'none' for children
+        // Store inherited eye color too
+        eyeColor: childStats.eyeColor,
       },
     };
     familyMembers.push(childMember);

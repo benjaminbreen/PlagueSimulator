@@ -6,13 +6,13 @@ export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth' | 'metal';
 // Break chances when pushed with force (shift + release)
 export const BREAK_CHANCES: Partial<Record<PushableKind, number>> = {
   crate: 0.5,           // 50% chance - wooden crate
-  amphora: 0.75,        // 75% chance - ceramic amphora
-  clayJar: 0.75,        // 75% chance - ceramic jar
-  geranium: 0.75,       // 75% chance - ceramic pot with plant
-  olivePot: 0.75,       // 75% chance - ceramic pot
-  lemonPot: 0.75,       // 75% chance - ceramic pot
-  palmPot: 0.75,        // 75% chance - ceramic pot
-  bougainvilleaPot: 0.75, // 75% chance - ceramic pot
+  amphora: 0.35,        // 35% chance - ceramic amphora (sturdy storage vessel)
+  clayJar: 0.25,        // 25% chance - ceramic jar (thick pottery)
+  geranium: 0.60,       // 60% chance - ceramic pot with plant (more fragile)
+  olivePot: 0.60,       // 60% chance - ceramic pot
+  lemonPot: 0.60,       // 60% chance - ceramic pot
+  palmPot: 0.60,        // 60% chance - ceramic pot
+  bougainvilleaPot: 0.60, // 60% chance - ceramic pot
 };
 
 // Check if an object can break
@@ -87,6 +87,43 @@ export interface PushableObject {
   isShattered?: boolean;             // For ceramic objects - becomes true when hit hard
   shatterTime?: number;              // Timestamp when shattered (for visual effects)
 }
+
+// Swingable objects (hanging from ceiling, like lanterns)
+export interface SwingableObject {
+  id: string;
+  sourceId: string;                  // Reference to the interior prop
+  anchorPoint: THREE.Vector3;        // Fixed ceiling attachment point
+  position: THREE.Vector3;           // Current position (calculated from pendulum)
+  ropeLength: number;                // Length of chain/rope
+  angle: THREE.Vector2;              // Current angles from vertical (x, z) in radians
+  angularVelocity: THREE.Vector2;    // Angular velocity (x, z)
+  radius: number;                    // Collision radius
+  mass: number;                      // Mass for physics
+  isShattered?: boolean;             // Can break if hit too hard
+  shatterTime?: number;
+}
+
+export const createSwingable = (
+  id: string,
+  sourceId: string,
+  anchorPoint: [number, number, number],
+  ropeLength: number,
+  radius: number,
+  mass: number
+): SwingableObject => {
+  const anchor = new THREE.Vector3(anchorPoint[0], anchorPoint[1], anchorPoint[2]);
+  return {
+    id,
+    sourceId,
+    anchorPoint: anchor,
+    position: anchor.clone().add(new THREE.Vector3(0, -ropeLength, 0)), // Start hanging straight down
+    ropeLength,
+    angle: new THREE.Vector2(0, 0), // Start at rest
+    angularVelocity: new THREE.Vector2(0, 0),
+    radius,
+    mass
+  };
+};
 
 // Height of climbable pushable objects (for stepping onto them)
 export const CLIMBABLE_PUSHABLE_HEIGHTS: Partial<Record<PushableKind, number>> = {

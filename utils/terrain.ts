@@ -37,6 +37,23 @@ export const getTerrainHeight = (
     return hillHeight + h1 + h2 + h3 + h4;
   }
 
+  // Salhiyya: Hillside quarter on slopes of Mount Qassioun (northwest)
+  if (district === 'SALHIYYA') {
+    // Directional slope rising toward northwest (Mount Qassioun direction)
+    // x increases eastward, z increases southward, so -x and -z is northwest
+    const slopeTowardMountain = (-x * 0.08 + -z * 0.06) * 1.2; // Rises to northwest
+
+    // Add rolling hillside terrain on top of the slope
+    const h1 = Math.sin((x + s) * 0.045) * Math.cos((z - s) * 0.045) * 2.0;
+    const h2 = Math.sin((x + z) * 0.07 + s * 0.3) * 1.0;
+    const h3 = Math.cos((z - x) * 0.055 + s * 0.25) * 0.8;
+
+    // Subtle ridges running perpendicular to slope (natural hillside feature)
+    const ridges = Math.sin((x - z) * 0.15) * 0.4;
+
+    return slopeTowardMountain + h1 + h2 + h3 + ridges;
+  }
+
   const isOutskirts = district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT';
   const f1 = isOutskirts ? 0.035 : 0.045;
   const f2 = isOutskirts ? 0.06 : 0.08;

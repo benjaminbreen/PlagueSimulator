@@ -249,9 +249,12 @@ const AnimatedPortrait: React.FC<{
         headscarfColor={isDeceased ? "#dde8f5" : npc.headwearColor}
         robeAccentColor={isDeceased ? "#c8d8e8" : npc.robeAccentColor}
         hairColor={isDeceased ? "#e0e5ec" : npc.hairColor}
+        eyeColor={npc.eyeColor}
         facialHair={npc.facialHair}
         facialHairColor={isDeceased ? "#e0e5ec" : npc.facialHairColor}
+        mouthExpression={npc.charisma != null ? Math.max(-1, Math.min(1, (npc.charisma - 8) / 6)) : 0}
         gender={npc.gender}
+        age={npc.age}
         scale={[1, 1, 1]}
         robeHasTrim={npc.robeHasTrim}
         robeHemBand={npc.robeHemBand}
@@ -448,7 +451,8 @@ export const EncounterModal: React.FC<EncounterModalProps> = ({
       onConversationResult(npc.id, result.summary, result.impact, { action: pendingAction });
     },
     onNPCAction: handleNPCAction,
-    isNPCInitiated
+    isNPCInitiated,
+    familyRelationship
   });
 
   // Handle NPC dismissal: save conversation summary, then trigger event immediately

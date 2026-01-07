@@ -465,6 +465,17 @@ export const NPC: React.FC<NPCProps> = memo(({
     return { skin, scarf, scarfRoughness, scarfPattern, scarfAccent, garmentType, turbanPattern, turbanAccent, robe, accent, hair, headwear, hasEmbroidery };
   }, [stats.headwearStyle, stats.id, stats.profession, stats.robeBaseColor, stats.robeAccentColor, stats.headwearColor, stats.hairColor, stats.socialClass, stats.gender, stats.headscarfPattern, stats.headscarfAccentColor, stats.headwearGarmentType, stats.turbanPattern, stats.turbanAccentColor, stats.hasEmbroidery, idSeed]);
 
+  const strengthScale = useMemo(() => {
+    if (stats.strength == null) return 1;
+    const normalized = THREE.MathUtils.clamp((stats.strength - 6) / 10, 0, 1);
+    return 0.9 + normalized * 0.25;
+  }, [stats.strength]);
+
+  const mouthExpression = useMemo(() => {
+    if (stats.charisma == null) return 0;
+    return THREE.MathUtils.clamp((stats.charisma - 8) / 6, -1, 1);
+  }, [stats.charisma]);
+
   // Apply mourning colors if NPC's building has deceased residents
   const mourningAdjustedColors = useMemo(() => {
     if (!homeBuildingId || !buildingInfection) {
@@ -809,13 +820,17 @@ export const NPC: React.FC<NPCProps> = memo(({
         if (currentHour !== lastSpeedUpdateHourRef.current || stateChanged) {
           const time = simTime % 24;
           const nightSlow = time < 6 || time > 20 ? 0.8 : 1.0;
-          const baseSpeed = stateRef.current === AgentState.INFECTED ? 0.7 : 2.0;
+          const baseSpeed = stateRef.current === AgentState.INFECTED ? 0.65 : 1.8;
           cachedSpeedRef.current = baseSpeed * nightSlow;
           lastSpeedUpdateHourRef.current = currentHour;
           lastSpeedUpdateStateRef.current = stateRef.current;
         }
         let speed = cachedSpeedRef.current;
         if (quarantine && stateRef.current === AgentState.INFECTED) speed = 0;
+
+        // Calmness: lower calmness -> faster pacing, higher calmness -> slower pace.
+        const calmness = THREE.MathUtils.clamp(1 - (panicRef.current / 100), 0, 1);
+        speed *= 0.9 + (1 - calmness) * 0.3;
 
         // MORALE: Panicked NPCs move faster (fleeing behavior)
         if (panicRef.current > 70) {
@@ -992,13 +1007,18 @@ export const NPC: React.FC<NPCProps> = memo(({
       // Only check every ~1 second of sim time to reduce overhead
       // Check both individual and global cooldowns
       const globalCooldownActive = globalApproachCooldownRef?.current && simTime < globalApproachCooldownRef.current;
+
+      // Family members bypass global cooldown - they should always be able to approach the player
+      const isFamilyMemberForCooldown = role === 'family';
+      const effectiveGlobalCooldownActive = isFamilyMemberForCooldown ? false : globalCooldownActive;
+
       if (
         onNPCInitiatedEncounter &&
         !isSelected &&
         stateRef.current === AgentState.HEALTHY &&
         simTime - lastApproachCheckRef.current > 1 &&
         simTime > approachCooldownRef.current &&
-        !globalCooldownActive
+        !effectiveGlobalCooldownActive
       ) {
         lastApproachCheckRef.current = simTime;
         approachCheckCountRef.current += 1;
@@ -1008,10 +1028,19 @@ export const NPC: React.FC<NPCProps> = memo(({
 
         // Family members have larger notice range and always approach
         const APPROACH_NOTICE_DISTANCE = isFamilyMember ? 15 : 12; // Family members notice from further away
-        const APPROACH_INITIATE_DISTANCE = 2.5; // Close enough to trigger encounter
+        const APPROACH_INITIATE_DISTANCE = isFamilyMember ? 4.0 : 2.5; // Family members trigger from further away
 
+        // FAMILY MEMBERS: Trigger encounter immediately if very close, even without approaching first
+        if (isFamilyMember && distToPlayer < APPROACH_INITIATE_DISTANCE && !isApproachingPlayerRef.current) {
+          // Family member is already very close - trigger encounter directly!
+          approachCooldownRef.current = simTime + 5; // Short cooldown for family
+          onNPCInitiatedEncounter({
+            stats: { ...stats, panicLevel: panicRef.current, awarenessLevel: awarenessRef.current },
+            state: stateRef.current
+          });
+        }
         // Only consider approaching if player is in notice range
-        if (distToPlayer < APPROACH_NOTICE_DISTANCE && distToPlayer > APPROACH_INITIATE_DISTANCE) {
+        else if (distToPlayer < APPROACH_NOTICE_DISTANCE && distToPlayer > APPROACH_INITIATE_DISTANCE) {
           // Family members ALWAYS approach (bypass all disposition/charisma checks)
           if (isFamilyMember) {
             // Start approaching the player immediately!
@@ -1490,6 +1519,7 @@ export const NPC: React.FC<NPCProps> = memo(({
         <Html
           position={[0, 2.8, 0]}
           center
+          zIndexRange={[10, 0]}
           style={{ pointerEvents: 'none' }}
         >
           <div className="px-2 py-1 bg-gradient-to-b from-pink-500 to-pink-600 text-white text-[10px] font-bold uppercase tracking-wider rounded-full shadow-lg border border-pink-300/50 whitespace-nowrap animate-pulse"
@@ -1537,9 +1567,10 @@ export const NPC: React.FC<NPCProps> = memo(({
           headscarfRoughness={appearance.scarfRoughness}
           robeAccentColor={mourningAdjustedColors.accent}
           hairColor={appearance.hair}
+          eyeColor={stats.eyeColor}
           gender={stats.gender}
           age={stats.age}
-          scale={[stats.weight, stats.height, stats.weight] as [number, number, number]}
+          scale={[stats.weight * strengthScale, stats.height, stats.weight * strengthScale] as [number, number, number]}
           robeHasTrim={stats.robeHasTrim}
           robeHasSash={stats.robeHasSash}
           robeHemBand={stats.robeHemBand}
@@ -1559,6 +1590,7 @@ export const NPC: React.FC<NPCProps> = memo(({
           turbanAccentColor={appearance.turbanAccent}
           facialHair={stats.facialHair}
           facialHairColor={stats.facialHairColor}
+          mouthExpression={mouthExpression}
           sleeveCoverage={stats.sleeveCoverage}
           footwearStyle={stats.footwearStyle}
           footwearColor={stats.footwearColor}
@@ -1699,7 +1731,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       )}
 
       {showDemographicsOverlay && displayState !== AgentState.DECEASED && (
-        <Html transform={false} position={[0, 2.9, 0]} center>
+        <Html transform={false} position={[0, 2.9, 0]} center zIndexRange={[10, 0]}>
           {/* Mobile: Ultra-compact - just health status indicator */}
           <div className="md:hidden">
             <div className={`rounded-full px-2 py-1 text-[10px] font-bold pointer-events-none ${
@@ -1742,7 +1774,7 @@ export const NPC: React.FC<NPCProps> = memo(({
       )}
 
       {hovered && (
-        <Html distanceFactor={15} position={[0, 2.5, 0]} center>
+        <Html distanceFactor={15} position={[0, 2.5, 0]} center zIndexRange={[10, 0]}>
           <div className="bg-black/90 backdrop-blur-md p-4 rounded-xl border border-amber-600/40 text-amber-50 w-52 shadow-2xl pointer-events-none select-none">
             <h4 className="historical-font text-amber-400 border-b border-amber-900/50 pb-2 mb-2 uppercase text-xs tracking-wider font-bold">{stats.name}</h4>
             <div className="space-y-1.5 text-[10px]">

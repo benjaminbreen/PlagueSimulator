@@ -176,7 +176,13 @@ interface InventoryEntry {
 
 const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void; onToggle: () => void; isNight?: boolean }> = ({ data, sceneMode, onClose, onToggle, isNight = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [expanded, setExpanded] = useState(false);
   const [minimapSize, setMinimapSize] = useState(() => (window.innerWidth < 640 ? 150 : 220));
+  const lastRenderRef = useRef(0);
+  const lastSizeRef = useRef(0);
+
+  // Expanded size is larger
+  const displaySize = expanded ? Math.min(window.innerWidth - 48, window.innerHeight - 200, 400) : minimapSize;
 
   useEffect(() => {
     const handleResize = () => {
@@ -188,14 +194,26 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
 
   useEffect(() => {
     if (!data || sceneMode !== 'outdoor') return;
+
+    // Throttle renders to ~12fps (83ms) - minimap doesn't need 60fps
+    const now = performance.now();
+    if (now - lastRenderRef.current < 83 && lastSizeRef.current === displaySize) return;
+    lastRenderRef.current = now;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const size = minimapSize;
+    const size = displaySize;
     const dpr = Math.min(window.devicePixelRatio || 1, 1.35);
-    canvas.width = size * dpr;
-    canvas.height = size * dpr;
-    canvas.style.width = `${size}px`;
-    canvas.style.height = `${size}px`;
+
+    // Only resize canvas when size actually changes
+    if (lastSizeRef.current !== size) {
+      canvas.width = size * dpr;
+      canvas.height = size * dpr;
+      canvas.style.width = `${size}px`;
+      canvas.style.height = `${size}px`;
+      lastSizeRef.current = size;
+    }
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -227,7 +245,6 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
 
     // Fixed north-up map projection (no rotation)
     const scale = radius / data.radius;
-    const viewYaw = Number.isFinite(data.player.cameraYaw) ? data.player.cameraYaw : data.player.yaw;
 
     // Project function - NO rotation, north is always up
     // In Three.js: +Z is typically "into screen" / south, -Z is forward/north
@@ -289,17 +306,18 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
 
       const { color, label } = getBuildingInfo(b.type);
       const bSize = Math.max(6, Math.min(24, b.size * scale));
+      const isEnterable = b.enterable !== false;
 
-      // Draw building shape
+      // Draw building shape - minimal shadows for performance
       ctx.fillStyle = color;
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = color;
-      ctx.globalAlpha = alpha * 0.35;
+      ctx.shadowBlur = 0; // Removed per-building shadows
+      ctx.globalAlpha = alpha * (isEnterable ? 0.5 : 0.35);
       ctx.fillRect(p.x - bSize / 2, p.y - bSize / 2, bSize, bSize);
 
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = alpha * 0.85;
-      ctx.lineWidth = 1.6;
+      // Stroke - brighter for enterable buildings
+      ctx.strokeStyle = isEnterable ? '#4ade80' : color;
+      ctx.globalAlpha = alpha * (isEnterable ? 1.0 : 0.85);
+      ctx.lineWidth = isEnterable ? 2.2 : 1.6;
       ctx.strokeRect(p.x - bSize / 2, p.y - bSize / 2, bSize, bSize);
 
       // Door notch
@@ -337,26 +355,25 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         let labelAlpha = alpha;
         if (dist > labelFadeStart) {
           const fadeProgress = (dist - labelFadeStart) / (1 - labelFadeStart);
-          labelAlpha = alpha * Math.pow(1 - fadeProgress, 1.8);
+          labelAlpha = alpha * Math.pow(1 - fadeProgress, 1.5);
         }
-        if (labelAlpha < 0.25) return;
+        if (labelAlpha < 0.2) return;
 
         ctx.save();
         ctx.translate(p.x, p.y);
 
         // Label background for readability
-        ctx.font = 'bold 6px monospace';
+        ctx.font = 'bold 8px sans-serif';
         const textWidth = ctx.measureText(label).width;
 
-        ctx.globalAlpha = labelAlpha * 0.6;
+        ctx.globalAlpha = Math.min(1, labelAlpha * 0.85);
         ctx.fillStyle = '#000';
-        ctx.fillRect(-textWidth / 2 - 2, bSize / 2 + 1, textWidth + 4, 8);
+        ctx.fillRect(-textWidth / 2 - 3, bSize / 2 + 1, textWidth + 6, 11);
 
         // Label text
-        ctx.globalAlpha = labelAlpha * 0.9;
-        ctx.fillStyle = color;
-        ctx.shadowBlur = 3;
-        ctx.shadowColor = '#000';
+        ctx.globalAlpha = Math.min(1, labelAlpha * 1.1);
+        ctx.fillStyle = '#fff';
+        ctx.shadowBlur = 0;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         ctx.fillText(label, 0, bSize / 2 + 2);
@@ -393,12 +410,12 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         : npc.state === AgentState.INCUBATING ? '#f59e0b'
         : '#8fe3ff';
 
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = glow;
+      // Draw NPC dot - no shadow for performance, slightly larger for visibility
+      ctx.shadowBlur = 0;
       ctx.fillStyle = glow;
       ctx.globalAlpha = alpha;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, 2.4, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
     });
@@ -454,20 +471,28 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
       ctx.closePath();
       ctx.fill();
 
-      ctx.globalAlpha = alpha * 0.5;
+      ctx.globalAlpha = alpha * 0.6;
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.arc(0, 0, 2, 0, Math.PI * 2);
+      ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.globalAlpha = alpha * 0.85;
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = '#000';
+      // Label background pill for readability
+      ctx.font = 'bold 9px sans-serif';
+      const npcTextWidth = ctx.measureText(label).width;
+      ctx.globalAlpha = Math.min(1, alpha * 0.9);
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.roundRect(-npcTextWidth / 2 - 4, -20, npcTextWidth + 8, 12, 3);
+      ctx.fill();
+
+      // Label text
+      ctx.globalAlpha = Math.min(1, alpha * 1.1);
       ctx.fillStyle = color;
-      ctx.font = 'bold 8px monospace';
+      ctx.shadowBlur = 0;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText(label, 0, -8);
+      ctx.fillText(label, 0, -9);
 
       ctx.restore();
       ctx.globalAlpha = 1;
@@ -480,22 +505,94 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
         const distSq = p.x * p.x + p.y * p.y;
         if (distSq > radius * radius) return;
         const dist = Math.sqrt(distSq) / radius;
-        const alpha = Math.pow(1 - dist, 2.1);
+        const alpha = Math.pow(1 - dist, 1.8);
         if (alpha < 0.2) return;
 
         ctx.save();
         ctx.translate(p.x, p.y);
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = 'rgba(210, 190, 140, 0.9)';
+
+        // Landmark dot
+        ctx.globalAlpha = Math.min(1, alpha * 1.1);
+        ctx.fillStyle = '#e8d9a8';
+        ctx.shadowBlur = 6;
+        ctx.shadowColor = '#d4c896';
         ctx.beginPath();
-        ctx.arc(0, 0, 2.2, 0, Math.PI * 2);
+        ctx.arc(0, 0, 3, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.font = '8px Lato, sans-serif';
+        // Label background
+        ctx.font = 'bold 8px sans-serif';
+        const lmText = lm.label.toUpperCase();
+        const lmTextWidth = ctx.measureText(lmText).width;
+        ctx.globalAlpha = Math.min(1, alpha * 0.85);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-lmTextWidth / 2 - 3, 4, lmTextWidth + 6, 11);
+
+        // Label text
+        ctx.globalAlpha = Math.min(1, alpha * 1.1);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillStyle = 'rgba(230, 210, 160, 0.9)';
-        ctx.fillText(lm.label.toUpperCase(), 0, 4);
+        ctx.fillStyle = '#e8d9a8';
+        ctx.fillText(lmText, 0, 5);
+        ctx.restore();
+      });
+    }
+
+    // === MERCHANT ICONS ===
+    if (data.merchants && data.merchants.length > 0) {
+      data.merchants.forEach((merchant) => {
+        const p = project(merchant.x, merchant.z);
+        const distSq = p.x * p.x + p.y * p.y;
+        if (distSq > radius * radius) return;
+        const dist = Math.sqrt(distSq) / radius;
+        const alpha = Math.pow(1 - dist, 1.6);
+        if (alpha < 0.2) return;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+
+        // Gold coin icon for merchant - no shadow for performance
+        const coinColor = '#f59e0b';
+        const coinSize = expanded ? 5 : 4;
+
+        // Coin circle
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = alpha * 0.95;
+        ctx.fillStyle = coinColor;
+        ctx.beginPath();
+        ctx.arc(0, 0, coinSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Inner highlight
+        ctx.globalAlpha = alpha * 0.7;
+        ctx.fillStyle = '#fcd34d';
+        ctx.beginPath();
+        ctx.arc(-coinSize * 0.2, -coinSize * 0.2, coinSize * 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // "$" symbol
+        ctx.globalAlpha = alpha * 0.9;
+        ctx.fillStyle = '#78350f';
+        ctx.font = `bold ${expanded ? 6 : 5}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('$', 0, 0.5);
+
+        // Label in expanded mode
+        if (expanded && merchant.profession) {
+          ctx.globalAlpha = alpha * 0.85;
+          ctx.fillStyle = '#000';
+          const labelText = merchant.profession.toUpperCase().slice(0, 10);
+          const labelWidth = ctx.measureText(labelText).width;
+          ctx.fillRect(-labelWidth / 2 - 2, coinSize + 2, labelWidth + 4, 9);
+
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = coinColor;
+          ctx.font = 'bold 7px sans-serif';
+          ctx.fillText(labelText, 0, coinSize + 7);
+        }
+
         ctx.restore();
       });
     }
@@ -628,12 +725,52 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
 
     ctx.restore();
 
-    // === PLAYER ARROW - Rotates based on camera direction ===
+    // === CAMERA VIEW CONE - Shows where camera is looking ===
+    const cameraYaw = Number.isFinite(data.player.cameraYaw) ? data.player.cameraYaw : data.player.yaw;
+    const characterYaw = data.player.yaw;
+    const fovAngle = Math.PI / 3; // 60 degree field of view
+    const coneLength = radius * 0.65; // How far the cone extends
+
     ctx.save();
-    // Rotate arrow to show camera facing direction
-    // viewYaw: 0 = looking north (-Z), π/2 = looking east (+X), etc.
-    // Negate to match the flipped Z projection
-    ctx.rotate(-viewYaw);
+    // Canvas rotation is clockwise for positive angles
+    // With Y-flipped projection, we rotate by positive yaw
+    ctx.rotate(cameraYaw);
+
+    // Cone gradient - fades out toward edges
+    const coneGradient = ctx.createRadialGradient(0, 0, 0, 0, 0, coneLength);
+    coneGradient.addColorStop(0, 'rgba(135, 206, 250, 0.3)');
+    coneGradient.addColorStop(0.5, 'rgba(135, 206, 250, 0.15)');
+    coneGradient.addColorStop(1, 'rgba(135, 206, 250, 0)');
+
+    ctx.fillStyle = coneGradient;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    // Draw cone arc pointing "up" (-Y direction) before rotation
+    ctx.arc(0, 0, coneLength, -Math.PI / 2 - fovAngle / 2, -Math.PI / 2 + fovAngle / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Cone edge lines for clarity
+    ctx.strokeStyle = 'rgba(135, 206, 250, 0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(
+      Math.cos(-Math.PI / 2 - fovAngle / 2) * coneLength,
+      Math.sin(-Math.PI / 2 - fovAngle / 2) * coneLength
+    );
+    ctx.moveTo(0, 0);
+    ctx.lineTo(
+      Math.cos(-Math.PI / 2 + fovAngle / 2) * coneLength,
+      Math.sin(-Math.PI / 2 + fovAngle / 2) * coneLength
+    );
+    ctx.stroke();
+
+    ctx.restore();
+
+    // === PLAYER ARROW - Shows character facing direction ===
+    ctx.save();
+    ctx.rotate(characterYaw); // Character facing direction (positive to match Y-flip)
 
     // Outer glow
     ctx.shadowBlur = 14;
@@ -663,7 +800,7 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     ctx.restore();
 
     ctx.restore();
-  }, [data, minimapSize, sceneMode]);
+  }, [data, displaySize, sceneMode, expanded]);
 
   if (!data || sceneMode !== 'outdoor') return null;
 
@@ -686,11 +823,72 @@ const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'inte
     data.district === 'BAB_SHARQI' ? 'Bab Sharqi' :
     'Residential';
 
+  // When expanded, center the minimap on screen
+  if (expanded) {
+    return (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm pointer-events-auto"
+        onClick={() => setExpanded(false)}
+      >
+        <div
+          className="relative"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="rounded-full p-[4px]"
+            style={{ background: 'linear-gradient(135deg, #7a5a2e, #d3a45a 45%, #6b4b22)' }}
+          >
+            <div
+              className="relative rounded-full p-[8px] bg-black/90 border-2 border-amber-900/50 shadow-[0_0_40px_rgba(210,164,90,0.5)]"
+              aria-label="Expanded Minimap"
+            >
+              <canvas ref={canvasRef} className="rounded-full block" />
+              <div
+                className="absolute inset-0 rounded-full pointer-events-none"
+                style={{ background: 'radial-gradient(circle at 30% 25%, rgba(255,255,255,0.08), transparent 55%)' }}
+              />
+            </div>
+          </div>
+          {/* Legend */}
+          <div className="absolute -bottom-20 left-1/2 -translate-x-1/2 flex gap-4 text-[10px] text-amber-100/80">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-sm border-2 border-[#4ade80] bg-[#4ade80]/30"></span>
+              <span>Enterable</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-[#f59e0b]"></span>
+              <span>Merchant</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-full bg-[#8fe3ff]"></span>
+              <span>NPC</span>
+            </div>
+          </div>
+          {/* Close button */}
+          <button
+            onClick={() => setExpanded(false)}
+            className="absolute -top-3 -right-3 w-8 h-8 rounded-full bg-black/80 border border-amber-700/60 text-amber-200 hover:text-white hover:bg-black/90 flex items-center justify-center text-lg"
+          >
+            ×
+          </button>
+          {/* District label */}
+          <div className="absolute -top-10 left-1/2 -translate-x-1/2 text-sm uppercase tracking-[0.3em] text-amber-100 whitespace-nowrap"
+            style={{ textShadow: '0 2px 8px rgba(0,0,0,0.9)' }}
+          >
+            {districtLabel}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="absolute top-20 right-6 pointer-events-auto group">
       <div
-        className="rounded-full p-[3px]"
+        className="rounded-full p-[3px] cursor-pointer transition-transform hover:scale-105"
         style={{ background: 'linear-gradient(135deg, #7a5a2e, #d3a45a 45%, #6b4b22)' }}
+        onClick={() => setExpanded(true)}
+        title="Click to expand"
       >
         <div
           className="relative rounded-full p-[6px] bg-black/80 border border-amber-900/40 shadow-[0_0_24px_rgba(210,164,90,0.35)]"
@@ -797,6 +995,7 @@ const NpcPortrait: React.FC<{
             headscarfColor={scarf}
             robeAccentColor={accent}
             hairColor={hair}
+            eyeColor={npc.eyeColor}
             gender={npc.gender}
             hairStyle={npc.hairStyle}
             headwearStyle={npc.headwearStyle}
@@ -809,6 +1008,7 @@ const NpcPortrait: React.FC<{
             footwearStyle={npc.footwearStyle}
             footwearColor={npc.footwearColor}
             accessories={npc.accessories}
+            mouthExpression={npc.charisma != null ? Math.max(-1, Math.min(1, (npc.charisma - 8) / 6)) : 0}
             enableArmSwing={false}
             showGroundShadow={false}
             distanceFromCamera={0}
@@ -1560,7 +1760,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
           {/* Center - Map button - truncates location name */}
           <button
-            onClick={() => setShowMap(true)}
+            onClick={() => {
+              setShowMap(true);
+              setMobileReportsPanelVisible(false);
+            }}
             className="bg-black/40 backdrop-blur-md px-3 h-11 rounded-full border border-amber-600/30 text-amber-500 shadow-lg flex items-center gap-1.5 transition-all active:scale-95 min-w-0 flex-1 max-w-[180px]"
           >
             <div className="bg-amber-500/10 p-1.5 rounded-full flex-shrink-0">
@@ -1587,7 +1790,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
         {/* Desktop - Original map button */}
         <button
-          onClick={() => setShowMap(true)}
+          onClick={() => {
+            setShowMap(true);
+            setMobileReportsPanelVisible(false);
+          }}
           className="hidden md:flex bg-black/30 hover:bg-black/55 backdrop-blur-md px-4 py-2 rounded-full border border-amber-400/20 text-amber-400 shadow-lg items-center gap-2 pointer-events-auto transition-all group active:scale-95"
         >
           <div className="bg-amber-500/10 p-1 rounded-full group-hover:bg-amber-500/20 transition-colors">
@@ -1605,8 +1811,9 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           const infectionState = buildingInfection?.[nearBuilding.id];
           const isInfected = infectionState?.status === 'infected' || infectionState?.status === 'deceased';
           const isDeceased = infectionState?.status === 'deceased';
-          // Allow entry to open buildings OR infected/deceased plague houses
-          const canEnter = (nearBuilding.isOpen || isInfected) && onTriggerEnterBuilding;
+          const isPlayerHome = nearBuilding.id === playerStats.homeBuildingId;
+          // Allow entry to open buildings OR infected/deceased plague houses OR player's home
+          const canEnter = (nearBuilding.isOpen || isInfected || isPlayerHome) && onTriggerEnterBuilding;
 
           return (
             <div
@@ -1721,7 +1928,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         <div
           className={`
             fixed md:relative top-0 left-0 h-full md:h-auto z-50 md:z-auto
-            w-[85vw] max-w-[360px] md:w-auto md:max-w-none
+            w-[70vw] max-w-[320px] md:w-auto md:max-w-none
             transition-all duration-300 ease-out
             ${showMerchantModal ? 'opacity-0 pointer-events-none md:-translate-x-full' : 'md:transform-none md:opacity-100'}
             ${mobileReportsPanelVisible ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}
@@ -1739,7 +1946,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             const deltaX = touch.clientX - startX;
             const deltaY = Math.abs(touch.clientY - startY);
             // Swipe left to close (negative deltaX, mostly horizontal)
-            if (deltaX < -80 && deltaY < 50) {
+            if (deltaX < -50 && deltaY < 80) {
               setMobileReportsPanelVisible(false);
             }
           }}
@@ -1747,8 +1954,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           {/* Mobile backdrop - proper z-index for click handling */}
           {mobileReportsPanelVisible && (
             <div
-              className="md:hidden fixed inset-0 bg-black/60"
-              style={{ zIndex: -1 }}
+              className="md:hidden fixed inset-0 bg-black/60 z-40"
               onClick={(e) => {
                 e.stopPropagation();
                 setMobileReportsPanelVisible(false);
@@ -1785,15 +1991,20 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               daysSinceOutbreak={(simTime / 24) + 1}
               onNavigateToHousehold={onNavigateToHousehold}
               onNavigateToDeceased={onNavigateToDeceased}
-              onShowPlayerModal={() => setShowPlayerModal(true)}
+              onShowPlayerModal={() => {
+                setShowPlayerModal(true);
+                setMobileReportsPanelVisible(false);
+              }}
               onOpenFamilyDossier={() => {
                 setDossierTab('family');
                 setShowPlayerModal(true);
+                setMobileReportsPanelVisible(false);
               }}
               onOpenInventoryDossier={() => {
                 setDossierTab('inventory');
                 setInventoryView('grid');
                 setShowPlayerModal(true);
+                setMobileReportsPanelVisible(false);
               }}
               onSelectFamilyMember={setSelectedFamilyMember}
               params={{
@@ -1838,7 +2049,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               showDemographicsOverlay={showDemographicsOverlay}
               setShowDemographicsOverlay={setShowDemographicsOverlay}
               playerStats={playerStats}
-              onShowPlayerModal={() => setShowPlayerModal(true)}
+              onShowPlayerModal={() => {
+                setShowPlayerModal(true);
+                setMobileReportsPanelVisible(false);
+              }}
               inventoryEntries={inventoryEntries}
               onDropItem={onDropItem}
               inventorySortBy={inventorySortBy}
@@ -1854,6 +2068,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               onOpenFamilyDossier={() => {
                 setDossierTab('family');
                 setShowPlayerModal(true);
+                setMobileReportsPanelVisible(false);
               }}
             />
             */}
@@ -2111,7 +2326,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           </div>
         )}
 
-        <div className="absolute bottom-6 left-6">
+        <div className="hidden md:block absolute bottom-6 left-6">
           <Compass minimapData={minimapData} onClick={() => showPerspectiveMenu(true)} />
         </div>
 

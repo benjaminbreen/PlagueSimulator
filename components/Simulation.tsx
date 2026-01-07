@@ -1081,6 +1081,8 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
   const glowRef = useRef<THREE.Mesh>(null);
   const outerGlowRef = useRef<THREE.Mesh>(null);
   const groupRef = useRef<THREE.Group>(null);
+  // PERFORMANCE: Reuse vector instead of allocating every frame
+  const sunPosRef = useRef(new THREE.Vector3());
 
   // Create sun texture once
   const sunTexture = useMemo(() => createSunTexture(256), []);
@@ -1095,12 +1097,12 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
     groupRef.current.visible = visible;
     if (!visible) return;
 
-    const sunPos = new THREE.Vector3(
+    sunPosRef.current.set(
       Math.cos(sunAngle - Math.PI / 2) * radius,
       Math.max(-10, elevation * 90),
       60
     );
-    groupRef.current.position.copy(sunPos);
+    groupRef.current.position.copy(sunPosRef.current);
     groupRef.current.lookAt(0, 0, 0);
 
     // GRAPHICS: Horizon size scaling - sun appears MUCH larger near horizon, smaller at zenith
@@ -2900,7 +2902,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
               const dz = b.position[2] - pos.z;
               return (dx * dx + dz * dz) <= maxDistSq;
             })
-            .map((b) => ({ x: b.position[0], z: b.position[2], type: b.type, size: buildingSize * (b.sizeScale ?? 1), doorSide: b.doorSide }));
+            .map((b) => ({ x: b.position[0], z: b.position[2], type: b.type, size: buildingSize * (b.sizeScale ?? 1), doorSide: b.doorSide, enterable: b.isOpen !== false }));
 
           const npcs: MiniMapData['npcs'] = [];
           const hash = agentHashRef.current;

@@ -11,7 +11,7 @@ import { Player } from './Player';
 import { InteriorExitIndicator } from './InteriorExitIndicator';
 import { Humanoid } from './Humanoid';
 import { generateInteriorObstacles, getSharedWalls } from '../utils/interior';
-import { PushableObject, createPushable } from '../utils/pushables';
+import { PushableObject, createPushable, SwingableObject, createSwingable } from '../utils/pushables';
 import { PushableDroppedItem } from './environment/decorations/Pushables';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
 import { createRugTexture, createNoiseTexture, createPlankTexture, createWallTexture, createPlasterTexture, createPatchTexture, createTileTexture, createReligiousWallTexture, createCivicWallTexture, createAdobeWallTexture, createGeometricBandTexture, createPackedEarthTexture, createWidePlankTexture, createNarrowPlankTexture, createHerringboneTexture, createTerracottaTileTexture, createStoneSlabTexture, createBrickFloorTexture, createReedMatTexture } from './interior/materials';
@@ -47,12 +47,16 @@ interface InteriorSceneProps {
     startedAt: number;
     expiresAt: number;
   } | null;
+  /** Callback when a family member NPC approaches and initiates an encounter */
+  onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
+  /** Callback when player commits a crime witnessed by NPCs */
+  onCrimeWitnessed?: (crime: { type: 'theft' | 'vandalism'; witnessCount: number }) => void;
 }
 
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0, onNearbyMerchant, onNearRoofHatch, narratorHighlight }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0, onNearbyMerchant, onNearRoofHatch, narratorHighlight, onNPCInitiatedEncounter, onCrimeWitnessed }) => {
   const { scene, gl } = useThree();
   // Tap-to-move state for interior
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
@@ -85,6 +89,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const lastOverrideNonceRef = useRef<number | null>(null);
   const registrySyncTimerRef = useRef(0);
   const exposureCheckTimerRef = useRef(0);
+  // Family member encounter cooldown (prevent spam)
+  const familyEncounterCooldownRef = useRef(0);
+  const familyApproachCheckTimerRef = useRef(0);
   const getReligionColor = (value: string) => {
     switch (value) {
       case 'Sunni Islam': return 'text-amber-200';
@@ -123,6 +130,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
   const exitTriggeredRef = useRef(false);
   const [pickedUpIds, setPickedUpIds] = useState<Set<string>>(new Set());
   const [hoveredNpcId, setHoveredNpcId] = useState<string | null>(null);
+  const [alarmedNpcIds, setAlarmedNpcIds] = useState<string[]>([]); // NPCs witnessing crimes
   const nearStairsIdRef = useRef<string | null>(null);
   const nearRoofHatchIdRef = useRef<string | null>(null);
   const activeFloor = useMemo(() => spec.floors?.[activeFloorIndex] ?? null, [spec.floors, activeFloorIndex]);
@@ -474,8 +482,8 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       InteriorPropType.SPINDLE,
       InteriorPropType.MORTAR,
       InteriorPropType.HERB_RACK,
-      InteriorPropType.TOOL_RACK,
-      InteriorPropType.LANTERN
+      InteriorPropType.TOOL_RACK
+      // LANTERN removed - now uses swingable physics
     ]);
     const typeOffsets: Partial<Record<InteriorPropType, number>> = {
       [InteriorPropType.BENCH]: 0.25,
@@ -492,8 +500,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
       [InteriorPropType.MORTAR]: 0.12,
       [InteriorPropType.HERB_RACK]: 0.2,
       [InteriorPropType.TOOL_RACK]: 0.2,
-      [InteriorPropType.FLOOR_LAMP]: 0.8,
-      [InteriorPropType.LANTERN]: 0.15
+      [InteriorPropType.FLOOR_LAMP]: 0.8
     };
     const typeRadius: Partial<Record<InteriorPropType, number>> = {
       [InteriorPropType.BENCH]: 1.0,
@@ -602,6 +609,41 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     });
     return items;
   }, [activeProps, pickupMap]);
+
+  // Create swingable objects for lanterns (hanging ceiling lamps with pendulum physics)
+  const baseSwingables = useMemo<SwingableObject[]>(() => {
+    const items: SwingableObject[] = [];
+    activeProps.forEach((prop) => {
+      if (prop.type !== InteriorPropType.LANTERN) return;
+
+      // Lantern anchor is at the prop position (ceiling mount point)
+      // Rope length is how far it hangs down from the ceiling
+      const ropeLength = 0.6; // About 60cm chain
+      const radius = 0.4; // Collision radius
+      const mass = 1.0; // Metal lantern with oil - responsive to impacts
+
+      const item = createSwingable(
+        `interior-swing-${prop.id}`,
+        prop.id,
+        [prop.position[0], prop.position[1], prop.position[2]],
+        ropeLength,
+        radius,
+        mass
+      );
+      items.push(item);
+    });
+    return items;
+  }, [activeProps]);
+
+  const [swingables, setSwingables] = useState<SwingableObject[]>(() => baseSwingables);
+  useEffect(() => {
+    setSwingables(baseSwingables);
+  }, [baseSwingables]);
+  const swingablesRef = useRef<SwingableObject[]>(swingables);
+  useEffect(() => {
+    swingablesRef.current = swingables;
+  }, [swingables]);
+
   const [pushables, setPushables] = useState<PushableObject[]>(() => basePushables);
   useEffect(() => {
     setPushables(prev => {
@@ -659,6 +701,45 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     });
     onPickupItem?.(pickup);
   }, [onPickupItem]);
+
+  // Crime witness detection system
+  const handlePropertyDamage = useCallback((position: THREE.Vector3) => {
+    // Find NPCs within witness range (5 units)
+    const witnesses = activeNpcs.filter(npc => {
+      const dist = npc.position.distanceTo(position);
+      const npcState = npcStatesRef.current.find(s => s.id === npc.id)?.state ?? npc.state;
+      return dist < 5.0 && npcState !== AgentState.DECEASED;
+    });
+
+    if (witnesses.length === 0) return;
+
+    // Show visual alert on witnesses
+    const witnessIds = witnesses.map(n => n.id);
+    setAlarmedNpcIds(witnessIds);
+    setTimeout(() => setAlarmedNpcIds([]), 3000);
+
+    // Notify parent for reputation penalty
+    onCrimeWitnessed?.({
+      type: 'vandalism',
+      witnessCount: witnesses.length
+    });
+
+    // Trigger confrontation with primary witness (owner or first witness)
+    const primaryWitness = witnesses.find(n => n.merchantData?.role === 'owner')
+      || witnesses.find(n => playerStats.familyMembers?.some(m => m.npcId === n.id))
+      || witnesses[0];
+
+    if (primaryWitness && onNPCInitiatedEncounter) {
+      const npcState = npcStatesRef.current.find(s => s.id === primaryWitness.id);
+      setTimeout(() => {
+        onNPCInitiatedEncounter({
+          stats: primaryWitness.stats,
+          state: npcState?.state ?? primaryWitness.state
+        });
+      }, 1500); // Delay to show alert animation first
+    }
+  }, [activeNpcs, onCrimeWitnessed, onNPCInitiatedEncounter, playerStats.familyMembers]);
+
   const entryRoom = useMemo(() => activeRooms.find((room) => room.type === InteriorRoomType.ENTRY) ?? activeRooms[0], [activeRooms]);
   const roomMap = useMemo(() => {
     const map = new Map<string, InteriorRoom>();
@@ -1429,6 +1510,38 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         }
       });
     }
+
+    // FAMILY MEMBER ENCOUNTER: Check if family members are near the player
+    if (playerRef.current && onNPCInitiatedEncounter && !selectedNpcId && simTime > familyEncounterCooldownRef.current) {
+      familyApproachCheckTimerRef.current += delta * params.simulationSpeed;
+      if (familyApproachCheckTimerRef.current >= 0.5) { // Check twice per sim-second
+        familyApproachCheckTimerRef.current = 0;
+        const playerPos = playerRef.current.position;
+        const familyNpcIds = new Set(playerStats.familyMembers?.map(m => m.npcId) || []);
+
+        // Find family member NPCs that are close and healthy
+        for (const npcState of npcStatesRef.current) {
+          if (!familyNpcIds.has(npcState.id)) continue;
+          if (npcState.state !== AgentState.HEALTHY) continue;
+
+          const dist = Math.hypot(npcState.position.x - playerPos.x, npcState.position.z - playerPos.z);
+          if (dist < 3.5) { // Within conversation distance
+            // Find the NPC stats from activeNpcs
+            const npcData = activeNpcs.find(n => n.id === npcState.id);
+            if (npcData) {
+              // Set cooldown to prevent spam (30 sim minutes)
+              familyEncounterCooldownRef.current = simTime + 30;
+              // Trigger the encounter!
+              onNPCInitiatedEncounter({
+                stats: npcData.stats,
+                state: npcState.state
+              });
+              break; // Only trigger one encounter at a time
+            }
+          }
+        }
+      }
+    }
   });
   const wallPalette = useMemo(() => {
     const base = spec.socialClass === SocialClass.NOBILITY
@@ -1878,6 +1991,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
 
       {activeProps.map((prop, index) => {
         const pushable = pushables.find((item) => item.sourceId === prop.id);
+        const swingable = swingables.find((item) => item.sourceId === prop.id);
         const roomForProp = activeRooms.find((room) => room.id === prop.roomId);
         const rugMat = rugMaterials[Math.floor(seededRandom(styleSeed + index * 13) * rugMaterials.length)];
         const prayerMat = prayerRugMaterials[Math.floor(seededRandom(styleSeed + index * 17) * prayerRugMaterials.length)];
@@ -1889,9 +2003,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             prayerRugMaterial={prayerMat}
             profession={spec.profession}
             socialClass={spec.socialClass}
-            positionVector={pushable?.position}
+            positionVector={swingable?.position ?? pushable?.position}
             roomSize={roomForProp?.size}
-            isShattered={pushable?.isShattered}
+            isShattered={pushable?.isShattered || swingable?.isShattered}
           />
         );
       })}
@@ -1972,6 +2086,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             </Html>
             );
           })()}
+          {alarmedNpcIds.includes(npc.id) && (
+            <Html position={[0, 2.4, 0]} center zIndexRange={[10, 0]}>
+              <div className="text-3xl animate-bounce" style={{ pointerEvents: 'none' }}>❗</div>
+            </Html>
+          )}
           <Humanoid
             color={npc.stats.socialClass === SocialClass.NOBILITY ? '#6a5b4a' : '#6b5a45'}
             headColor="#e2c6a2"
@@ -2012,9 +2131,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         obstacles={obstacles}
         initialPosition={playerSpawn}
         pushablesRef={pushablesRef}
+        swingablesRef={swingablesRef}
         onImpactPuff={handleImpactPuff}
         onPickupPrompt={onPickupPrompt}
         onPickup={handlePickup}
+        onPropertyDamaged={handlePropertyDamage}
         targetPosition={playerTarget}
         setTargetPosition={setPlayerTarget}
         observeMode={observeMode}

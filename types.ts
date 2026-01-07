@@ -133,6 +133,9 @@ export interface NPCStats {
   // Personality system
   disposition: number;        // 0-100: baseline friendliness/personality (persistent)
   mood: string;               // Current emotional state (derived from disposition)
+  strength?: number;
+  charisma?: number;
+  eyeColor?: string;
   // Morale/Rumor system
   awarenessLevel: number;     // 0-100: knowledge of plague spreading in city
   panicLevel: number;         // 0-100: fear/anxiety response
@@ -219,6 +222,7 @@ export interface FamilyMember {
     headwearColor?: string;
     facialHair?: 'none' | 'stubble' | 'short_beard' | 'full_beard' | 'mustache' | 'goatee';
     facialHairColor?: string;
+    eyeColor?: string;
   };
 }
 
@@ -240,6 +244,7 @@ export interface PlayerStats {
   healthStatus: string;
   skinTone: string;
   hairColor: string;
+  eyeColor?: string;
   robeColor: string;
   headscarfColor: string;
   skinDescription: string;
@@ -820,7 +825,7 @@ export type SpecialNPCType = 'SUFI_MYSTIC' | 'ASTROLOGER' | 'SCRIBE';
 
 export interface MiniMapData {
   player: { x: number; z: number; yaw: number; cameraYaw: number };
-  buildings: Array<{ x: number; z: number; type: BuildingType; size: number; doorSide: number }>;
+  buildings: Array<{ x: number; z: number; type: BuildingType; size: number; doorSide: number; enterable?: boolean }>;
   npcs: Array<{ id: string; x: number; z: number; state: AgentState; name?: string; profession?: string; age?: number; gender?: 'Male' | 'Female' }>;
   specialNPCs: Array<{ x: number; z: number; type: SpecialNPCType }>;
   merchants?: Array<{ x: number; z: number; name?: string; profession?: string }>;
@@ -1037,6 +1042,7 @@ export const getLocationLabel = (x: number, y: number) => {
   if (isNear(0, -2, 0.5)) return "Al-Shaghour (Poor Hovels)";
   if (isNear(-1, 1, 0.5)) return "Al-Qaymariyya (Wealthy Quarter)";
   if (isNear(2, 1, 0.5)) return "Bab Sharqi (Eastern Gate)";
+  if (isNear(0, 3, 0.5)) return "Bab al-Faradis Cemetery (Qabristan)";
   if (isNear(1, 3, 0.5)) return "Ghouta Farmlands (Rural Fringe)";
   if (isNear(3, 0, 0.5)) return "Desert Outskirts (Syrian Desert)";
   if (isNear(-2, 0, 0.5)) return "Caravanserai (Silk Market)";
@@ -1077,6 +1083,7 @@ export type DistrictType =
   | 'CHRISTIAN_QUARTER'
   | 'UMAYYAD_MOSQUE'
   | 'SALHIYYA'
+  | 'CEMETERY'
   | 'OUTSKIRTS_FARMLAND'
   | 'OUTSKIRTS_DESERT'
   | 'OUTSKIRTS_SCRUBLAND'
@@ -1167,6 +1174,8 @@ export const getDistrictType = (mapX: number, mapY: number): DistrictType => {
     if (tileX === -3) return 'OUTSKIRTS_SCRUBLAND';
     if (tileX === 3) return edgeRoll < 0.7 ? 'OUTSKIRTS_DESERT' : 'OUTSKIRTS_SCRUBLAND';
     if (tileY === 3) {
+      // Cemetery (Qabristan) north of city near Bab al-Faradis gate
+      if (tileX === 0) return 'CEMETERY';
       if (tileX <= -2) return 'OUTSKIRTS_SCRUBLAND';
       if (edgeRoll < 0.12) return 'HOVELS';
       return 'OUTSKIRTS_FARMLAND';
