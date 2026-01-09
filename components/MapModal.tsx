@@ -28,6 +28,10 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
     { title: "MAMLUK FORTRESS", name: "The Citadel", hoverName: "Fortress", x: -1, y: 0, type: "civic", desc: "Military fortress in northwestern corner of old city", color: "red", importance: 3 },
     { title: "MOUNTAIN SHRINE", name: "Mount Qassioun", hoverName: "Sacred Peak", x: -2, y: 2, type: "landmark", desc: "Sacred mountain overlooking Damascus from northwest", color: "emerald", importance: 2 },
     { title: "SOUTHERN ROAD", name: "Hauran Highway", hoverName: "Trade Route", x: 1, y: -2, type: "landmark", desc: "Trade route to the fertile Hauran plateau", color: "yellow", importance: 1 },
+    { title: "ANCIENT CEMETERY", name: "Maqbarat Bab al-Saghir", hoverName: "Graveyard", x: -2, y: -3, type: "cemetery", desc: "Ancient cemetery with tombs of companions and martyrs", color: "crimson", importance: 2 },
+    { title: "MAMLUK TOMBS", name: "Turbat al-Mamalik", hoverName: "Royal Tombs", x: 0, y: -3, type: "cemetery", desc: "Mamluk funerary complexes and mausoleums", color: "crimson", importance: 2 },
+    { title: "LITTLE DOMES", name: "Al-Qubaybat", hoverName: "Mausoleum District", x: 2, y: -2, type: "cemetery", desc: "Elaborate domed tombs of Mamluk emirs and scholars", color: "crimson", importance: 2 },
+    { title: "CANAL DISTRICT", name: "Al-Qanawat", hoverName: "Waterways", x: -2, y: -2, type: "waterway", desc: "Canal district with norias and irrigation channels", color: "cyan", importance: 2 },
   ], []);
 
   // Generate generic grid tiles (procedural locations)
@@ -188,6 +192,7 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
 
                 // Muted colors for generic districts by type
                 const districtColorMap: Record<DistrictType, { fill: string; stroke: string; text: string }> = {
+                  // Core districts
                   MARKET: { fill: '#b8985c', stroke: '#d4b88a', text: '#d4b88a' },
                   RESIDENTIAL: { fill: '#6b7280', stroke: '#9ca3af', text: '#9ca3af' },
                   ROADSIDE: { fill: '#8b7a5a', stroke: '#a89978', text: '#a89978' },
@@ -199,6 +204,7 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
                   CHRISTIAN_QUARTER: { fill: '#6a8ab5', stroke: '#88a8c8', text: '#88a8c8' },
                   UMAYYAD_MOSQUE: { fill: '#5a9a7a', stroke: '#78b898', text: '#78b898' },
                   SALHIYYA: { fill: '#6a8a5a', stroke: '#88a878', text: '#88a878' },
+                  CEMETERY: { fill: '#8b2020', stroke: '#b83030', text: '#d84040' },
                   CARAVANSERAI: { fill: '#b87a4a', stroke: '#d49868', text: '#d49868' },
                   MOUNTAIN_SHRINE: { fill: '#5a8a6a', stroke: '#78a888', text: '#78a888' },
                   SOUTHERN_ROAD: { fill: '#9a8a5a', stroke: '#b8a878', text: '#b8a878' },
@@ -209,6 +215,23 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
                   OUTSKIRTS_FARMLAND: { fill: '#6a9a5a', stroke: '#88b878', text: '#88b878' },
                   OUTSKIRTS_DESERT: { fill: '#c8906a', stroke: '#e6ae88', text: '#e6ae88' },
                   OUTSKIRTS_SCRUBLAND: { fill: '#7a8a5a', stroke: '#98a878', text: '#98a878' },
+                  // New historical districts
+                  QAYMARIYYA: { fill: '#8b7ba5', stroke: '#a89bc4', text: '#a89bc4' },      // Wealthy, near mosque
+                  AMARA: { fill: '#7a8a8a', stroke: '#98a8a8', text: '#98a8a8' },          // Residential
+                  QUBAYBAT: { fill: '#7a2525', stroke: '#a83535', text: '#c84545' },       // Tombs area
+                  QANAWAT: { fill: '#5a8a9a', stroke: '#78a8b8', text: '#78a8b8' },        // Canal, water
+                  SHAGHOUR_OUTER: { fill: '#7a6a5a', stroke: '#988878', text: '#988878' }, // Poor suburb
+                  AMIN: { fill: '#6a7ab5', stroke: '#8898c8', text: '#8898c8' },           // Eastern Jewish edge
+                  LOWER_SALHIYYA: { fill: '#5a7a5a', stroke: '#789878', text: '#789878' }, // Lower hillside
+                  BAB_FARADIS: { fill: '#6a9a8a', stroke: '#88b8a8', text: '#88b8a8' },    // Paradise Gate
+                  RABWE: { fill: '#4a8a6a', stroke: '#68a888', text: '#68a888' },          // River gorge, gardens
+                  UQAYBA: { fill: '#7a8a7a', stroke: '#98a898', text: '#98a898' },         // Northern suburb
+                  DARAYA_ROAD: { fill: '#8a8a6a', stroke: '#a8a888', text: '#a8a888' },    // Road to village
+                  JABIYA_ROAD: { fill: '#9a8a6a', stroke: '#b8a888', text: '#b8a888' },    // Western approach
+                  QASSIOUN_CAVES: { fill: '#5a7a6a', stroke: '#789888', text: '#789888' }, // Sacred caves
+                  NORTH_GHOUTA: { fill: '#5a9a5a', stroke: '#78b878', text: '#78b878' },   // Northern farms
+                  SOUTH_GHOUTA: { fill: '#6a9a5a', stroke: '#88b878', text: '#88b878' },   // Southern farms
+                  EAST_GHOUTA: { fill: '#5a8a5a', stroke: '#78a878', text: '#78a878' },    // Eastern orchards
                 };
 
                 const colors = districtColorMap[tile.districtType] || { fill: '#64748b', stroke: '#94a3b8', text: '#94a3b8' };
@@ -287,6 +310,8 @@ export const MapModal: React.FC<MapModalProps> = ({ currentX, currentY, onClose,
                   lime: { bg: '#84cc16', ring: '#a3e635', glow: 'rgba(132, 204, 22, 0.6)', text: '#ecfccb' },
                   sand: { bg: '#f59e0b', ring: '#fbbf24', glow: 'rgba(245, 158, 11, 0.5)', text: '#fef3c7' },
                   slate: { bg: '#64748b', ring: '#94a3b8', glow: 'rgba(148, 163, 184, 0.5)', text: '#e2e8f0' },
+                  crimson: { bg: '#991b1b', ring: '#b91c1c', glow: 'rgba(153, 27, 27, 0.7)', text: '#fecaca' },
+                  cyan: { bg: '#06b6d4', ring: '#22d3ee', glow: 'rgba(6, 182, 212, 0.6)', text: '#cffafe' },
                 };
 
                 const colors = colorMap[loc.color] || colorMap.amber;

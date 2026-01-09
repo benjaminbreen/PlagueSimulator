@@ -34,6 +34,7 @@ export interface NarratorContext {
     reputation: number;
     currency: number;
   };
+  currentTask?: string | null;
   nearbyBuildings: NarratorContextItem[];
   nearbyNpcs: NarratorContextItem[];
   nearbyObjects: NarratorContextItem[];
@@ -78,7 +79,7 @@ const describePlagueState = (state: string | undefined | null) => {
 };
 
 export const buildNarratorPrompt = (question: string, context: NarratorContext) => {
-  const { player, sceneMode, district, locationLabel, timeOfDay, weather, interiorInfo, nearbyBuildings, nearbyNpcs, nearbyObjects, nearbyDistricts } = context;
+  const { player, sceneMode, district, locationLabel, timeOfDay, weather, interiorInfo, nearbyBuildings, nearbyNpcs, nearbyObjects, nearbyDistricts, currentTask } = context;
   const buildingLine = formatItems(nearbyBuildings, 'No notable buildings are within view.');
   const npcLine = formatItems(nearbyNpcs, 'No nearby figures are clearly visible.');
   const objectLine = formatItems(nearbyObjects, 'No notable objects are within arm\'s reach.');
@@ -114,6 +115,7 @@ export const buildNarratorPrompt = (question: string, context: NarratorContext) 
     `Time: ${timeOfDay.toFixed(1)}h. Weather: ${weather}.`,
     `Player: ${player.name}, ${player.profession}, ${player.socialClass}. Health: ${player.healthStatus}.`,
     `Condition: ${plagueNote}. Standing: ${reputationNote}. Means: ${wealthNote}.`,
+    currentTask ? `Current task: ${currentTask}` : '',
     `Nearby districts: ${districtLine}`,
     `Nearby buildings: ${buildingLine}`,
     `Nearby figures: ${npcLine}`,

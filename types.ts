@@ -226,6 +226,23 @@ export interface FamilyMember {
   };
 }
 
+export interface PlayerTaskTarget {
+  kind: 'district' | 'building' | 'home';
+  mapX?: number;
+  mapY?: number;
+  buildingId?: string;
+  label?: string;
+  locationLabel?: string;
+}
+
+export interface PlayerTask {
+  id: string;
+  title: string;
+  description: string;
+  status: 'active' | 'completed';
+  target?: PlayerTaskTarget;
+}
+
 export interface PlayerStats {
   name: string;
   age: number;
@@ -304,6 +321,7 @@ export interface PlayerStats {
   maxInventorySlots: number; // Start with 20
   plague: PlagueStatus;      // Plague infection status
   activeEffects: ActiveEffect[]; // Temporary effects from consumed items
+  currentTask?: PlayerTask | null;
   /** Stored headwear when unequipped - can be re-equipped from inventory */
   unequippedHeadwear?: {
     description: string;
@@ -856,7 +874,6 @@ export interface DevSettings {
   showPerfPanel: boolean;
   showHoverWireframe: boolean;
   showShadows: boolean;
-  showClouds: boolean;
   showFog: boolean;
   showTorches: boolean;
   showNPCs: boolean;
@@ -866,6 +883,8 @@ export interface DevSettings {
   showSoundDebug: boolean;
   showEventDebug: boolean;
   deathMode: boolean;
+  disableUiBlur: boolean;
+  disableCameraOcclusion: boolean;
 }
 
 export interface SimulationStats {
@@ -1029,72 +1048,133 @@ export const getLocationLabel = (x: number, y: number) => {
     return Math.sqrt(dx * dx + dy * dy) <= radius;
   };
 
-  // 7x7 grid with exact tile mapping (radius 0.5 = one tile per district)
-  // Named districts
-  if (isNear(0, 0, 0.5)) return "Al-Buzuriyah (Central Bazaar)";
-  if (isNear(0, 2, 0.5)) return "Umayyad Mosque (Great Mosque)";
-  if (isNear(0, 1, 0.5)) return "Souq Axis (Market Road)";
-  if (isNear(-1, 0, 0.5)) return "The Mamluk Citadel (Civic Quarter)";
-  if (isNear(-1, 2, 0.5)) return "Al-Salihiyya (Hillside Quarter)";
-  if (isNear(-2, 1, 0.5)) return "Al-Salihiyya (Hillside Quarter)";
-  if (isNear(0, -1, 0.5)) return "Al-Yahud (Jewish Quarter)";
-  if (isNear(2, 0, 0.5)) return "Al-Nasara (Christian Quarter)";
-  if (isNear(0, -2, 0.5)) return "Al-Shaghour (Poor Hovels)";
-  if (isNear(-1, 1, 0.5)) return "Al-Qaymariyya (Wealthy Quarter)";
+  // ============================================
+  // HISTORICAL 7x7 GRID - 14th Century Damascus
+  // All 49 tiles with authentic medieval Arabic names
+  // ============================================
+
+  // ROW Y=+3 (Far North - River/Mountain Slopes)
+  if (isNear(-3, 3, 0.5)) return "Magharat Qassioun (Sacred Caves)";
+  if (isNear(-2, 3, 0.5)) return "Upper Rabwe (Mill Gorge)";
+  if (isNear(-1, 3, 0.5)) return "Rabwe Gardens (Barada Orchards)";
+  if (isNear(0, 3, 0.5)) return "Jisr al-Barada (River Crossing)";
+  if (isNear(1, 3, 0.5)) return "Al-'Uqayba (Northern Suburb)";
+  if (isNear(2, 3, 0.5)) return "Bab al-Faradis Road (Paradise Gate)";
+  if (isNear(3, 3, 0.5)) return "Al-Ghouta al-Sharqiyya (East Ghouta)";
+
+  // ROW Y=+2 (North - Religious/Scholarly Quarter)
+  if (isNear(-3, 2, 0.5)) return "Jabal Qassioun (Mountain Path)";
+  if (isNear(-2, 2, 0.5)) return "Maqam Ibrahim (Mountain Shrine)";
+  if (isNear(-1, 2, 0.5)) return "Al-Salihiyya (Scholarly Quarter)";
+  if (isNear(0, 2, 0.5)) return "Al-Jami' al-Umawi (Great Mosque)";
+  if (isNear(1, 2, 0.5)) return "Al-Qaymariyya (Mosque Quarter)";
+  if (isNear(2, 2, 0.5)) return "Bab al-Faradis (Paradise Gate)";
+  if (isNear(3, 2, 0.5)) return "Basatin al-Ghouta (Ghouta Orchards)";
+
+  // ROW Y=+1 (Upper City)
+  if (isNear(-3, 1, 0.5)) return "Tariq al-Jabal (Mountain Road)";
+  if (isNear(-2, 1, 0.5)) return "Al-Salihiyya al-Sufla (Lower Salihiyya)";
+  if (isNear(-1, 1, 0.5)) return "Souq Sarouja (Officers' Quarter)";
+  if (isNear(0, 1, 0.5)) return "Souq al-Qal'a (Citadel Market)";
+  if (isNear(1, 1, 0.5)) return "Al-'Amara (Central Residential)";
   if (isNear(2, 1, 0.5)) return "Bab Sharqi (Eastern Gate)";
-  if (isNear(0, 3, 0.5)) return "Bab al-Faradis Cemetery (Qabristan)";
-  if (isNear(1, 3, 0.5)) return "Ghouta Farmlands (Rural Fringe)";
-  if (isNear(3, 0, 0.5)) return "Desert Outskirts (Syrian Desert)";
-  if (isNear(-2, 0, 0.5)) return "Caravanserai (Silk Market)";
-  if (isNear(-2, -1, 0.5)) return "Caravanserai (Silk Market)";
-  if (isNear(-2, 2, 0.5)) return "Mountain Shrine (Qassioun)";
-  if (isNear(1, -2, 0.5)) return "Southern Road (Hauran Route)";
-  if (isNear(1, 0, 0.5)) return "Straight Street (Via Recta)";
-  if (isNear(2, 2, 0.5)) return "Straight Street (Via Recta)";
-  if (isNear(1, -1, 0.5)) return "Al-Midan (Southern Gate)";
+  if (isNear(3, 1, 0.5)) return "Al-Ghouta al-Sharqiyya (East Ghouta)";
 
-  // Connector districts
-  if (isNear(-1, -1, 0.5)) return "Narrow Alleys";
-  if (isNear(1, 1, 0.5)) return "Residential Quarter";
-  if (isNear(-1, -2, 0.5)) return "Residential Quarter";
-  if (isNear(-2, -2, 0.5)) return "Roadside Settlement";
-  if (isNear(1, 2, 0.5)) return "Roadside Settlement";
-  if (isNear(2, -1, 0.5)) return "Roadside Settlement";
-  if (isNear(2, -2, 0.5)) return "Roadside Settlement";
+  // ROW Y=0 (Central - Via Recta / Main Axis)
+  if (isNear(-3, 0, 0.5)) return "Tariq Bab al-Jabiya (Western Road)";
+  if (isNear(-2, 0, 0.5)) return "Khan al-Harir (Silk Caravanserai)";
+  if (isNear(-1, 0, 0.5)) return "Qal'at Dimashq (The Citadel)";
+  if (isNear(0, 0, 0.5)) return "Al-Buzuriyah (Central Bazaar)";
+  if (isNear(1, 0, 0.5)) return "Al-Sharif al-Mustaqim (Via Recta)";
+  if (isNear(2, 0, 0.5)) return "Bab Touma (Christian Quarter)";
+  if (isNear(3, 0, 0.5)) return "Al-Badiya (Desert Fringe)";
 
-  // Outer perimeter
-  if (Math.abs(x) === 3 || Math.abs(y) === 3) {
-    if (x <= -2 || (y === 3 && x === -2)) return "Scrublands";
-    return "Desert Fringe";
+  // ROW Y=-1 (Lower City)
+  if (isNear(-3, -1, 0.5)) return "Basatin al-Gharb (Western Farms)";
+  if (isNear(-2, -1, 0.5)) return "Taht al-Qal'a (Below the Citadel)";
+  if (isNear(-1, -1, 0.5)) return "Al-Shaghour al-Juwwani (Inner Alleys)";
+  if (isNear(0, -1, 0.5)) return "Harat al-Yahud (Jewish Quarter)";
+  if (isNear(1, -1, 0.5)) return "Al-Midan (Caravan District)";
+  if (isNear(2, -1, 0.5)) return "Al-Amin (Eastern Quarter)";
+  if (isNear(3, -1, 0.5)) return "Tariq Tadmur (Palmyra Road)";
+
+  // ROW Y=-2 (Southern Suburbs)
+  if (isNear(-3, -2, 0.5)) return "Tariq Bab al-Saghir (Cemetery Road)";
+  if (isNear(-2, -2, 0.5)) return "Al-Qanawat (Canal District)";
+  if (isNear(-1, -2, 0.5)) return "Al-Shaghour al-Barrani (Outer Shaghour)";
+  if (isNear(0, -2, 0.5)) return "Midan al-Hasa (Gravel Field)";
+  if (isNear(1, -2, 0.5)) return "Tariq Hawran (Hauran Highway)";
+  if (isNear(2, -2, 0.5)) return "Al-Qubaybat (Little Domes)";
+  if (isNear(3, -2, 0.5)) return "Al-Ghouta al-Janubiyya (South Ghouta)";
+
+  // ROW Y=-3 (Far South - Roads/Farms/Cemeteries)
+  if (isNear(-3, -3, 0.5)) return "Al-Sahara' al-Gharbiyya (Western Waste)";
+  if (isNear(-2, -3, 0.5)) return "Maqbarat Bab al-Saghir (Ancient Cemetery)";
+  if (isNear(-1, -3, 0.5)) return "Tariq Daraya (Daraya Road)";
+  if (isNear(0, -3, 0.5)) return "Turbat al-Mamalik (Mamluk Tombs)";
+  if (isNear(1, -3, 0.5)) return "Tariq al-Hajj (Pilgrimage Road)";
+  if (isNear(2, -3, 0.5)) return "Al-Ghouta al-Janubiyya (South Ghouta)";
+  if (isNear(3, -3, 0.5)) return "Al-Badiya al-Sharqiyya (Eastern Desert)";
+
+  // Beyond 7x7 grid - procedural labels based on direction
+  if (Math.abs(x) > 3 || Math.abs(y) > 3) {
+    // Far south - pilgrimage roads
+    if (y <= -4 && Math.abs(x) <= 1) return "Tariq al-Hajj (Pilgrimage Road)";
+    // Far east - desert
+    if (x >= 4) return "Al-Badiya (Syrian Desert)";
+    // Far west - mountains
+    if (x <= -4) return "Jabal al-Gharb (Western Highlands)";
+    // Far north - Ghouta/river
+    if (y >= 4) return "Al-Ghouta (Irrigated Oasis)";
+    // Default
+    return "Damascus Outskirts";
   }
 
-  // Fallback
+  // Fallback (should not be reached)
   return `Damascus Quarter — ${x}, ${y}`;
 };
 
 export type DistrictType =
-  | 'MARKET'
-  | 'WEALTHY'
-  | 'HOVELS'
-  | 'CIVIC'
-  | 'RESIDENTIAL'
-  | 'ALLEYS'
-  | 'JEWISH_QUARTER'
-  | 'CHRISTIAN_QUARTER'
-  | 'UMAYYAD_MOSQUE'
-  | 'SALHIYYA'
-  | 'CEMETERY'
-  | 'OUTSKIRTS_FARMLAND'
-  | 'OUTSKIRTS_DESERT'
-  | 'OUTSKIRTS_SCRUBLAND'
-  | 'ROADSIDE'
-  | 'CARAVANSERAI'
-  | 'MOUNTAIN_SHRINE'
-  | 'SOUTHERN_ROAD'
-  | 'STRAIGHT_STREET'
-  | 'SOUQ_AXIS'
-  | 'MIDAN'
-  | 'BAB_SHARQI';
+  // Core districts (kept for compatibility)
+  | 'MARKET'              // Al-Buzuriyah - central spice/grain souq
+  | 'WEALTHY'             // Souq Sarouja - Mamluk officers' quarter
+  | 'HOVELS'              // Midan al-Hasa - poor southern district
+  | 'CIVIC'               // The Citadel - Mamluk fortress
+  | 'RESIDENTIAL'         // Generic residential (used for fallback)
+  | 'ALLEYS'              // Al-Shaghour al-Juwwani - inner working-class
+  | 'JEWISH_QUARTER'      // Harat al-Yahud
+  | 'CHRISTIAN_QUARTER'   // Bab Touma
+  | 'UMAYYAD_MOSQUE'      // Great Mosque
+  | 'SALHIYYA'            // Al-Salihiyya - scholarly quarter
+  | 'CEMETERY'            // Bab al-Saghir Cemetery / Mamluk Tombs
+  | 'OUTSKIRTS_FARMLAND'  // Ghouta orchards
+  | 'OUTSKIRTS_DESERT'    // Eastern badlands
+  | 'OUTSKIRTS_SCRUBLAND' // Western rocky scrub
+  | 'ROADSIDE'            // Generic roadside (used outside grid)
+  | 'CARAVANSERAI'        // Khan al-Harir / Taht al-Qal'a
+  | 'MOUNTAIN_SHRINE'     // Maqam Ibrahim on Qassioun
+  | 'SOUTHERN_ROAD'       // Hauran Highway / Hajj Road
+  | 'STRAIGHT_STREET'     // Via Recta
+  | 'SOUQ_AXIS'           // Al-Hamidiyya Souq corridor
+  | 'MIDAN'               // Al-Midan gate district
+  | 'BAB_SHARQI'          // Eastern Gate district
+  // New historical districts for 7x7 grid
+  | 'QAYMARIYYA'          // Wealthy quarter near mosque
+  | 'AMARA'               // Central residential near mosque
+  | 'QUBAYBAT'            // "Little Domes" - tombs area
+  | 'QANAWAT'             // Canal district, irrigation
+  | 'SHAGHOUR_OUTER'      // Al-Shaghour al-Barrani - outer suburb
+  | 'AMIN'                // Eastern Jewish quarter edge
+  | 'LOWER_SALHIYYA'      // Lower slopes of Salihiyya
+  | 'BAB_FARADIS'         // Paradise Gate district
+  | 'RABWE'               // River gorge with gardens
+  | 'UQAYBA'              // Northern suburb
+  | 'DARAYA_ROAD'         // Road to Daraya village
+  | 'JABIYA_ROAD'         // Western approach to Bab al-Jabiya
+  | 'QASSIOUN_CAVES'      // Sacred caves on holy mountain
+  | 'NORTH_GHOUTA'        // Northern irrigated farmland
+  | 'SOUTH_GHOUTA'        // Southern irrigated farmland
+  | 'EAST_GHOUTA';        // Eastern orchards
 
 /**
  * Helper: Check if coordinate is within radius of a point (handles fractional coordinates)
@@ -1114,10 +1194,14 @@ const hashToUnit = (x: number, y: number, seed = 0): number => {
 
 /**
  * Get district type based on map coordinates
- * 7x7 grid with exact tile mapping (radius 0.5 = one tile per district)
- * Outer perimeter: Desert and Scrubland
- * Inner 5x5: Historical Damascus districts
- * Geography: West = mountains/scrubland, East = desert, North = Qassioun slopes, South = plains
+ * 7x7 grid with exact tile mapping based on historical 14th century Damascus geography
+ *
+ * Geography:
+ * - North (Y=+3): Barada River gorge, Mt. Qassioun slopes
+ * - South (Y=-3): Roads to Hauran/Mecca, cemeteries, farms
+ * - West (X=-3): Mountain foothills, scrubland
+ * - East (X=+3): Ghouta oasis edge, turning to desert
+ * - Center: Old walled city with souqs, quarters, citadel
  */
 export const getDistrictType = (mapX: number, mapY: number): DistrictType => {
   const tileX = Math.round(mapX);
@@ -1125,34 +1209,36 @@ export const getDistrictType = (mapX: number, mapY: number): DistrictType => {
   const absX = Math.abs(tileX);
   const absY = Math.abs(tileY);
 
-  // Beyond outer perimeter: geographic bias with roads + mixed outskirts
+  // Beyond 7x7 grid: procedurally generated outskirts with geographic bias
   if (absX > 3 || absY > 3) {
-    if (tileX === 1 && tileY <= -3) return 'SOUTHERN_ROAD';
+    // Southern road continues beyond grid
+    if (tileX === 1 && tileY <= -4) return 'SOUTHERN_ROAD';
 
     let desert = 0.22;
     let scrub = 0.45;
     let farm = 0.2;
     let hovels = 0.13;
 
+    // Eastern = more desert
     if (tileX >= 4) {
-      desert += 0.2;
+      desert += 0.25;
       scrub -= 0.1;
       farm -= 0.05;
     }
+    // Western = more scrubland/mountains
     if (tileX <= -4) {
-      scrub += 0.15;
-      desert -= 0.08;
+      scrub += 0.2;
+      desert -= 0.1;
     }
+    // Far north/south = more farms (Ghouta extends)
     if (tileY >= 4 || tileY <= -4) {
-      farm += 0.08;
-      desert -= 0.04;
-      scrub -= 0.04;
+      farm += 0.1;
+      desert -= 0.05;
+      scrub -= 0.05;
     }
-    if (Math.abs(tileX - 1) <= 1 && tileY <= -3) {
-      hovels += 0.08;
-    }
-    if (tileY >= 4 || tileY <= -4) {
-      hovels += 0.04;
+    // Near southern roads = some hovels/settlements
+    if (Math.abs(tileX - 1) <= 1 && tileY <= -4) {
+      hovels += 0.1;
     }
 
     desert = Math.max(0.05, desert);
@@ -1167,61 +1253,72 @@ export const getDistrictType = (mapX: number, mapY: number): DistrictType => {
     return 'OUTSKIRTS_DESERT';
   }
 
-  // OUTER PERIMETER (7x7 grid edges) - Ghouta belt + desert/foothills
-  if (absX === 3 || absY === 3) {
-    const edgeRoll = hashToUnit(tileX, tileY, 7);
+  // ============================================
+  // HISTORICAL 7x7 GRID - 14th Century Damascus
+  // ============================================
 
-    if (tileX === -3) return 'OUTSKIRTS_SCRUBLAND';
-    if (tileX === 3) return edgeRoll < 0.7 ? 'OUTSKIRTS_DESERT' : 'OUTSKIRTS_SCRUBLAND';
-    if (tileY === 3) {
-      // Cemetery (Qabristan) north of city near Bab al-Faradis gate
-      if (tileX === 0) return 'CEMETERY';
-      if (tileX <= -2) return 'OUTSKIRTS_SCRUBLAND';
-      if (edgeRoll < 0.12) return 'HOVELS';
-      return 'OUTSKIRTS_FARMLAND';
-    }
-    if (tileY === -3) {
-      if (tileX === 1) return 'SOUTHERN_ROAD';
-      if (edgeRoll < 0.15) return 'HOVELS';
-      return edgeRoll < 0.75 ? 'OUTSKIRTS_FARMLAND' : 'OUTSKIRTS_SCRUBLAND';
-    }
-  }
+  // ROW Y=+3 (Far North - River/Mountain Slopes)
+  if (isNearPoint(mapX, -3, mapY, 3, 0.5)) return 'QASSIOUN_CAVES';      // Sacred caves on holy mountain
+  if (isNearPoint(mapX, -2, mapY, 3, 0.5)) return 'RABWE';               // Upper Rabwe - steep ravine with mills
+  if (isNearPoint(mapX, -1, mapY, 3, 0.5)) return 'RABWE';               // Rabwe Gardens - irrigated orchards
+  if (isNearPoint(mapX, 0, mapY, 3, 0.5)) return 'NORTH_GHOUTA';         // Barada Crossing - river ford
+  if (isNearPoint(mapX, 1, mapY, 3, 0.5)) return 'UQAYBA';               // Al-'Uqayba - northern suburb (11th c.)
+  if (isNearPoint(mapX, 2, mapY, 3, 0.5)) return 'BAB_FARADIS';          // Road to Paradise Gate
+  if (isNearPoint(mapX, 3, mapY, 3, 0.5)) return 'EAST_GHOUTA';          // Eastern orchards, turning arid
 
-  // INNER 5x5 GRID - Named districts and connectors
-  // Y=2 row (northern districts)
-  if (isNearPoint(mapX, -2, mapY, 2, 0.5)) return 'MOUNTAIN_SHRINE';
-  if (isNearPoint(mapX, -1, mapY, 2, 0.5)) return 'SALHIYYA';
-  if (isNearPoint(mapX, 0, mapY, 2, 0.5)) return 'UMAYYAD_MOSQUE';
-  if (isNearPoint(mapX, 1, mapY, 2, 0.5)) return 'ROADSIDE';
-  if (isNearPoint(mapX, 2, mapY, 2, 0.5)) return 'STRAIGHT_STREET';
+  // ROW Y=+2 (North - Religious/Scholarly Quarter)
+  if (isNearPoint(mapX, -3, mapY, 2, 0.5)) return 'OUTSKIRTS_SCRUBLAND'; // Mountain approach
+  if (isNearPoint(mapX, -2, mapY, 2, 0.5)) return 'MOUNTAIN_SHRINE';     // Maqam Ibrahim on Qassioun
+  if (isNearPoint(mapX, -1, mapY, 2, 0.5)) return 'SALHIYYA';            // Al-Salihiyya - scholarly quarter
+  if (isNearPoint(mapX, 0, mapY, 2, 0.5)) return 'UMAYYAD_MOSQUE';       // Great Mosque of Damascus
+  if (isNearPoint(mapX, 1, mapY, 2, 0.5)) return 'QAYMARIYYA';           // Wealthy quarter near mosque
+  if (isNearPoint(mapX, 2, mapY, 2, 0.5)) return 'BAB_FARADIS';          // Paradise Gate district
+  if (isNearPoint(mapX, 3, mapY, 2, 0.5)) return 'NORTH_GHOUTA';         // Irrigated farmland north of walls
 
-  // Y=1 row
-  if (isNearPoint(mapX, -2, mapY, 1, 0.5)) return 'SALHIYYA';
-  if (isNearPoint(mapX, -1, mapY, 1, 0.5)) return 'WEALTHY';
-  if (isNearPoint(mapX, 0, mapY, 1, 0.5)) return 'SOUQ_AXIS';
-  if (isNearPoint(mapX, 1, mapY, 1, 0.5)) return 'RESIDENTIAL';
-  if (isNearPoint(mapX, 2, mapY, 1, 0.5)) return 'BAB_SHARQI';
+  // ROW Y=+1 (Upper City)
+  if (isNearPoint(mapX, -3, mapY, 1, 0.5)) return 'OUTSKIRTS_SCRUBLAND'; // Mountain path to Salihiyya
+  if (isNearPoint(mapX, -2, mapY, 1, 0.5)) return 'LOWER_SALHIYYA';      // Lower Salihiyya - Hanbali mosques
+  if (isNearPoint(mapX, -1, mapY, 1, 0.5)) return 'WEALTHY';             // Souq Sarouja - Mamluk officers' quarter
+  if (isNearPoint(mapX, 0, mapY, 1, 0.5)) return 'SOUQ_AXIS';            // Al-Hamidiyya Souq corridor
+  if (isNearPoint(mapX, 1, mapY, 1, 0.5)) return 'AMARA';                // Al-Amara - central residential
+  if (isNearPoint(mapX, 2, mapY, 1, 0.5)) return 'BAB_SHARQI';           // Eastern Gate district
+  if (isNearPoint(mapX, 3, mapY, 1, 0.5)) return 'EAST_GHOUTA';          // Ghouta orchards east of walls
 
-  // Y=0 row (central districts)
-  if (isNearPoint(mapX, -2, mapY, 0, 0.5)) return 'CARAVANSERAI';
-  if (isNearPoint(mapX, -1, mapY, 0, 0.5)) return 'CIVIC';
-  if (isNearPoint(mapX, 0, mapY, 0, 0.5)) return 'MARKET';
-  if (isNearPoint(mapX, 1, mapY, 0, 0.5)) return 'STRAIGHT_STREET';
-  if (isNearPoint(mapX, 2, mapY, 0, 0.5)) return 'CHRISTIAN_QUARTER';
+  // ROW Y=0 (Central - Via Recta / Main Axis)
+  if (isNearPoint(mapX, -3, mapY, 0, 0.5)) return 'JABIYA_ROAD';         // Western approach to Bab al-Jabiya
+  if (isNearPoint(mapX, -2, mapY, 0, 0.5)) return 'CARAVANSERAI';        // Khan al-Harir - silk caravanserai
+  if (isNearPoint(mapX, -1, mapY, 0, 0.5)) return 'CIVIC';               // The Citadel - Mamluk fortress
+  if (isNearPoint(mapX, 0, mapY, 0, 0.5)) return 'MARKET';               // Al-Buzuriyah - central souq
+  if (isNearPoint(mapX, 1, mapY, 0, 0.5)) return 'STRAIGHT_STREET';      // Via Recta with colonnades
+  if (isNearPoint(mapX, 2, mapY, 0, 0.5)) return 'CHRISTIAN_QUARTER';    // Bab Touma - Christian quarter
+  if (isNearPoint(mapX, 3, mapY, 0, 0.5)) return 'OUTSKIRTS_DESERT';     // Eastern Badiya - desert fringe
 
-  // Y=-1 row
-  if (isNearPoint(mapX, -2, mapY, -1, 0.5)) return 'CARAVANSERAI';
-  if (isNearPoint(mapX, -1, mapY, -1, 0.5)) return 'ALLEYS';
-  if (isNearPoint(mapX, 0, mapY, -1, 0.5)) return 'JEWISH_QUARTER';
-  if (isNearPoint(mapX, 1, mapY, -1, 0.5)) return 'MIDAN';
-  if (isNearPoint(mapX, 2, mapY, -1, 0.5)) return 'ROADSIDE';
+  // ROW Y=-1 (Lower City)
+  if (isNearPoint(mapX, -3, mapY, -1, 0.5)) return 'OUTSKIRTS_FARMLAND'; // Western farms
+  if (isNearPoint(mapX, -2, mapY, -1, 0.5)) return 'CARAVANSERAI';       // Taht al-Qal'a - below citadel
+  if (isNearPoint(mapX, -1, mapY, -1, 0.5)) return 'ALLEYS';             // Al-Shaghour al-Juwwani - inner alleys
+  if (isNearPoint(mapX, 0, mapY, -1, 0.5)) return 'JEWISH_QUARTER';      // Harat al-Yahud
+  if (isNearPoint(mapX, 1, mapY, -1, 0.5)) return 'MIDAN';               // Al-Midan - southern gate district
+  if (isNearPoint(mapX, 2, mapY, -1, 0.5)) return 'AMIN';                // Al-Amin - eastern Jewish quarter edge
+  if (isNearPoint(mapX, 3, mapY, -1, 0.5)) return 'OUTSKIRTS_DESERT';    // Desert road to Palmyra
 
-  // Y=-2 row (southern districts)
-  if (isNearPoint(mapX, -2, mapY, -2, 0.5)) return 'ROADSIDE';
-  if (isNearPoint(mapX, -1, mapY, -2, 0.5)) return 'RESIDENTIAL';
-  if (isNearPoint(mapX, 0, mapY, -2, 0.5)) return 'HOVELS';
-  if (isNearPoint(mapX, 1, mapY, -2, 0.5)) return 'SOUTHERN_ROAD';
-  if (isNearPoint(mapX, 2, mapY, -2, 0.5)) return 'ROADSIDE';
+  // ROW Y=-2 (Southern Suburbs)
+  if (isNearPoint(mapX, -3, mapY, -2, 0.5)) return 'OUTSKIRTS_SCRUBLAND';// Bab al-Saghir Road approach
+  if (isNearPoint(mapX, -2, mapY, -2, 0.5)) return 'QANAWAT';            // Al-Qanawat - canal district
+  if (isNearPoint(mapX, -1, mapY, -2, 0.5)) return 'SHAGHOUR_OUTER';     // Al-Shaghour al-Barrani - outer suburb
+  if (isNearPoint(mapX, 0, mapY, -2, 0.5)) return 'HOVELS';              // Midan al-Hasa - "Gravel Field"
+  if (isNearPoint(mapX, 1, mapY, -2, 0.5)) return 'SOUTHERN_ROAD';       // Hauran Highway
+  if (isNearPoint(mapX, 2, mapY, -2, 0.5)) return 'QUBAYBAT';            // Al-Qubaybat - "Little Domes" tombs
+  if (isNearPoint(mapX, 3, mapY, -2, 0.5)) return 'SOUTH_GHOUTA';        // Fertile orchards, apricots
+
+  // ROW Y=-3 (Far South - Roads/Farms/Cemeteries)
+  if (isNearPoint(mapX, -3, mapY, -3, 0.5)) return 'OUTSKIRTS_SCRUBLAND';// Western scrubland
+  if (isNearPoint(mapX, -2, mapY, -3, 0.5)) return 'CEMETERY';           // Bab al-Saghir Cemetery
+  if (isNearPoint(mapX, -1, mapY, -3, 0.5)) return 'DARAYA_ROAD';        // Road to Daraya village
+  if (isNearPoint(mapX, 0, mapY, -3, 0.5)) return 'CEMETERY';            // Mamluk Tombs - funerary complexes
+  if (isNearPoint(mapX, 1, mapY, -3, 0.5)) return 'SOUTHERN_ROAD';       // Hajj Road - pilgrimage to Mecca
+  if (isNearPoint(mapX, 2, mapY, -3, 0.5)) return 'SOUTH_GHOUTA';        // Lower Ghouta - irrigated farms
+  if (isNearPoint(mapX, 3, mapY, -3, 0.5)) return 'OUTSKIRTS_DESERT';    // Desert edge
 
   // Fallback (should rarely be reached with 0.5 radius)
   return 'RESIDENTIAL';

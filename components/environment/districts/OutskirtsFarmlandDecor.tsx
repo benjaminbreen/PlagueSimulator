@@ -240,7 +240,9 @@ export const getFarmlandLandmarks = (mapX: number, mapY: number): Array<{ x: num
 
 export const OutskirtsFarmlandDecor: React.FC<{ mapX: number; mapY: number; timeOfDay?: number }> = ({ mapX, mapY, timeOfDay }) => {
   const district = getDistrictType(mapX, mapY);
-  if (district !== 'OUTSKIRTS_FARMLAND') return null;
+  // Include all Ghouta districts - the famous irrigated orchards surrounding Damascus
+  // RABWE is the river gorge with mills and orchards; NORTH_GHOUTA is northern irrigated farmland
+  if (district !== 'OUTSKIRTS_FARMLAND' && district !== 'EAST_GHOUTA' && district !== 'SOUTH_GHOUTA' && district !== 'NORTH_GHOUTA' && district !== 'RABWE') return null;
 
   const layout = useMemo(() => buildFarmlandLayout(mapX, mapY), [mapX, mapY]);
   const waterwheelRef = useRef<THREE.Group>(null);

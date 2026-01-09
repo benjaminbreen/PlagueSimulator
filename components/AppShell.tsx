@@ -66,6 +66,7 @@ interface AppShellProps {
   onTriggerEnterViaRooftopHatch?: () => void;
   nearBirdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null;
   onTriggerOpenBirdcage?: () => void;
+  nearReadable: { id: string; position: any; epitaph: any } | null;
   showEncounterModal: boolean;
   showPlayerModal: boolean;
   showEnterModalActive: boolean;
@@ -99,6 +100,7 @@ interface AppShellProps {
   // Treatment outcome modal
   treatmentOutcome: TreatmentOutcome | null;
   onCloseTreatmentOutcome: () => void;
+  startLocationLabel?: string;
 }
 
 export const AppShell = React.memo(({
@@ -138,6 +140,7 @@ export const AppShell = React.memo(({
   onTriggerEnterViaRooftopHatch,
   nearBirdcage,
   onTriggerOpenBirdcage,
+  nearReadable,
   showEncounterModal,
   showPlayerModal,
   showEnterModalActive,
@@ -167,7 +170,8 @@ export const AppShell = React.memo(({
   onTriggerMedicalTreatment,
   playerSkinTone,
   treatmentOutcome,
-  onCloseTreatmentOutcome
+  onCloseTreatmentOutcome,
+  startLocationLabel
 }: AppShellProps) => {
   const [showAbout, setShowAbout] = useState(false);
   const [skipIntro, setSkipIntro] = useState(false);
@@ -218,7 +222,7 @@ export const AppShell = React.memo(({
             <p className={`text-amber-200/70 text-sm md:text-base leading-relaxed ${!skipIntro && 'animate-[fadeIn_1s_ease-out_1s_forwards]'}`}
                style={{ fontFamily: 'Lato, Georgia, serif', opacity: skipIntro ? 1 : 0 }}>
               It is {formatTimeOfDay(uiProps.params?.timeOfDay ?? 12)} in the{' '}
-              <span className="text-amber-100">Al-Buzuriyah Souq</span> of Damascus.
+              <span className="text-amber-100">{startLocationLabel ?? 'Damascus'}</span>.
             </p>
             <p className={`text-amber-200/70 text-sm md:text-base leading-relaxed mt-3 ${!skipIntro && 'animate-[fadeIn_1s_ease-out_2s_forwards]'}`}
                style={{ fontFamily: 'Lato, Georgia, serif', opacity: skipIntro ? 1 : 0 }}>
@@ -575,6 +579,14 @@ export const AppShell = React.memo(({
           <span className="hidden md:inline opacity-60 mr-1">[O]</span>
           Open {nearBirdcage.label}
         </button>
+      )}
+
+      {/* Readable Gravestone Prompt - outdoor only */}
+      {!observeMode && sceneMode === 'outdoor' && nearReadable && !nearChest && !nearBirdcage && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
+        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto select-none animate-pulse">
+          <span className="hidden md:inline opacity-60 mr-1">[R]</span>
+          Read Inscription
+        </div>
       )}
 
       <ObserveController

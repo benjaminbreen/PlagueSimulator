@@ -43,6 +43,17 @@
       /* Better touch behavior */
       * { -webkit-tap-highlight-color: transparent; }
       button, a, [role="button"] { touch-action: manipulation; }
+
+      /* Debug: disable UI blur for perf testing */
+      .no-ui-blur .backdrop-blur,
+      .no-ui-blur .backdrop-blur-sm,
+      .no-ui-blur .backdrop-blur-md,
+      .no-ui-blur .backdrop-blur-lg,
+      .no-ui-blur .backdrop-blur-xl,
+      .no-ui-blur .backdrop-blur-2xl {
+        -webkit-backdrop-filter: none !important;
+        backdrop-filter: none !important;
+      }
     </style>
   <script type="importmap">
 {

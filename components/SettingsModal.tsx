@@ -449,15 +449,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 />
               </label>
               <label className="flex items-center justify-between">
-                <span className="text-amber-300/80">Clouds</span>
-                <input
-                  type="checkbox"
-                  checked={devSettings.showClouds}
-                  onChange={(e) => setDevSettings(prev => ({ ...prev, showClouds: e.target.checked }))}
-                  className="accent-amber-600"
-                />
-              </label>
-              <label className="flex items-center justify-between">
                 <span className="text-amber-300/80">Fog</span>
                 <input
                   type="checkbox"

@@ -1427,54 +1427,54 @@ const buildHeadwearPick = (
       options.push(
         // Khimar options (structured, tight wrapping)
         { desc: 'white linen khimar', color: muslimColors.white, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'cream khimar with simple band', color: muslimColors.cream, garmentType: 'khimar', pattern: 'band', accent: muslimColors.white },
-        { desc: 'pale khimar with subtle weave', color: muslimColors.paleBeige, garmentType: 'khimar', pattern: 'simple', accent: muslimColors.cream },
-        { desc: 'beige khimar in natural linen', color: muslimColors.beige, garmentType: 'khimar', pattern: 'none' },
+        { desc: 'cream khimar with decorative band', color: muslimColors.cream, garmentType: 'khimar', pattern: 'band', accent: muslimColors.brown },
+        { desc: 'pale khimar with woven diamond pattern', color: muslimColors.paleBeige, garmentType: 'khimar', pattern: 'simple', accent: muslimColors.darkBrown },
+        { desc: 'beige khimar with subtle damask', color: muslimColors.beige, garmentType: 'khimar', pattern: 'simple', accent: muslimColors.brown },
 
         // Milhafa options (flowing, North African style)
         { desc: 'white cotton milhafa', color: muslimColors.white, garmentType: 'milhafa', pattern: 'none' },
-        { desc: 'flowing milhafa in cream', color: muslimColors.cream, garmentType: 'milhafa', pattern: 'none' },
-        { desc: 'natural linen milhafa', color: muslimColors.paleBeige, garmentType: 'milhafa', pattern: 'simple', accent: muslimColors.white },
+        { desc: 'flowing milhafa with diamond weave', color: muslimColors.cream, garmentType: 'milhafa', pattern: 'simple', accent: muslimColors.tan },
+        { desc: 'natural linen milhafa with pattern', color: muslimColors.paleBeige, garmentType: 'milhafa', pattern: 'simple', accent: muslimColors.brown },
 
         // Hijab options (simple, contemporary style)
         { desc: 'white headscarf', color: muslimColors.white, garmentType: 'hijab', pattern: 'none' },
-        { desc: 'cream linen headscarf', color: muslimColors.cream, garmentType: 'hijab', pattern: 'none' },
-        { desc: 'modest headscarf with band', color: muslimColors.paleBeige, garmentType: 'hijab', pattern: 'band', accent: muslimColors.white }
+        { desc: 'cream headscarf with damask', color: muslimColors.cream, garmentType: 'hijab', pattern: 'simple', accent: muslimColors.tan },
+        { desc: 'modest headscarf with band', color: muslimColors.paleBeige, garmentType: 'hijab', pattern: 'band', accent: muslimColors.brown }
       );
     } else if (isChristian) {
       // Christian women - must wear BLUE by Mamluk law
       options.push(
         { desc: 'blue linen khimar', color: christianColors.lightBlue, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'deep blue khimar', color: christianColors.deepBlue, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'blue khimar with pale band', color: christianColors.mediumBlue, garmentType: 'khimar', pattern: 'band', accent: christianColors.lightBlue },
-        { desc: 'indigo khimar', color: christianColors.indigo, garmentType: 'khimar', pattern: 'simple', accent: christianColors.lightBlue },
-        { desc: 'blue cotton milhafa', color: christianColors.lightBlue, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'deep blue khimar with damask', color: christianColors.deepBlue, garmentType: 'khimar', pattern: 'simple', accent: '#a8b8c8' },
+        { desc: 'blue khimar with pale band', color: christianColors.mediumBlue, garmentType: 'khimar', pattern: 'band', accent: '#c8d8e8' },
+        { desc: 'indigo khimar with diamond pattern', color: christianColors.indigo, garmentType: 'khimar', pattern: 'simple', accent: '#8aa0b8' },
+        { desc: 'blue milhafa with woven pattern', color: christianColors.lightBlue, garmentType: 'milhafa', pattern: 'simple', accent: '#4a6a8a' },
         { desc: 'deep blue milhafa', color: christianColors.deepBlue, garmentType: 'milhafa', pattern: 'none' },
-        { desc: 'blue headscarf', color: christianColors.mediumBlue, garmentType: 'hijab', pattern: 'none' },
+        { desc: 'blue headscarf with damask', color: christianColors.mediumBlue, garmentType: 'hijab', pattern: 'simple', accent: '#a8c0d0' },
         { desc: 'light blue headscarf', color: christianColors.lightBlue, garmentType: 'hijab', pattern: 'none' }
       );
     } else if (isJewish) {
       // Jewish women - must wear YELLOW by Mamluk law
       options.push(
         { desc: 'saffron yellow khimar', color: jewishColors.saffron, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'golden khimar', color: jewishColors.golden, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'pale yellow khimar with band', color: jewishColors.paleYellow, garmentType: 'khimar', pattern: 'band', accent: jewishColors.golden },
-        { desc: 'amber khimar', color: jewishColors.amber, garmentType: 'khimar', pattern: 'simple', accent: jewishColors.saffron },
-        { desc: 'yellow cotton milhafa', color: jewishColors.saffron, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'golden khimar with damask', color: jewishColors.golden, garmentType: 'khimar', pattern: 'simple', accent: '#8a6a30' },
+        { desc: 'pale yellow khimar with band', color: jewishColors.paleYellow, garmentType: 'khimar', pattern: 'band', accent: '#a08040' },
+        { desc: 'amber khimar with diamond pattern', color: jewishColors.amber, garmentType: 'khimar', pattern: 'simple', accent: '#7a5a28' },
+        { desc: 'yellow milhafa with woven pattern', color: jewishColors.saffron, garmentType: 'milhafa', pattern: 'simple', accent: '#8a6830' },
         { desc: 'golden milhafa', color: jewishColors.golden, garmentType: 'milhafa', pattern: 'none' },
-        { desc: 'yellow headscarf', color: jewishColors.saffron, garmentType: 'hijab', pattern: 'none' },
+        { desc: 'yellow headscarf with damask', color: jewishColors.saffron, garmentType: 'hijab', pattern: 'simple', accent: '#a08040' },
         { desc: 'pale yellow headscarf', color: jewishColors.paleYellow, garmentType: 'hijab', pattern: 'none' }
       );
     } else if (isSamaritan) {
       // Samaritan women - must wear RED by Mamluk law
       options.push(
         { desc: 'red linen khimar', color: samaritanColors.red, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'crimson khimar', color: samaritanColors.crimson, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'light red khimar', color: samaritanColors.lightRed, garmentType: 'khimar', pattern: 'none' },
-        { desc: 'deep red khimar', color: samaritanColors.deepRed, garmentType: 'khimar', pattern: 'simple', accent: samaritanColors.lightRed },
-        { desc: 'red cotton milhafa', color: samaritanColors.red, garmentType: 'milhafa', pattern: 'none' },
+        { desc: 'crimson khimar with damask', color: samaritanColors.crimson, garmentType: 'khimar', pattern: 'simple', accent: '#d8a8a0' },
+        { desc: 'light red khimar with pattern', color: samaritanColors.lightRed, garmentType: 'khimar', pattern: 'simple', accent: '#5a2a22' },
+        { desc: 'deep red khimar with diamond weave', color: samaritanColors.deepRed, garmentType: 'khimar', pattern: 'simple', accent: '#c89080' },
+        { desc: 'red milhafa with woven pattern', color: samaritanColors.red, garmentType: 'milhafa', pattern: 'simple', accent: '#5a3030' },
         { desc: 'crimson milhafa', color: samaritanColors.crimson, garmentType: 'milhafa', pattern: 'none' },
-        { desc: 'red headscarf', color: samaritanColors.red, garmentType: 'hijab', pattern: 'none' }
+        { desc: 'red headscarf with damask', color: samaritanColors.red, garmentType: 'hijab', pattern: 'simple', accent: '#c8a090' }
       );
     }
 
@@ -1834,7 +1834,7 @@ export const generateNPCStats = (seed: number, context?: { districtType?: Distri
     }
   }
 
-  const headwearPick = buildHeadwearPick(rand, gender, headwearStyle, { isReligiousLeader, isSoldier, isOfficer }, socialClass, religion);
+  let headwearPick = buildHeadwearPick(rand, gender, headwearStyle, { isReligiousLeader, isSoldier, isOfficer }, socialClass, religion);
   const headwearColor = headwearPick.color;
   const headwearGarmentType = gender === 'Female' ? (headwearPick.garmentType ?? 'hijab') : undefined;
   const headscarfPattern = gender === 'Female' ? (headwearPick.pattern ?? 'none') : undefined;

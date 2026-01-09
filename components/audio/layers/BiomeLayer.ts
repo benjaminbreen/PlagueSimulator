@@ -19,27 +19,51 @@ import { getSharedNoiseBuffer } from '../synthesis/NoiseGenerators';
 // Biome type for sound grouping
 type BiomeType = 'marketplace' | 'wealthy' | 'hovels' | 'desert' | 'civic';
 
-// Map 12 districts to 5 biome profiles
+// Map all districts to 5 biome profiles
 const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
+  // Marketplace biome - busy commercial areas
   MARKET: 'marketplace',
   CARAVANSERAI: 'marketplace',
   STRAIGHT_STREET: 'marketplace',
   SOUQ_AXIS: 'marketplace',
   MIDAN: 'marketplace',
   BAB_SHARQI: 'marketplace',
+  BAB_FARADIS: 'marketplace',
+  AMARA: 'marketplace',
+  // Wealthy biome - refined, peaceful areas
   WEALTHY: 'wealthy',
   SALHIYYA: 'wealthy',
+  CHRISTIAN_QUARTER: 'wealthy',
+  QAYMARIYYA: 'wealthy',
+  LOWER_SALHIYYA: 'wealthy',
+  // Hovels biome - dense, poor areas
   HOVELS: 'hovels',
   ALLEYS: 'hovels',
-  JEWISH_QUARTER: 'hovels',  // TODO: Add specific Jewish Quarter soundscape in Phase 6
+  JEWISH_QUARTER: 'hovels',
   RESIDENTIAL: 'hovels',
+  SHAGHOUR_OUTER: 'hovels',
+  AMIN: 'hovels',
+  QANAWAT: 'hovels',
+  UQAYBA: 'hovels',
+  ROADSIDE: 'hovels',
+  // Desert biome - open, sparse areas
   OUTSKIRTS_DESERT: 'desert',
   OUTSKIRTS_FARMLAND: 'desert',
+  OUTSKIRTS_SCRUBLAND: 'desert',
   SOUTHERN_ROAD: 'desert',
   MOUNTAIN_SHRINE: 'desert',
+  RABWE: 'desert',
+  DARAYA_ROAD: 'desert',
+  JABIYA_ROAD: 'desert',
+  QASSIOUN_CAVES: 'desert',
+  NORTH_GHOUTA: 'desert',
+  SOUTH_GHOUTA: 'desert',
+  EAST_GHOUTA: 'desert',
+  // Civic biome - formal, imposing areas
   CIVIC: 'civic',
-  CHRISTIAN_QUARTER: 'wealthy',
   UMAYYAD_MOSQUE: 'civic',
+  CEMETERY: 'civic',
+  QUBAYBAT: 'civic',
 };
 
 // Sound configuration per biome

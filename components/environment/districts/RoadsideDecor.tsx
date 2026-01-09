@@ -10,7 +10,8 @@ import { seededRandom } from '../../../utils/procedural';
 
 export const RoadsideDecor: React.FC<{ mapX: number; mapY: number }> = ({ mapX, mapY }) => {
   const district = getDistrictType(mapX, mapY);
-  if (district !== 'ROADSIDE') return null;
+  // JABIYA_ROAD is the western approach to Bab al-Jabiya gate
+  if (district !== 'ROADSIDE' && district !== 'JABIYA_ROAD') return null;
 
   const seed = mapX * 73 + mapY * 137;
   const rand = (offset: number) => seededRandom(seed + offset);

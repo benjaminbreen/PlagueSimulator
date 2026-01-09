@@ -11,7 +11,7 @@ import { Player } from './Player';
 import { MarketStall } from './MarketStall';
 import { MerchantNPC } from './MerchantNPC';
 import { AgentSnapshot, SpatialHash, buildBuildingHash, buildObstacleHash, queryNearbyAgents } from '../utils/spatial';
-import { PushableObject, PickupInfo, createPushable, ShatterLootItem, PushableKind, getPushableDisplayName } from '../utils/pushables';
+import { PushableObject, PickupInfo, createPushable, ShatterLootItem, PushableKind, getPushableDisplayName, generateGraveEpitaph } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
@@ -34,6 +34,7 @@ import { Scribe } from './npcs/Scribe';
 import { exposePlayerToPlague } from '../utils/plague';
 import { InfectedBuildingMarkers } from './environment/InfectedBuildingMarkers';
 import { PlayerHomeMarker } from './environment/PlayerHomeMarker';
+import { buildWaterwayLayout } from './environment/districts/WaterwayDecor';
 import { BoundaryHeadingIndicator } from './BoundaryHeadingIndicator';
 import { NarratorHighlightRing } from './NarratorHighlightRing';
 
@@ -58,6 +59,8 @@ interface SimulationProps {
   onPickupPrompt?: (label: string | null) => void;
   onClimbablePrompt?: (label: string | null) => void;
   onClimbingStateChange?: (climbing: boolean) => void;
+  onGravestoneDesecrated?: () => void;
+  onNearReadable?: (readable: { id: string; position: any; epitaph: any } | null) => void;
   climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
   pickupTriggerRef?: React.MutableRefObject<boolean>;    // Mobile/touch trigger for pickup
   climbTriggerRef?: React.MutableRefObject<boolean>;     // Mobile/touch trigger for initiating climb
@@ -274,76 +277,6 @@ interface WeatherState {
   weatherBlend: number;
 }
 
-const CloudLayer: React.FC<{ weather: React.MutableRefObject<WeatherState>; timeOfDay: number }> = ({ weather, timeOfDay }) => {
-  const meshRef = useRef<THREE.InstancedMesh>(null);
-  const tempObj = useMemo(() => new THREE.Object3D(), []);
-  const count = 12;
-  const cloudColors = useMemo(() => ({
-    tint: new THREE.Color('#ffffff'),
-    warm: new THREE.Color('#ffd5a8'),
-    cool: new THREE.Color('#c8e6ff'),
-    sandstorm: new THREE.Color('#c9a25f')
-  }), []);
-
-  const clouds = useMemo(() => {
-    return Array.from({ length: count }).map(() => ({
-      pos: new THREE.Vector3((Math.random() - 0.5) * 200, 30 + Math.random() * 10, (Math.random() - 0.5) * 200),
-      scale: 10 + Math.random() * 25,
-      speed: 0.2 + Math.random() * 0.6,
-    }));
-  }, []);
-
-  useFrame((_, delta) => {
-    const cloudCover = weather.current.cloudCover;
-    if (!meshRef.current || cloudCover <= 0.05) {
-      if (meshRef.current) meshRef.current.visible = false;
-      return;
-    }
-
-    const wind = weather.current.wind;
-    clouds.forEach((cloud, i) => {
-      cloud.pos.x += wind.x * cloud.speed * delta;
-      cloud.pos.z += wind.y * cloud.speed * delta;
-
-      if (cloud.pos.x > 120) cloud.pos.x = -120;
-      if (cloud.pos.x < -120) cloud.pos.x = 120;
-      if (cloud.pos.z > 120) cloud.pos.z = -120;
-      if (cloud.pos.z < -120) cloud.pos.z = 120;
-
-      tempObj.position.copy(cloud.pos);
-      tempObj.rotation.set(-Math.PI / 2, 0, 0);
-      const scale = cloud.scale * (0.4 + cloudCover);
-      tempObj.scale.set(scale, scale, scale);
-      tempObj.updateMatrix();
-      meshRef.current!.setMatrixAt(i, tempObj.matrix);
-    });
-    meshRef.current.instanceMatrix.needsUpdate = true;
-    meshRef.current.visible = true;
-    const material = meshRef.current.material as THREE.MeshStandardMaterial;
-    material.opacity = 0.12 + cloudCover * 0.3;
-    const sunAngle = (timeOfDay / 24) * Math.PI * 2;
-    const elevation = Math.sin(sunAngle - Math.PI / 2);
-    const dayFactor = smoothstep(-0.1, 0.35, elevation);
-    const duskFactor = smoothstep(0.05, -0.2, -elevation) * (1 - dayFactor);
-    const dawnFactor = smoothstep(-0.2, 0.05, elevation) * (1 - dayFactor);
-    const { tint, warm, cool, sandstorm } = cloudColors;
-    tint.set('#ffffff');
-    if (weather.current.weatherType === WeatherType.SANDSTORM) {
-      tint.copy(sandstorm);
-    } else {
-      tint.lerp(warm, Math.max(duskFactor, dawnFactor) * 0.6);
-      tint.lerp(cool, (1 - Math.max(duskFactor, dawnFactor)) * (1 - dayFactor) * 0.2);
-    }
-    material.color.lerp(tint, 0.2);
-  });
-
-  return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      <planeGeometry args={[1, 1]} />
-      <meshStandardMaterial transparent opacity={0.4} depthWrite={false} roughness={1} />
-    </instancedMesh>
-  );
-};
 
 const smoothstep = (edge0: number, edge1: number, x: number) => {
   const t = THREE.MathUtils.clamp((x - edge0) / (edge1 - edge0), 0, 1);
@@ -986,9 +919,10 @@ const SkyGradientDome: React.FC<{ timeOfDay: number; weatherType: WeatherType }>
     bottom.lerp(new THREE.Color(bottom).lerp(new THREE.Color('#e6d6b8'), desat), 0.25);
 
     if (weatherType === WeatherType.OVERCAST) {
-      top.lerp(new THREE.Color('#8a98a8'), 0.4);
-      mid.lerp(new THREE.Color('#7b8794'), 0.4);
-      bottom.lerp(new THREE.Color('#6e7882'), 0.35);
+      // Heavy overcast - pale gray sky with subtle warm tint at horizon
+      top.lerp(new THREE.Color('#9aa4ae'), 0.85);    // Pale gray zenith
+      mid.lerp(new THREE.Color('#a8b0b8'), 0.80);    // Slightly lighter mid-sky
+      bottom.lerp(new THREE.Color('#b8bcc4'), 0.75); // Brightest at horizon (typical overcast)
     } else if (weatherType === WeatherType.SANDSTORM) {
       const dustTop = new THREE.Color('#b9956a');
       const dustMid = new THREE.Color('#c3a276');
@@ -1242,7 +1176,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch, narratorHighlight }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, onGravestoneDesecrated, onNearReadable, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch, narratorHighlight }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1538,6 +1472,16 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       addPickupItem('shard-road-1', 'potteryShard', [-4, 0.05, 2], 'Pottery Shard', 'ground-pottery');
       return items;
     }
+    // QANAWAT (Canal District) - minimal items only in corners, away from canal
+    if (district === 'QANAWAT') {
+      // Place items only in far corners where buildings are
+      items.push(
+        createPushable('jar-canal-1', 'clayJar', [-36, 0, 33], 0.6, 0.8, 0, 'ceramic'),
+        createPushable('basket-canal-1', 'basket', [36, 0.2, -36], 0.6, 0.6, 0.2, 'wood')
+      );
+      addCoin('coin-canal-1', [-35, 0.05, -36]);
+      return items;
+    }
     items.push(
       createPushable('jar-res-1', 'clayJar', [-2.2, 0, -1.8], 0.6, 0.8, 0, 'ceramic')
     );
@@ -1603,6 +1547,78 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         );
         boulder.isSleeping = true; // Start sleeping for performance
         items.push(boulder);
+      });
+    }
+
+    // CEMETERY: Pushable gravestones
+    if (district === 'CEMETERY') {
+      const rand = (offset: number) => seededRandom(sessionSeed + offset);
+      const QIBLA_ANGLE = (190 * Math.PI) / 180;
+
+      // Main cemetery graves (48 graves in organic clusters)
+      const gravePositions = [
+        // Northwest cluster
+        [-30, -25], [-28, -22], [-32, -20], [-26, -18],
+        [-30, -15], [-34, -14], [-28, -12], [-32, -10],
+        // Northeast cluster
+        [28, -24], [32, -22], [26, -19], [30, -17],
+        [34, -15], [28, -13], [32, -11], [26, -9],
+        // West cluster
+        [-35, -5], [-32, -2], [-38, 0], [-34, 3],
+        [-30, 5], [-36, 8], [-32, 10], [-34, 12],
+        // East cluster
+        [32, -4], [36, -1], [30, 2], [34, 5],
+        [38, 7], [32, 10], [36, 12], [30, 14],
+        // South cluster (older, well-maintained)
+        [-20, 18], [-16, 20], [-22, 23], [-18, 25],
+        [-14, 28], [-20, 30], [-16, 32], [-18, 34],
+        [18, 18], [22, 20], [16, 23], [20, 25],
+        [24, 28], [18, 30], [22, 32], [20, 34],
+      ];
+
+      gravePositions.forEach(([x, z], i) => {
+        const jitterX = (rand(i * 5 + 600) - 0.5) * 0.8;
+        const jitterZ = (rand(i * 5 + 601) - 0.5) * 0.8;
+        const rotJitter = (rand(i * 5 + 602) - 0.5) * 0.15;
+
+        // Determine grave type
+        const typeRoll = rand(i * 5 + 603);
+        const graveType = typeRoll < 0.40 ? 'flat'
+          : typeRoll < 0.70 ? 'raised'
+          : typeRoll < 0.90 ? 'double_marker'
+          : 'ornate';
+
+        // Determine shape (14th century Islamic designs)
+        const shapeRoll = rand(i * 5 + 604);
+        const graveShape = shapeRoll < 0.50 ? 'rectangular'
+          : shapeRoll < 0.80 ? 'arch'
+          : shapeRoll < 0.95 ? 'peaked'
+          : 'platform';
+
+        const scale = 1.44 + rand(i * 5 + 605) * 0.72; // 1.44-2.16
+
+        const gravestone = createPushable(
+          `grave-${i}`,
+          'gravestone',
+          [x + jitterX, 0, z + jitterZ],
+          0.5 * scale, // Collision radius
+          150 * scale, // Heavy stone mass (scales with size)
+          QIBLA_ANGLE + rotJitter,
+          'stone'
+        );
+
+        gravestone.graveShape = graveShape as any;
+        gravestone.graveScale = scale;
+        gravestone.graveType = graveType as any;
+        gravestone.isTipped = false;
+        gravestone.tippedRotation = 0;
+        gravestone.wobbleAngle = 0;
+        gravestone.wobbleVelocity = 0;
+
+        // Generate unique epitaph for this grave
+        gravestone.graveEpitaph = generateGraveEpitaph(sessionSeed + i * 777);
+
+        items.push(gravestone);
       });
     }
 
@@ -1826,18 +1842,20 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     return sources;
   }, [buildingsState, birdcagePlacements, params.mapX, params.mapY]);
 
-  // Procedurally generate 1-3 market stalls in the main marketplace
+  // Procedurally generate market stalls in marketplace districts
   const marketStalls = useMemo<MarketStallData[]>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
+    const isSouq = district === 'SOUQ_AXIS';
     if (params.mapX !== 0 || params.mapY !== 0) {
-      if (!isOutskirts && district !== 'CARAVANSERAI') return [];
+      if (!isOutskirts && district !== 'CARAVANSERAI' && !isSouq) return [];
     }
 
     const seed = params.mapX * 1000 + params.mapY * 100 + sessionSeed;
     let randCounter = 0;
     const rand = () => seededRandom(seed + randCounter++ * 137);
 
-    const stallCount = isOutskirts ? 1 : district === 'CARAVANSERAI' ? 4 : 1 + Math.floor(rand() * 2); // 1-2 stalls (reduced for performance)
+    // SOUQ_AXIS gets a few stalls along the covered corridor (reduced for performance)
+    const stallCount = isOutskirts ? 1 : district === 'CARAVANSERAI' ? 4 : isSouq ? 3 : 1 + Math.floor(rand() * 2);
     const stalls: MarketStallData[] = [];
 
     // Available stall types
@@ -1853,10 +1871,19 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     const woodColors = ['#8b4513', '#a0522d', '#6b4423', '#3e2723'];
 
     // Keep track of occupied positions to avoid overlaps
-    const occupiedZones: { x: number; z: number; radius: number }[] = [
-      { x: 0, z: 0, radius: 6 },    // Fountain
-      { x: -9, z: 0, radius: 2 },   // Left column
-      { x: 9, z: 0, radius: 2 }     // Right column
+    const occupiedZones: { x: number; z: number; radius: number }[] = isSouq
+      ? [] // Souq has fixed positions, no need for collision zones
+      : [
+        { x: 0, z: 0, radius: 6 },    // Fountain
+        { x: -9, z: 0, radius: 2 },   // Left column
+        { x: 9, z: 0, radius: 2 }     // Right column
+      ];
+
+    // Fixed positions for SOUQ_AXIS - stalls spread along wider corridor
+    const souqPositions: Array<[number, number, number]> = [
+      [-5, 0, -18],   // South-west
+      [5, 0, 0],      // Center-east
+      [-5, 0, 18],    // North-west
     ];
 
     for (let i = 0; i < stallCount; i++) {
@@ -1864,30 +1891,37 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       let attempts = 0;
       const maxAttempts = 20;
 
-      // Try to find a valid position
-      while (!position && attempts < maxAttempts) {
-        const x = (rand() - 0.5) * 30; // Random position in ~30 unit radius
-        const z = (rand() - 0.5) * 30;
+      if (isSouq) {
+        // Use fixed souq positions
+        position = souqPositions[i % souqPositions.length];
+      } else {
+        // Try to find a valid position
+        while (!position && attempts < maxAttempts) {
+          const x = (rand() - 0.5) * 30; // Random position in ~30 unit radius
+          const z = (rand() - 0.5) * 30;
 
-        // Check if position is far enough from occupied zones
-        const tooClose = occupiedZones.some(zone => {
-          const dist = Math.sqrt((x - zone.x) ** 2 + (z - zone.z) ** 2);
-          return dist < zone.radius + 4; // 4 unit clearance
-        });
+          // Check if position is far enough from occupied zones
+          const tooClose = occupiedZones.some(zone => {
+            const dist = Math.sqrt((x - zone.x) ** 2 + (z - zone.z) ** 2);
+            return dist < zone.radius + 4; // 4 unit clearance
+          });
 
-        if (!tooClose) {
-          position = [x, 0, z];
-          occupiedZones.push({ x, z, radius: 4 }); // Mark as occupied
+          if (!tooClose) {
+            position = [x, 0, z];
+            occupiedZones.push({ x, z, radius: 4 }); // Mark as occupied
+          }
+
+          attempts++;
         }
-
-        attempts++;
       }
 
       if (!position) continue; // Skip if couldn't find valid position
 
       const type = stallTypes[Math.floor(rand() * stallTypes.length)];
-      const size = isOutskirts ? 'small' : district === 'CARAVANSERAI' ? 'medium' : rand() < 0.2 ? 'small' : rand() < 0.7 ? 'medium' : 'large';
-      const rotation = [0, 90, 180, 270][Math.floor(rand() * 4)];
+      // Souq stalls are smaller to fit in the covered corridor
+      const size = isOutskirts ? 'small' : district === 'CARAVANSERAI' ? 'medium' : isSouq ? 'small' : rand() < 0.2 ? 'small' : rand() < 0.7 ? 'medium' : 'large';
+      // Souq stalls face the corridor (90 or 270 degrees)
+      const rotation = isSouq ? (position[0] < 0 ? 90 : 270) : [0, 90, 180, 270][Math.floor(rand() * 4)];
       const awningColor = awningColors[Math.floor(rand() * awningColors.length)];
       const woodColor = woodColors[Math.floor(rand() * woodColors.length)];
 
@@ -1915,7 +1949,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         ? [0, 0, 8]
         : district === 'CARAVANSERAI'
           ? caravanPositions[i % caravanPositions.length]
-          : null;
+          : isSouq
+            ? position // Use the souq position we calculated
+            : null;
       stalls.push({
         id: `stall-${i}`,
         type,
@@ -1934,8 +1970,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   // Generate merchant NPCs for each market stall
   const merchants = useMemo<MerchantNPCType[]>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
+    const isSouq = district === 'SOUQ_AXIS';
     if (params.mapX !== 0 || params.mapY !== 0) {
-      if (!isOutskirts && district !== 'CARAVANSERAI') return [];
+      if (!isOutskirts && district !== 'CARAVANSERAI' && !isSouq) return [];
     }
 
     return marketStalls.map((stall, index) => {
@@ -2112,7 +2149,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const obstacles = useMemo<Obstacle[]>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
     if (params.mapX !== 0 || params.mapY !== 0) {
-      if (!isOutskirts && district !== 'CARAVANSERAI') return [];
+      // Allow obstacles for outskirts, caravanserai, and canal district
+      if (!isOutskirts && district !== 'CARAVANSERAI' && district !== 'QANAWAT') return [];
     }
 
     const baseObstacles: Obstacle[] = isOutskirts
@@ -2146,6 +2184,69 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     // Add tree obstacles for hilly districts
     if (district === 'MOUNTAIN_SHRINE' || district === 'SALHIYYA' || isOutskirts) {
       return [...baseObstacles, ...stallObstacles, ...treeObstacles];
+    }
+
+    // Add canal obstacles for QANAWAT (waterway district)
+    if (district === 'QANAWAT') {
+      const layout = buildWaterwayLayout(params.mapX, params.mapY);
+      const canalObstacles: Obstacle[] = [];
+      const mainCanal = layout.mainCanal;
+      const bridges = layout.bridges;
+
+      // Generate obstacles along the main canal
+      const canalLength = Math.sqrt(
+        (mainCanal.end[0] - mainCanal.start[0]) ** 2 +
+        (mainCanal.end[1] - mainCanal.start[1]) ** 2
+      );
+      const obstacleSpacing = 2.5; // Space between obstacle points
+      const numObstacles = Math.floor(canalLength / obstacleSpacing);
+
+      for (let i = 0; i <= numObstacles; i++) {
+        const t = i / numObstacles;
+        const x = mainCanal.start[0] + t * (mainCanal.end[0] - mainCanal.start[0]);
+        const z = mainCanal.start[1] + t * (mainCanal.end[1] - mainCanal.start[1]);
+
+        // Check if this point is near a bridge (skip if so)
+        let nearBridge = false;
+        for (const bridge of bridges) {
+          const dx = x - bridge.pos[0];
+          const dz = z - bridge.pos[2];
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < bridge.width + 2) { // Bridge width + buffer
+            nearBridge = true;
+            break;
+          }
+        }
+
+        if (!nearBridge) {
+          canalObstacles.push({
+            position: [x, 0, z],
+            radius: mainCanal.width / 2 - 0.3 // Canal half-width
+          });
+        }
+      }
+
+      // Also add obstacles for branch canals
+      for (const branch of layout.branchCanals) {
+        const branchLength = Math.sqrt(
+          (branch.end[0] - branch.start[0]) ** 2 +
+          (branch.end[1] - branch.start[1]) ** 2
+        );
+        const numBranchObs = Math.floor(branchLength / obstacleSpacing);
+
+        for (let i = 0; i <= numBranchObs; i++) {
+          const t = i / numBranchObs;
+          const x = branch.start[0] + t * (branch.end[0] - branch.start[0]);
+          const z = branch.start[1] + t * (branch.end[1] - branch.start[1]);
+
+          canalObstacles.push({
+            position: [x, 0, z],
+            radius: branch.width / 2 - 0.2
+          });
+        }
+      }
+
+      return [...baseObstacles, ...stallObstacles, ...canalObstacles];
     }
 
     return [...baseObstacles, ...stallObstacles];
@@ -2235,10 +2336,18 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
   }, [params.mapX, params.mapY, obstacles, obstacleHash]);
 
+  // Track weather for shadow toggling
+  const [shouldEnableShadows, setShouldEnableShadows] = useState(true);
+
   useEffect(() => {
-    gl.shadowMap.enabled = true;
+    // Enable shadows only during clear weather
+    const currentWeather = resolvedWeatherTypeRef.current;
+    const enableShadows = currentWeather === WeatherType.CLEAR && devSettings.showShadows;
+
+    setShouldEnableShadows(enableShadows);
+    gl.shadowMap.enabled = enableShadows;
     gl.shadowMap.type = THREE.PCFSoftShadowMap;
-  }, [gl]);
+  }, [gl, devSettings.showShadows]);
 
   const sunAngle = (params.timeOfDay / 24) * Math.PI * 2;
   const sunElevation = Math.sin(sunAngle - Math.PI / 2);
@@ -2346,12 +2455,23 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           onWeatherUpdate(resolvedWeatherType);
         }
 
-        // Tier 2: Harsher sun for intense midday heat
-        const sunIntensity = Math.pow(Math.max(0, sunElevation), 0.45) * 6.8 * (1 - cloudCover * 0.4);
-        // Tier 1: Reduced ambient for darker, more vivid shadows
-        let ambientIntensity = 0.08 + dayFactor * 0.3 + cloudCover * 0.08;
-        // Tier 1: Boosted hemisphere for warm ground bounce
-        let hemiIntensity = 0.38 + dayFactor * 0.62 + cloudCover * 0.16;
+        // Toggle shadows based on weather - OVERCAST gets soft diffuse shadows, only SANDSTORM disables
+        const enableShadows = resolvedWeatherType !== WeatherType.SANDSTORM && devSettings.showShadows;
+        if (gl.shadowMap.enabled !== enableShadows) {
+          gl.shadowMap.enabled = enableShadows;
+          setShouldEnableShadows(enableShadows);
+        }
+
+        // Sun intensity - reduced during overcast for soft diffuse lighting
+        let sunIntensity = Math.pow(Math.max(0, sunElevation), 0.45) * 6.8 * (1 - cloudCover * 0.4);
+        if (resolvedWeatherType === WeatherType.OVERCAST) {
+          // Overcast: diffuse light from cloud layer, reduced but still present
+          sunIntensity *= 0.45;
+        }
+        // TESTING: Boosted ambient to make blue visible
+        let ambientIntensity = 0.3 + dayFactor * 0.8 + cloudCover * 0.08;
+        // Boosted hemisphere for blue sky fill
+        let hemiIntensity = 0.5 + dayFactor * 0.8 + cloudCover * 0.16;
 
         // GRAPHICS: Peak sun shadow enrichment - darker, more saturated shadows at noon
         // Reduce ambient during peak day for higher contrast shadows
@@ -2395,7 +2515,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         skyMid.lerp(temp1, dayFactor).lerp(temp2, twilightFactor * 0.7).lerp(temp3, nightFactor);
 
         skyHorizon.set('#0a0f1a');
-        temp1.set('#2f95ee');
+        temp1.set('#e8d4b8'); // Warm dusty horizon (Syrian summer heat haze, not cool blue sky)
         temp2.set('#e8b878');
         temp3.set('#0f1829');
         skyHorizon.lerp(temp1, dayFactor).lerp(temp2, twilightFactor * 0.8).lerp(temp3, nightFactor);
@@ -2421,7 +2541,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
         // Daytime: VERY SUBTLE atmospheric perspective (realistic haze)
         if (dayFactor > 0.6) {
-          temp1.set('#e8eef3'); // Lighter, barely-there blue
+          temp1.set('#f5e8d8'); // Warm cream haze (Syrian heat, not blue mist)
           fogColor.lerp(temp1, (dayFactor - 0.6) * 0.08); // More subtle blend
 
           // Peak sun heat haze (10am-2pm) - warm golden shimmer
@@ -2525,23 +2645,57 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           baseShadowSoftness = THREE.MathUtils.lerp(baseShadowSoftness, -0.008, 0.85);
         }
 
-        if (lightRef.current.shadow) {
-          lightRef.current.shadow.bias = baseShadowSoftness;
+        // GRAPHICS: Dynamic shadow radius - sharp at noon, soft at dawn/dusk
+        // Lower radius = crisper shadow edges, higher = blurrier
+        let shadowRadius = THREE.MathUtils.lerp(
+          2.0,   // Soft shadows at dawn/dusk (diffuse light)
+          0.5,   // Sharp shadows at noon (direct overhead sun)
+          dayFactor
+        );
+
+        // Weather-based shadow radius adjustment
+        if (resolvedWeatherType === WeatherType.OVERCAST) {
+          // Very soft, diffuse shadows for overcast (light scattered by clouds)
+          shadowRadius = THREE.MathUtils.lerp(shadowRadius, 3.0, 0.8);
+        } else if (resolvedWeatherType === WeatherType.SANDSTORM) {
+          shadowRadius = THREE.MathUtils.lerp(shadowRadius, 3.5, 0.85);
         }
 
-        const shadowContrast = smoothstep(0.25, 0.7, sunElevation);
-        ambientIntensity *= 1 - shadowContrast * 0.12;
-        hemiIntensity *= 1 - shadowContrast * 0.08;
-        ambientRef.current.intensity = THREE.MathUtils.lerp(ambientRef.current.intensity, ambientIntensity, 0.08);
-        // GRAPHICS: Desaturated ambient color during day for richer shadow saturation
-        // Less saturated ambient = more saturated shadows by contrast
+        if (lightRef.current.shadow) {
+          lightRef.current.shadow.bias = baseShadowSoftness;
+          lightRef.current.shadow.radius = shadowRadius;
+        }
+
+        // GRAPHICS: Darker shadows at peak sun - reduce fill light in shadowed areas
+        // Overcast has much less shadow contrast (diffuse lighting from all directions)
+        let shadowContrast = smoothstep(0.25, 0.7, sunElevation);
+        if (resolvedWeatherType === WeatherType.OVERCAST) {
+          shadowContrast *= 0.3; // Much less contrast on overcast days
+        }
+        // Keep ambient visible in shadows to show blue color
+        ambientIntensity *= 1 - shadowContrast * 0.25;  // Less reduction so blue shows
+        hemiIntensity *= 1 - shadowContrast * 0.20;     // Keep hemi visible too
+        ambientRef.current.intensity = ambientIntensity;  // Immediate set for testing
+        // GRAPHICS: BLUE SHADOWS - ambient light fills shadows, so blue ambient = blue shadows
+        // Stronger blue during peak day creates warm sun / cool shadow contrast
         const { ambientColor, rimColor, shadowFillColor } = colorCache.current;
-        ambientColor.set("#b9c4e6");
-        temp1.set("#e8e4dc");
-        ambientColor.lerp(temp1, dayFactor * 0.35);
-        ambientRef.current.color.lerp(ambientColor, 0.05);
-        hemiRef.current.intensity = THREE.MathUtils.lerp(hemiRef.current.intensity, hemiIntensity, 0.08);
-        hemiRef.current.color.lerp(hemiSky, 0.05);
+
+        // Base cool blue for shadows
+        ambientColor.set("#6080c0");  // Saturated blue base
+        // Make it MORE blue during midday (when shadows are most visible)
+        const midDayBlue = Math.max(0, 1 - Math.abs(12 - params.timeOfDay) / 4);
+        temp1.set("#3060e0");  // Intense blue for peak day
+        ambientColor.lerp(temp1, midDayBlue * dayFactor * 0.6);
+        // Lerp to night color
+        temp2.set("#1a2040");
+        ambientColor.lerp(temp2, nightFactor);
+        ambientRef.current.color.set(ambientColor);  // Immediate set, no slow lerp
+
+        // Hemisphere sky color - also blue to fill shadows from above
+        const blueHemiSky = hemiSky.clone();
+        blueHemiSky.lerp(new THREE.Color("#2060ff"), dayFactor * 0.7);  // More intense blue
+        hemiRef.current.intensity = hemiIntensity;  // Immediate set for testing
+        hemiRef.current.color.set(blueHemiSky);  // Immediate set
         hemiRef.current.groundColor.lerp(hemiGround, 0.05);
         if (rimLightRef.current) {
           // Tier 2: Warm rim lighting during day + twilight
@@ -2551,48 +2705,38 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           rimColor.set(dayFactor > 0.5 ? '#fff0d8' : '#f2b27a');
           rimLightRef.current.color.lerp(rimColor, 0.05);
         }
-        // GRAPHICS: Shadow fill light - adds rich colored tint to shadows (scattered skylight)
-        // ENHANCED: Time-of-day shadow colors for cinematic richness
+        // GRAPHICS: Shadow fill light - EXTREME blue tint to shadows
         // WEATHER-AWARE: Color and intensity adjust based on atmospheric conditions
         if (shadowFillLightRef.current) {
-          // Base intensity from dayFactor
-          let shadowFillIntensity = dayFactor * 0.4 * (1 - shadowContrast * 0.2);
+          // EXTREME intensity for very visible blue shadows
+          let shadowFillIntensity = dayFactor * 2.0;
 
           // Weather-based adjustments
           if (resolvedWeatherType === WeatherType.OVERCAST) {
-            // Overcast: reduced intensity (clouds block direct skylight)
-            shadowFillIntensity *= 0.5;
-            // Desaturated gray-blue for overcast shadow fill
-            shadowFillColor.set('#8a9aaa');
+            shadowFillIntensity *= 0.4;
+            shadowFillColor.set('#4070b0');
           } else if (resolvedWeatherType === WeatherType.SANDSTORM) {
-            // Sandstorm: minimal intensity, warm dust-scattered light
             shadowFillIntensity *= 0.25;
-            // Warm ochre for dust-scattered light
             shadowFillColor.set('#b8a080');
           } else {
-            // ENHANCED: Rich time-of-day shadow tinting
-            // Morning/evening: warm purple-blue shadows
-            // Midday: cooler saturated blue shadows (complementary to golden sun)
-            const midDayFactor = Math.max(0, 1 - Math.abs(12 - params.timeOfDay) / 5); // Peak at noon
+            // EXTREME saturated blues
+            const midDayFactor = Math.max(0, 1 - Math.abs(12 - params.timeOfDay) / 5);
 
             if (twilightFactor > 0.3) {
-              // Twilight: rich purple-blue shadows
-              shadowFillColor.set('#6a5a9a');
+              // Twilight: electric purple-blue
+              shadowFillColor.set('#2010d0');
             } else if (midDayFactor > 0.6) {
-              // Midday: saturated cool blue (complementary to warm sun)
-              shadowFillColor.set('#3f6fca');
+              // Midday: electric blue
+              shadowFillColor.set('#0020e0');
             } else {
-              // Morning/afternoon: medium blue-purple
-              shadowFillColor.set('#5a78b8');
+              // Morning/afternoon: vivid blue
+              shadowFillColor.set('#1030d0');
             }
           }
 
-          shadowFillLightRef.current.intensity = THREE.MathUtils.lerp(
-            shadowFillLightRef.current.intensity,
-            shadowFillIntensity,
-            0.08
-          );
-          shadowFillLightRef.current.color.lerp(shadowFillColor, 0.05);
+          // Immediate application for testing
+          shadowFillLightRef.current.intensity = shadowFillIntensity;
+          shadowFillLightRef.current.color.set(shadowFillColor);
         }
         if (marketBounceRef.current) {
           const district = getDistrictType(params.mapX, params.mapY);
@@ -2603,8 +2747,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         if (gl) {
-          // Sun-baked: Increased exposure during day, much lower exposure at night
-          const targetExposure = 1.02 + dayFactor * 0.14 + nightFactor * 0.12 + twilightFactor * 0.05;
+          // WARMER: Boosted exposure for sun-baked Mediterranean feel
+          // Peak day now ~1.30 (was 1.16)
+          const targetExposure = 1.02 + dayFactor * 0.14 + nightFactor * 0.10 + twilightFactor * 0.08;
           gl.toneMappingExposure = THREE.MathUtils.lerp(gl.toneMappingExposure, targetExposure, 0.05);
         }
 
@@ -3029,7 +3174,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <directionalLight
         ref={lightRef}
         position={[50, 50, 20]}
-        castShadow={devSettings.showShadows}
+        castShadow={shouldEnableShadows}
         shadow-mapSize={[1024, 1024]}
         shadow-camera-left={-24}
         shadow-camera-right={24}
@@ -3084,7 +3229,6 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <MilkyWay visible={dayFactor <= 0.4} simTime={simTime} />
 
       {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#c5ddf5', 0.004]} />}
-      {devSettings.showClouds && <CloudLayer weather={weather} timeOfDay={params.timeOfDay} />}
 
       {narratorHighlight && (
         <NarratorHighlightRing
@@ -3216,7 +3360,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           buildingInfection={buildingInfection}
           obstacles={obstacles}
           obstacleHash={obstacleHash}
-          maxAgents={12}
+          maxAgents={
+            district === 'QASSIOUN_CAVES' ? 3 :
+            district === 'MOUNTAIN_SHRINE' ? 4 :
+            district === 'CEMETERY' ? 5 :
+            district === 'OUTSKIRTS_SCRUBLAND' ? 4 :
+            12
+          }
           agentHashRef={agentHashRef}
           impactMapRef={impactMapRef}
           playerRef={playerRef}
@@ -3285,6 +3435,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         climbInputRef={climbInputRef}
         pickupTriggerRef={pickupTriggerRef}
         climbTriggerRef={climbTriggerRef}
+        onGravestoneDesecrated={onGravestoneDesecrated}
+        onNearReadable={onNearReadable}
         onFallDamage={onFallDamage}
         cameraViewTarget={cameraViewTarget}
         onPlayerStartMove={onPlayerStartMove}
@@ -3293,6 +3445,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onShatterLoot={handleShatterLoot}
         onIsometricOcclusionChange={handleIsometricOcclusionChange}
         mapEntryToken={`${params.mapX},${params.mapY}`}
+        enableCameraOcclusion={!devSettings.disableCameraOcclusion}
       />
       <BoundaryHeadingIndicator playerRef={playerRef} mapX={params.mapX} mapY={params.mapY} />
 

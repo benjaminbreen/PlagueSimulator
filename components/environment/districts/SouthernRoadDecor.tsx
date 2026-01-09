@@ -8,7 +8,8 @@ import { getDistrictType } from '../../../types';
 
 export const SouthernRoadDecor: React.FC<{ mapX: number; mapY: number }> = ({ mapX, mapY }) => {
   const district = getDistrictType(mapX, mapY);
-  if (district !== 'SOUTHERN_ROAD') return null;
+  // DARAYA_ROAD is the road to Daraya village, similar to the main southern routes
+  if (district !== 'SOUTHERN_ROAD' && district !== 'DARAYA_ROAD') return null;
   const roadWidth = 8;
   const ditchOffset = 7.5;
   const ditchWidth = 1.6;

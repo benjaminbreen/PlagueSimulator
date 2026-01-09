@@ -100,6 +100,77 @@ const DISTRICT_RULES: Record<DistrictType, ClimbableRule[]> = {
     { type: 'STONE_STAIRCASE', probability: 0.4, minStories: 2, maxPerBuilding: 1 },
     { type: 'WOODEN_LADDER', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
   ],
+  // New historical districts
+  CEMETERY: [
+    { type: 'STONE_STAIRCASE', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
+  ],
+  OUTSKIRTS_SCRUBLAND: [
+    { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
+  ],
+  ROADSIDE: [
+    { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
+  ],
+  QAYMARIYYA: [
+    { type: 'STONE_STAIRCASE', probability: 0.7, minStories: 2, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.8, minStories: 1, maxPerBuilding: 2 },
+    { type: 'MASHRABIYA', probability: 0.6, minStories: 2, maxPerBuilding: 2 },
+  ],
+  AMARA: [
+    { type: 'STONE_STAIRCASE', probability: 0.4, minStories: 2, maxPerBuilding: 1 },
+    { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.6, minStories: 1, maxPerBuilding: 2 },
+  ],
+  QUBAYBAT: [
+    { type: 'STONE_STAIRCASE', probability: 0.3, minStories: 1, maxPerBuilding: 1 },
+  ],
+  QANAWAT: [
+    { type: 'STONE_STAIRCASE', probability: 0.4, minStories: 2, maxPerBuilding: 1 },
+    { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.5, minStories: 1, maxPerBuilding: 2 },
+  ],
+  SHAGHOUR_OUTER: [
+    { type: 'WOODEN_LADDER', probability: 0.6, minStories: 1, maxPerBuilding: 2 },
+  ],
+  AMIN: [
+    { type: 'STONE_STAIRCASE', probability: 0.5, minStories: 2, maxPerBuilding: 1 },
+    { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.5, minStories: 1, maxPerBuilding: 2 },
+  ],
+  LOWER_SALHIYYA: [
+    { type: 'STONE_STAIRCASE', probability: 0.5, minStories: 2, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.7, minStories: 1, maxPerBuilding: 2 },
+  ],
+  BAB_FARADIS: [
+    { type: 'STONE_STAIRCASE', probability: 0.4, minStories: 2, maxPerBuilding: 1 },
+    { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
+  ],
+  RABWE: [
+    { type: 'STONE_STAIRCASE', probability: 0.5, minStories: 2, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.7, minStories: 1, maxPerBuilding: 2 },
+  ],
+  UQAYBA: [
+    { type: 'STONE_STAIRCASE', probability: 0.4, minStories: 2, maxPerBuilding: 1 },
+    { type: 'WOODEN_LADDER', probability: 0.5, minStories: 1, maxPerBuilding: 1 },
+    { type: 'GRAPE_TRELLIS', probability: 0.6, minStories: 1, maxPerBuilding: 2 },
+  ],
+  DARAYA_ROAD: [
+    { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
+  ],
+  JABIYA_ROAD: [
+    { type: 'WOODEN_LADDER', probability: 0.4, minStories: 1, maxPerBuilding: 1 },
+  ],
+  QASSIOUN_CAVES: [
+    { type: 'STONE_STAIRCASE', probability: 0.8, minStories: 1, maxPerBuilding: 1 },
+  ],
+  NORTH_GHOUTA: [
+    { type: 'WOODEN_LADDER', probability: 0.7, minStories: 1, maxPerBuilding: 1 },
+  ],
+  SOUTH_GHOUTA: [
+    { type: 'WOODEN_LADDER', probability: 0.7, minStories: 1, maxPerBuilding: 1 },
+  ],
+  EAST_GHOUTA: [
+    { type: 'WOODEN_LADDER', probability: 0.7, minStories: 1, maxPerBuilding: 1 },
+  ],
 };
 
 // ==================== PLACEMENT ALGORITHM ====================

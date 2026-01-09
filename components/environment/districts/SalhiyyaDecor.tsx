@@ -8,6 +8,20 @@ import * as THREE from 'three';
 import { getDistrictType } from '../../../types';
 import { getTerrainHeight, TerrainHeightmap, sampleTerrainHeight } from '../../../utils/terrain';
 import { seededRandom } from '../../../utils/procedural';
+import { CACHED_WOOD_TEXTURES, FOLIAGE_MATERIAL, DARK_FOLIAGE_MATERIAL } from '../../../utils/environment/wood';
+
+// Shared trunk materials for trees
+const OLIVE_TRUNK_MATERIAL = new THREE.MeshStandardMaterial({
+  map: CACHED_WOOD_TEXTURES.oak,
+  roughness: 0.92,
+  color: new THREE.Color('#6a5a4a'),
+});
+
+const PINE_TRUNK_MATERIAL = new THREE.MeshStandardMaterial({
+  map: CACHED_WOOD_TEXTURES.walnut,
+  roughness: 0.95,
+  color: new THREE.Color('#5a4a3a'),
+});
 
 export const SalhiyyaDecor: React.FC<{
   mapX: number;
@@ -19,7 +33,8 @@ export const SalhiyyaDecor: React.FC<{
   heightmap?: TerrainHeightmap | null;
 }> = ({ mapX, mapY, timeOfDay, terrainSeed, onTreePositionsGenerated, buildingPositions = [], heightmap }) => {
   const district = getDistrictType(mapX, mapY);
-  if (district !== 'SALHIYYA') return null;
+  // LOWER_SALHIYYA is the lower slopes of the scholarly quarter with Hanbali mosques
+  if (district !== 'SALHIYYA' && district !== 'LOWER_SALHIYYA') return null;
 
   const time = timeOfDay ?? 12;
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
@@ -219,34 +234,29 @@ export const SalhiyyaDecor: React.FC<{
 
         return (
           <group key={`tree-${i}`} position={[pos[0], h, pos[2]]}>
-            {/* Trunk */}
-            <mesh position={[0, trunkHeight / 2, 0]} castShadow receiveShadow>
+            {/* Trunk with wood texture */}
+            <mesh position={[0, trunkHeight / 2, 0]} castShadow receiveShadow material={isOlive ? OLIVE_TRUNK_MATERIAL : PINE_TRUNK_MATERIAL}>
               <cylinderGeometry args={[0.15, 0.22, trunkHeight, 6]} />
-              <meshStandardMaterial color={isOlive ? "#5a4a3a" : "#4a3a2a"} roughness={0.95} />
             </mesh>
-            {/* Foliage */}
+            {/* Foliage with leaf texture */}
             {isOlive ? (
               // Olive tree - round canopy
               <>
-                <mesh position={[0, trunkHeight + foliageHeight * 0.5, 0]} castShadow receiveShadow>
+                <mesh position={[0, trunkHeight + foliageHeight * 0.5, 0]} castShadow receiveShadow material={FOLIAGE_MATERIAL}>
                   <sphereGeometry args={[foliageHeight * 0.7, 8, 8]} />
-                  <meshStandardMaterial color="#5a6a4a" roughness={0.85} />
                 </mesh>
-                <mesh position={[0.3, trunkHeight + foliageHeight * 0.3, 0.2]} castShadow receiveShadow>
+                <mesh position={[0.3, trunkHeight + foliageHeight * 0.3, 0.2]} castShadow receiveShadow material={FOLIAGE_MATERIAL}>
                   <sphereGeometry args={[foliageHeight * 0.5, 8, 8]} />
-                  <meshStandardMaterial color="#4a5a3a" roughness={0.85} />
                 </mesh>
               </>
             ) : (
               // Pine tree - conical
               <>
-                <mesh position={[0, trunkHeight + foliageHeight / 2, 0]} castShadow receiveShadow>
+                <mesh position={[0, trunkHeight + foliageHeight / 2, 0]} castShadow receiveShadow material={DARK_FOLIAGE_MATERIAL}>
                   <coneGeometry args={[1.4, foliageHeight, 8]} />
-                  <meshStandardMaterial color="#3a5a3a" roughness={0.85} />
                 </mesh>
-                <mesh position={[0, trunkHeight + foliageHeight * 0.25, 0]} castShadow receiveShadow>
+                <mesh position={[0, trunkHeight + foliageHeight * 0.25, 0]} castShadow receiveShadow material={DARK_FOLIAGE_MATERIAL}>
                   <coneGeometry args={[1.8, foliageHeight * 0.6, 8]} />
-                  <meshStandardMaterial color="#2f4f2f" roughness={0.85} />
                 </mesh>
               </>
             )}

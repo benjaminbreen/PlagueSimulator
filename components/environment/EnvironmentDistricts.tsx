@@ -20,6 +20,10 @@ import JewishQuarterDecor from './districts/JewishQuarterDecor';
 import { BabSharqiGate } from './districts/BabSharqiGate';
 import UmayyadMosqueDistrict from './districts/UmayyadMosqueDistrict';
 import { HovelsDecor } from './districts/HovelsDecor';
+import { SouqDecor } from './districts/SouqDecor';
+import { QassiounCavesDecor } from './districts/QassiounCavesDecor';
+import { WaterwayDecor } from './districts/WaterwayDecor';
+import { QubaybatDecor } from './districts/QubaybatDecor';
 
 type EnvironmentDistrictsProps = {
   mapX: number;
@@ -101,5 +105,16 @@ export const EnvironmentDistricts: React.FC<EnvironmentDistrictsProps> = ({
       onTreePositionsGenerated={onTreePositionsGenerated}
     />
     <CaravanseraiComplex mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+    <SouqDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+    <QassiounCavesDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} terrainSeed={terrainSeed} />
+    <WaterwayDecor mapX={mapX} mapY={mapY} timeOfDay={timeOfDay} />
+    <QubaybatDecor
+      mapX={mapX}
+      mapY={mapY}
+      timeOfDay={timeOfDay}
+      terrainSeed={terrainSeed}
+      onTreePositionsGenerated={onTreePositionsGenerated}
+      heightmap={heightmap}
+    />
   </>
 );

@@ -1141,7 +1141,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         rumorTimer: 0,
       };
     });
-  }, [activeNpcs, activeRooms, entryRoom, roomHotspots, simTime, activeSeed]);
+  // NOTE: simTime intentionally excluded - we only want to initialize NPC states once when
+  // the interior loads, not reset them every time simTime changes (which caused trembling)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeNpcs, activeRooms, entryRoom, roomHotspots, activeSeed]);
 
   useEffect(() => {
     if (!npcStateOverride) return;
@@ -1798,9 +1801,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         map: texture ?? undefined,
         color: opt.base,
         roughness: 0.9,
+        // More aggressive polygonOffset to prevent z-fighting with floor tint
         polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4,
       });
     });
   }, []);

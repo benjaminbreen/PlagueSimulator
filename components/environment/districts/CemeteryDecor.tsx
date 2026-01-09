@@ -1,7 +1,7 @@
 /**
  * Cemetery (Qabristan) District Decorations
  * Islamic cemetery outside Damascus city walls (1348 CE)
- * Features: Qibla-oriented graves, cypress trees, small tomb structures, keeper shacks
+ * Features: Qibla-oriented graves with authentic 14th century shapes, cypress trees, tomb structures, keeper shacks
  * Reflects escalating plague impact through visual progression
  */
 
@@ -10,14 +10,26 @@ import * as THREE from 'three';
 import { getDistrictType } from '../../../types';
 import { TerrainHeightmap, sampleTerrainHeight } from '../../../utils/terrain';
 import { seededRandom } from '../../../utils/procedural';
+import { CACHED_WOOD_TEXTURES, DARK_FOLIAGE_MATERIAL } from '../../../utils/environment/wood';
+
+// Shared trunk material for cypress trees
+const CYPRESS_TRUNK_MATERIAL = new THREE.MeshStandardMaterial({
+  map: CACHED_WOOD_TEXTURES.walnut,
+  roughness: 0.95,
+  color: new THREE.Color('#5a4a3a'),
+});
 
 // Qibla direction from Damascus to Mecca: approximately 190 degrees (SSW)
 const QIBLA_ANGLE = (190 * Math.PI) / 180;
+
+// Historically accurate 14th century Islamic grave marker shapes
+type GraveShape = 'rectangular' | 'arch' | 'peaked' | 'platform';
 
 interface GraveData {
   position: [number, number, number];
   rotation: number; // Perpendicular to qibla
   type: 'flat' | 'raised' | 'double_marker' | 'ornate';
+  shape: GraveShape; // 14th century Islamic marker design
   scale: number;
 }
 
@@ -33,6 +45,56 @@ interface ShackData {
   rotation: number;
   size: [number, number, number];
 }
+
+// Custom geometry creators for authentic Islamic grave markers
+const createArchTopGeometry = (): THREE.BufferGeometry => {
+  const shape = new THREE.Shape();
+  const width = 0.35;
+  const height = 0.8;
+  const archRadius = width / 2;
+
+  // Start at bottom left
+  shape.moveTo(-width / 2, -height / 2);
+  // Right side up
+  shape.lineTo(width / 2, -height / 2);
+  shape.lineTo(width / 2, height / 2 - archRadius);
+  // Arch top
+  shape.absarc(0, height / 2 - archRadius, archRadius, 0, Math.PI, false);
+  // Back down left side
+  shape.lineTo(-width / 2, -height / 2);
+
+  const extrudeSettings = {
+    depth: 0.08,
+    bevelEnabled: false
+  };
+
+  return new THREE.ExtrudeGeometry(shape, extrudeSettings);
+};
+
+const createPeakedTopGeometry = (): THREE.BufferGeometry => {
+  const shape = new THREE.Shape();
+  const width = 0.38;
+  const height = 0.85;
+  const peakHeight = 0.15;
+
+  // Start at bottom left
+  shape.moveTo(-width / 2, -height / 2);
+  // Right side
+  shape.lineTo(width / 2, -height / 2);
+  shape.lineTo(width / 2, height / 2 - peakHeight);
+  // Peak
+  shape.lineTo(0, height / 2);
+  shape.lineTo(-width / 2, height / 2 - peakHeight);
+  // Back to start
+  shape.lineTo(-width / 2, -height / 2);
+
+  const extrudeSettings = {
+    depth: 0.09,
+    bevelEnabled: false
+  };
+
+  return new THREE.ExtrudeGeometry(shape, extrudeSettings);
+};
 
 export const CemeteryDecor: React.FC<{
   mapX: number;
@@ -54,10 +116,21 @@ export const CemeteryDecor: React.FC<{
   plagueProgress = 0.5
 }) => {
   const district = getDistrictType(mapX, mapY);
+  // QUBAYBAT ("Little Domes") now has its own dedicated decor component
   if (district !== 'CEMETERY') return null;
 
   const time = timeOfDay ?? 12;
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;
+
+  // Torch positions: central corners only (4 torches for performance)
+  const torchPositions = useMemo(() => {
+    const positions: Array<[number, number]> = [];
+
+    // Four corners of central area
+    positions.push([-18, -18], [18, -18], [-18, 18], [18, 18]);
+
+    return positions;
+  }, []);
 
   const seed = mapX * 1000 + mapY + terrainSeed;
 
@@ -65,8 +138,11 @@ export const CemeteryDecor: React.FC<{
     return heightmap ? sampleTerrainHeight(heightmap, x, z) : 0;
   };
 
+  // Memoized custom geometries
+  const archTopGeometry = useMemo(() => createArchTopGeometry(), []);
+  const peakedTopGeometry = useMemo(() => createPeakedTopGeometry(), []);
+
   // ==================== CYPRESS TREES ====================
-  // Reduced from 40+ to ~18 trees
   const cypressTrees = useMemo(() => {
     const trees: Array<[number, number, number]> = [];
     const rand = (offset: number) => seededRandom(seed + offset);
@@ -104,13 +180,12 @@ export const CemeteryDecor: React.FC<{
   }, [onTreePositionsGenerated, cypressTrees]);
 
   // ==================== GRAVES ====================
-  // 40-50 graves total, with Islamic layout
+  // 48 main graves + up to 12 plague graves = 48-60 total
   const graves = useMemo(() => {
     const graveData: GraveData[] = [];
     const rand = (offset: number) => seededRandom(seed + offset);
 
     // Main cemetery section - organic clusters around pathways
-    // Graves oriented perpendicular to qibla (so bodies face Mecca)
     const gravePositions = [
       // Northwest cluster
       [-30, -25], [-28, -22], [-32, -20], [-26, -18],
@@ -138,29 +213,39 @@ export const CemeteryDecor: React.FC<{
 
     gravePositions.forEach(([x, z], i) => {
       const h = getHeight(x, z);
-      const jitterX = (rand(i * 3 + 600) - 0.5) * 0.8;
-      const jitterZ = (rand(i * 3 + 601) - 0.5) * 0.8;
-      const rotJitter = (rand(i * 3 + 602) - 0.5) * 0.15; // Slight variation
+      const jitterX = (rand(i * 5 + 600) - 0.5) * 0.8;
+      const jitterZ = (rand(i * 5 + 601) - 0.5) * 0.8;
+      const rotJitter = (rand(i * 5 + 602) - 0.5) * 0.15;
 
       // Determine grave type
       let type: 'flat' | 'raised' | 'double_marker' | 'ornate';
-      const typeRoll = rand(i * 3 + 603);
-      if (typeRoll < 0.40) type = 'flat'; // 40% flat graves (simple stone markers)
-      else if (typeRoll < 0.70) type = 'raised'; // 30% raised mounds (turba)
-      else if (typeRoll < 0.90) type = 'double_marker'; // 20% head+foot stones
-      else type = 'ornate'; // 10% ornate markers
+      const typeRoll = rand(i * 5 + 603);
+      if (typeRoll < 0.40) type = 'flat';
+      else if (typeRoll < 0.70) type = 'raised';
+      else if (typeRoll < 0.90) type = 'double_marker';
+      else type = 'ornate';
+
+      // Determine shape (14th century Islamic designs)
+      // Rarity: rectangular (50%) > arch (30%) > peaked (15%) > platform (5%)
+      let shape: GraveShape;
+      const shapeRoll = rand(i * 5 + 604);
+      if (shapeRoll < 0.50) shape = 'rectangular'; // Simple stele (most common)
+      else if (shapeRoll < 0.80) shape = 'arch'; // Mihrab-inspired arch top
+      else if (shapeRoll < 0.95) shape = 'peaked'; // Pointed/peaked top
+      else shape = 'platform'; // Flat elevated platform (elite)
 
       graveData.push({
         position: [x + jitterX, h, z + jitterZ],
         rotation: QIBLA_ANGLE + rotJitter,
         type,
-        scale: 0.85 + rand(i * 3 + 604) * 0.3
+        shape,
+        scale: 1.2 + rand(i * 5 + 605) * 0.6 // Larger graves: 1.2-1.8
       });
     });
 
     // Plague victims section (new, more chaotic)
     if (plagueProgress > 0.3) {
-      const plagueGraves = Math.floor(plagueProgress * 12); // Max 12 new graves
+      const plagueGraves = Math.floor(plagueProgress * 12);
       for (let i = 0; i < plagueGraves; i++) {
         const x = -15 + rand(i + 800) * 30;
         const z = -35 + rand(i + 801) * 15;
@@ -168,8 +253,9 @@ export const CemeteryDecor: React.FC<{
 
         graveData.push({
           position: [x, h, z],
-          rotation: QIBLA_ANGLE + (rand(i + 802) - 0.5) * 0.4, // More variation
-          type: 'flat', // Simple markers for mass burials
+          rotation: QIBLA_ANGLE + (rand(i + 802) - 0.5) * 0.4,
+          type: 'flat',
+          shape: 'rectangular', // Mass burials get simple markers only
           scale: 0.7 + rand(i + 803) * 0.2
         });
       }
@@ -179,7 +265,6 @@ export const CemeteryDecor: React.FC<{
   }, [seed, plagueProgress, heightmap]);
 
   // ==================== TOMB STRUCTURES ====================
-  // Small domed mausoleums for important families - reduced to 3-5
   const tombs = useMemo(() => {
     const tombData: TombData[] = [];
     const rand = (offset: number) => seededRandom(seed + offset);
@@ -196,7 +281,7 @@ export const CemeteryDecor: React.FC<{
       const width = 3.0 + rand(i + 1000) * 0.8;
       const depth = 3.0 + rand(i + 1001) * 0.8;
       const height = 2.5 + rand(i + 1002) * 1.0;
-      const hasDome = rand(i + 1003) > 0.4; // 60% have domes
+      const hasDome = rand(i + 1003) > 0.4;
 
       tombData.push({
         position: [x, h, z],
@@ -210,16 +295,15 @@ export const CemeteryDecor: React.FC<{
   }, [seed, heightmap]);
 
   // ==================== GRAVE KEEPER SHACKS ====================
-  // 3-4 small hovels around cemetery periphery
   const shacks = useMemo(() => {
     const shackData: ShackData[] = [];
     const rand = (offset: number) => seededRandom(seed + offset);
 
     const shackPositions = [
-      { x: -45, z: -40, name: 'grave_digger' }, // Southwest - grave digger's dwelling
-      { x: 45, z: -38, name: 'tool_shed' },     // Southeast - tool storage
-      { x: -43, z: 40, name: 'keeper' },        // Northwest - cemetery keeper
-      { x: 0, z: -48, name: 'gate_house' },     // South gate - small gate house
+      { x: -45, z: -40, name: 'grave_digger' },
+      { x: 45, z: -38, name: 'tool_shed' },
+      { x: -43, z: 40, name: 'keeper' },
+      { x: 0, z: -48, name: 'gate_house' },
     ];
 
     shackPositions.slice(0, 3 + (plagueProgress > 0.7 ? 1 : 0)).forEach(({ x, z }, i) => {
@@ -248,7 +332,6 @@ export const CemeteryDecor: React.FC<{
 
     const walls: WallSegment[] = [];
 
-    // Perimeter walls with gates
     const segments = [
       // North wall
       { x1: -48, z1: 48, x2: -20, z2: 48, height: 1.6 },
@@ -282,7 +365,7 @@ export const CemeteryDecor: React.FC<{
     const graves: Array<[number, number, number]> = [];
     const rand = (offset: number) => seededRandom(seed + offset);
 
-    const graveCount = Math.floor(plagueProgress * 8); // Max 8 open graves
+    const graveCount = Math.floor(plagueProgress * 8);
 
     for (let i = 0; i < graveCount; i++) {
       const x = -20 + rand(i + 1200) * 40;
@@ -314,10 +397,12 @@ export const CemeteryDecor: React.FC<{
 
   // ==================== RENDERING ====================
 
-  const graveFlatRef = useRef<THREE.InstancedMesh>(null);
-  const graveRaisedRef = useRef<THREE.InstancedMesh>(null);
-  const graveDoubleRef = useRef<THREE.InstancedMesh>(null);
-  const graveOrnateRef = useRef<THREE.InstancedMesh>(null);
+  // Refs for grave shapes
+  const graveRectangularRef = useRef<THREE.InstancedMesh>(null);
+  const graveArchRef = useRef<THREE.InstancedMesh>(null);
+  const gravePeakedRef = useRef<THREE.InstancedMesh>(null);
+  const gravePlatformRef = useRef<THREE.InstancedMesh>(null);
+
   const cypressTrunkRef = useRef<THREE.InstancedMesh>(null);
   const cypressCanopyRef = useRef<THREE.InstancedMesh>(null);
   const tombRef = useRef<THREE.InstancedMesh>(null);
@@ -325,59 +410,59 @@ export const CemeteryDecor: React.FC<{
 
   const tempObj = useMemo(() => new THREE.Object3D(), []);
 
-  // Setup graves by type
+  // Setup graves by shape
   useEffect(() => {
-    const flatGraves = graves.filter(g => g.type === 'flat');
-    const raisedGraves = graves.filter(g => g.type === 'raised');
-    const doubleGraves = graves.filter(g => g.type === 'double_marker');
-    const ornateGraves = graves.filter(g => g.type === 'ornate');
+    const rectangularGraves = graves.filter(g => g.shape === 'rectangular');
+    const archGraves = graves.filter(g => g.shape === 'arch');
+    const peakedGraves = graves.filter(g => g.shape === 'peaked');
+    const platformGraves = graves.filter(g => g.shape === 'platform');
 
-    // Flat markers - simple upright stone
-    if (graveFlatRef.current && flatGraves.length > 0) {
-      flatGraves.forEach((grave, i) => {
-        tempObj.position.set(grave.position[0], grave.position[1] + 0.4, grave.position[2]);
-        tempObj.rotation.set(0, grave.rotation, 0);
-        tempObj.scale.set(grave.scale, grave.scale, grave.scale);
-        tempObj.updateMatrix();
-        graveFlatRef.current!.setMatrixAt(i, tempObj.matrix);
-      });
-      graveFlatRef.current.instanceMatrix.needsUpdate = true;
-    }
-
-    // Raised mounds (turba) - low mound with marker
-    if (graveRaisedRef.current && raisedGraves.length > 0) {
-      raisedGraves.forEach((grave, i) => {
+    // Rectangular (simple stele) - most common
+    if (graveRectangularRef.current && rectangularGraves.length > 0) {
+      rectangularGraves.forEach((grave, i) => {
         tempObj.position.set(grave.position[0], grave.position[1] + 0.5, grave.position[2]);
         tempObj.rotation.set(0, grave.rotation, 0);
         tempObj.scale.set(grave.scale, grave.scale, grave.scale);
         tempObj.updateMatrix();
-        graveRaisedRef.current!.setMatrixAt(i, tempObj.matrix);
+        graveRectangularRef.current!.setMatrixAt(i, tempObj.matrix);
       });
-      graveRaisedRef.current.instanceMatrix.needsUpdate = true;
+      graveRectangularRef.current.instanceMatrix.needsUpdate = true;
     }
 
-    // Double markers - head and foot stones
-    if (graveDoubleRef.current && doubleGraves.length > 0) {
-      doubleGraves.forEach((grave, i) => {
-        tempObj.position.set(grave.position[0], grave.position[1] + 0.45, grave.position[2]);
+    // Arch top (mihrab-inspired)
+    if (graveArchRef.current && archGraves.length > 0) {
+      archGraves.forEach((grave, i) => {
+        tempObj.position.set(grave.position[0], grave.position[1] + 0.5, grave.position[2]);
+        tempObj.rotation.set(0, grave.rotation, 0); // Same as rectangular
+        tempObj.scale.set(grave.scale, grave.scale, grave.scale);
+        tempObj.updateMatrix();
+        graveArchRef.current!.setMatrixAt(i, tempObj.matrix);
+      });
+      graveArchRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Peaked top
+    if (gravePeakedRef.current && peakedGraves.length > 0) {
+      peakedGraves.forEach((grave, i) => {
+        tempObj.position.set(grave.position[0], grave.position[1] + 0.5, grave.position[2]);
+        tempObj.rotation.set(0, grave.rotation, 0); // Same as rectangular
+        tempObj.scale.set(grave.scale, grave.scale, grave.scale);
+        tempObj.updateMatrix();
+        gravePeakedRef.current!.setMatrixAt(i, tempObj.matrix);
+      });
+      gravePeakedRef.current.instanceMatrix.needsUpdate = true;
+    }
+
+    // Platform (flat elevated style for elite)
+    if (gravePlatformRef.current && platformGraves.length > 0) {
+      platformGraves.forEach((grave, i) => {
+        tempObj.position.set(grave.position[0], grave.position[1] + 0.35, grave.position[2]);
         tempObj.rotation.set(0, grave.rotation, 0);
         tempObj.scale.set(grave.scale, grave.scale, grave.scale);
         tempObj.updateMatrix();
-        graveDoubleRef.current!.setMatrixAt(i, tempObj.matrix);
+        gravePlatformRef.current!.setMatrixAt(i, tempObj.matrix);
       });
-      graveDoubleRef.current.instanceMatrix.needsUpdate = true;
-    }
-
-    // Ornate markers - larger, decorated
-    if (graveOrnateRef.current && ornateGraves.length > 0) {
-      ornateGraves.forEach((grave, i) => {
-        tempObj.position.set(grave.position[0], grave.position[1] + 0.7, grave.position[2]);
-        tempObj.rotation.set(0, grave.rotation, 0);
-        tempObj.scale.set(grave.scale * 1.3, grave.scale * 1.3, grave.scale * 1.3);
-        tempObj.updateMatrix();
-        graveOrnateRef.current!.setMatrixAt(i, tempObj.matrix);
-      });
-      graveOrnateRef.current.instanceMatrix.needsUpdate = true;
+      gravePlatformRef.current.instanceMatrix.needsUpdate = true;
     }
   }, [graves, tempObj]);
 
@@ -417,7 +502,7 @@ export const CemeteryDecor: React.FC<{
       tombs.filter(t => t.hasDome).forEach((tomb, i) => {
         tempObj.position.set(tomb.position[0], tomb.position[1] + tomb.size[1] + 0.8, tomb.position[2]);
         tempObj.rotation.set(0, 0, 0);
-        tempObj.scale.set(tomb.size[0] * 0.7, tomb.size[0] * 0.5, tomb.size[2] * 0.7);
+        tempObj.scale.set(tomb.size[0] * 1.7, tomb.size[0] * 0.8, tomb.size[2] * 0.7);
         tempObj.updateMatrix();
         tombDomeRef.current!.setMatrixAt(i, tempObj.matrix);
       });
@@ -425,72 +510,104 @@ export const CemeteryDecor: React.FC<{
     }
   }, [tombs, tempObj]);
 
-  const flatCount = graves.filter(g => g.type === 'flat').length;
-  const raisedCount = graves.filter(g => g.type === 'raised').length;
-  const doubleCount = graves.filter(g => g.type === 'double_marker').length;
-  const ornateCount = graves.filter(g => g.type === 'ornate').length;
+  const rectangularCount = graves.filter(g => g.shape === 'rectangular').length;
+  const archCount = graves.filter(g => g.shape === 'arch').length;
+  const peakedCount = graves.filter(g => g.shape === 'peaked').length;
+  const platformCount = graves.filter(g => g.shape === 'platform').length;
   const domeCount = tombs.filter(t => t.hasDome).length;
 
   return (
     <group>
-      {/* ===== GRAVESTONES ===== */}
-      {/* Flat markers */}
-      {flatCount > 0 && (
-        <instancedMesh ref={graveFlatRef} args={[undefined, undefined, flatCount]} castShadow>
-          <boxGeometry args={[0.35, 0.8, 0.08]} />
+      {/* ===== GRAVESTONES - 14TH CENTURY ISLAMIC SHAPES ===== */}
+
+      {/* Rectangular stele (50% - most common, default) */}
+      {rectangularCount > 0 && (
+        <instancedMesh ref={graveRectangularRef} args={[undefined, undefined, rectangularCount]} castShadow>
+          <boxGeometry args={[0.95, 0.8, 0.08]} />
           <meshStandardMaterial color="#7a7a6a" roughness={0.95} />
         </instancedMesh>
       )}
 
-      {/* Raised mounds with marker */}
-      {raisedCount > 0 && (
-        <instancedMesh ref={graveRaisedRef} args={[undefined, undefined, raisedCount]} castShadow>
-          <boxGeometry args={[0.4, 1.0, 0.1]} />
+      {/* Arch top stele (30% - mihrab-inspired, middle class) */}
+      {archCount > 0 && (
+        <instancedMesh ref={graveArchRef} args={[archTopGeometry, undefined, archCount]} castShadow>
           <meshStandardMaterial color="#8a8a78" roughness={0.92} />
         </instancedMesh>
       )}
 
-      {/* Double markers (head + foot) */}
-      {doubleCount > 0 && (
-        <instancedMesh ref={graveDoubleRef} args={[undefined, undefined, doubleCount]} castShadow>
-          <boxGeometry args={[0.38, 0.9, 0.09]} />
-          <meshStandardMaterial color="#7a7a68" roughness={0.94} />
+      {/* Peaked top stele (15% - pointed top, wealthier) */}
+      {peakedCount > 0 && (
+        <instancedMesh ref={gravePeakedRef} args={[peakedTopGeometry, undefined, peakedCount]} castShadow>
+          <meshStandardMaterial color="#9a9a88" roughness={0.90} />
         </instancedMesh>
       )}
 
-      {/* Ornate markers */}
-      {ornateCount > 0 && (
-        <instancedMesh ref={graveOrnateRef} args={[undefined, undefined, ornateCount]} castShadow>
-          <boxGeometry args={[0.5, 1.4, 0.12]} />
-          <meshStandardMaterial color="#9a9a88" roughness={0.88} />
+      {/* Platform graves (5% - flat elevated platform, elite/scholars) */}
+      {platformCount > 0 && (
+        <instancedMesh ref={gravePlatformRef} args={[undefined, undefined, platformCount]} castShadow receiveShadow>
+          <boxGeometry args={[1.8, 0.5, 1.2]} />
+          <meshStandardMaterial color="#a89888" roughness={0.98} />
         </instancedMesh>
       )}
 
-      {/* Mounds for raised graves */}
+      {/* Platform borders (raised edges for elite graves) */}
+      {graves.filter(g => g.shape === 'platform').map((grave, i) => (
+        <group key={`platform-${i}`} position={grave.position} rotation={[0, grave.rotation, 0]}>
+          {/* Border stones */}
+          <mesh position={[0, 0.3, 0.6 * grave.scale]} castShadow>
+            <boxGeometry args={[1.8 * grave.scale, 0.15, 0.08]} />
+            <meshStandardMaterial color="#9a8a78" roughness={0.92} />
+          </mesh>
+          <mesh position={[0, 0.3, -0.6 * grave.scale]} castShadow>
+            <boxGeometry args={[1.8 * grave.scale, 0.15, 0.08]} />
+            <meshStandardMaterial color="#9a8a78" roughness={0.92} />
+          </mesh>
+          <mesh position={[0.9 * grave.scale, 0.3, 0]} castShadow>
+            <boxGeometry args={[0.08, 0.15, 1.2 * grave.scale]} />
+            <meshStandardMaterial color="#9a8a78" roughness={0.92} />
+          </mesh>
+          <mesh position={[-0.9 * grave.scale, 0.3, 0]} castShadow>
+            <boxGeometry args={[0.08, 0.15, 1.2 * grave.scale]} />
+            <meshStandardMaterial color="#9a8a78" roughness={0.92} />
+          </mesh>
+        </group>
+      ))}
+
+      {/* Mounds for raised graves (turba) - horizontal pedestals */}
       {graves.filter(g => g.type === 'raised').map((grave, i) => (
         <mesh
           key={`mound-${i}`}
           position={[grave.position[0], grave.position[1] + 0.15, grave.position[2]]}
-          rotation={[-Math.PI / 2, 0, grave.rotation]}
+          rotation={[-Math.PI / 0.1, 0, 0]}
           castShadow
+          receiveShadow
         >
-          <cylinderGeometry args={[0.8, 0.9, 0.3, 12]} />
+          <cylinderGeometry args={[0.8 * grave.scale, 0.9 * grave.scale, 0.3, 16]} />
           <meshStandardMaterial color="#6a6a58" roughness={1.0} />
         </mesh>
       ))}
 
       {/* Foot stones for double marker graves */}
       {graves.filter(g => g.type === 'double_marker').map((grave, i) => {
-        const footX = grave.position[0] + Math.sin(grave.rotation) * 1.5;
+        const footX = grave.position[0] + Math.sin(grave.rotation) * 0.5;
         const footZ = grave.position[2] + Math.cos(grave.rotation) * 1.5;
+
         return (
           <mesh
             key={`foot-${i}`}
-            position={[footX, grave.position[1] + 0.25, footZ]}
-            rotation={[0, grave.rotation, 0]}
+            position={[footX, grave.position[1] + 0.3, footZ]}
+            rotation={[0.3, grave.rotation, 0]}
             castShadow
           >
-            <boxGeometry args={[0.25 * grave.scale, 0.5 * grave.scale, 0.08 * grave.scale]} />
+            {grave.shape === 'rectangular' && (
+              <boxGeometry args={[0.35 * grave.scale, 0.8 * grave.scale, 0.08 * grave.scale]} />
+            )}
+            {grave.shape === 'arch' && (
+              <primitive object={archTopGeometry.clone().scale(grave.scale * 0.9, grave.scale * 0.6, grave.scale * 0.6)} />
+            )}
+            {grave.shape === 'peaked' && (
+              <primitive object={peakedTopGeometry.clone().scale(grave.scale * 0.9, grave.scale * 0.6, grave.scale * 0.6)} />
+            )}
             <meshStandardMaterial color="#7a7a68" roughness={0.94} />
           </mesh>
         );
@@ -499,47 +616,26 @@ export const CemeteryDecor: React.FC<{
       {/* ===== CYPRESS TREES ===== */}
       {cypressTrees.length > 0 && (
         <>
-          <instancedMesh ref={cypressTrunkRef} args={[undefined, undefined, cypressTrees.length]} castShadow>
-            <cylinderGeometry args={[0.18, 0.22, 5.0, 8]} />
-            <meshStandardMaterial color="#4a3a2a" roughness={1.0} />
+          <instancedMesh ref={cypressTrunkRef} args={[undefined, undefined, cypressTrees.length]} castShadow material={CYPRESS_TRUNK_MATERIAL}>
+            <cylinderGeometry args={[0., 0.22, 8.0, 8]} />
           </instancedMesh>
-          <instancedMesh ref={cypressCanopyRef} args={[undefined, undefined, cypressTrees.length]} castShadow>
+          <instancedMesh ref={cypressCanopyRef} args={[undefined, undefined, cypressTrees.length]} castShadow material={DARK_FOLIAGE_MATERIAL}>
             <coneGeometry args={[1.0, 4.5, 8]} />
-            <meshStandardMaterial color="#2a3a2a" roughness={0.95} />
           </instancedMesh>
-        </>
-      )}
-
-      {/* ===== TOMB STRUCTURES ===== */}
-      {tombs.length > 0 && (
-        <>
-          <instancedMesh ref={tombRef} args={[undefined, undefined, tombs.length]} castShadow receiveShadow>
-            <boxGeometry args={[1, 1, 1]} />
-            <meshStandardMaterial color="#b8a898" roughness={0.9} />
-          </instancedMesh>
-          {domeCount > 0 && (
-            <instancedMesh ref={tombDomeRef} args={[undefined, undefined, domeCount]} castShadow>
-              <sphereGeometry args={[1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
-              <meshStandardMaterial color="#a8988" roughness={0.85} />
-            </instancedMesh>
-          )}
         </>
       )}
 
       {/* ===== GRAVE KEEPER SHACKS ===== */}
       {shacks.map((shack, i) => (
         <group key={`shack-${i}`} position={shack.position} rotation={[0, shack.rotation, 0]}>
-          {/* Walls */}
           <mesh position={[0, shack.size[1] / 2, 0]} castShadow receiveShadow>
             <boxGeometry args={shack.size} />
             <meshStandardMaterial color="#8a7a6a" roughness={0.95} />
           </mesh>
-          {/* Flat roof */}
           <mesh position={[0, shack.size[1] + 0.1, 0]} castShadow>
             <boxGeometry args={[shack.size[0] + 0.2, 0.15, shack.size[2] + 0.2]} />
             <meshStandardMaterial color="#7a6a5a" roughness={0.95} />
           </mesh>
-          {/* Door */}
           <mesh position={[0, shack.size[1] * 0.4, shack.size[2] / 2 + 0.05]} castShadow>
             <boxGeometry args={[0.6, shack.size[1] * 0.7, 0.05]} />
             <meshStandardMaterial color="#5a4a3a" roughness={1.0} />
@@ -574,17 +670,14 @@ export const CemeteryDecor: React.FC<{
       {/* ===== OPEN GRAVES ===== */}
       {openGraves.map((pos, i) => (
         <group key={`open-grave-${i}`} position={pos} rotation={[0, QIBLA_ANGLE, 0]}>
-          {/* Dirt mound */}
           <mesh position={[1.2, 0.25, 0]} castShadow>
             <boxGeometry args={[1.0, 0.5, 1.5]} />
             <meshStandardMaterial color="#5a4a3a" roughness={1.0} />
           </mesh>
-          {/* Hole */}
           <mesh position={[0, -0.2, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
             <planeGeometry args={[1.2, 2.0]} />
             <meshStandardMaterial color="#2a2a2a" roughness={1.0} />
           </mesh>
-          {/* Shovel (if grave diggers present) */}
           {plagueProgress > 0.5 && i % 2 === 0 && (
             <mesh position={[0.5, 0.3, 0.8]} rotation={[0, 0, Math.PI / 6]} castShadow>
               <boxGeometry args={[0.05, 1.2, 0.05]} />
@@ -597,19 +690,16 @@ export const CemeteryDecor: React.FC<{
       {/* ===== FUNERAL TENTS ===== */}
       {funeralTents.map((tent, i) => (
         <group key={`tent-${i}`} position={tent.position} rotation={[0, tent.rotation, 0]}>
-          {/* Poles */}
           {[[-1.8, -1.8], [1.8, -1.8], [-1.8, 1.8], [1.8, 1.8]].map(([x, z], j) => (
             <mesh key={j} position={[x, 1.3, z]} castShadow>
               <cylinderGeometry args={[0.04, 0.04, 2.6, 6]} />
               <meshStandardMaterial color="#5a4a3a" roughness={0.9} />
             </mesh>
           ))}
-          {/* Canopy */}
           <mesh position={[0, 2.6, 0]} castShadow>
             <boxGeometry args={[4.0, 0.05, 4.0]} />
             <meshStandardMaterial color="#c8b8a8" roughness={0.95} side={THREE.DoubleSide} />
           </mesh>
-          {/* Side drape */}
           <mesh position={[0, 1.7, -2.0]} castShadow>
             <boxGeometry args={[4.0, 1.8, 0.05]} />
             <meshStandardMaterial
@@ -651,7 +741,7 @@ export const CemeteryDecor: React.FC<{
         </mesh>
       ))}
 
-      {/* ===== WATER BASINS (for wudu) ===== */}
+      {/* ===== WATER BASINS ===== */}
       {[-30, 0, 30].map((x, i) => {
         const z = -46;
         const h = getHeight(x, z);
@@ -670,16 +760,56 @@ export const CemeteryDecor: React.FC<{
       })}
 
       {/* ===== PATHWAYS ===== */}
-      {/* Main north-south path */}
       <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
         <planeGeometry args={[3.0, 80]} />
         <meshStandardMaterial color="#9a8a78" roughness={1.0} />
       </mesh>
-      {/* East-west cross path */}
       <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, Math.PI / 2]} receiveShadow>
         <planeGeometry args={[3.0, 70]} />
         <meshStandardMaterial color="#9a8a78" roughness={1.0} />
       </mesh>
+
+      {/* ===== TORCHES ===== */}
+      {torchPositions.map(([x, z], i) => {
+        const h = getHeight(x, z);
+
+        return (
+          <group key={`torch-${i}`} position={[x, h, z]}>
+            {/* Torch post */}
+            <mesh position={[0, 1.5, 0]} castShadow>
+              <cylinderGeometry args={[0.08, 0.1, 3, 6]} />
+              <meshStandardMaterial color="#4a3a2a" roughness={0.95} />
+            </mesh>
+            {/* Torch top */}
+            <mesh position={[0, 3.2, 0]} castShadow>
+              <coneGeometry args={[0.2, 0.4, 6]} />
+              <meshStandardMaterial color="#2a1a0a" roughness={0.9} />
+            </mesh>
+            {/* Flame (only visible at night/dusk/dawn) */}
+            {nightFactor > 0.05 && (
+              <>
+                <mesh position={[0, 3.4, 0]}>
+                  <coneGeometry args={[0.15, 0.5, 4]} />
+                  <meshStandardMaterial
+                    color="#ff8a3c"
+                    emissive="#ff6a1c"
+                    emissiveIntensity={1.2 + Math.sin(Date.now() * 0.005 + i) * 0.3}
+                    transparent
+                    opacity={0.9}
+                  />
+                </mesh>
+                <pointLight
+                  position={[0, 3.5, 0]}
+                  intensity={12 * nightFactor}
+                  distance={40}
+                  decay={1.8}
+                  color="#ff9a4c"
+                />
+              </>
+            )}
+          </group>
+        );
+      })}
     </group>
   );
 };

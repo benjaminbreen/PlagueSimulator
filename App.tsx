@@ -4,10 +4,12 @@ import * as THREE from 'three';
 import { MoraleStats } from './components/Agents';
 import { SimulationParams, SimulationStats, SimulationCounts, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, CONSTANTS, InteriorSpec, InteriorNarratorState, InteriorPropType, getLocationLabel, getDistrictType, NPCStats, AgentState, MerchantNPC, MiniMapData, ActionSlotState, ActionId, PLAYER_ACTIONS, PlayerActionEvent, ConversationSummary, NpcStateOverride, NPCRecord, BuildingInfectionState, PlagueType, SocialClass, MedicalEstablishmentType } from './types';
 import { MedicalTreatmentModal } from './components/MedicalTreatmentModal';
+import { ReadModal } from './components/ReadModal';
 import { applyTreatmentEffects, getEfficacyMultiplier, getTreatmentById, ESTABLISHMENTS, generateDetailedOutcome, TreatmentOutcome } from './utils/medicalTreatments';
 import { getBuildingHeight } from './utils/buildingHeights';
 import { applyCompoundEffects } from './utils/apothecaryRecipes';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
+import { generateInitialTask } from './utils/tasks';
 import { generateInteriorSpec, FamilyInteriorContext } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
 import { NpcListEntry } from './components/NpcListModal';
@@ -59,6 +61,7 @@ function App() {
 
   const [transitioning, setTransitioning] = useState(false);
   const [mapEntrySpawn, setMapEntrySpawn] = useState<{ mapX: number; mapY: number; position: [number, number, number] } | null>(null);
+  const initialSpawnAppliedRef = useRef(false);
   const overworldPath = useOverworldPath(params.mapX, params.mapY, stats.simTime);
   const [gameLoading, setGameLoading] = useState(true); // Initial loading state
   const [nearBuilding, setNearBuilding] = useState<BuildingMetadata | null>(null);
@@ -75,8 +78,12 @@ function App() {
     setShowEncounterModal,
     showGuideModal,
     setShowGuideModal,
+    showReadModal,
+    setShowReadModal,
     lootModalData,
     setLootModalData,
+    readModalData,
+    setReadModalData,
     medicalModal,
     setMedicalModal
   } = useModalState();
@@ -124,6 +131,7 @@ function App() {
   const [nearStairs, setNearStairs] = useState<{ id: string; label: string; position: [number, number, number]; type: InteriorPropType } | null>(null);
   const [nearRoofHatch, setNearRoofHatch] = useState<{ id: string; position: [number, number, number] } | null>(null);
   const [nearRooftopHatch, setNearRooftopHatch] = useState<{ buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null>(null);
+  const [nearReadable, setNearReadable] = useState<{ id: string; position: THREE.Vector3; epitaph: any } | null>(null);
   const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
   const [narratorHighlight, setNarratorHighlight] = useState<{
     position: [number, number, number];
@@ -597,6 +605,97 @@ function App() {
     };
   });
 
+  const spawnCandidates = useMemo(() => {
+    const tiles: Array<{ mapX: number; mapY: number; district: ReturnType<typeof getDistrictType> }> = [];
+    for (let y = -2; y <= 2; y += 1) {
+      for (let x = -2; x <= 2; x += 1) {
+        const district = getDistrictType(x, y);
+        tiles.push({ mapX: x, mapY: y, district });
+      }
+    }
+    return tiles;
+  }, []);
+
+  const chooseSpawnTile = useCallback((stats: PlayerStats) => {
+    const profession = stats.profession.toLowerCase();
+    const isMerchant = /(merchant|draper|trader|khan|caravanserai|innkeeper|sherbet|spice|herbalist|goldsmith)/i.test(profession);
+    const isClergy = /(imam|qadi|mufti|muezzin|qur'an|madrasa)/i.test(profession);
+    const isSoldier = /(guard|soldier|mamluk)/i.test(profession);
+    const isLaborer = /(laborer|water-carrier|porter|servant|laundry|bread seller|water-bearer)/i.test(profession);
+    const isArtisan = /(weaver|carpenter|potter|coppersmith|dyer|tanner|blacksmith|embroiderer|silk|spinner)/i.test(profession);
+
+    const preferred = new Set<ReturnType<typeof getDistrictType>>();
+    if (stats.socialClass === SocialClass.NOBILITY) {
+      preferred.add('WEALTHY');
+      preferred.add('SALHIYYA');
+      preferred.add('CIVIC');
+    }
+    if (stats.socialClass === SocialClass.MERCHANT || isMerchant) {
+      preferred.add('MARKET');
+      preferred.add('SOUQ_AXIS');
+      preferred.add('STRAIGHT_STREET');
+      preferred.add('CARAVANSERAI');
+    }
+    if (stats.socialClass === SocialClass.CLERGY || isClergy) {
+      preferred.add('UMAYYAD_MOSQUE');
+      preferred.add('CIVIC');
+    }
+    if (isSoldier) {
+      preferred.add('CIVIC');
+      preferred.add('SOUTHERN_ROAD');
+      preferred.add('BAB_SHARQI');
+    }
+    if (isLaborer) {
+      preferred.add('HOVELS');
+      preferred.add('ALLEYS');
+      preferred.add('MIDAN');
+      preferred.add('SOUTHERN_ROAD');
+    }
+    if (isArtisan) {
+      preferred.add('MARKET');
+      preferred.add('SOUQ_AXIS');
+      preferred.add('RESIDENTIAL');
+    }
+
+    const marketTile = spawnCandidates.find((tile) => tile.district === 'MARKET') ?? spawnCandidates[0];
+    const roll = Math.random();
+    if (roll < 0.33 && marketTile) {
+      return marketTile;
+    }
+
+    const weighted = spawnCandidates.filter((tile) => tile.district !== 'MARKET');
+    let totalWeight = 0;
+    const weights = weighted.map((tile) => {
+      const weight = 1 + (preferred.has(tile.district) ? 2 : 0);
+      totalWeight += weight;
+      return weight;
+    });
+    const pick = Math.random() * totalWeight;
+    let cumulative = 0;
+    for (let i = 0; i < weighted.length; i += 1) {
+      cumulative += weights[i];
+      if (pick <= cumulative) return weighted[i];
+    }
+    return weighted[weighted.length - 1] ?? marketTile;
+  }, [playerSeed, spawnCandidates]);
+
+  useEffect(() => {
+    if (initialSpawnAppliedRef.current) return;
+    if (params.mapX !== 0 || params.mapY !== 0) return;
+    const spawn = chooseSpawnTile(playerStats);
+    if (!spawn) return;
+    initialSpawnAppliedRef.current = true;
+    setParams((prev) => ({
+      ...prev,
+      mapX: spawn.mapX,
+      mapY: spawn.mapY
+    }));
+  }, [chooseSpawnTile, params.mapX, params.mapY, playerStats, setParams]);
+
+  useEffect(() => {
+    if (!initialSpawnAppliedRef.current) return;
+  }, [params.mapX, params.mapY]);
+
   // Apply owner override to home building when homeBuildingId is set or when navigating to home tile
   useEffect(() => {
     if (!playerStats.homeBuildingId) return;
@@ -789,6 +888,27 @@ function App() {
     setShowEncounterModal(true);
   }, [activeEvent, showMerchantModal, showEnterModal, showPlayerModal, showEncounterModal, tryTriggerEvent]);
 
+  // Handle gravestone desecration (knocking over graves)
+  const handleGravestoneDesecrated = useCallback(() => {
+    const DESECRATION_PENALTY = -5;
+    setPlayerStats(prev => ({
+      ...prev,
+      reputation: Math.max(0, prev.reputation + DESECRATION_PENALTY)
+    }));
+  }, []);
+
+  // Handle approaching a readable object (gravestone with epitaph)
+  const handleNearReadable = useCallback((readable: { id: string; position: THREE.Vector3; epitaph: any } | null) => {
+    setNearReadable(readable);
+  }, []);
+
+  // Handle closing read modal (switch back to isometric camera)
+  const handleCloseReadModal = useCallback(() => {
+    setShowReadModal(false);
+    setReadModalData(null);
+    setParams(prev => ({ ...prev, cameraMode: CameraMode.ISOMETRIC }));
+  }, []);
+
   // Handle crime witnessed by NPCs (theft, vandalism)
   const handleCrimeWitnessed = useCallback(({ type, witnessCount }: { type: 'theft' | 'vandalism'; witnessCount: number }) => {
     const penalty = type === 'theft' ? -10 : -3;
@@ -853,7 +973,6 @@ function App() {
     showPerfPanel: false,
     showHoverWireframe: false,
     showShadows: true,
-    showClouds: true,
     showFog: true,
     showTorches: false,
     showNPCs: true,
@@ -863,7 +982,13 @@ function App() {
     showSoundDebug: false,
     showEventDebug: false,
     deathMode: false,
+    disableUiBlur: false,
+    disableCameraOcclusion: false,
   });
+
+  useEffect(() => {
+    document.body.classList.toggle('no-ui-blur', devSettings.disableUiBlur);
+  }, [devSettings.disableUiBlur]);
 
   useEffect(() => {
     if (sceneMode === 'interior') {
@@ -1216,9 +1341,20 @@ function App() {
         });
         setShowEncounterModal(true);
       }
+      // Open read modal with 'R' key when near a readable gravestone
+      if (e.key === 'r' && sceneMode === 'outdoor' && nearReadable && !showReadModal && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        setReadModalData(nearReadable); // Store full gravestone data
+        setShowReadModal(true);
+        // Switch to over-shoulder camera view (like merchant/player modals)
+        setParams(prev => ({ ...prev, cameraMode: CameraMode.OVER_SHOULDER }));
+      }
       // Close merchant modal with Escape
       if (e.key === 'Escape' && showMerchantModal) {
         setShowMerchantModal(false);
+      }
+      // Close read modal with Escape or R
+      if ((e.key === 'Escape' || e.key === 'r') && showReadModal) {
+        handleCloseReadModal();
       }
       // Open chest with 'O' key when near a chest (works in both interior and outdoor)
       if (e.key === 'o' && nearChest && !lootModalData && !showMerchantModal && !showEncounterModal) {
@@ -1675,6 +1811,7 @@ function App() {
 
   const getDistrictActivityLabel = useCallback((districtType: import('./types').DistrictType) => {
     const labels: Record<import('./types').DistrictType, string> = {
+      // Core districts
       MARKET: 'the market street',
       WEALTHY: 'a wealthy residential lane',
       HOVELS: 'a cramped lane',
@@ -1685,15 +1822,35 @@ function App() {
       CHRISTIAN_QUARTER: 'the Christian quarter street',
       UMAYYAD_MOSQUE: 'the mosque precinct',
       SALHIYYA: 'the hillside district',
+      CEMETERY: 'the cemetery grounds',
       OUTSKIRTS_FARMLAND: 'the farmland edge',
       OUTSKIRTS_DESERT: 'the desert fringe',
+      OUTSKIRTS_SCRUBLAND: 'the scrubland path',
+      ROADSIDE: 'a roadside settlement',
       CARAVANSERAI: 'the caravanserai yard',
       MOUNTAIN_SHRINE: 'the mountain path',
       SOUTHERN_ROAD: 'the southern road',
       STRAIGHT_STREET: 'the straight street',
       SOUQ_AXIS: 'the souq corridor',
       MIDAN: 'the southern gate road',
-      BAB_SHARQI: 'the eastern gate road'
+      BAB_SHARQI: 'the eastern gate road',
+      // New historical districts
+      QAYMARIYYA: 'the affluent mosque quarter',
+      AMARA: 'the central residential district',
+      QUBAYBAT: 'the tombs district',
+      QANAWAT: 'the canal district',
+      SHAGHOUR_OUTER: 'the outer southern suburb',
+      AMIN: 'the eastern quarter street',
+      LOWER_SALHIYYA: 'the lower hillside quarter',
+      BAB_FARADIS: 'the Paradise Gate road',
+      RABWE: 'the river gorge gardens',
+      UQAYBA: 'the northern suburb',
+      DARAYA_ROAD: 'the Daraya road',
+      JABIYA_ROAD: 'the western approach road',
+      QASSIOUN_CAVES: 'the sacred mountain caves',
+      NORTH_GHOUTA: 'the northern irrigated orchards',
+      SOUTH_GHOUTA: 'the southern irrigated orchards',
+      EAST_GHOUTA: 'the eastern orchards',
     };
     return labels[districtType] ?? 'the street';
   }, []);
@@ -1943,6 +2100,7 @@ function App() {
         reputation: playerStats.reputation,
         currency: playerStats.currency
       },
+      currentTask: playerStats.currentTask?.description ?? null,
       nearbyBuildings,
       nearbyNpcs: sceneMode === 'interior'
         ? interiorNpcs.slice(0, 6)
@@ -2308,11 +2466,12 @@ function App() {
     console.log('[Family Debug] Stored in familyNpcsRef, count:', familyNpcsRef.current.length);
 
     // Update the home building's owner to be the player
-    setTileBuildings(prev => prev.map(b =>
+    const updatedBuildings = tileBuildings.map(b =>
       b.id === home.id
         ? { ...b, ownerName: playerStats.name, ownerProfession: playerStats.profession }
         : b
-    ));
+    );
+    setTileBuildings(updatedBuildings);
 
     // Immediately recreate registry WITH family NPCs (don't just delete - race condition)
     const homeTileKey = getTileKey(params.mapX, params.mapY);
@@ -2320,7 +2479,7 @@ function App() {
     const tileSeed = hashToSeedTile(homeTileKey);
     // Check if we need to seed initial infections (if not already done)
     const seedInitial = !seededInitialInfectionsRef.current;
-    const newRegistry = createTileNPCRegistry(tileBuildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, seedInitial, npcRecords);
+    const newRegistry = createTileNPCRegistry(updatedBuildings, district, stats.simTime, tileSeed, CONSTANTS.AGENT_COUNT, seedInitial, npcRecords);
     if (seedInitial) {
       seededInitialInfectionsRef.current = true;
     }
@@ -2337,6 +2496,21 @@ function App() {
 
     console.log(`[Family] Assigned home: ${home.id}, generated ${familyMembers.length} family members for ${playerStats.name}`);
   }, [tileBuildings, playerStats.homeBuildingId, playerStats.socialClass, playerStats.name, playerStats.profession, selectPlayerHome, params.mapX, params.mapY]);
+
+  useEffect(() => {
+    if (playerStats.currentTask || tileBuildings.length === 0) return;
+    const task = generateInitialTask(playerStats, {
+      mapX: params.mapX,
+      mapY: params.mapY,
+      buildings: tileBuildings,
+      seed: playerSeed,
+      familyMembers: playerStats.familyMembers,
+      homeBuildingId: playerStats.homeBuildingId,
+      homeMapPosition: playerStats.homeMapPosition
+    });
+    if (!task) return;
+    setPlayerStats(prev => (prev.currentTask ? prev : { ...prev, currentTask: task }));
+  }, [playerStats, tileBuildings, params.mapX, params.mapY, playerSeed]);
 
   useEffect(() => {
     if (tileBuildings.length === 0) return;
@@ -3290,6 +3464,37 @@ function App() {
   const isOnHomeTile = playerStats.homeMapPosition?.mapX === params.mapX &&
                        playerStats.homeMapPosition?.mapY === params.mapY;
 
+  useEffect(() => {
+    const task = playerStats.currentTask;
+    if (!task || task.status !== 'active') return;
+    const target = task.target;
+    if (!target) return;
+
+    let completed = false;
+    if (target.kind === 'district' && target.mapX !== undefined && target.mapY !== undefined) {
+      completed = params.mapX === target.mapX && params.mapY === target.mapY;
+    } else if (target.kind === 'building') {
+      completed = nearBuilding?.id === target.buildingId ||
+        (sceneMode === 'interior' && interiorBuilding?.id === target.buildingId);
+    } else if (target.kind === 'home') {
+      const atHomeTile = isOnHomeTile;
+      const atHomeBuilding = nearBuilding?.id === playerStats.homeBuildingId ||
+        (sceneMode === 'interior' && interiorBuilding?.id === playerStats.homeBuildingId);
+      completed = atHomeTile && (atHomeBuilding || !playerStats.homeBuildingId);
+    }
+
+    if (!completed) return;
+    setPlayerStats(prev => ({
+      ...prev,
+      currentTask: prev.currentTask ? { ...prev.currentTask, status: 'completed' } : prev.currentTask
+    }));
+    setToastMessages(prev => [...prev, {
+      id: `task-complete-${toastIdCounter.current++}`,
+      message: `Task complete: ${task.title}.`,
+      duration: 5000
+    }]);
+  }, [interiorBuilding, isOnHomeTile, nearBuilding, params.mapX, params.mapY, playerStats.currentTask, playerStats.homeBuildingId, sceneMode]);
+
   const homeDisplayInfo = useMemo(() => {
     if (!playerStats.homeBuildingId || !playerStats.homeMapPosition) {
       return { buildingType: undefined, districtName: undefined };
@@ -3585,6 +3790,8 @@ function App() {
     onPlagueExposure: handlePlagueExposure,
     onNPCInitiatedEncounter: handleNPCInitiatedEncounter,
     onCrimeWitnessed: handleCrimeWitnessed,
+    onGravestoneDesecrated: handleGravestoneDesecrated,
+    onNearReadable: handleNearReadable,
     onFallDamage: handleFallDamage,
     cameraViewTarget,
     onPlayerStartMove: handlePlayerStartMove,
@@ -3615,6 +3822,8 @@ function App() {
     handleBuildingsUpdate,
     handleClearSelectedNpc,
     handleFallDamage,
+    handleGravestoneDesecrated,
+    handleNearReadable,
     handleMapChange,
     handleMoraleUpdate,
     handleNPCInitiatedEncounter,
@@ -3714,6 +3923,7 @@ function App() {
         onTriggerEnterViaRooftopHatch={handleEnterViaRooftopHatch}
         nearBirdcage={nearBirdcage}
         onTriggerOpenBirdcage={handleTriggerOpenBirdcage}
+        nearReadable={nearReadable}
         showEncounterModal={showEncounterModal}
         showPlayerModal={showPlayerModal}
         showEnterModalActive={showEnterModal}
@@ -3743,9 +3953,21 @@ function App() {
         playerSkinTone={playerStats.skinTone}
         treatmentOutcome={treatmentOutcome}
         onCloseTreatmentOutcome={() => setTreatmentOutcome(null)}
+        startLocationLabel={getLocationLabel(params.mapX, params.mapY)}
       />
 
       <SimulationShell {...simulationShellProps} />
+
+      {/* Read modal for gravestones */}
+      {showReadModal && readModalData && (
+        <ReadModal
+          epitaph={readModalData.epitaph}
+          graveShape={readModalData.graveShape}
+          graveType={readModalData.graveType}
+          graveScale={readModalData.graveScale}
+          onClose={handleCloseReadModal}
+        />
+      )}
     </div>
   );
 }

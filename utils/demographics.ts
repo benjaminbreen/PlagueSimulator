@@ -13,25 +13,52 @@ import { DistrictType, Ethnicity, Language, Religion, SocialClass } from '../typ
 type BiomeType = 'marketplace' | 'wealthy' | 'hovels' | 'desert' | 'civic' | 'christian_quarter' | 'jewish_quarter' | 'umayyad_mosque';
 
 const DISTRICT_TO_BIOME: Record<DistrictType, BiomeType> = {
+  // Commercial districts
   MARKET: 'marketplace',
   CARAVANSERAI: 'marketplace',
   STRAIGHT_STREET: 'marketplace',
   SOUQ_AXIS: 'marketplace',
   MIDAN: 'marketplace',
+  BAB_FARADIS: 'marketplace',
+  AMARA: 'marketplace',
+  // Christian areas
   BAB_SHARQI: 'christian_quarter',
+  CHRISTIAN_QUARTER: 'christian_quarter',
+  // Wealthy quarters
   WEALTHY: 'wealthy',
-  SALHIYYA: 'wealthy',        // Kurdish/Hanbali scholarly quarter on Mt. Qasiyun slopes
+  SALHIYYA: 'wealthy',
+  QAYMARIYYA: 'wealthy',
+  LOWER_SALHIYYA: 'wealthy',
+  // Poor/crowded areas
   HOVELS: 'hovels',
   ALLEYS: 'hovels',
-  JEWISH_QUARTER: 'jewish_quarter',      // Al-Yahud / Harat al-Yahud
-  CHRISTIAN_QUARTER: 'christian_quarter', // Bab Touma and Bab Sharqi areas
-  UMAYYAD_MOSQUE: 'umayyad_mosque',      // The Great Mosque of Damascus
   RESIDENTIAL: 'hovels',
+  SHAGHOUR_OUTER: 'hovels',
+  QANAWAT: 'hovels',
+  UQAYBA: 'hovels',
+  ROADSIDE: 'hovels',
+  // Jewish Quarter
+  JEWISH_QUARTER: 'jewish_quarter',
+  AMIN: 'jewish_quarter',
+  // Mosque area
+  UMAYYAD_MOSQUE: 'umayyad_mosque',
+  // Desert/outskirts
   OUTSKIRTS_DESERT: 'desert',
   OUTSKIRTS_FARMLAND: 'desert',
+  OUTSKIRTS_SCRUBLAND: 'desert',
   SOUTHERN_ROAD: 'desert',
   MOUNTAIN_SHRINE: 'desert',
+  RABWE: 'desert',
+  DARAYA_ROAD: 'desert',
+  JABIYA_ROAD: 'desert',
+  QASSIOUN_CAVES: 'desert',
+  NORTH_GHOUTA: 'desert',
+  SOUTH_GHOUTA: 'desert',
+  EAST_GHOUTA: 'desert',
+  // Civic areas
   CIVIC: 'civic',
+  CEMETERY: 'civic',
+  QUBAYBAT: 'civic',
 };
 
 // =============================================================================

@@ -105,6 +105,8 @@ interface PlayerProps {
   pickupTriggerRef?: React.MutableRefObject<boolean>;    // Mobile/touch trigger for pickup
   climbTriggerRef?: React.MutableRefObject<boolean>;     // Mobile/touch trigger for initiating climb
   onPropertyDamaged?: (position: THREE.Vector3) => void; // Crime detection for breaking interior objects
+  onGravestoneDesecrated?: () => void; // Reputation penalty for knocking over graves
+  onNearReadable?: (readable: { id: string; position: THREE.Vector3; epitaph: any } | null) => void; // Near gravestone for reading
   onFallDamage?: (fallHeight: number, fatal: boolean) => void;
   cameraViewTarget?: [number, number, number] | null;
   onPlayerStartMove?: () => void;
@@ -116,6 +118,7 @@ interface PlayerProps {
   onIsometricOcclusionChange?: (ids: string[]) => void;
   mapEntryToken?: string;
   isInterior?: boolean;
+  enableCameraOcclusion?: boolean;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -155,6 +158,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   pickupTriggerRef,
   climbTriggerRef,
   onPropertyDamaged,
+  onGravestoneDesecrated,
+  onNearReadable,
   onFallDamage,
   cameraViewTarget,
   onPlayerStartMove,
@@ -165,7 +170,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   interiorEntryToken = null,
   onIsometricOcclusionChange,
   mapEntryToken,
-  isInterior = false
+  isInterior = false,
+  enableCameraOcclusion = true
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -1898,7 +1904,50 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    // 2c. Boulder slope gravity
+    // 2c. Gravestone physics (tipping and wobbling)
+    if (pushablesRef?.current) {
+      for (const item of pushablesRef.current) {
+        if (item.kind !== 'gravestone') continue;
+
+        // Tipping animation - smoothly rotate to fallen position
+        if (item.isTipped && item.tippedRotation !== undefined && item.tippedRotation < Math.PI / 2) {
+          const TIPPING_SPEED = 2.5; // Radians per second
+          item.tippedRotation = Math.min(Math.PI / 2, item.tippedRotation + TIPPING_SPEED * delta);
+        }
+
+        // Wobble physics - spring-damper oscillation
+        if (!item.isTipped) {
+          if (item.wobbleAngle === undefined) item.wobbleAngle = 0;
+          if (item.wobbleVelocity === undefined) item.wobbleVelocity = 0;
+
+          // Spring-damper system for realistic wobble
+          const SPRING_STIFFNESS = 15.0; // How quickly it returns to center
+          const DAMPING = 0.85; // Energy loss per frame (higher = more damping)
+          const MAX_WOBBLE_ANGLE = 0.3; // Max ~17 degrees wobble
+
+          // Spring force (restoring force toward vertical)
+          const springForce = -item.wobbleAngle * SPRING_STIFFNESS;
+          item.wobbleVelocity += springForce * delta;
+
+          // Apply damping
+          item.wobbleVelocity *= Math.pow(DAMPING, delta * 60);
+
+          // Update angle
+          item.wobbleAngle += item.wobbleVelocity * delta;
+
+          // Clamp wobble angle to prevent unrealistic movement
+          item.wobbleAngle = Math.max(-MAX_WOBBLE_ANGLE, Math.min(MAX_WOBBLE_ANGLE, item.wobbleAngle));
+
+          // Stop wobbling when nearly at rest
+          if (Math.abs(item.wobbleAngle) < 0.001 && Math.abs(item.wobbleVelocity) < 0.01) {
+            item.wobbleAngle = 0;
+            item.wobbleVelocity = 0;
+          }
+        }
+      }
+    }
+
+    // 2d. Boulder slope gravity
     if (pushablesRef?.current && heightmap) {
       const now = state.clock.elapsedTime;
       const SLOPE_GRAVITY_FORCE = 8.0; // Acceleration down slopes (increased to overcome friction)
@@ -2609,6 +2658,17 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             hitItem.angularVelocity.copy(rollAxis.multiplyScalar(initialAngularSpeed));
           }
 
+          // Gravestone tipping - shift+push always knocks them over
+          if (hitItem.kind === 'gravestone' && !hitItem.isTipped) {
+            hitItem.isTipped = true;
+            hitItem.tippedRotation = 0; // Start tipping animation
+            // Clear any wobble
+            hitItem.wobbleAngle = 0;
+            hitItem.wobbleVelocity = 0;
+            // Reputation penalty for desecrating graves
+            onGravestoneDesecrated?.();
+          }
+
           // Visual and audio feedback
           onImpactPuff?.(hitItem.position.clone(), 0.5 + strength * 0.4);
           playObjectImpact(hitItem.material, 0.5 + strength * 0.3);
@@ -2711,6 +2771,16 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           // Wake sleeping boulders when bumped
           if (item.kind === 'boulder' && item.isSleeping) {
             item.isSleeping = false;
+          }
+
+          // Gravestone wobble - bumping causes wobble effect (if not already tipped)
+          if (item.kind === 'gravestone' && !item.isTipped) {
+            // Initialize wobble properties if needed
+            if (item.wobbleAngle === undefined) item.wobbleAngle = 0;
+            if (item.wobbleVelocity === undefined) item.wobbleVelocity = 0;
+            // Add angular impulse proportional to bump strength
+            const wobbleImpulse = shove * 0.8; // Convert linear impulse to angular
+            item.wobbleVelocity += wobbleImpulse;
           }
 
           const next = item.position.clone().add(impulse.clone().multiplyScalar(0.2));
@@ -2844,6 +2914,32 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
         pickupPromptRef.current = nearestLabel;
         onPickupPrompt(nearestLabel ? `Press SHIFT to pick up ${nearestLabel}` : null);
       }
+    }
+
+    // 3f. Readable object detection (gravestones with epitaphs)
+    if (pushablesRef?.current && onNearReadable) {
+      let nearestReadable: { id: string; position: THREE.Vector3; epitaph: any } | null = null;
+      let nearestDistSq = Infinity;
+      const READ_RANGE = 2.0; // Slightly larger range than pickup
+
+      for (const item of pushablesRef.current) {
+        if (item.kind !== 'gravestone' || !item.graveEpitaph) continue;
+        const dx = item.position.x - group.current.position.x;
+        const dz = item.position.z - group.current.position.z;
+        const distSq = dx * dx + dz * dz;
+        if (distSq < READ_RANGE * READ_RANGE && distSq < nearestDistSq) {
+          nearestDistSq = distSq;
+          nearestReadable = {
+            id: item.id,
+            position: item.position.clone(),
+            epitaph: item.graveEpitaph,
+            graveShape: item.graveShape,
+            graveType: item.graveType,
+            graveScale: item.graveScale
+          };
+        }
+      }
+      onNearReadable(nearestReadable);
     }
 
     // 4. Camera Positioning
@@ -3079,7 +3175,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    if (cameraMode === CameraMode.ISOMETRIC && onIsometricOcclusionChange && group.current) {
+    if (enableCameraOcclusion && cameraMode === CameraMode.ISOMETRIC && onIsometricOcclusionChange && group.current) {
       isoOcclusionFrameRef.current += 1;
       if (isoOcclusionFrameRef.current >= 4) {
         isoOcclusionFrameRef.current = 0;
@@ -3112,7 +3208,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           }
         }
       }
-    } else if (cameraMode !== CameraMode.ISOMETRIC && onIsometricOcclusionChange) {
+    } else if ((!enableCameraOcclusion || cameraMode !== CameraMode.ISOMETRIC) && onIsometricOcclusionChange) {
       if (isoOccludedKeyRef.current !== '') {
         isoOccludedKeyRef.current = '';
         onIsometricOcclusionChange([]);
@@ -3161,7 +3257,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     }
 
     // Orbit occlusion assist (third-person): rotate slightly and fade walls if player is blocked.
-    if (cameraMode === CameraMode.THIRD_PERSON && orbitRef.current && group.current) {
+    if (enableCameraOcclusion && cameraMode === CameraMode.THIRD_PERSON && orbitRef.current && group.current) {
       orbitOcclusionFrameRef.current += 1;
       if (orbitOcclusionFrameRef.current >= 4) {
         orbitOcclusionFrameRef.current = 0;
@@ -3299,7 +3395,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
     // PHASE 2: Wall Occlusion System - Make walls transparent when blocking camera view
     // Active in over-shoulder and isometric modes for readable framing
-    if ((cameraMode === CameraMode.OVER_SHOULDER || cameraMode === CameraMode.ISOMETRIC) && group.current) {
+    if (enableCameraOcclusion && (cameraMode === CameraMode.OVER_SHOULDER || cameraMode === CameraMode.ISOMETRIC) && group.current) {
       // Performance: Only check every 3 frames
       occlusionCheckFrameRef.current++;
       if (occlusionCheckFrameRef.current >= 3) {
@@ -3369,7 +3465,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           }
         });
       }
-    } else if (cameraMode !== CameraMode.THIRD_PERSON) {
+    } else if (!enableCameraOcclusion || cameraMode !== CameraMode.THIRD_PERSON) {
       // Restore all occluded meshes when not using any occlusion mode.
       occludedMeshesRef.current.forEach((mesh) => {
         if (Array.isArray(mesh.material)) {

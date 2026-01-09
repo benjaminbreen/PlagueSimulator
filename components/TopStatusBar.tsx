@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calendar, Sun, Moon, Pause, Play, FastForward, Keyboard, MousePointer2, Camera, Menu, X, ChevronDown } from 'lucide-react';
+import { Calendar, Sun, Moon, Pause, Play, FastForward, Keyboard, MousePointer2, Camera, Menu, X, ChevronDown, Cloud, CloudMoon, Wind } from 'lucide-react';
 import { PlayerStats } from '../types';
 import { SicknessMeter } from './SicknessMeter';
 
@@ -7,6 +7,7 @@ interface TopStatusBarProps {
   dateStr: string;
   timeStr: string;
   isDaytime: boolean;
+  currentWeather: string;
   simulationSpeed: number;
   onSetSimulationSpeed: (speed: number) => void;
   onOpenWeather: () => void;
@@ -30,10 +31,28 @@ const getSpeedInfo = (speed: number) => {
   return { icon: FastForward, label: '4x', color: 'bg-amber-700 text-white' };
 };
 
+// Get weather icon based on current weather and time of day
+const getWeatherIcon = (weather: string, isDaytime: boolean) => {
+  switch (weather) {
+    case 'SANDSTORM':
+      return { icon: Wind, color: 'text-orange-400' };
+    case 'OVERCAST':
+      return isDaytime
+        ? { icon: Cloud, color: 'text-slate-400' }
+        : { icon: CloudMoon, color: 'text-slate-400' };
+    case 'CLEAR':
+    default:
+      return isDaytime
+        ? { icon: Sun, color: 'text-amber-400' }
+        : { icon: Moon, color: 'text-indigo-400' };
+  }
+};
+
 export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   dateStr,
   timeStr,
   isDaytime,
+  currentWeather,
   simulationSpeed,
   onSetSimulationSpeed,
   onOpenWeather,
@@ -52,6 +71,8 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const speedInfo = getSpeedInfo(simulationSpeed);
   const SpeedIcon = speedInfo.icon;
+  const weatherInfo = getWeatherIcon(currentWeather, isDaytime);
+  const WeatherIcon = weatherInfo.icon;
 
   return (
     <div
@@ -74,12 +95,12 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
         className="md:hidden flex items-center gap-1.5"
         onClick={e => e.stopPropagation()}
       >
-        {/* Time with day/night icon */}
+        {/* Time with weather icon */}
         <div
           className="flex items-center gap-1 text-amber-100/90 px-2 py-1 rounded-lg active:bg-amber-900/30 transition-colors"
           onClick={onOpenWeather}
         >
-          {isDaytime ? <Sun size={12} className="text-amber-400" /> : <Moon size={12} className="text-indigo-400" />}
+          <WeatherIcon size={12} className={weatherInfo.color} />
           <span className="text-[10px] font-mono">{timeStr}</span>
         </div>
 
@@ -114,7 +135,7 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
           onClick={onOpenWeather}
           title="View Weather Report"
         >
-          {isDaytime ? <Sun size={14} className="text-amber-400" /> : <Moon size={14} className="text-indigo-400" />}
+          <WeatherIcon size={14} className={weatherInfo.color} />
           <span className="text-xs font-mono tracking-widest">{timeStr}</span>
         </div>
 

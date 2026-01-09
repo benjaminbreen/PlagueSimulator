@@ -55,7 +55,8 @@ export const GROUND_PALETTE = {
   RESIDENTIAL: ['#c8b8a8', '#b8a898', '#d8c8b8'],
   CIVIC: ['#d8c2a0', '#d1b896'],
   SALHIYYA: ['#6a8a4a', '#5f7d45', '#548040'],
-  CEMETERY: ['#7a7a5a', '#6f6f52', '#73735a', '#686850'], // Somber gray-brown earth with dry grass
+  CEMETERY: ['#7a5a48', '#6a4a38', '#755040', '#6f5442'], // Dry brown dirt
+  QUBAYBAT: ['#8a7a68', '#7a6a58', '#9a8a78', '#857560'], // Dusty stone and sandy soil (mausoleum district)
   OUTSKIRTS_FARMLAND: ['#6e8f4a', '#5f7f42', '#6a934f', '#57823f'],
   OUTSKIRTS_DESERT: ['#d89556', '#c8904e', '#db9e62', '#c87d42'], // Warm amber-yellow-orange desert sand
   OUTSKIRTS_SCRUBLAND: ['#8d8465', '#7f7658', '#9a8f6b', '#8a7d5e'], // Dusty scrub soil
@@ -63,6 +64,8 @@ export const GROUND_PALETTE = {
   MOUNTAIN_SHRINE: ['#6b7d5a', '#7a8a68', '#889775', '#5f6e4f'],
   CARAVANSERAI: ['#c8a86f', '#c19d64', '#b7935d'],
   SOUTHERN_ROAD: ['#c2a47c', '#b6956d', '#aa8b63'],
+  QASSIOUN_CAVES: ['#252220', '#2a2825', '#22201d', '#2d2a27'], // Very dark cave rock floor
+  QANAWAT: ['#4a7a5a', '#3f6f4f', '#558565', '#4a8058', '#3d7048'], // Lush blue-green from canal moisture
   DEFAULT: ['#e2c8a2', '#dbc29a']
 };
 

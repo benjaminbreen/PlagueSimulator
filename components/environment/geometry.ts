@@ -33,6 +33,37 @@ export const createNoiseTexture = (size = 256, opacity = 0.2): THREE.CanvasTextu
 };
 
 /**
+ * Create a matte dirt/sand texture for cemetery ground
+ * Stays completely rough (no shine) while providing noisy surface detail
+ */
+export const createDirtTexture = (size = 256): THREE.CanvasTexture | null => {
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const imageData = ctx.createImageData(size, size);
+
+  // Create noisy dirt texture with high base value (rough/matte)
+  // Values stay between 180-255 to ensure no shininess while allowing more variation
+  for (let i = 0; i < imageData.data.length; i += 4) {
+    // More variation for grainier dirt appearance
+    const grain = Math.random() * 75 + 180; // 180-255 range = always rough, more noise
+    imageData.data[i] = grain;
+    imageData.data[i + 1] = grain;
+    imageData.data[i + 2] = grain;
+    imageData.data[i + 3] = 255; // Full opacity
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  return texture;
+};
+
+/**
  * Create a radial grime/AO texture for building contact areas
  */
 export const createGrimeTexture = (size = 256): THREE.CanvasTexture | null => {

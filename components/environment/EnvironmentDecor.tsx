@@ -5,6 +5,7 @@ import { PushableObject } from '../../utils/pushables';
 import { HangingCarpets } from './decorations/HangingCarpets';
 import { LaundryLines } from './decorations/LaundryLines';
 import { PushableBoulder } from './decorations/Boulder';
+import { PushableGravestone } from './decorations/PushableGravestone';
 import {
   PushableBench,
   PushableClayJar,
@@ -40,6 +41,7 @@ const PushableDecorations: React.FC<{ items: PushableObject[] }> = ({ items }) =
   <>
     {items.map((item) => {
       if (item.kind === 'boulder') return <PushableBoulder key={item.id} item={item} />;
+      if (item.kind === 'gravestone') return <PushableGravestone key={item.id} item={item} />;
       if (item.kind === 'bench') return <PushableBench key={item.id} item={item} />;
       if (item.kind === 'clayJar') return <PushableClayJar key={item.id} item={item} />;
       if (item.kind === 'geranium') return <PushableGeraniumPot key={item.id} item={item} />;

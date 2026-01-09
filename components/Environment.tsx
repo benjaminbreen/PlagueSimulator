@@ -13,7 +13,7 @@ import { LaundryLine, getCatenaryPoint } from '../utils/laundry';
 import { HangingCarpet } from '../utils/hangingCarpets';
 import { bakeBoxAO, bakeBoxAO_TallBuilding, bakeBoxAO_Civic } from '../utils/vertexAO';
 import { CACHED_STRIPE_TEXTURES, CACHED_MEDICAL_PATTERN, CACHED_CIVIC_PATTERN } from '../utils/environment/textures';
-import { getWoodTexture } from '../utils/environment/wood';
+import { getWoodTexture, CACHED_GRASS_TEXTURE } from '../utils/environment/wood';
 import { getDoorStyle } from '../utils/environment/doorStyle';
 import {
   HOVER_WIREFRAME_COLORS,
@@ -28,7 +28,8 @@ import {
   createNoiseTexture,
   createGrimeTexture,
   createBlotchTexture,
-  createLinenTexture
+  createLinenTexture,
+  createDirtTexture
 } from './environment/geometry';
 import { CourtyardBuilding } from './environment/buildings/CourtyardBuilding';
 import { BuildingOrnaments } from './environment/buildings/BuildingOrnaments';
@@ -617,9 +618,9 @@ const Building: React.FC<{
     const isNoonish = torchIntensity < 0.4; // Peak sun when torches are minimal
 
     if (isDaytime && isNoonish) {
-      // Sun-baked warm glow (subtle golden emissive)
-      const emissiveIntensity = (0.8 - torchIntensity) / 0.8 * 0.12; // Inverse of torch intensity
-      buildingMaterial.emissive.setRGB(0.92, 0.82, 0.62); // Warm sun-baked stone
+      // Sun-baked warm glow - BOOSTED for Mediterranean feel
+      const emissiveIntensity = (0.8 - torchIntensity) / 0.8 * 0.28; // Boosted from 0.12
+      buildingMaterial.emissive.setRGB(0.95, 0.85, 0.55); // Warmer, more saturated sun-baked stone
       buildingMaterial.emissiveIntensity = emissiveIntensity;
     } else {
       // Fade out emissive outside peak sun hours
@@ -2527,10 +2528,138 @@ export const Buildings: React.FC<{
       // No regular buildings in cemetery - small keeper shacks handled by CemeteryDecor
       return [];
     }
+    if (district === 'QUBAYBAT') {
+      // Qubaybat (Little Domes) - mausoleum district with perimeter buildings
+      // Major tombs handled by QubaybatDecor, but regular buildings around the edges
+      const perimeterPositions: Array<{ x: number; z: number; side: 'north' | 'south' | 'east' | 'west' }> = [
+        // North perimeter
+        { x: -35, z: 42, side: 'north' }, { x: -18, z: 44, side: 'north' },
+        { x: 18, z: 44, side: 'north' }, { x: 35, z: 42, side: 'north' },
+        // South perimeter (near gate - fewer buildings)
+        { x: -38, z: -44, side: 'south' }, { x: 38, z: -44, side: 'south' },
+        // East perimeter
+        { x: 44, z: -25, side: 'east' }, { x: 44, z: 10, side: 'east' },
+        { x: 42, z: 32, side: 'east' },
+        // West perimeter
+        { x: -44, z: -25, side: 'west' }, { x: -44, z: 10, side: 'west' },
+        { x: -42, z: 32, side: 'west' },
+      ];
+
+      perimeterPositions.forEach((pos, i) => {
+        const localSeed = seed + i * 137 + 700;
+        if (seededRandom(localSeed) > 0.75) return; // 25% chance to skip
+
+        const jitterX = (seededRandom(localSeed + 1) - 0.5) * 3;
+        const jitterZ = (seededRandom(localSeed + 2) - 0.5) * 3;
+        const building = generateBuildingMetadata(
+          localSeed,
+          pos.x + jitterX,
+          pos.z + jitterZ,
+          district
+        );
+        building.sizeScale = 0.85 + seededRandom(localSeed + 3) * 0.25;
+        // Mix of residential and some commercial (tomb visitors, mourning supplies)
+        if (seededRandom(localSeed + 4) > 0.7) {
+          building.type = BuildingType.COMMERCIAL;
+          building.ownerProfession = ['Shroud Maker', 'Coffin Maker', 'Incense Seller', 'Flower Seller'][Math.floor(seededRandom(localSeed + 5) * 4)];
+        } else {
+          building.type = BuildingType.RESIDENTIAL;
+          building.ownerProfession = ['Cemetery Keeper', 'Grave Digger', 'Qari (Quran Reciter)', 'Watchman'][Math.floor(seededRandom(localSeed + 5) * 4)];
+        }
+        addBuilding(building);
+      });
+
+      return bldMetadata;
+    }
     if (district === 'OUTSKIRTS_SCRUBLAND') {
       // Scrublands have 0-3 buildings handled by decorative system
       // No regular procedural buildings
       return [];
+    }
+    if (district === 'SOUQ_AXIS') {
+      // SOUQ - Covered market corridor with buildings set back from center
+      // SouqDecor handles arcades, awnings, and shop niches in the central corridor
+      // Regular buildings are placed only at the far edges
+      const corridorHalfWidth = 8; // SouqDecor uses this for arcades
+      const buildingOffset = 14; // Buildings start well beyond the arcade
+      const spacing = 18; // Wide spacing between buildings
+      const span = 2; // Fewer buildings overall
+
+      for (let i = -span; i <= span; i++) {
+        const z = i * spacing;
+        const localSeedLeft = seed + i * 1337 + 77;
+        const localSeedRight = seed + i * 1337 + 99;
+
+        // Skip many positions - souq has few large buildings
+        if (seededRandom(localSeedLeft) < 0.4) continue;
+        if (seededRandom(localSeedRight) < 0.4) continue;
+
+        // Left side buildings (west of corridor)
+        const left = generateBuildingMetadata(localSeedLeft, -buildingOffset - seededRandom(localSeedLeft + 1) * 6, z, district);
+        left.sizeScale = 1.1 + seededRandom(localSeedLeft + 2) * 0.2; // Larger buildings
+        left.type = BuildingType.COMMERCIAL;
+        left.ownerProfession = ['Textile Merchant', 'Spice Merchant', 'Perfume Seller', 'Rug Merchant'][Math.floor(seededRandom(localSeedLeft + 3) * 4)];
+
+        // Right side buildings (east of corridor)
+        const right = generateBuildingMetadata(localSeedRight, buildingOffset + seededRandom(localSeedRight + 1) * 6, z, district);
+        right.sizeScale = 1.1 + seededRandom(localSeedRight + 2) * 0.2;
+        right.type = BuildingType.COMMERCIAL;
+        right.ownerProfession = ['Cloth Dyer', 'Coppersmith', 'Jeweler', 'Leather Worker'][Math.floor(seededRandom(localSeedRight + 3) * 4)];
+
+        addBuilding(left);
+        addBuilding(right);
+      }
+
+      // A few residential buildings at the very edges
+      for (let i = 0; i < 3; i++) {
+        const localSeed = seed + i * 500 + 8000;
+        const side = i % 2 === 0 ? -1 : 1;
+        const x = side * (24 + seededRandom(localSeed) * 8);
+        const z = -25 + i * 25 + seededRandom(localSeed + 1) * 10;
+
+        const building = generateBuildingMetadata(localSeed, x, z, district);
+        building.sizeScale = 0.9;
+        building.type = BuildingType.RESIDENTIAL;
+        building.ownerProfession = 'Merchant';
+        addBuilding(building);
+      }
+
+      return bldMetadata;
+    }
+    if (district === 'QASSIOUN_CAVES') {
+      // Qassioun Caves - Sacred cave system with NO buildings
+      // All cave elements (cliffs, crystals, shrine, stalactites) are handled by QassiounCavesDecor
+      // This is a natural cave formation - no buildings should spawn here
+      return [];
+    }
+    if (district === 'QANAWAT') {
+      // Canal district - sparse buildings only in far corners, away from waterways
+      // Main canal runs diagonally from SW to NE through the center
+      // Buildings must be in the TRUE corners (NW and SE quadrants)
+      const cornerBuildings = [
+        { x: -38, z: 35, seed: 100 },   // Far NW corner (away from diagonal)
+        { x: 38, z: 35, seed: 200 },    // Far NE corner
+        { x: -38, z: -38, seed: 300 },  // Far SW corner
+        { x: 38, z: -38, seed: 400 },   // Far SE corner (away from diagonal)
+      ];
+
+      for (const corner of cornerBuildings) {
+        const localSeed = seed + corner.seed;
+        if (seededRandom(localSeed) > 0.6) continue; // 40% chance to skip
+
+        const building = generateBuildingMetadata(
+          localSeed,
+          corner.x + seededRandom(localSeed + 1) * 4 - 2, // Less jitter to stay in corners
+          corner.z + seededRandom(localSeed + 2) * 4 - 2,
+          district
+        );
+        building.sizeScale = 0.75 + seededRandom(localSeed + 3) * 0.15; // Smaller buildings
+        building.type = BuildingType.RESIDENTIAL;
+        building.ownerProfession = ['Miller', 'Launderer', 'Dyer', 'Gardener'][Math.floor(seededRandom(localSeed + 4) * 4)];
+        addBuilding(building);
+      }
+
+      return bldMetadata;
     }
     if (district === 'ROADSIDE') {
       // Roadside: Mix of buildings along road and set back from road
@@ -3000,6 +3129,7 @@ export const Buildings: React.FC<{
 
 export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: THREE.Vector3) => void; district: DistrictType; seed: number; terrainSeed: number; timeOfDay?: number; fogColor?: THREE.Color; onHeightmapBuilt?: (heightmap: TerrainHeightmap | null) => void }> = ({ mapX, mapY, onClick, district, seed, terrainSeed, timeOfDay, fogColor, onHeightmapBuilt }) => {
   const roughnessTexture = useMemo(() => createNoiseTexture(128, 0.05), []);
+  const dirtTexture = useMemo(() => createDirtTexture(256), []); // Matte dirt texture for cemetery
   const blotchTexture = useMemo(() => createBlotchTexture(512), []);
   const { camera, scene } = useThree();
 
@@ -3061,26 +3191,30 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
   // Using imported GROUND_PALETTE from environment/constants
   const pick = (list: string[]) => list[Math.floor(seed * list.length) % list.length];
   const baseColor = (district === 'MARKET' || district === 'STRAIGHT_STREET' || district === 'SOUQ_AXIS' || district === 'MIDAN') ? pick(GROUND_PALETTE.MARKET)
-    : district === 'WEALTHY' ? pick(GROUND_PALETTE.WEALTHY)
+    : (district === 'WEALTHY' || district === 'QAYMARIYYA' || district === 'AMARA' || district === 'BAB_FARADIS') ? pick(GROUND_PALETTE.WEALTHY)
     : district === 'HOVELS' ? pick(GROUND_PALETTE.HOVELS)
-    : (district === 'ALLEYS' || district === 'BAB_SHARQI') ? pick(GROUND_PALETTE.ALLEYS)
+    : (district === 'ALLEYS' || district === 'BAB_SHARQI' || district === 'AMIN' || district === 'SHAGHOUR_OUTER' || district === 'UQAYBA') ? pick(GROUND_PALETTE.ALLEYS)
+    : district === 'QANAWAT' ? pick(GROUND_PALETTE.QANAWAT)
     : district === 'JEWISH_QUARTER' ? pick(GROUND_PALETTE.JEWISH_QUARTER)
-    : district === 'SALHIYYA' ? pick(GROUND_PALETTE.SALHIYYA)
+    : (district === 'SALHIYYA' || district === 'LOWER_SALHIYYA') ? pick(GROUND_PALETTE.SALHIYYA)
     : district === 'CEMETERY' ? pick(GROUND_PALETTE.CEMETERY)
-    : district === 'OUTSKIRTS_FARMLAND' ? pick(GROUND_PALETTE.OUTSKIRTS_FARMLAND)
+    : district === 'QUBAYBAT' ? pick(GROUND_PALETTE.QUBAYBAT)
+    // Ghouta districts - the famous irrigated orchards around Damascus
+    : (district === 'OUTSKIRTS_FARMLAND' || district === 'EAST_GHOUTA' || district === 'SOUTH_GHOUTA' || district === 'NORTH_GHOUTA' || district === 'RABWE') ? pick(GROUND_PALETTE.OUTSKIRTS_FARMLAND)
     : district === 'OUTSKIRTS_DESERT' ? pick(GROUND_PALETTE.OUTSKIRTS_DESERT)
     : district === 'OUTSKIRTS_SCRUBLAND' ? pick(GROUND_PALETTE.OUTSKIRTS_SCRUBLAND)
-    : district === 'ROADSIDE' ? pick(GROUND_PALETTE.ROADSIDE)
+    : (district === 'ROADSIDE' || district === 'JABIYA_ROAD') ? pick(GROUND_PALETTE.ROADSIDE)
     : district === 'MOUNTAIN_SHRINE' ? pick(GROUND_PALETTE.MOUNTAIN_SHRINE)
     : district === 'CARAVANSERAI' ? pick(GROUND_PALETTE.CARAVANSERAI)
-    : district === 'SOUTHERN_ROAD' ? pick(GROUND_PALETTE.SOUTHERN_ROAD)
+    : (district === 'SOUTHERN_ROAD' || district === 'DARAYA_ROAD') ? pick(GROUND_PALETTE.SOUTHERN_ROAD)
     : district === 'CIVIC' ? pick(GROUND_PALETTE.CIVIC)
+    : district === 'QASSIOUN_CAVES' ? pick(GROUND_PALETTE.QASSIOUN_CAVES)
     : pick(GROUND_PALETTE.DEFAULT);
   const overlayColor = district === 'WEALTHY' ? '#c3b9a9'
     : district === 'HOVELS' || district === 'ALLEYS' || district === 'BAB_SHARQI' ? '#9a734d'
     : district === 'JEWISH_QUARTER' ? '#b09a7d' // Lighter stone, distinct from alleys
     : district === 'SALHIYYA' ? '#4a6a3a' // Grass overlay
-    : district === 'CEMETERY' ? '#5a5a48' // Somber dried grass patches
+    : district === 'CEMETERY' ? '#6a4a38' // Dark brown dirt patches
     : district === 'OUTSKIRTS_FARMLAND' ? '#4f6f3b'
     : district === 'OUTSKIRTS_DESERT' ? '#d17a4a' // Warm terracotta overlay (unused - overlay disabled for desert)
     : district === 'OUTSKIRTS_SCRUBLAND' ? '#8a845f' // Dry scrub overlay
@@ -3103,28 +3237,53 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
   // PERFORMANCE & REALISM: Custom shader with distance-based horizon fade
   // Solves the "fog soup" problem by only fading at the horizon, not nearby objects
   const groundMaterial = useMemo(() => {
-    if (roughnessTexture) {
-      roughnessTexture.repeat.set(6, 6);
+    // Determine which districts are grassy (includes Ghouta - Damascus's famous irrigated orchards)
+    // Also includes alias districts that map to grassy biomes
+    // QANAWAT (canal district) is lush from irrigation
+    const isGrassyDistrict = district === 'SALHIYYA' || district === 'LOWER_SALHIYYA'
+      || district === 'WEALTHY' || district === 'QAYMARIYYA' || district === 'AMARA' || district === 'BAB_FARADIS'
+      || district === 'OUTSKIRTS_FARMLAND' || district === 'EAST_GHOUTA' || district === 'SOUTH_GHOUTA' || district === 'NORTH_GHOUTA' || district === 'RABWE'
+      || district === 'QANAWAT';
+
+    // Use grass texture for grassy districts, dirt for cemetery, roughness for others
+    const textureToUse = isGrassyDistrict ? CACHED_GRASS_TEXTURE
+      : district === 'CEMETERY' ? dirtTexture
+      : roughnessTexture;
+
+    if (textureToUse && !isGrassyDistrict) {
+      // More repeats for cemetery to increase visible noise (grass texture has its own repeat)
+      const repeatValue = district === 'CEMETERY' ? 10 : 6;
+      textureToUse.repeat.set(repeatValue, repeatValue);
     }
     const material = new THREE.MeshStandardMaterial({
       color: baseColor,
-      // Desert sand should be completely matte (no shine/wetness)
+      // Desert sand and cemetery dirt should be completely matte (no shine/wetness)
       roughness: 1.0,
       metalness: 0,
-      envMapIntensity: district === 'OUTSKIRTS_SCRUBLAND' ? 0.05 : 0.2,
-      // Desert sand: no roughness map for flatter, drier appearance
-      roughnessMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND') ? null : roughnessTexture || null,
-      bumpMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND') ? null : roughnessTexture || null,
-      bumpScale: district === 'OUTSKIRTS_SCRUBLAND' ? 0.0015 : 0.0025
+      envMapIntensity: (district === 'OUTSKIRTS_SCRUBLAND' || district === 'CEMETERY') ? 0.05 : isGrassyDistrict ? 0.02 : 0.2,
+      // Grassy districts get the grass texture as their main map for visible grass pattern
+      map: isGrassyDistrict ? textureToUse : null,
+      // Desert sand: no texture maps for flatter sand dunes
+      // Cemetery: use specialized dirt texture that stays matte
+      roughnessMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND' || isGrassyDistrict) ? null : textureToUse || null,
+      bumpMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND') ? null : isGrassyDistrict ? textureToUse : textureToUse || null,
+      bumpScale: district === 'CEMETERY' ? 0.012 : district === 'OUTSKIRTS_SCRUBLAND' ? 0.0015 : isGrassyDistrict ? 0.008 : 0.0025,
+      // Enable transparency for edge fade effect
+      transparent: true,
+      depthWrite: true,
     });
 
     // Inject custom shader code for distance-based horizon fade + heat shimmer
+    // Ground radius for edge alpha fade (half of scaleSize(250))
+    const groundRadius = scaleSize(250) / 2;
+
     material.onBeforeCompile = (shader) => {
-      // Add uniforms for camera position, sky color, time, and heat intensity
+      // Add uniforms for camera position, sky color, time, heat intensity, and ground radius
       shader.uniforms.cameraPos = { value: new THREE.Vector3() };
-      shader.uniforms.skyColor = { value: new THREE.Color(0xd5e5f0) }; // Lighter, desaturated sky
+      shader.uniforms.skyColor = { value: new THREE.Color(0xf0e0c8) }; // Warm sandy horizon (Syrian heat haze)
       shader.uniforms.time = { value: 0.0 };
       shader.uniforms.heatIntensity = { value: 0.0 }; // 0-1, based on dayFactor
+      shader.uniforms.groundRadius = { value: groundRadius };
 
       // Inject into vertex shader for heat shimmer displacement
       shader.vertexShader = shader.vertexShader.replace(
@@ -3163,13 +3322,14 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
         }`
       );
 
-      // Inject into fragment shader for distance-based fade
+      // Inject into fragment shader for distance-based fade + edge alpha
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <common>',
         `#include <common>
         varying vec3 vWorldPosition;
         uniform vec3 cameraPos;
-        uniform vec3 skyColor;`
+        uniform vec3 skyColor;
+        uniform float groundRadius;`
       );
       // Conditionally include dithering - skip for caravanserai to avoid artifacts
       const ditherCode = district === 'CARAVANSERAI'
@@ -3182,12 +3342,19 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
 
         // Distance-based horizon fade (only affects distant ground, not nearby)
         float distFromCamera = length(vWorldPosition.xz - cameraPos.xz);
-        float horizonFadeStart = 80.0;  // Start fading at 80 units
-        float horizonFadeEnd = 140.0;   // Fully sky color at 140 units
+        float horizonFadeStart = 90.0;  // Start fading at 90 units (pushed out to reduce circle visibility)
+        float horizonFadeEnd = 145.0;   // Fully blended at 145 units
         float horizonFade = smoothstep(horizonFadeStart, horizonFadeEnd, distFromCamera);
 
         // Blend to sky color at horizon - subtle and transparent
-        gl_FragColor.rgb = mix(gl_FragColor.rgb, skyColor, horizonFade * 0.5);`
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, skyColor, horizonFade * 0.5);
+
+        // EDGE ALPHA FADE: Soft fade at ground boundary (distance from world origin)
+        float distFromOrigin = length(vWorldPosition.xz);
+        float edgeFadeStart = groundRadius - 18.0;  // Start fading 18 units from edge
+        float edgeFadeEnd = groundRadius - 2.0;     // Nearly transparent at edge
+        float edgeAlpha = 1.0 - smoothstep(edgeFadeStart, edgeFadeEnd, distFromOrigin);
+        gl_FragColor.a *= edgeAlpha;`
       );
 
       // Store reference to update uniforms
@@ -3195,7 +3362,7 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
     };
 
     return material;
-  }, [roughnessTexture, baseColor, district]);
+  }, [roughnessTexture, dirtTexture, baseColor, district]);
 
   // Update shader uniforms every frame for camera position, sky color, time, and heat
   useFrame((state) => {
@@ -3300,8 +3467,8 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
         <primitive object={groundMaterial} />
       </mesh>
 
-      {/* Skip overlay for desert - no moisture/wetness effect */}
-      {district !== 'OUTSKIRTS_DESERT' && (
+      {/* Skip overlay for desert and cemetery - no moisture/wetness effect on dry dirt */}
+      {district !== 'OUTSKIRTS_DESERT' && district !== 'CEMETERY' && (
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.08, 0]}>
           <primitive object={terrainGeometry ?? baseGeometry} attach="geometry" />
           <primitive object={groundOverlayMaterial} />
@@ -3320,10 +3487,13 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
         );
       })}
 
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, 0]} receiveShadow>
-        <primitive object={innerTerrainGeometry ?? innerBaseGeometry} attach="geometry" />
-        <meshStandardMaterial color={baseColor} roughness={1} opacity={0.18} transparent />
-      </mesh>
+      {/* Inner terrain layer - skip for cemetery to avoid transparency issues */}
+      {district !== 'CEMETERY' && (
+        <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, 0]} receiveShadow>
+          <primitive object={innerTerrainGeometry ?? innerBaseGeometry} attach="geometry" />
+          <meshStandardMaterial color={baseColor} roughness={1} opacity={0.18} transparent />
+        </mesh>
+      )}
     </group>
   );
 };

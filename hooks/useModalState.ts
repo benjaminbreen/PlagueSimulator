@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LootModalData } from '../components/LootModal';
 import { MedicalEstablishmentType } from '../types';
+import { ReadableEpitaph } from '../components/ReadModal';
 
 export interface MedicalModalState {
   isOpen: boolean;
@@ -14,8 +15,10 @@ export const useModalState = () => {
   const [showPlayerModal, setShowPlayerModal] = useState(false);
   const [showEncounterModal, setShowEncounterModal] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
+  const [showReadModal, setShowReadModal] = useState(false);
   const [lootModalData, setLootModalData] = useState<LootModalData | null>(null);
   const [medicalModal, setMedicalModal] = useState<MedicalModalState | null>(null);
+  const [readModalData, setReadModalData] = useState<ReadableEpitaph | null>(null);
 
   return {
     showEnterModal,
@@ -28,9 +31,13 @@ export const useModalState = () => {
     setShowEncounterModal,
     showGuideModal,
     setShowGuideModal,
+    showReadModal,
+    setShowReadModal,
     lootModalData,
     setLootModalData,
     medicalModal,
-    setMedicalModal
+    setMedicalModal,
+    readModalData,
+    setReadModalData
   };
 };

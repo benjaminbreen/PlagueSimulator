@@ -460,10 +460,12 @@ const InteriorPropMesh: React.FC<{
     }
     case InteriorPropType.PRAYER_RUG: {
       const scale = prop.scale ?? [1, 1, 1];
-      const width = roomSize ? Math.min(roomSize[0] * 0.35, 3.6) : 3.0;
-      const depth = roomSize ? Math.min(roomSize[2] * 0.35, 2.8) : 2.1;
+      const width = roomSize ? Math.min(roomSize[0] * 0.35, 2.6) : 3.0;
+      const depth = roomSize ? Math.min(roomSize[2] * 0.3, 2.8) : 2.1;
       return (
-        <mesh {...common} position={anchoredPos(0.02)} rotation={[-Math.PI / 2, 0, 0]} receiveShadow scale={[scale[0], 1, scale[2]]} material={prayerRugMaterial}>
+        // Y=0.06 to sit well above floor (Y=0) and floor tint overlay (Y=0.01)
+        // Combined with aggressive polygonOffset on material to prevent z-fighting
+        <mesh {...common} position={anchoredPos(0.06)} rotation={[-Math.PI / 2, 0, 0]} receiveShadow scale={[scale[0], 1, scale[2]]} material={prayerRugMaterial}>
           <planeGeometry args={[width, depth]} />
         </mesh>
       );
@@ -1854,8 +1856,9 @@ const InteriorPropMesh: React.FC<{
         </group>
       );
     case InteriorPropType.SCALE:
+      // Local Y=0 since wrapper group handles world positioning
       return (
-        <group {...common} position={anchoredPos(prop.position[1] > 0 ? prop.position[1] : 0.7)}>
+        <group {...common} position={anchoredPos(0)}>
           <mesh receiveShadow>
             <boxGeometry args={[0.4, 0.08, 0.4]} />
             <meshStandardMaterial color="#6a4a32" roughness={0.85} />
@@ -1867,15 +1870,17 @@ const InteriorPropMesh: React.FC<{
         </group>
       );
     case InteriorPropType.LEDGER:
+      // Local Y=0 since wrapper group handles world positioning
       return (
-        <mesh {...common} position={anchoredPos(prop.position[1] > 0 ? prop.position[1] : 0.72)} receiveShadow>
+        <mesh {...common} position={anchoredPos(0)} receiveShadow>
           <boxGeometry args={[0.35, 0.08, 0.25]} />
           <meshStandardMaterial color="#a8916a" roughness={0.8} />
         </mesh>
       );
     case InteriorPropType.INK_SET:
+      // Local Y=0 since wrapper group handles world positioning
       return (
-        <group {...common} position={anchoredPos(prop.position[1] > 0 ? prop.position[1] : 0.7)}>
+        <group {...common} position={anchoredPos(0)}>
           <mesh receiveShadow>
             <boxGeometry args={[0.22, 0.06, 0.22]} />
             <meshStandardMaterial color="#4a3a2a" roughness={0.9} />
@@ -1933,8 +1938,7 @@ const InteriorPropMesh: React.FC<{
         </group>
       );
     case InteriorPropType.LAMP: {
-      // Use prop's Y position if it's on a surface (Y > 0.3), otherwise place on floor
-      const lampY = prop.position[1] > 0.3 ? prop.position[1] : 0;
+      // Local Y=0 since wrapper group handles world positioning
 
       // PEASANT class gets a simple clay oil lamp - terracotta dish with wick
       if (socialClass === SocialClass.PEASANT) {
@@ -1943,7 +1947,7 @@ const InteriorPropMesh: React.FC<{
         const oilColor = '#3a3520'; // Dark oil residue
 
         return (
-          <group {...common} position={anchoredPos(lampY)}>
+          <group {...common} position={anchoredPos(0)}>
             <ContactShadow size={[0.25, 0.25]} />
 
             {/* Dim point light - poor quality oil gives weak light */}
@@ -1997,7 +2001,7 @@ const InteriorPropMesh: React.FC<{
       const glassColor = '#d8e8f0';
 
       return (
-        <group {...common} position={anchoredPos(lampY)}>
+        <group {...common} position={anchoredPos(0)}>
           <ContactShadow size={[0.4, 0.4]} />
 
           {/* Point light for actual illumination */}
@@ -2105,10 +2109,9 @@ const InteriorPropMesh: React.FC<{
       );
     }
     case InteriorPropType.CANDLE: {
-      // Use prop's Y position if on a surface, otherwise floor level
-      const candleY = prop.position[1] > 0.3 ? prop.position[1] : 0;
+      // Local Y=0 since wrapper group handles world positioning
       return (
-        <group {...common} position={anchoredPos(candleY)}>
+        <group {...common} position={anchoredPos(0)}>
           {/* Candle stick - offset up by half height so bottom sits on surface */}
           <mesh position={[0, 0.1, 0]} receiveShadow castShadow>
             <cylinderGeometry args={[0.06, 0.06, 0.2, 8]} />
@@ -2456,9 +2459,10 @@ const InteriorPropMesh: React.FC<{
 
       // For swinging lanterns, calculate chain dynamics
       const isSwinging = positionVector !== undefined;
+      // Local Y=0 since wrapper group handles world positioning
       const lanternPosition = isSwinging
         ? [base.x, base.y, base.z] as [number, number, number]
-        : anchoredPos(prop.position[1] > 0 ? prop.position[1] : 2.2);
+        : anchoredPos(0);
 
       // Calculate chain geometry for swinging lanterns
       let chainLength = 0.8;
@@ -3276,20 +3280,20 @@ const InteriorPropMesh: React.FC<{
             </mesh>
           </group>
 
-          {/* Horseshoe arch - created with torus segment */}
+          {/* Horseshoe arch - created with torus segment, arcing upward */}
           <group position={[0, columnHeight + 0.1, 0]}>
-            {/* Main arch span */}
-            <mesh rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
-              <torusGeometry args={[archWidth / 2, 0.12, 8, 24, Math.PI]} />
+            {/* Main arch span - rotated to arc upward in Y direction */}
+            <mesh rotation={[0, 0, Math.PI / 200]} castShadow receiveShadow>
+              <torusGeometry args={[archWidth / 2, 0.12, 8,24, Math.PI]} />
               <meshStandardMaterial color={stoneColor} roughness={0.8} />
             </mesh>
-            {/* Arch keystone */}
-            <mesh position={[0, archWidth / 2 - 0.1, 0]} castShadow receiveShadow>
-              <boxGeometry args={[0.3, 0.25, 0.25]} />
+            {/* Arch keystone at apex */}
+            <mesh position={[0, archWidth / 2 - 0.2, 0]} castShadow receiveShadow>
+              <boxGeometry args={[0.4, 0.35, 0.25]} />
               <meshStandardMaterial color={accentColor} roughness={0.85} />
             </mesh>
             {/* Decorative band on arch */}
-            <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.08]} receiveShadow>
+            <mesh rotation={[0, 0, Math.PI / 200]} position={[0, 0, 0.08]} receiveShadow>
               <torusGeometry args={[archWidth / 2 - 0.15, 0.04, 6, 24, Math.PI]} />
               <meshStandardMaterial color={accentColor} roughness={0.9} />
             </mesh>

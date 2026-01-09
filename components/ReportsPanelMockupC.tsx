@@ -63,6 +63,7 @@ interface ReportsPanelProps {
   onSelectGuideEntry?: (entryId: string) => void;
   playerInfected?: boolean;
   onPopulationChartClick?: () => void;
+  onOpenTaskModal?: () => void;
 }
 
 // Donut chart component
@@ -215,7 +216,8 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
   onOpenGuideModal,
   onSelectGuideEntry,
   playerInfected = false,
-  onPopulationChartClick
+  onPopulationChartClick,
+  onOpenTaskModal
 }) => {
   const [activeTab, setActiveTab] = useState<'epidemic' | 'player' | 'guide'>('epidemic');
   const [collapsed, setCollapsed] = useState(false);
@@ -679,6 +681,28 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
                       <div className="text-amber-300/70 text-[10px] uppercase tracking-wider">Family</div>
                     </div>
                   </div>
+
+                  {playerStats.currentTask && (
+                    <button
+                      type="button"
+                      onClick={onOpenTaskModal}
+                      className={`w-full text-left bg-black/25 border border-amber-900/30 rounded-lg px-4 py-3 transition-colors ${onOpenTaskModal ? 'cursor-pointer hover:bg-amber-900/20' : 'cursor-default'}`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs uppercase tracking-widest text-amber-400/80">Current Task</span>
+                        <span className={`text-[10px] uppercase tracking-wider ${playerStats.currentTask.status === 'completed' ? 'text-emerald-400' : 'text-amber-300/70'}`}>
+                          {playerStats.currentTask.status}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-sm text-amber-100/90 font-semibold">{playerStats.currentTask.title}</div>
+                      <p className="text-sm text-amber-100/60 leading-relaxed">{playerStats.currentTask.description}</p>
+                      {playerStats.currentTask.target?.locationLabel && (
+                        <div className="mt-2 text-[11px] text-amber-300/60">
+                          Target area: {playerStats.currentTask.target.locationLabel}
+                        </div>
+                      )}
+                    </button>
+                  )}
 
                   {/* Household section - only if has family */}
                   {playerStats.familyMembers && playerStats.familyMembers.length > 0 && (

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, BuildingInfectionState, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance } from '../types';
+import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, BuildingInfectionState, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance, DistrictType, getDistrictType } from '../types';
 import { MoraleStats } from './Agents';
 import { ActionBar } from './ActionBar';
 import { Humanoid } from './Humanoid';
@@ -48,6 +48,7 @@ import { buildNarratorPrompt, NarratorContext } from '../utils/narratorPrompt';
 import { NarratorHighlightEntry } from './NarratorPanel';
 import { LLMTransparencyModal } from './LLMTransparencyModal';
 import { NpcListModal, NpcListEntry } from './NpcListModal';
+import { TaskModal } from './TaskModal';
 
 interface UIProps {
   params: SimulationParams;
@@ -1068,9 +1069,12 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const narratorPendingQuestionRef = useRef<string | null>(null);
   const [llmTransparencyOpen, setLlmTransparencyOpen] = useState(false);
   const [npcListModalOpen, setNpcListModalOpen] = useState(false);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [npcListEntries, setNpcListEntries] = useState<NpcListEntry[]>([]);
   const [llmTransparencyEntries, setLlmTransparencyEntries] = useState<Array<{ id: string; prompt: string; response: string }>>([]);
   const perspectiveTimeoutRef = useRef<number | null>(null);
+  const prevWeatherRef = useRef<string>(currentWeather);
+  const prevIsDaytimeRef = useRef<boolean>(params.timeOfDay > 6 && params.timeOfDay < 18);
 
   const summarizeNarratorOutput = useCallback((text: string) => {
     const normalized = text.replace(/\s+/g, ' ').trim();
@@ -1230,6 +1234,193 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
       setNarratorLoading(false);
     }
   }, [getNarratorContext, narratorExchanges, narratorLoading, pushNarration, sanitizeNarratorMemory, setNarratorOpen, summarizeNarratorOutput]);
+
+  // Weather change narrator messages
+  useEffect(() => {
+    // Only push message if weather actually changed (not on initial mount)
+    if (prevWeatherRef.current !== currentWeather) {
+      const weatherMessages: Record<string, string[]> = {
+        CLEAR: [
+          'The dust settles. Sunlight returns to the streets, sharp and merciless.',
+          'The clouds part. Heat descends upon the city once more.',
+          'Clear skies overhead. The Barada glints in the distance.',
+          'The air clears. You can see the hills beyond the walls again.'
+        ],
+        OVERCAST: [
+          'Gray clouds gather overhead, dulling the harsh light.',
+          'The sky darkens. A rare relief from the blazing sun.',
+          'Clouds blanket Damascus. The air grows cooler.',
+          'Overcast skies bring a momentary reprieve from the heat.'
+        ],
+        SANDSTORM: [
+          'Dust rises from the desert. The wind howls through the alleys.',
+          'A sandstorm sweeps in from the east. Visibility drops sharply.',
+          'Choking dust fills the air. People retreat indoors.',
+          'The khamsin arrives. Grit stings your eyes and throat.',
+          'A wall of sand approaches. The city braces itself.'
+        ]
+      };
+
+      const messages = weatherMessages[currentWeather] || weatherMessages.CLEAR;
+      const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+      pushNarration(randomMessage);
+
+      prevWeatherRef.current = currentWeather;
+    }
+  }, [currentWeather, pushNarration]);
+
+  // Dawn and sunset narrator messages
+  useEffect(() => {
+    const isDaytime = params.timeOfDay > 6 && params.timeOfDay < 18;
+    const currentDistrict = getDistrictType(params.mapX, params.mapY);
+
+    // Only push message if day/night state actually changed
+    if (prevIsDaytimeRef.current !== isDaytime) {
+      if (isDaytime) {
+        // Dawn/Sunrise messages by district
+        const dawnMessagesByDistrict: Partial<Record<DistrictType, string[]>> = {
+          MARKET: [
+            'Dawn breaks over the souq. Merchants arrive to arrange their spice displays.',
+            'First light touches the market stalls. The smell of fresh bread drifts from the ovens.',
+            'Sunrise illuminates the bazaar. Caravans unload their wares at the gates.',
+            'The call to Fajr echoes through the market district. Vendors begin to haggle.',
+            'Morning comes to the souq. Copper pots gleam in the early light.'
+          ],
+          UMAYYAD_MOSQUE: [
+            'The muezzin\'s call rings from the Great Mosque. Dawn prayer fills the courtyard.',
+            'Sunrise gilds the mosque\'s minarets. The faithful gather for Fajr.',
+            'First light illuminates the mosque\'s golden dome. Worshippers stream through the gates.',
+            'Dawn breaks over the Umayyad Mosque. The marble courtyard awakens.',
+            'Morning prayer echoes from the ancient sanctuary. A new day begins in God\'s house.'
+          ],
+          CEMETERY: [
+            'Dawn light falls upon the tombstones. The cemetery keeper begins his rounds.',
+            'Pale sunrise touches the graves. Mourners arrive for morning prayers.',
+            'First light reaches the necropolis. Stone markers cast long shadows westward.',
+            'Sunrise over the cemetery. Birds alight on ancient memorials.',
+            'Morning comes to the city of the dead. Marble epitaphs catch the early sun.'
+          ],
+          WEALTHY: [
+            'Dawn breaks over the officers\' quarter. Servants light braziers in the courtyards.',
+            'Sunrise touches the wealthy homes. Garden fountains begin their daily song.',
+            'First light reaches Sarouja. Guards change watch at the mansions.',
+            'Morning comes to the Mamluk quarter. Horses stamp in the stables.',
+            'Pale light spreads across the wealthy district. Ornate balconies catch the glow.'
+          ],
+          MOUNTAIN_SHRINE: [
+            'Dawn breaks over Qassioun. The shrine on the mountain glows in morning light.',
+            'Sunrise reaches the hilltop sanctuary. All Damascus spreads below.',
+            'First light touches the mountain shrine. Pilgrims begin their ascent.',
+            'Morning comes to Maqam Ibrahim. The city awakens in the valley far below.',
+            'Pale sunrise illuminates the heights. The shrine stands sentinel over Damascus.'
+          ],
+          CARAVANSERAI: [
+            'Dawn breaks at the khan. Camels stir and drivers prepare to depart.',
+            'Sunrise over the caravanserai. Merchants count their goods for the journey.',
+            'First light fills the travelers\' courtyard. Coffee boils over morning fires.',
+            'Morning comes to the khan. Caravan bells jingle as the gates open.',
+            'Pale light reaches the traders\' inn. The long road beckons once more.'
+          ],
+          OUTSKIRTS_FARMLAND: [
+            'Dawn breaks over the Ghouta orchards. Farmers head to the fields.',
+            'Sunrise touches the fruit groves. Irrigation channels begin to flow.',
+            'First light reaches the gardens. Date palms sway in the morning breeze.',
+            'Morning comes to the farmlands. The scent of apricot blossoms fills the air.',
+            'Pale light spreads across the orchards. Workers gather for the harvest.'
+          ],
+          HOVELS: [
+            'Dawn breaks over the poor quarter. Smoke rises from meager cooking fires.',
+            'Sunrise reaches the Midan hovels. Children emerge into the dusty streets.',
+            'First light touches the slums. Another hard day begins for the destitute.',
+            'Morning comes to the poor district. Beggars take their positions.',
+            'Pale light illuminates the cramped alleys. Life stirs in the shadows.'
+          ]
+        };
+
+        const messages = dawnMessagesByDistrict[currentDistrict] || [
+          'The call to Fajr echoes across Damascus. Dawn breaks over the eastern hills.',
+          'First light touches the minarets. The city stirs to life.',
+          'Sunrise paints the walls amber. Merchants begin to open their stalls.',
+          'The muezzin\'s voice heralds the dawn. Another day begins.',
+          'Pale light spreads across the rooftops. The night watch departs.'
+        ];
+        const randomDawn = messages[Math.floor(Math.random() * messages.length)];
+        pushNarration(randomDawn);
+      } else {
+        // Sunset/Dusk messages by district
+        const sunsetMessagesByDistrict: Partial<Record<DistrictType, string[]>> = {
+          MARKET: [
+            'The sun sets over the souq. Merchants pack up their remaining wares.',
+            'Twilight falls on the marketplace. Oil lamps flicker to life among the stalls.',
+            'Dusk settles over the bazaar. The day\'s trading comes to an end.',
+            'Evening descends on the market. Shopkeepers close their shutters.',
+            'The call to Maghrib echoes through the souq. The last customers depart.'
+          ],
+          UMAYYAD_MOSQUE: [
+            'The sun sinks behind the Great Mosque. Evening prayer fills the courtyard.',
+            'Twilight touches the minarets. The faithful gather for Maghrib.',
+            'Dusk falls over the ancient sanctuary. Lamps are lit in the prayer niches.',
+            'Evening comes to the mosque. The marble grows cool in the fading light.',
+            'Sunset gilds the golden dome. Worshippers answer the call to prayer.'
+          ],
+          CEMETERY: [
+            'The sun sets over the graves. The cemetery keeper locks the gates.',
+            'Twilight falls among the tombs. Shadows lengthen across the headstones.',
+            'Dusk settles on the necropolis. The last mourners hurry homeward.',
+            'Evening comes to the city of the dead. Stone markers fade into darkness.',
+            'Sunset touches the ancient memorials. Night claims the silent streets.'
+          ],
+          WEALTHY: [
+            'The sun sets over Sarouja. Servants light the evening lamps.',
+            'Twilight descends on the wealthy quarter. Music drifts from garden parties.',
+            'Dusk settles over the mansions. Fountains reflect the last light.',
+            'Evening comes to the officers\' district. Guards take up night positions.',
+            'Sunset touches the ornate balconies. Another day ends in comfort.'
+          ],
+          MOUNTAIN_SHRINE: [
+            'The sun sets beyond Qassioun. The shrine darkens on the heights.',
+            'Twilight falls over the mountain. All Damascus glows below in lamplight.',
+            'Dusk claims the hilltop sanctuary. Pilgrims descend before nightfall.',
+            'Evening comes to Maqam Ibrahim. Stars emerge above the sacred place.',
+            'Sunset paints the western sky. The shrine stands dark against the glow.'
+          ],
+          CARAVANSERAI: [
+            'The sun sets at the khan. Travelers secure their goods for the night.',
+            'Twilight falls on the caravanserai. Gates close against the darkness.',
+            'Dusk settles over the traders\' inn. Campfires bloom in the courtyard.',
+            'Evening comes to the khan. Stories are told over the evening meal.',
+            'Sunset touches the courtyard walls. The day\'s journey ends here.'
+          ],
+          OUTSKIRTS_FARMLAND: [
+            'The sun sets over the Ghouta. Farmers return from the fields.',
+            'Twilight falls on the orchards. The day\'s harvest is complete.',
+            'Dusk settles over the gardens. Irrigation gates are closed for the night.',
+            'Evening comes to the farmlands. The scent of jasmine fills the cooling air.',
+            'Sunset touches the fruit groves. Workers head homeward in the fading light.'
+          ],
+          HOVELS: [
+            'The sun sets over the poor quarter. Families huddle around meager fires.',
+            'Twilight falls on the slums. The day\'s struggle gives way to night\'s cold.',
+            'Dusk settles over the Midan hovels. Children are called inside.',
+            'Evening comes to the poor district. Darkness brings a brief respite.',
+            'Sunset fades from the cramped alleys. Another hard day ends.'
+          ]
+        };
+
+        const messages = sunsetMessagesByDistrict[currentDistrict] || [
+          'The sun sinks behind the western walls. Maghrib prayer time approaches.',
+          'Twilight descends upon Damascus. Oil lamps flicker to life in the souqs.',
+          'Day fades into evening. The call to prayer drifts through the cooling air.',
+          'Shadows lengthen across the alleys. The day\'s heat finally breaks.',
+          'Dusk settles over the city. Stars begin to appear above the Citadel.'
+        ];
+        const randomSunset = messages[Math.floor(Math.random() * messages.length)];
+        pushNarration(randomSunset);
+      }
+
+      prevIsDaytimeRef.current = isDaytime;
+    }
+  }, [params.timeOfDay, params.mapX, params.mapY, pushNarration]);
 
   // Biome ambience preview for settings
   const { currentPreview, playPreview, stopPreview } = useBiomeAmbiencePreview();
@@ -1715,6 +1906,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         dateStr={getDateStr()}
         timeStr={getTimeStr()}
         isDaytime={params.timeOfDay > 6 && params.timeOfDay < 18}
+        currentWeather={currentWeather}
         simulationSpeed={params.simulationSpeed}
         onSetSimulationSpeed={(speed) => handleChange('simulationSpeed', speed)}
         onOpenWeather={() => setShowWeather(true)}
@@ -2022,6 +2214,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               onOpenGuideModal={onOpenGuideModal}
               onSelectGuideEntry={onSelectGuideEntry}
               playerInfected={playerStats.plague.state !== AgentState.HEALTHY}
+              onOpenTaskModal={() => {
+                setTaskModalOpen(true);
+                setMobileReportsPanelVisible(false);
+              }}
               onPopulationChartClick={() => {
                 if (getNpcListEntries) {
                   setNpcListEntries(getNpcListEntries());
@@ -2460,12 +2656,16 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               <input type="checkbox" checked={devSettings.showHoverWireframe} onChange={(e) => setDevSettings(prev => ({ ...prev, showHoverWireframe: e.target.checked }))} className="accent-amber-600" />
             </label>
             <label className="flex items-center justify-between">
-              <span>Shadows</span>
-              <input type="checkbox" checked={devSettings.showShadows} onChange={(e) => setDevSettings(prev => ({ ...prev, showShadows: e.target.checked }))} className="accent-amber-600" />
+              <span>UI Blur</span>
+              <input type="checkbox" checked={!devSettings.disableUiBlur} onChange={(e) => setDevSettings(prev => ({ ...prev, disableUiBlur: !e.target.checked }))} className="accent-amber-600" />
             </label>
             <label className="flex items-center justify-between">
-              <span>Clouds</span>
-              <input type="checkbox" checked={devSettings.showClouds} onChange={(e) => setDevSettings(prev => ({ ...prev, showClouds: e.target.checked }))} className="accent-amber-600" />
+              <span>Camera Occlusion</span>
+              <input type="checkbox" checked={!devSettings.disableCameraOcclusion} onChange={(e) => setDevSettings(prev => ({ ...prev, disableCameraOcclusion: !e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>Shadows</span>
+              <input type="checkbox" checked={devSettings.showShadows} onChange={(e) => setDevSettings(prev => ({ ...prev, showShadows: e.target.checked }))} className="accent-amber-600" />
             </label>
             <label className="flex items-center justify-between">
               <span>Fog</span>
@@ -2486,6 +2686,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             <label className="flex items-center justify-between">
               <span>Miasma</span>
               <input type="checkbox" checked={devSettings.showMiasma} onChange={(e) => setDevSettings(prev => ({ ...prev, showMiasma: e.target.checked }))} className="accent-amber-600" />
+            </label>
+            <label className="flex items-center justify-between">
+              <span>City Walls</span>
+              <input type="checkbox" checked={devSettings.showCityWalls} onChange={(e) => setDevSettings(prev => ({ ...prev, showCityWalls: e.target.checked }))} className="accent-amber-600" />
             </label>
           </div>
         </div>
@@ -2726,6 +2930,13 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         isOpen={npcListModalOpen}
         onClose={() => setNpcListModalOpen(false)}
         entries={npcListEntries}
+      />
+      <TaskModal
+        open={taskModalOpen}
+        onClose={() => setTaskModalOpen(false)}
+        currentX={params.mapX}
+        currentY={params.mapY}
+        task={playerStats.currentTask}
       />
     </div>
   );

@@ -222,11 +222,11 @@ const getStrawTexture = (baseHex: string, accentHex: string) => {
   return texture;
 };
 
-const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric', baseHex: string, accentHex: string, repeat = 3) => {
+const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron' | 'ikat' | 'tiraz' | 'geometric' | 'band', baseHex: string, accentHex: string, repeat = 3) => {
   const key = `${pattern}_${baseHex}_${accentHex}_${repeat}`;
   const cached = motifCache.get(key);
   if (cached) return cached;
-  const size = 64;
+  const size = 128; // Larger texture for better detail
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -237,9 +237,22 @@ const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron' | 'ikat' | 'ti
   ctx.fillRect(0, 0, size, size);
   ctx.fillStyle = accentHex;
   ctx.globalAlpha = 0.55;
-  if (pattern === 'stripe') {
-    for (let y = 0; y < size; y += 6) {
-      ctx.fillRect(0, y, size, 2);
+  if (pattern === 'band') {
+    // Single or double horizontal band - very visible decorative trim
+    ctx.globalAlpha = 0.9; // Very visible
+    // Main band in upper third
+    ctx.fillRect(0, size * 0.25, size, size * 0.12);
+    // Thin accent lines
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(0, size * 0.22, size, 2);
+    ctx.fillRect(0, size * 0.40, size, 2);
+  } else if (pattern === 'stripe') {
+    // Multiple horizontal stripes - very visible
+    ctx.globalAlpha = 0.85; // High visibility
+    const stripeWidth = 6;
+    const spacing = 14;
+    for (let y = 0; y < size; y += spacing) {
+      ctx.fillRect(0, y, size, stripeWidth);
     }
   } else if (pattern === 'chevron') {
     for (let y = 0; y < size; y += 12) {
@@ -316,14 +329,14 @@ const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron' | 'ikat' | 'ti
       ctx.fill();
     }
   } else if (pattern === 'geometric') {
-    // Islamic geometric: interlocking 8-pointed stars
-    const step = 22;
-    ctx.globalAlpha = 0.5;
+    // Islamic geometric: interlocking 8-pointed stars - more visible
+    const step = 28; // Larger pattern
+    ctx.globalAlpha = 0.8; // Much more visible
     for (let y = -step / 2; y < size + step; y += step) {
       for (let x = -step / 2; x < size + step; x += step) {
         const cx = x + step / 2;
         const cy = y + step / 2;
-        const r = step * 0.4;
+        const r = step * 0.42;
         // 8-pointed star
         ctx.beginPath();
         for (let i = 0; i < 8; i++) {
@@ -337,18 +350,20 @@ const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron' | 'ikat' | 'ti
         ctx.closePath();
         ctx.fill();
         // Central dot
-        ctx.globalAlpha = 0.35;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r * 0.15, 0, Math.PI * 2);
-        ctx.fill();
         ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.8;
       }
     }
   } else {
-    // damask (default)
-    const step = 20;
-    for (let x = 0; x < size; x += step) {
-      for (let y = 0; y < size; y += step) {
+    // damask (default) - VERY visible diamond pattern for headscarves
+    ctx.globalAlpha = 0.95; // Nearly full opacity for maximum visibility
+    const step = 36; // Large pattern diamonds
+    for (let x = -step / 2; x < size + step; x += step) {
+      for (let y = -step / 2; y < size + step; y += step) {
+        // Main diamond - large and prominent
         ctx.beginPath();
         ctx.moveTo(x + step / 2, y + 3);
         ctx.lineTo(x + step - 3, y + step / 2);
@@ -356,6 +371,18 @@ const getMotifTexture = (pattern: 'damask' | 'stripe' | 'chevron' | 'ikat' | 'ti
         ctx.lineTo(x + 3, y + step / 2);
         ctx.closePath();
         ctx.fill();
+        // Center dot accent
+        ctx.globalAlpha = 0.6;
+        ctx.beginPath();
+        ctx.arc(x + step / 2, y + step / 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+        // Small corner accents for richer pattern
+        ctx.globalAlpha = 0.4;
+        ctx.beginPath();
+        ctx.arc(x + step / 2, y + 8, 2, 0, Math.PI * 2);
+        ctx.arc(x + step / 2, y + step - 8, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.95;
       }
     }
   }
@@ -691,7 +718,16 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   }, []);
   const lipGap = useMemo(() => 0.006 + Math.random() * 0.004, []);
   const headwearShadow = useMemo(() => new THREE.Color(headscarfColor).multiplyScalar(0.85).getStyle(), [headscarfColor]);
-  const headwearHighlight = useMemo(() => new THREE.Color(headscarfColor).multiplyScalar(1.08).getStyle(), [headscarfColor]);
+  // Highlight for patterns - make notably brighter/lighter for visibility
+  const headwearHighlight = useMemo(() => {
+    const base = new THREE.Color(headscarfColor);
+    // Lighten significantly for visible contrast (was only 1.08, now much more)
+    const hsl = { h: 0, s: 0, l: 0 };
+    base.getHSL(hsl);
+    // Increase lightness by 25-35% while slightly reducing saturation
+    base.setHSL(hsl.h, hsl.s * 0.8, Math.min(0.95, hsl.l + 0.25));
+    return base.getStyle();
+  }, [headscarfColor]);
   const turbanHighlight = useMemo(() => {
     const hash = turbanColor.split('').reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
     if (headwearStyle === 'turban' || headwearStyle === 'fez') {
@@ -709,14 +745,17 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     [turbanAccentColor, turbanHighlight]
   );
 
-  // Generate texture-based patterns for geometric and simple headscarf patterns
+  // Generate texture-based patterns for ALL headscarf patterns (textures are more reliable than 3D geometry)
+  // Lower repeat values = larger, more visible patterns
   const headscarfTexture = useMemo(() => {
     if (headscarfPattern === 'geometric') {
-      return getMotifTexture('geometric', headscarfColor, scarfPatternColor, 4);
+      return getMotifTexture('geometric', headscarfColor, scarfPatternColor, 2); // Was 4
     } else if (headscarfPattern === 'simple') {
-      return getMotifTexture('damask', headscarfColor, scarfPatternColor, 6);
+      return getMotifTexture('damask', headscarfColor, scarfPatternColor, 1.5); // Large diamonds
     } else if (headscarfPattern === 'stripe') {
-      return getMotifTexture('stripe', headscarfColor, scarfPatternColor, 3);
+      return getMotifTexture('stripe', headscarfColor, scarfPatternColor, 1.5); // Was 2
+    } else if (headscarfPattern === 'band') {
+      return getMotifTexture('band', headscarfColor, scarfPatternColor, 0.8); // Single large band
     }
     return null;
   }, [headscarfPattern, headscarfColor, scarfPatternColor]);
@@ -998,7 +1037,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
     return base.multiplyScalar(0.6).getStyle();
   }, [sickHeadColor]);
 
-  // Cheek flush/rosy cheeks - based on age, gender, health
+  // Cheek flush/rosy cheeks - based on age, gender, health (rare - ~5% of population)
   const cheekFlushIntensity = useMemo(() => {
     // Create seed for consistent flush per character
     const seed = hairColor.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -1007,18 +1046,18 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       return x - Math.floor(x);
     };
 
-    let baseChance = 0.25; // Default 25% base chance
+    let baseChance = 0.05; // Default 5% base chance (reduced to 1/5)
     let intensity = 0;
 
     // Children have higher chance and stronger flush
     if (age !== undefined && age < 12) {
-      baseChance = 0.6;
+      baseChance = 0.12; // Was 60%, now 12%
       intensity = 0.7;
     } else if (age !== undefined && age < 25) {
-      baseChance = 0.4;
+      baseChance = 0.08; // Was 40%, now 8%
       intensity = 0.5;
     } else if (age !== undefined && age > 60) {
-      baseChance = 0.15; // Elderly less likely
+      baseChance = 0.03; // Was 15%, now 3%
       intensity = 0.3;
     } else {
       intensity = 0.4;
@@ -1026,7 +1065,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     // Women slightly more likely
     if (isFemale) {
-      baseChance += 0.1;
+      baseChance += 0.02; // Was 10%, now 2%
       intensity += 0.1;
     }
 
@@ -4358,14 +4397,21 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   {headwearGarmentType === 'khimar' && (
                     <>
                       <mesh position={[0, 0.14, 0.01]} rotation={[Math.PI / 2.2, 0, 0]} castShadow>
-                        <torusGeometry args={[0.21, 0.013, 8, 18]} />
+                        <torusGeometry args={[0.21, 0.020, 8, 18]} />
                         <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.04} />
                       </mesh>
                       {headscarfPattern === 'stripe' && (
-                        <mesh position={[0, 0.17, 0.00]} rotation={[Math.PI / 2.3, 0, 0]} castShadow>
-                          <torusGeometry args={[0.19, 0.010, 8, 18]} />
-                          <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
-                        </mesh>
+                        <>
+                          <mesh position={[0, 0.17, 0.00]} rotation={[Math.PI / 2.3, 0, 0]} castShadow>
+                            <torusGeometry args={[0.19, 0.016, 8, 18]} />
+                            <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
+                          </mesh>
+                          {/* Third stripe for more visible pattern */}
+                          <mesh position={[0, 0.11, 0.02]} rotation={[Math.PI / 2.1, 0, 0]} castShadow>
+                            <torusGeometry args={[0.22, 0.014, 8, 18]} />
+                            <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.04} />
+                          </mesh>
+                        </>
                       )}
                     </>
                   )}
@@ -4373,14 +4419,21 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   {headwearGarmentType === 'milhafa' && (
                     <>
                       <mesh position={[0, 0.10, -0.03]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-                        <torusGeometry args={[0.22, 0.012, 8, 18]} />
+                        <torusGeometry args={[0.22, 0.018, 8, 18]} />
                         <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.06} />
                       </mesh>
                       {headscarfPattern === 'stripe' && (
-                        <mesh position={[0, 0.13, -0.03]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-                          <torusGeometry args={[0.20, 0.010, 8, 18]} />
-                          <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.06} />
-                        </mesh>
+                        <>
+                          <mesh position={[0, 0.13, -0.03]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                            <torusGeometry args={[0.20, 0.015, 8, 18]} />
+                            <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.06} />
+                          </mesh>
+                          {/* Third stripe */}
+                          <mesh position={[0, 0.07, -0.04]} rotation={[Math.PI / 1.9, 0, 0]} castShadow>
+                            <torusGeometry args={[0.23, 0.013, 8, 18]} />
+                            <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
+                          </mesh>
+                        </>
                       )}
                     </>
                   )}
@@ -4388,14 +4441,21 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                   {headwearGarmentType === 'hijab' && (
                     <>
                       <mesh position={[0, 0.12, -0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-                        <torusGeometry args={[0.21, 0.012, 8, 18]} />
+                        <torusGeometry args={[0.21, 0.018, 8, 18]} />
                         <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
                       </mesh>
                       {headscarfPattern === 'stripe' && (
-                        <mesh position={[0, 0.15, -0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
-                          <torusGeometry args={[0.19, 0.010, 8, 18]} />
-                          <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
-                        </mesh>
+                        <>
+                          <mesh position={[0, 0.15, -0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                            <torusGeometry args={[0.19, 0.015, 8, 18]} />
+                            <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.05} />
+                          </mesh>
+                          {/* Third stripe */}
+                          <mesh position={[0, 0.09, -0.02]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+                            <torusGeometry args={[0.22, 0.013, 8, 18]} />
+                            <meshStandardMaterial color={scarfPatternColor} roughness={headscarfRoughness + 0.04} />
+                          </mesh>
+                        </>
                       )}
                     </>
                   )}

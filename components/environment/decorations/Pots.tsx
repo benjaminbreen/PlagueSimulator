@@ -3,10 +3,26 @@
  * Various potted plants for marketplace and district decorations with size/style variation
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
+import * as THREE from 'three';
 import { PushableObject } from '../../../utils/pushables';
 import { POT_COLORS, FLOWER_COLORS } from '../constants';
 import { HoverableGroup } from '../shared/HoverSystem';
+import { CACHED_WOOD_TEXTURES, FOLIAGE_MATERIAL, DARK_FOLIAGE_MATERIAL } from '../../../utils/environment/wood';
+
+// Shared trunk material using wood texture - cached for performance
+const TRUNK_MATERIAL = new THREE.MeshStandardMaterial({
+  map: CACHED_WOOD_TEXTURES.oak,
+  roughness: 0.92,
+  color: new THREE.Color('#9a7a5a'), // Tint to blend with texture
+});
+
+// Darker trunk material for rings/segments
+const TRUNK_RING_MATERIAL = new THREE.MeshStandardMaterial({
+  map: CACHED_WOOD_TEXTURES.walnut,
+  roughness: 0.95,
+  color: new THREE.Color('#7a5a3a'),
+});
 
 // ==================== SHATTERED POT (shared) ====================
 
@@ -312,13 +328,11 @@ export const PushableOlivePot: React.FC<{ item: PushableObject }> = ({ item }) =
           <cylinderGeometry args={[0.45, 0.55, 0.45, 12]} />
           <meshStandardMaterial color={potColor} roughness={0.9} />
         </mesh>
-        <mesh position={[0, 0.55, 0]} castShadow>
+        <mesh position={[0, 0.55, 0]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.05, 0.08, 0.5, 8]} />
-          <meshStandardMaterial color="#6b4a2a" roughness={0.95} />
         </mesh>
-        <mesh position={[0, 0.9, 0]} castShadow>
+        <mesh position={[0, 0.9, 0]} castShadow material={FOLIAGE_MATERIAL}>
           <sphereGeometry args={[0.55, 10, 8]} />
-          <meshStandardMaterial color="#3f5d3a" roughness={0.85} />
         </mesh>
       </group>
     </HoverableGroup>
@@ -391,38 +405,31 @@ export const PushableLemonPot: React.FC<{ item: PushableObject }> = ({ item }) =
           <meshStandardMaterial color="#4a3a2a" roughness={0.98} />
         </mesh>
 
-        {/* LEMON TREE TRUNK - gnarled citrus wood */}
-        <mesh position={[0, 0.55, 0]} castShadow>
+        {/* LEMON TREE TRUNK - gnarled citrus wood with texture */}
+        <mesh position={[0, 0.55, 0]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.06, 0.09, 0.4, 8]} />
-          <meshStandardMaterial color="#7a5a3a" roughness={0.94} />
         </mesh>
         {/* Trunk texture knot */}
-        <mesh position={[0.06, 0.5, 0]} castShadow>
+        <mesh position={[0.06, 0.5, 0]} castShadow material={TRUNK_RING_MATERIAL}>
           <sphereGeometry args={[0.04, 6, 5]} />
-          <meshStandardMaterial color="#6a4a2a" roughness={0.96} />
         </mesh>
         {/* Upper trunk */}
-        <mesh position={[0, 0.72, 0]} castShadow>
+        <mesh position={[0, 0.72, 0]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.05, 0.06, 0.25, 8]} />
-          <meshStandardMaterial color="#6a5a3a" roughness={0.94} />
         </mesh>
 
         {/* MAIN BRANCHES - citrus trees have multiple branches */}
-        <mesh position={[0.2, 0.78, 0.1]} rotation={[0.3, 0.4, 0.5]} castShadow>
+        <mesh position={[0.2, 0.78, 0.1]} rotation={[0.3, 0.4, 0.5]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.03, 0.04, 0.35, 6]} />
-          <meshStandardMaterial color="#6a5a3a" roughness={0.95} />
         </mesh>
-        <mesh position={[-0.18, 0.8, -0.12]} rotation={[-0.25, -0.5, -0.4]} castShadow>
+        <mesh position={[-0.18, 0.8, -0.12]} rotation={[-0.25, -0.5, -0.4]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.03, 0.04, 0.32, 6]} />
-          <meshStandardMaterial color="#6a5a3a" roughness={0.95} />
         </mesh>
-        <mesh position={[0.12, 0.82, -0.18]} rotation={[0.2, -0.3, 0.3]} castShadow>
+        <mesh position={[0.12, 0.82, -0.18]} rotation={[0.2, -0.3, 0.3]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.025, 0.035, 0.28, 6]} />
-          <meshStandardMaterial color="#6a5a3a" roughness={0.95} />
         </mesh>
-        <mesh position={[-0.15, 0.75, 0.16]} rotation={[0.35, 0.4, -0.3]} castShadow>
+        <mesh position={[-0.15, 0.75, 0.16]} rotation={[0.35, 0.4, -0.3]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.025, 0.035, 0.3, 6]} />
-          <meshStandardMaterial color="#6a5a3a" roughness={0.95} />
         </mesh>
 
         {/* FOLIAGE - Multiple irregular clusters for realistic citrus crown */}
@@ -432,12 +439,9 @@ export const PushableLemonPot: React.FC<{ item: PushableObject }> = ({ item }) =
             position={cluster.pos as [number, number, number]}
             scale={cluster.scale as [number, number, number]}
             castShadow
+            material={FOLIAGE_MATERIAL}
           >
             <sphereGeometry args={[0.5, 8, 7]} />
-            <meshStandardMaterial
-              color={j % 3 === 0 ? '#4a6b3a' : j % 3 === 1 ? '#5a7b4a' : '#3a5b2a'}
-              roughness={0.87}
-            />
           </mesh>
         ))}
 
@@ -558,31 +562,26 @@ export const PushablePalmPot: React.FC<{ item: PushableObject }> = ({ item }) =>
           <meshStandardMaterial color="#4a3a2a" roughness={0.98} />
         </mesh>
 
-        {/* DATE PALM TRUNK with realistic segments */}
+        {/* DATE PALM TRUNK with realistic segments and wood texture */}
         {/* Base trunk segment */}
-        <mesh position={[0, 0.58, 0]} castShadow>
+        <mesh position={[0, 0.58, 0]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.11, 0.13, 0.15, 10]} />
-          <meshStandardMaterial color="#8a6a4a" roughness={0.95} />
         </mesh>
         {/* Trunk segment ring (darker) */}
-        <mesh position={[0, 0.65, 0]} castShadow>
+        <mesh position={[0, 0.65, 0]} castShadow material={TRUNK_RING_MATERIAL}>
           <cylinderGeometry args={[0.12, 0.12, 0.03, 10]} />
-          <meshStandardMaterial color="#6a5a3a" roughness={0.98} />
         </mesh>
         {/* Mid trunk segment */}
-        <mesh position={[0, 0.78, 0]} castShadow>
+        <mesh position={[0, 0.78, 0]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.10, 0.11, 0.2, 10]} />
-          <meshStandardMaterial color="#7a5a3a" roughness={0.95} />
         </mesh>
         {/* Trunk segment ring */}
-        <mesh position={[0, 0.88, 0]} castShadow>
+        <mesh position={[0, 0.88, 0]} castShadow material={TRUNK_RING_MATERIAL}>
           <cylinderGeometry args={[0.11, 0.11, 0.03, 10]} />
-          <meshStandardMaterial color="#6a5a3a" roughness={0.98} />
         </mesh>
         {/* Upper trunk segment */}
-        <mesh position={[0, 1.0, 0]} castShadow>
+        <mesh position={[0, 1.0, 0]} castShadow material={TRUNK_MATERIAL}>
           <cylinderGeometry args={[0.09, 0.10, 0.18, 10]} />
-          <meshStandardMaterial color="#8a6a4a" roughness={0.95} />
         </mesh>
         {/* Crown base (where fronds emerge) */}
         <mesh position={[0, 1.12, 0]} castShadow>

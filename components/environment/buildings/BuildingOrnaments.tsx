@@ -12,6 +12,14 @@ import {
 } from '../decorations/IslamicOrnaments';
 import { HoverableGroup } from '../shared/HoverSystem';
 import { useNightTintedMaterial } from '../shared/nightMaterials';
+import { CACHED_WOOD_TEXTURES } from '../../../utils/environment/wood';
+
+// Shared material for wooden beams
+const BEAM_MATERIAL = new THREE.MeshStandardMaterial({
+  map: CACHED_WOOD_TEXTURES.walnut,
+  roughness: 0.95,
+  color: new THREE.Color('#5a4030'),
+});
 
 const Awning: React.FC<{ material: THREE.Material; position: [number, number, number]; rotation: [number, number, number]; width: number; seed: number; nightFactor: number }> = ({ material, position, rotation, width, seed, nightFactor }) => {
   const ref = useRef<THREE.Mesh>(null);
@@ -354,9 +362,8 @@ export const BuildingOrnaments: React.FC<BuildingOrnamentsProps> = ({
       {seededRandom(localSeed + 71) > 0.6 && (
         <group>
           {[0, 1, 2].map((i) => (
-            <mesh key={`beam-${i}`} position={[finalBuildingSize / 2 + 0.4, -finalHeight / 2 + 1 + i * 1.4, (i - 1) * 1.2]} castShadow>
+            <mesh key={`beam-${i}`} position={[finalBuildingSize / 2 + 0.4, -finalHeight / 2 + 1 + i * 1.4, (i - 1) * 1.2]} castShadow material={BEAM_MATERIAL}>
               <boxGeometry args={[0.6, 0.15, 0.15]} />
-              <meshStandardMaterial color="#3d2817" roughness={1} />
             </mesh>
           ))}
         </group>

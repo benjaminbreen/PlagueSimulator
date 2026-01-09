@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem' | 'storageChest';
+export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem' | 'storageChest' | 'gravestone';
 export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth' | 'metal';
 
 // Break chances when pushed with force (shift + release)
@@ -54,6 +54,7 @@ export const PUSHABLE_DISPLAY_NAMES: Record<PushableKind, string> = {
   amphora: 'Amphora',
   droppedItem: 'Item',
   storageChest: 'Storage Chest',
+  gravestone: 'Gravestone',
 };
 
 export const getPushableDisplayName = (kind: PushableKind): string => {
@@ -86,6 +87,19 @@ export interface PushableObject {
   potSize?: number;                  // 0.7-1.3 scale multiplier
   isShattered?: boolean;             // For ceramic objects - becomes true when hit hard
   shatterTime?: number;              // Timestamp when shattered (for visual effects)
+  graveShape?: 'rectangular' | 'arch' | 'peaked' | 'platform'; // For gravestones
+  graveScale?: number;               // Scale multiplier for gravestones
+  graveType?: 'flat' | 'raised' | 'double_marker' | 'ornate'; // Grave burial type
+  isTipped?: boolean;                // For gravestones - knocked over state
+  tippedRotation?: number;           // Current tipped rotation angle (0 to Math.PI/2)
+  wobbleAngle?: number;              // Wobble rotation angle (oscillates around 0)
+  wobbleVelocity?: number;           // Angular velocity for wobble oscillation
+  graveEpitaph?: {                   // Procedurally generated epitaph
+    name: string;                    // Deceased's name
+    age: number;                     // Age at death
+    title?: string;                  // Optional title/descriptor
+    inscription?: string;            // Optional Quranic verse or saying
+  };
 }
 
 // Swingable objects (hanging from ceiling, like lanterns)
@@ -250,4 +264,85 @@ export const generateShatterLoot = (
   }
 
   return loot;
+};
+
+// Historically accurate 14th century Damascus epitaph generation
+const DAMASCENE_NAMES = {
+  male: [
+    'Ahmad', 'Muhammad', 'Ali', 'Hassan', 'Hussein', 'Omar', 'Uthman', 'Ibrahim', 'Ismail', 'Yusuf',
+    'Musa', 'Dawud', 'Sulayman', 'Khalid', 'Salah al-Din', 'Nur al-Din', 'Mahmud', 'Abdullah', 'Zakariya', 'Yahya',
+    'Umar', 'Jamal', 'Nasir', 'Mansur', 'Harun', 'Bilal', 'Talha', 'Zubayr', 'Abu Bakr', 'Anas'
+  ],
+  female: [
+    'Fatima', 'Aisha', 'Khadija', 'Zaynab', 'Maryam', 'Hafsa', 'Ruqayya', 'Umm Kulthum', 'Asma', 'Safiya',
+    'Layla', 'Salma', 'Sawda', 'Hind', 'Zahra', 'Noor', 'Amina', 'Rabiah', 'Sukayna', 'Umm Salama'
+  ]
+};
+
+const FAMILY_NAMES = [
+  'ibn Ahmad', 'ibn Muhammad', 'ibn Ali', 'ibn Hassan', 'ibn Ibrahim', 'ibn Yusuf', 'ibn Khalid',
+  'al-Dimashqi', 'al-Shami', 'al-Masri', 'al-Baghdadi', 'al-Halabi', 'al-Tabrizi', 'al-Isfahani'
+];
+
+const TITLES = [
+  'Devoted mother', 'Beloved father', 'Pious scholar', 'Righteous merchant', 'Faithful servant of Allah',
+  'Keeper of the faith', 'Guardian of orphans', 'Skilled physician', 'Noble qadi', 'Respected imam',
+  'Generous benefactor', 'Wise elder', 'Humble servant', 'Devout worshipper', 'Protector of the weak',
+  'Teacher of knowledge', 'Pilgrim to Mecca', 'Reciter of Quran', 'Builder of mosques', 'Healer of the sick'
+];
+
+const QURAN_VERSES = [
+  'Inna lillahi wa inna ilayhi raji\'un', // To Allah we belong and to Him we return
+  'Every soul shall taste death',
+  'Allah is the best of providers',
+  'Blessed are those who believe',
+  'Peace be upon the righteous',
+  'The mercy of Allah encompasses all',
+  'In remembrance of Allah do hearts find rest',
+  'Allah loves those who are patient',
+  'Verily with hardship comes ease',
+  'He who created death and life to test you'
+];
+
+/**
+ * Generate a historically accurate epitaph for a 14th century Damascus gravestone
+ */
+export const generateGraveEpitaph = (seed: number): {
+  name: string;
+  age: number;
+  title?: string;
+  inscription?: string;
+} => {
+  const rand = () => {
+    // Simple seeded random
+    const x = Math.sin(seed++) * 10000;
+    return x - Math.floor(x);
+  };
+
+  const isMale = rand() > 0.5;
+  const firstName = isMale
+    ? DAMASCENE_NAMES.male[Math.floor(rand() * DAMASCENE_NAMES.male.length)]
+    : DAMASCENE_NAMES.female[Math.floor(rand() * DAMASCENE_NAMES.female.length)];
+
+  const familyName = FAMILY_NAMES[Math.floor(rand() * FAMILY_NAMES.length)];
+  const name = `${firstName} ${familyName}`;
+
+  // Age distribution: weighted toward adults (20-70), with some children and elderly
+  const ageRoll = rand();
+  let age: number;
+  if (ageRoll < 0.15) {
+    age = Math.floor(rand() * 15) + 1; // Children (1-15)
+  } else if (ageRoll < 0.85) {
+    age = Math.floor(rand() * 50) + 20; // Adults (20-69)
+  } else {
+    age = Math.floor(rand() * 25) + 70; // Elderly (70-94)
+  }
+
+  // 60% chance of having a title
+  const title = rand() < 0.6 ? TITLES[Math.floor(rand() * TITLES.length)] : undefined;
+
+  // 50% chance of having a Quranic inscription
+  const inscription = rand() < 0.5 ? QURAN_VERSES[Math.floor(rand() * QURAN_VERSES.length)] : undefined;
+
+  return { name, age, title, inscription };
 };

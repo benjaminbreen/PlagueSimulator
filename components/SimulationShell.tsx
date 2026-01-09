@@ -52,6 +52,8 @@ interface SimulationShellProps {
   onPlagueExposure: (updatedPlague: any) => void;
   onNPCInitiatedEncounter: (npc: any) => void;
   onCrimeWitnessed?: (crime: { type: 'theft' | 'vandalism'; witnessCount: number }) => void;
+  onGravestoneDesecrated?: () => void;
+  onNearReadable?: (readable: { id: string; position: any; epitaph: any } | null) => void;
   onFallDamage: (fallHeight: number, fatal: boolean) => void;
   cameraViewTarget: [number, number, number] | null;
   onPlayerStartMove: () => void;
@@ -138,6 +140,8 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   onPlagueExposure,
   onNPCInitiatedEncounter,
   onCrimeWitnessed,
+  onGravestoneDesecrated,
+  onNearReadable,
   onFallDamage,
   cameraViewTarget,
   onPlayerStartMove,
@@ -243,6 +247,8 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             merchantFocusPosition={merchantFocusPosition}
             onPlagueExposure={onPlagueExposure}
             onNPCInitiatedEncounter={onNPCInitiatedEncounter}
+            onGravestoneDesecrated={onGravestoneDesecrated}
+            onNearReadable={onNearReadable}
             onFallDamage={onFallDamage}
             cameraViewTarget={cameraViewTarget}
             onPlayerStartMove={onPlayerStartMove}

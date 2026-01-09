@@ -1485,6 +1485,11 @@ export const NPC: React.FC<NPCProps> = memo(({
     }
   });
 
+  // Don't render children younger than 3 years old (they look absurd as tiny walking adults)
+  if (stats.age !== undefined && stats.age < 3) {
+    return null;
+  }
+
   return (
     <group
       ref={group}
