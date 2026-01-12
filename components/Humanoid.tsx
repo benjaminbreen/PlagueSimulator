@@ -492,6 +492,8 @@ interface HumanoidProps {
   movementStartTimeRef?: React.MutableRefObject<number>; // For start inertia
   movementStopTimeRef?: React.MutableRefObject<number>; // For stop inertia
   sprintTransitionRef?: React.MutableRefObject<number>; // 0-1 walk to run blend
+  // Debug: hide outer robe to reveal underclothing
+  hideOuterRobe?: boolean;
 }
 
 export const Humanoid: React.FC<HumanoidProps> = memo(({
@@ -577,6 +579,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   movementStopTimeRef,
   sprintTransitionRef,
   isPlayer = false,
+  hideOuterRobe = false,
 }) => {
   const simpleLodActive = enableSimpleLod && distanceFromCamera > simpleLodDistance;
   const animationLodActive = distanceFromCamera > animationLodDistance;
@@ -2296,8 +2299,22 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
           </mesh>
         )}
 
-        {/* Torso / Robe */}
-        {isFemale ? (
+        {/* Torso / Robe - can be hidden to reveal underclothing for debugging */}
+        {hideOuterRobe ? (
+          /* Simple underclothing when outer robe is hidden */
+          <group>
+            {/* Simple shift/tunic undergarment */}
+            <mesh position={[0, 1.0, 0]} castShadow>
+              <cylinderGeometry args={[0.22, 0.28, 1.0, 8]} />
+              <meshStandardMaterial color="#e8dcc8" roughness={0.95} />
+            </mesh>
+            {/* Lower portion */}
+            <mesh position={[0, 0.4, 0]} castShadow>
+              <cylinderGeometry args={[0.28, 0.32, 0.4, 8]} />
+              <meshStandardMaterial color="#e8dcc8" roughness={0.95} />
+            </mesh>
+          </group>
+        ) : isFemale ? (
           <group>
             <mesh position={[0, 1.05, 0]} castShadow>
               <coneGeometry args={[0.55 * femaleRobeSpread, 1.2, 8]} />
@@ -2321,17 +2338,19 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               <meshStandardMaterial color={clothUpperColor} roughness={clothRoughness} />
             </mesh>
             {/* Collar neckline - round neck opening with decorative band */}
-            <mesh position={[0, 1.50, 0.08]} castShadow>
-              <torusGeometry args={[0.14, 0.025, 8, 16]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={0.82} />
-            </mesh>
+            {!hideOuterRobe && (
+              <mesh position={[0, 1.50, 0.08]} castShadow>
+                <torusGeometry args={[0.11, 0.02, 8, 16]} />
+                <meshStandardMaterial color={robeAccentColor} roughness={0.82} />
+              </mesh>
+            )}
             {/* Inner collar band - suggests modest layering */}
             <mesh position={[0, 1.48, 0.04]} castShadow>
               <cylinderGeometry args={[0.13, 0.14, 0.06, 8]} />
               <meshStandardMaterial color={clothFoldColor} roughness={clothRoughness} />
             </mesh>
             {/* Embroidered collar detail - for wealthier characters */}
-            {hasEmbroidery && (
+            {hasEmbroidery && !hideOuterRobe && (
               <>
                 <mesh position={[0.08, 1.48, 0.08]} castShadow>
                   <sphereGeometry args={[0.012, 6, 6]} />
@@ -2343,41 +2362,43 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
                 </mesh>
               </>
             )}
-            <mesh position={[0, 1.05, 0]} castShadow>
-              <cylinderGeometry args={[0.24, 0.24, 0.7, 8]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
-            </mesh>
-            {robeOverwrap && (
+            {robeOverwrap && !hideOuterRobe && (
               <mesh position={[0, 1.05, 0.08]} castShadow>
                 <coneGeometry args={[0.62 * femaleRobeSpread, 1.05, 8]} />
                 <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
               </mesh>
             )}
-            <mesh position={[0, 1.18, -0.12]} castShadow>
-              <boxGeometry args={[0.5, 0.2, 0.16]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
-            </mesh>
+            {!hideOuterRobe && (
+              <mesh position={[0, 1.18, -0.12]} castShadow>
+                <boxGeometry args={[0.5, 0.2, 0.16]} />
+                <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
+              </mesh>
+            )}
             <mesh position={[0, 0.6, 0]} castShadow>
               <coneGeometry args={[0.75 * femaleRobeSpread, 0.9, 8]} />
               <meshStandardMaterial color={clothLowerColor} roughness={clothRoughness} />
             </mesh>
-            <mesh position={[0, 0.2, 0]} castShadow>
-              <cylinderGeometry args={[0.78 * femaleRobeSpread, 0.78 * femaleRobeSpread, 0.1, 8]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
-            </mesh>
-            <mesh position={[0, 0.25, -0.18]} castShadow>
-              <boxGeometry args={[0.6, 0.06, 0.04]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
-            </mesh>
-            {robeHasSash && (
+            {!hideOuterRobe && (
+              <mesh position={[0, 0.2, 0]} castShadow>
+                <cylinderGeometry args={[0.78 * femaleRobeSpread, 0.78 * femaleRobeSpread, 0.1, 8]} />
+                <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
+              </mesh>
+            )}
+            {!hideOuterRobe && (
+              <mesh position={[0, 0.25, -0.18]} castShadow>
+                <boxGeometry args={[0.6, 0.06, 0.04]} />
+                <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
+              </mesh>
+            )}
+            {robeHasSash && !hideOuterRobe && (
               <mesh position={[0, 0.95, 0]} castShadow>
-                <torusGeometry args={[0.38 * femaleRobeSpread, 0.035, 6, 12]} />
+                <torusGeometry args={[0.48 * femaleRobeSpread, 0.03, 8, 14]} />
                 <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} map={sashMap ?? undefined} />
               </mesh>
             )}
-            {femaleRobeBand && (
-              <mesh position={[0, 1.35, 0]} castShadow>
-                <cylinderGeometry args={[0.18, 0.22, 0.1, 8]} />
+            {femaleRobeBand && !hideOuterRobe && (
+              <mesh position={[0, 1.35, 0.02]} castShadow>
+                <cylinderGeometry args={[0.24, 0.30, 0.08, 8]} />
                 <meshStandardMaterial color={robeAccentColor} roughness={accentRoughness} />
               </mesh>
             )}
@@ -2569,14 +2590,6 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
               </group>
             </group>
             </group>
-            <mesh position={[-0.2, 0.95, 0.02]} castShadow>
-              <boxGeometry args={[0.09, 0.1, 0.11]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={0.9} />
-            </mesh>
-            <mesh position={[0.2, 0.95, 0.02]} castShadow>
-              <boxGeometry args={[0.09, 0.1, 0.11]} />
-              <meshStandardMaterial color={robeAccentColor} roughness={0.9} />
-            </mesh>
           </group>
         ) : (
           <group ref={torsoGroup}>
@@ -2646,11 +2659,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
             )}
           </group>
         )}
-        {robeHasSash && (
+        {robeHasSash && !hideOuterRobe && (
           <group>
             {/* Main sash belt - thicker and more visible */}
             <mesh position={[0, 0.95, 0]} castShadow>
-              <torusGeometry args={[isFemale ? 0.42 : 0.28, 0.06, 10, 18]} />
+              <torusGeometry args={[isFemale ? 0.42 : 0.38, 0.05, 10, 18]} />
               <meshStandardMaterial color={robeAccentColor} roughness={0.85} map={sashMap ?? undefined} />
             </mesh>
             {/* Sash hanging ends */}
@@ -2712,7 +2725,7 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         )}
 
         {/* Tiraz decorative bands on upper chest/shoulders */}
-        {robeHasTrim && (
+        {robeHasTrim && !hideOuterRobe && (
           <group>
             <mesh position={[0, 1.35, 0.01]} castShadow>
               <cylinderGeometry args={[isFemale ? 0.38 : 0.26, isFemale ? 0.40 : 0.28, 0.08, 16]} />

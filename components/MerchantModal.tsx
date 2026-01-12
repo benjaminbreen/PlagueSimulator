@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { MerchantNPC, PlayerStats, MerchantItem, PlayerItem, MerchantType, CompoundRecipe } from '../types';
-import { Coins, Package, ShoppingCart, TrendingUp, Sparkles, X, FlaskConical, Scale, LayoutGrid, List, BookOpen } from 'lucide-react';
+import { Coins, Package, ShoppingCart, TrendingUp, Sparkles, X, FlaskConical, Scale, LayoutGrid, List, BookOpen, Users } from 'lucide-react';
 import { ApothecaryCompoundingPanel } from './ApothecaryCompoundingPanel';
 import { ItemIcon } from './items/ItemIcon';
+import { getReputationTier, getPriceModifier, getSellPriceModifier, getReputationLabel, getReputationColorClass, getReputationBgClass } from '../utils/reputation';
 
 interface MerchantModalProps {
   merchant: MerchantNPC;
@@ -27,12 +28,22 @@ export const MerchantModal: React.FC<MerchantModalProps> = ({
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const isApothecary = merchant.type === MerchantType.APOTHECARY;
 
+  // Get reputation-based price modifiers
+  const reputationTier = getReputationTier(playerStats.reputation);
+  const buyModifier = getPriceModifier(reputationTier);
+  const sellModifier = getSellPriceModifier(reputationTier);
+  const reputationLabel = getReputationLabel(reputationTier);
+  const reputationColorClass = getReputationColorClass(reputationTier);
+  const reputationBgClass = getReputationBgClass(reputationTier);
+
   const getFinalPrice = (basePrice: number) => {
-    return Math.round(basePrice * merchant.haggleModifier);
+    // Apply both merchant haggle modifier and reputation modifier
+    return Math.round(basePrice * merchant.haggleModifier * buyModifier);
   };
 
   const getSellPrice = (basePrice: number) => {
-    return Math.round(basePrice * 0.7);
+    // Apply reputation-based sell price modifier
+    return Math.round(basePrice * sellModifier);
   };
 
   const rarityMeta = {
@@ -462,6 +473,30 @@ export const MerchantModal: React.FC<MerchantModalProps> = ({
                 <div className="flex items-center gap-2">
                   <div className={`text-[9px] uppercase tracking-widest ${merchant.haggleModifier < 1 ? 'text-emerald-400' : 'text-red-400'}`}>
                     {merchant.haggleModifier < 1 ? 'Discount' : 'Markup'}: {Math.abs(Math.round((1 - merchant.haggleModifier) * 100))}%
+                  </div>
+                </div>
+              </>
+            )}
+            {/* Reputation-based price modifier */}
+            <div className="w-px h-8 bg-amber-800/20" />
+            <div className="flex items-center gap-2">
+              <div className={`w-8 h-8 rounded-lg ${reputationBgClass} border border-white/10 flex items-center justify-center`}>
+                <Users size={16} className={reputationColorClass} />
+              </div>
+              <div>
+                <div className="text-[9px] uppercase tracking-widest text-amber-500/50">Reputation</div>
+                <div className={`font-semibold text-sm ${reputationColorClass}`}>{reputationLabel}</div>
+              </div>
+            </div>
+            {buyModifier !== 1 && (
+              <>
+                <div className="w-px h-8 bg-amber-800/20" />
+                <div className="flex flex-col text-[9px] uppercase tracking-widest">
+                  <div className={buyModifier > 1 ? 'text-red-400' : 'text-emerald-400'}>
+                    Buy: {buyModifier > 1 ? '+' : '-'}{Math.abs(Math.round((buyModifier - 1) * 100))}%
+                  </div>
+                  <div className={sellModifier < 0.7 ? 'text-red-400' : sellModifier > 0.7 ? 'text-emerald-400' : 'text-amber-400'}>
+                    Sell: {sellModifier < 0.7 ? '' : '+'}{Math.round((sellModifier - 0.7) / 0.7 * 100)}%
                   </div>
                 </div>
               </>

@@ -29,7 +29,10 @@ import {
   createGrimeTexture,
   createBlotchTexture,
   createLinenTexture,
-  createDirtTexture
+  createDirtTexture,
+  createPlasterNormalTexture,
+  createStoneNormalTexture,
+  createGroundNormalTexture
 } from './environment/geometry';
 import { CourtyardBuilding } from './environment/buildings/CourtyardBuilding';
 import { BuildingOrnaments } from './environment/buildings/BuildingOrnaments';
@@ -46,6 +49,7 @@ import { EnvironmentDistricts } from './environment/EnvironmentDistricts';
 import { EnvironmentFauna } from './environment/EnvironmentFauna';
 import { EnvironmentBase } from './environment/EnvironmentBase';
 import { EnvironmentDecor } from './environment/EnvironmentDecor';
+import { AtmosphericDust } from './environment/AtmosphericDust';
 import { BuildingFrontDetails } from './environment/buildings/BuildingFrontDetails';
 import { BuildingRoofDetails } from './environment/buildings/BuildingRoofDetails';
 import { BuildingFacadeDetails } from './environment/buildings/BuildingFacadeDetails';
@@ -54,6 +58,7 @@ import { BirdcageSystem } from './environment/buildings/BirdcageSystem';
 import { generateClimbablesForBuilding, calculateRooftopHatchPosition, buildingCanHaveRooftopHatch } from '../utils/climbables';
 import { getBuildingMultipliers } from '../utils/buildingArchitecture';
 import { ISLAMIC_COLORS } from './environment/decorations/IslamicOrnaments';
+import { generateCitadelBuildings, getCitadelWallCollisions } from './environment/landmarks/CitadelComplex';
 
 // Texture generators, constants, and hover system now imported from environment/
 
@@ -68,7 +73,115 @@ const CACHED_NOISE_TEXTURES = [
 ];
 
 const CACHED_LINEN_TEXTURE = createLinenTexture(256);
- 
+
+// Normal maps for building surface detail
+const CACHED_PLASTER_NORMAL = createPlasterNormalTexture(256);
+const CACHED_STONE_NORMAL = createStoneNormalTexture(256);
+const CACHED_GROUND_NORMAL = createGroundNormalTexture(256);
+
+// ============================================================================
+// FRESNEL RIM LIGHTING SHADER HELPER
+// ============================================================================
+// Adds beautiful edge glow that makes objects pop against the sky.
+// Creates a "light wrap" effect simulating atmospheric scattering around edges.
+// Works by detecting grazing angles (where view direction is nearly perpendicular to surface).
+const addFresnelRimLighting = (mat: THREE.MeshStandardMaterial, options?: {
+  includeAO?: boolean;      // Also add ground contact + normal-based ambient occlusion
+  rimIntensity?: number;    // How strong the rim glow is (default 0.8)
+  fresnelPower?: number;    // Sharpness of rim edge (lower = wider rim, default 1.8)
+}) => {
+  const { includeAO = false, rimIntensity = 0.8, fresnelPower = 1.8 } = options || {};
+
+  mat.onBeforeCompile = (shader) => {
+    // Vertex shader: pass world position, normal, and view direction to fragment
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      varying vec3 vViewDir;`
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <worldpos_vertex>',
+      `#include <worldpos_vertex>
+      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+      vWorldNormal = normalize((modelMatrix * vec4(normal, 0.0)).xyz);
+      vViewDir = normalize(cameraPosition - vWorldPos);`
+    );
+
+    // Fragment shader: add varyings
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+      varying vec3 vWorldPos;
+      varying vec3 vWorldNormal;
+      varying vec3 vViewDir;`
+    );
+
+    // Build shader code based on options
+    let shaderCode = `#include <aomap_fragment>`;
+
+    if (includeAO) {
+      shaderCode += `
+        // ========================================
+        // SHADER-BASED AMBIENT OCCLUSION
+        // ========================================
+        // Ground contact darkening: objects darker at their base
+        float groundAO = smoothstep(0.0, 4.0, vWorldPos.y);
+        groundAO = mix(0.45, 1.0, groundAO);
+        // Normal-based darkening: underhangs and overhangs darker
+        float normalAO = 1.0;
+        float upFacing = max(0.0, vWorldNormal.y);
+        normalAO = mix(0.65, 1.0, upFacing);
+        float totalAO = groundAO * normalAO;
+        reflectedLight.directDiffuse *= mix(1.0, totalAO, 0.4);
+        reflectedLight.indirectDiffuse *= totalAO;
+        reflectedLight.indirectSpecular *= totalAO;`;
+    }
+
+    shaderCode += `
+        // ========================================
+        // FRESNEL RIM LIGHTING
+        // ========================================
+        // Calculate view direction for fresnel
+        vec3 viewDir = normalize(vViewDir);
+        vec3 worldNormal = normalize(vWorldNormal);
+
+        // Fresnel: strongest at grazing angles (edges)
+        // 1.0 when perpendicular, 0.0 when facing camera
+        float fresnelBase = 1.0 - max(0.0, dot(viewDir, worldNormal));
+
+        // Artistic power curve for pleasing rim falloff
+        float fresnel = pow(fresnelBase, ${fresnelPower.toFixed(1)});
+
+        // Height boost: stronger glow on upper parts (catch sky light)
+        float heightBoost = smoothstep(0.0, 8.0, vWorldPos.y);
+        fresnel *= mix(0.6, 1.0, heightBoost);
+
+        // Reduce on horizontal surfaces (roofs) - looks unnatural there
+        float verticalFacing = abs(worldNormal.y);
+        fresnel *= (1.0 - verticalFacing * 0.7);
+
+        // Rim colors: warm for sun-facing edges, cool for sky-facing
+        vec3 rimColorWarm = vec3(1.0, 0.88, 0.7);   // Golden cream (sun)
+        vec3 rimColorCool = vec3(0.85, 0.9, 1.0);   // Sky blue tint
+
+        // Blend based on surface orientation
+        float warmth = max(0.0, worldNormal.y) * 0.5 + 0.5;
+        vec3 rimColor = mix(rimColorCool, rimColorWarm, warmth);
+
+        // Apply rim light to final output
+        float rimInt = ${rimIntensity.toFixed(2)};
+        vec3 rimLight = rimColor * fresnel * rimInt;
+        reflectedLight.indirectDiffuse += rimLight;
+        reflectedLight.indirectSpecular += rimLight * 0.3;`;
+
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <aomap_fragment>',
+      shaderCode
+    );
+  };
+};
 
 const Dome: React.FC<{ material: THREE.Material; position: [number, number, number]; radius: number; nightFactor: number }> = ({ material, position, radius, nightFactor }) => {
   const tintedMaterial = useNightTintedMaterial(material, nightFactor, '#647489', 0.75);
@@ -2380,24 +2493,34 @@ export const Buildings: React.FC<{
   const materials = useMemo(() => {
     const matMap = new Map<BuildingType, THREE.MeshStandardMaterial>();
     Object.entries(BUILDING_PALETTES).forEach(([type, props]) => {
-      const applyTexture = type === BuildingType.COMMERCIAL
+      // Use stone normal for important buildings, plaster for residential/commercial
+      const useStoneNormal = type === BuildingType.RELIGIOUS
         || type === BuildingType.CIVIC
         || type === BuildingType.SCHOOL
-        || type === BuildingType.MEDICAL
-        || type === BuildingType.HOSPITALITY;
-      matMap.set(type as BuildingType, new THREE.MeshStandardMaterial({
+        || type === BuildingType.MEDICAL;
+      const normalMap = useStoneNormal ? CACHED_STONE_NORMAL : CACHED_PLASTER_NORMAL;
+
+      const mat = new THREE.MeshStandardMaterial({
         ...props,
-        // Only use bump map (physical texture), no color map - lets base colors show through
-        bumpMap: applyTexture ? noiseTextures[2] : null,
-        bumpScale: applyTexture ? 0.2 : 0, // TEMPORARY: Cranked way up for testing
-      }));
+        // Normal map for surface detail (catches light realistically)
+        normalMap: normalMap,
+        normalScale: useStoneNormal
+          ? new THREE.Vector2(0.12, 0.12)  // Stone: moderate detail
+          : new THREE.Vector2(0.06, 0.06), // Plaster: very subtle
+      });
+
+      // Add shader-based ambient occlusion AND fresnel rim lighting
+      // Stronger effect (0.8 intensity, 1.8 power) for noticeable edge glow on buildings
+      addFresnelRimLighting(mat, { includeAO: true, rimIntensity: 0.8, fresnelPower: 1.8 });
+
+      matMap.set(type as BuildingType, mat);
     });
     return matMap;
   }, []);
 
-  const otherMaterials = useMemo(() => ({
-    wood: new THREE.MeshStandardMaterial({ color: '#3d2817', roughness: 1.0 }),
-    dome: [
+  const otherMaterials = useMemo(() => {
+    // Create dome materials with fresnel rim lighting for beautiful curved surface highlights
+    const domeMaterials = [
       // Traditional sandstone domes
       new THREE.MeshStandardMaterial({ color: '#b8a98e', roughness: 0.7 }),
       new THREE.MeshStandardMaterial({ color: '#a6947a', roughness: 0.7 }),
@@ -2413,7 +2536,16 @@ export const Buildings: React.FC<{
       new THREE.MeshStandardMaterial({ color: '#c9a550', roughness: 0.35, metalness: 0.35 }), // aged gold
       // Green glazed tiles (traditional)
       new THREE.MeshStandardMaterial({ color: '#5a7a5a', roughness: 0.55, metalness: 0.1 }), // dark green
-    ],
+    ];
+
+    // Apply stronger fresnel to domes - curved surfaces showcase rim lighting beautifully
+    domeMaterials.forEach(mat => {
+      addFresnelRimLighting(mat, { includeAO: false, rimIntensity: 1.0, fresnelPower: 1.5 });
+    });
+
+    return {
+    wood: new THREE.MeshStandardMaterial({ color: '#3d2817', roughness: 1.0 }),
+    dome: domeMaterials,
     awning: [
       // Warm natural linens (common)
       new THREE.MeshStandardMaterial({ color: '#f0e8d8', roughness: 0.95, side: THREE.DoubleSide, bumpMap: CACHED_LINEN_TEXTURE, bumpScale: 0.015 }), // bright cream linen
@@ -2455,7 +2587,7 @@ export const Buildings: React.FC<{
       new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[1], color: '#4a6b8a', roughness: 0.88, side: THREE.DoubleSide }), // medium blue & white
       new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[2], color: '#5a7b9a', roughness: 0.88, side: THREE.DoubleSide }), // light blue & white
     ]
-  }), []);
+  }; }, []);
 
   const metadata = useMemo(() => {
     const bldMetadata: BuildingMetadata[] = [];
@@ -2754,31 +2886,37 @@ export const Buildings: React.FC<{
 
       return bldMetadata;
     }
-    if (district === 'OUTSKIRTS_FARMLAND' || district === 'OUTSKIRTS_DESERT') {
-      const positions: Array<[number, number, number]> = district === 'OUTSKIRTS_FARMLAND'
+    // Ghouta farmland districts - only sparse farmhouses on edges, no procedural buildings
+    const isGhoutaFarmland = district === 'OUTSKIRTS_FARMLAND' || district === 'EAST_GHOUTA'
+      || district === 'SOUTH_GHOUTA' || district === 'NORTH_GHOUTA' || district === 'RABWE';
+
+    if (isGhoutaFarmland || district === 'OUTSKIRTS_DESERT') {
+      const positions: Array<[number, number, number]> = district === 'OUTSKIRTS_DESERT'
         ? [
-          [-16, 0, -10],
-          [14, 0, 8],
-          [-6, 0, 14],
-        ]
-        : [
           [-24, 0, -18],
           [22, 0, 16],
           [-8, 0, 26],
           [26, 0, -6],
           [-26, 0, 8],
+        ]
+        : [
+          // Farmhouses only on far edges - sparse rural settlement
+          [-24, 0, -22],
+          [22, 0, 24],
+          [-22, 0, 20],
         ];
       positions.forEach((pos, idx) => {
         const [x, y, z] = pos;
         const localSeed = seed + idx * 1337;
         const data = generateBuildingMetadata(localSeed, x, z, district);
-        if (district === 'OUTSKIRTS_FARMLAND') {
+        if (isGhoutaFarmland) {
           data.type = BuildingType.RESIDENTIAL;
           data.ownerProfession = idx === 0
             ? 'Farmer'
             : idx === 1
               ? 'Field Worker'
               : 'Farmhouse';
+          data.sizeScale = 0.7 + seededRandom(localSeed + 50) * 0.3; // Smaller rural buildings
         } else {
           if (idx === 0) {
             data.type = BuildingType.COMMERCIAL;
@@ -2862,6 +3000,11 @@ export const Buildings: React.FC<{
       // No regular procedural buildings - the mosque complex is handled by UmayyadMosqueDistrict component
       // which includes the main mosque structure, courtyard, and decorative perimeter buildings
       return [];
+    }
+    if (district === 'CIVIC') {
+      // No regular procedural buildings - the citadel complex has custom buildings
+      // (Throne Room, Barracks, Stables, Arsenal) generated here
+      return generateCitadelBuildings();
     }
 
     // Note: OUTSKIRTS_FARMLAND, OUTSKIRTS_DESERT, OUTSKIRTS_SCRUBLAND, ROADSIDE, MOUNTAIN_SHRINE,
@@ -3093,18 +3236,30 @@ export const Buildings: React.FC<{
     }
   });
 
+  // Filter out citadel buildings from rendering - they have custom visuals in CitadelComplex
+  // But they remain in metadata for collision detection, entry, and interior generation
+  const renderableBuildings = useMemo(() =>
+    visibleBuildings.filter(b => !b.id.startsWith('citadel-')),
+    [visibleBuildings]
+  );
+  const renderableMetadata = useMemo(() =>
+    metadata.filter(b => !b.id.startsWith('citadel-')),
+    [metadata]
+  );
+
   return (
     <group>
       {/* Instanced rendering for performance - reduces draw calls by ~10x */}
       {/* Windows use ALL buildings (not visibleBuildings) to prevent flicker from mesh recreation during frustum culling */}
-      <InstancedWindows buildings={metadata} district={district} nightFactor={nightFactor} />
-      <InstancedDecorations buildings={visibleBuildings} district={district} />
-      <InstancedGroundClutter buildings={visibleBuildings} district={district} />
-      <BirdcageSystem buildings={visibleBuildings} district={district} mapSeed={sessionSeed} />
+      {/* Citadel buildings are excluded - they have custom visuals in CitadelComplex */}
+      <InstancedWindows buildings={renderableMetadata} district={district} nightFactor={nightFactor} />
+      <InstancedDecorations buildings={renderableBuildings} district={district} />
+      <InstancedGroundClutter buildings={renderableBuildings} district={district} />
+      <BirdcageSystem buildings={renderableBuildings} district={district} mapSeed={sessionSeed} />
 
       {/* Individual buildings (now without windows and some decorations, which are instanced above) */}
       {/* FRUSTUM CULLED - only renders buildings visible to camera (30-40% performance gain) */}
-      {visibleBuildings.map((data) => (
+      {renderableBuildings.map((data) => (
         <Building
           key={data.id}
           data={data}
@@ -3243,7 +3398,7 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
     const isGrassyDistrict = district === 'SALHIYYA' || district === 'LOWER_SALHIYYA'
       || district === 'WEALTHY' || district === 'QAYMARIYYA' || district === 'AMARA' || district === 'BAB_FARADIS'
       || district === 'OUTSKIRTS_FARMLAND' || district === 'EAST_GHOUTA' || district === 'SOUTH_GHOUTA' || district === 'NORTH_GHOUTA' || district === 'RABWE'
-      || district === 'QANAWAT';
+      || district === 'QANAWAT' || district === 'QUBAYBAT';
 
     // Use grass texture for grassy districts, dirt for cemetery, roughness for others
     const textureToUse = isGrassyDistrict ? CACHED_GRASS_TEXTURE
@@ -3268,6 +3423,19 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
       roughnessMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND' || isGrassyDistrict) ? null : textureToUse || null,
       bumpMap: (district === 'CARAVANSERAI' || district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND') ? null : isGrassyDistrict ? textureToUse : textureToUse || null,
       bumpScale: district === 'CEMETERY' ? 0.012 : district === 'OUTSKIRTS_SCRUBLAND' ? 0.0015 : isGrassyDistrict ? 0.008 : 0.0025,
+      // Ground normal map for surface detail
+      normalMap: CACHED_GROUND_NORMAL,
+      normalScale: new THREE.Vector2(
+        // Desert/scrubland: subtle, Cemetery: strong, Grassy: moderate, Default: moderate-strong
+        (district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND') ? 0.12
+          : district === 'CEMETERY' ? 0.25
+          : isGrassyDistrict ? 0.15
+          : 0.20,
+        (district === 'OUTSKIRTS_DESERT' || district === 'OUTSKIRTS_SCRUBLAND') ? 0.12
+          : district === 'CEMETERY' ? 0.25
+          : isGrassyDistrict ? 0.15
+          : 0.20
+      ),
       // Enable transparency for edge fade effect
       transparent: true,
       depthWrite: true,
@@ -3520,6 +3688,9 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
 // CaravanseraiComplex extracted to ./environment/districts/CaravanseraiComplex.tsx
 
 
+// TOGGLE: Set to false to disable atmospheric dust particles
+const ENABLE_ATMOSPHERIC_DUST = false;
+
 export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, selectionEnabled = false, selectedBuildingId = null, onSelectBuilding, pushables = [], fogColor, heightmap, laundryLines = [], hangingCarpets = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true, occludedBuildingIds = [] }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
@@ -3652,6 +3823,15 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
             npcPositions={npcPositions}
             playerPosition={playerPosition}
           />
+          {/* Atmospheric dust particles - easily toggled via ENABLE_ATMOSPHERIC_DUST constant */}
+          {ENABLE_ATMOSPHERIC_DUST && (
+            <AtmosphericDust
+              centerPosition={playerPosition}
+              timeOfDay={timeOfDay}
+              particleCount={300}
+              radius={35}
+            />
+          )}
         </group>
       </HoverLabelContext.Provider>
     </HoverWireframeContext.Provider>

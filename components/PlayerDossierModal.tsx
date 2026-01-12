@@ -47,6 +47,10 @@ interface PlayerDossierModalProps {
   onUnequipHeadwear?: () => void;
   /** Equip headwear from inventory */
   onEquipHeadwear?: () => void;
+  /** Whether outer robe is hidden (showing underclothing) */
+  hideOuterRobe?: boolean;
+  /** Toggle outer robe visibility */
+  onToggleOuterRobe?: () => void;
 }
 
 export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
@@ -69,7 +73,9 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
   isOnHomeTile,
   onGoHome,
   onUnequipHeadwear,
-  onEquipHeadwear
+  onEquipHeadwear,
+  hideOuterRobe,
+  onToggleOuterRobe
 }) => {
   const [hoveredZone, setHoveredZone] = useState<string | null>(null);
   const [selectedFamilyMember, setSelectedFamilyMember] = useState<FamilyMember | null>(null);
@@ -935,15 +941,28 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                     <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Hair</span>
                     <div className="text-amber-100/80 mt-1">{playerStats.hairDescription}</div>
                   </div>
-                  <button
-                    onClick={() => onSelectInventoryItem(buildApparelEntry('robe'))}
-                    className="text-left group"
-                  >
-                    <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Robe</span>
-                    <div className="text-amber-100/80 mt-1 group-hover:text-amber-200 transition-colors">
-                      {playerStats.robeDescription}
-                    </div>
-                  </button>
+                  <div className="group relative">
+                    <button
+                      onClick={() => onSelectInventoryItem(buildApparelEntry('robe'))}
+                      className="text-left w-full"
+                    >
+                      <span className="text-amber-500/60 uppercase tracking-widest text-[9px]">Robe</span>
+                      <div className="text-amber-100/80 mt-1 group-hover:text-amber-200 transition-colors">
+                        {hideOuterRobe ? 'Underclothing (robe removed)' : playerStats.robeDescription}
+                      </div>
+                    </button>
+                    {onToggleOuterRobe && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleOuterRobe();
+                        }}
+                        className="absolute right-0 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-[9px] px-2 py-1 rounded bg-amber-900/60 hover:bg-amber-800/80 text-amber-200 border border-amber-700/50"
+                      >
+                        {hideOuterRobe ? 'Equip' : 'Unequip'}
+                      </button>
+                    )}
+                  </div>
                   <div className="group relative">
                     <button
                       onClick={() => onSelectInventoryItem(buildApparelEntry('headwear'))}
@@ -1044,129 +1063,162 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                           </filter>
                         </defs>
 
-                        {/* Base body silhouette */}
-                        <g strokeWidth="0.5">
-                          {/* Head */}
-                          {(() => {
-                            const headStyle = hoveredZone === 'head' || hoveredZone === 'delirium'
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : playerStats.plague.delirium > 0
-                                ? { fill: 'rgba(168,85,247,0.3)', stroke: 'rgba(168,85,247,0.7)', filter: 'url(#glow-purple)' }
-                                : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <ellipse cx="60" cy="18" rx="14" ry="16" {...headStyle} />;
-                          })()}
+                        {/* Base body silhouette - gender-specific proportions */}
+                        {(() => {
+                          const isFemale = playerStats.gender === 'Female';
 
-                          {/* Ears */}
-                          {(() => {
-                            const earsAffected = playerStats.baselineAilments.some(a => a.zone === 'ears' || a.label?.toLowerCase().includes('hearing'));
-                            const earsHovered = hoveredZone === 'ears' || hoveredZone?.includes('hearing');
-                            const earStyle = earsHovered
-                              ? { fill: 'rgba(250,204,21,0.5)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : earsAffected
-                                ? { fill: 'rgba(59,130,246,0.35)', stroke: 'rgba(59,130,246,0.7)', filter: 'url(#glow-blue)' }
-                                : { fill: 'rgba(245,158,11,0.1)', stroke: 'rgba(245,158,11,0.25)', filter: '' };
-                            return (
-                              <>
-                                <ellipse cx="44" cy="18" rx="3" ry="5" {...earStyle} />
-                                <ellipse cx="76" cy="18" rx="3" ry="5" {...earStyle} />
-                              </>
-                            );
-                          })()}
+                          // Body path definitions for male vs female
+                          // Proper human proportions: legs should be ~half of total height
+                          // Head ~25, Neck 10, Torso 50, Pelvis 15, Legs 110 = 210 total
+                          const bodyPaths = {
+                            // Male: broader shoulders, narrower hips, straighter torso
+                            male: {
+                              torso: "M 45 38 Q 42 42 42 55 L 43 75 L 44 90 Q 44 94 48 96 L 72 96 Q 76 94 76 90 L 77 75 L 78 55 Q 78 42 75 38 Z",
+                              pelvis: "M 48 94 L 46 102 Q 44 108 48 110 L 56 110 L 56 112 L 50 114 L 70 114 L 64 112 L 64 110 L 72 110 Q 76 108 74 102 L 72 94",
+                              leftArm: "M 42 42 Q 36 46 33 54 L 30 68 L 28 82 L 27 92 L 30 94 L 33 92 L 34 82 L 36 68 Q 38 56 42 48",
+                              rightArm: "M 78 42 Q 84 46 87 54 L 90 68 L 92 82 L 93 92 L 90 94 L 87 92 L 86 82 L 84 68 Q 82 56 78 48",
+                              leftLeg: "M 52 112 L 50 135 L 48 160 L 46 185 L 45 200 Q 45 206 48 208 L 54 208 Q 57 206 56 200 L 55 185 L 54 160 L 54 135 L 54 112",
+                              rightLeg: "M 68 112 L 70 135 L 72 160 L 74 185 L 75 200 Q 75 206 72 208 L 66 208 Q 63 206 64 200 L 65 185 L 66 160 L 66 135 L 66 112"
+                            },
+                            // Female: narrower shoulders, wider hips, curved waist
+                            female: {
+                              torso: "M 48 38 Q 46 42 46 52 L 48 70 Q 50 80 48 90 Q 46 94 50 96 L 70 96 Q 74 94 72 90 Q 70 80 72 70 L 74 52 Q 74 42 72 38 Z",
+                              pelvis: "M 50 94 L 44 102 Q 40 110 48 114 L 56 114 L 56 116 L 48 118 L 72 118 L 64 116 L 64 114 L 72 114 Q 80 110 76 102 L 70 94",
+                              leftArm: "M 46 42 Q 40 46 37 54 L 34 68 L 32 80 L 32 90 L 35 92 L 38 90 L 38 80 L 40 68 Q 42 56 46 48",
+                              rightArm: "M 74 42 Q 80 46 83 54 L 86 68 L 88 80 L 88 90 L 85 92 L 82 90 L 82 80 L 80 68 Q 78 56 74 48",
+                              leftLeg: "M 52 116 L 50 140 L 48 165 L 46 188 L 45 200 Q 45 206 48 208 L 54 208 Q 57 206 56 200 L 55 188 L 54 165 L 54 140 L 54 116",
+                              rightLeg: "M 68 116 L 70 140 L 72 165 L 74 188 L 75 200 Q 75 206 72 208 L 66 208 Q 63 206 64 200 L 65 188 L 66 165 L 66 140 L 66 116"
+                            }
+                          };
 
-                          {/* Neck */}
-                          {(() => {
-                            const neckHovered = hoveredZone === 'neck' || hoveredZone === 'throat';
-                            const neckBuboes = playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'neck';
-                            const throatAffected = playerStats.baselineAilments.some(a => a.zone === 'throat' || a.zone === 'neck');
-                            const neckStyle = neckHovered
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : neckBuboes
-                                ? { fill: 'rgba(168,85,247,0.4)', stroke: 'rgba(168,85,247,0.7)', filter: 'url(#glow-purple)' }
-                                : throatAffected
-                                  ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: 'url(#glow-blue)' }
-                                  : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <rect x="54" y="32" width="12" height="10" rx="3" {...neckStyle} />;
-                          })()}
+                          const paths = isFemale ? bodyPaths.female : bodyPaths.male;
 
-                          {/* Torso */}
-                          {(() => {
-                            const torsoHovered = hoveredZone === 'torso' || hoveredZone === 'chest' || hoveredZone === 'lungs' || hoveredZone === 'abdomen' || hoveredZone === 'systemic';
-                            const torsoStyle = torsoHovered
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : playerStats.plague.coughingBlood > 0
-                                ? { fill: 'rgba(239,68,68,0.25)', stroke: 'rgba(239,68,68,0.6)', filter: 'url(#glow-red)' }
-                                : playerStats.plague.weakness > 0
-                                  ? { fill: 'rgba(245,158,11,0.2)', stroke: 'rgba(245,158,11,0.5)', filter: 'url(#glow-amber)' }
-                                  : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <path d="M 38 42 Q 32 50 32 70 L 32 95 Q 32 100 38 105 L 42 110 L 42 120 Q 42 125 48 125 L 72 125 Q 78 125 78 120 L 78 110 L 82 105 Q 88 100 88 95 L 88 70 Q 88 50 82 42 Z" {...torsoStyle} />;
-                          })()}
+                          return (
+                            <g strokeWidth="0.5">
+                              {/* Head */}
+                              {(() => {
+                                const headStyle = hoveredZone === 'head' || hoveredZone === 'delirium'
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : playerStats.plague.delirium > 0
+                                    ? { fill: 'rgba(168,85,247,0.3)', stroke: 'rgba(168,85,247,0.7)', filter: 'url(#glow-purple)' }
+                                    : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                return <ellipse cx="60" cy="14" rx="12" ry="13" {...headStyle} />;
+                              })()}
 
-                          {/* Left Arm */}
-                          {(() => {
-                            const armsHovered = hoveredZone === 'arms' || hoveredZone === 'upper arms' || hoveredZone === 'lower arms' || hoveredZone === 'hands' || hoveredZone === 'systemic';
-                            const armsAffected = playerStats.baselineAilments.some(a => a.zone === 'upper arms' || a.zone === 'lower arms' || a.zone === 'hands');
-                            const armStyle = armsHovered
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : armsAffected
-                                ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
-                                : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <path d="M 32 48 Q 22 52 18 65 L 12 95 Q 10 105 8 115 L 6 130 Q 4 136 8 140 L 14 142 Q 18 142 18 138 L 20 120 L 24 95 Q 26 80 32 68" {...armStyle} />;
-                          })()}
+                              {/* Ears */}
+                              {(() => {
+                                const earsAffected = playerStats.baselineAilments.some(a => a.zone === 'ears' || a.label?.toLowerCase().includes('hearing'));
+                                const earsHovered = hoveredZone === 'ears' || hoveredZone?.includes('hearing');
+                                const earStyle = earsHovered
+                                  ? { fill: 'rgba(250,204,21,0.5)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : earsAffected
+                                    ? { fill: 'rgba(59,130,246,0.35)', stroke: 'rgba(59,130,246,0.7)', filter: 'url(#glow-blue)' }
+                                    : { fill: 'rgba(245,158,11,0.1)', stroke: 'rgba(245,158,11,0.25)', filter: '' };
+                                return (
+                                  <>
+                                    <ellipse cx="47" cy="14" rx="2.5" ry="4" {...earStyle} />
+                                    <ellipse cx="73" cy="14" rx="2.5" ry="4" {...earStyle} />
+                                  </>
+                                );
+                              })()}
 
-                          {/* Right Arm */}
-                          {(() => {
-                            const armsHovered = hoveredZone === 'arms' || hoveredZone === 'upper arms' || hoveredZone === 'lower arms' || hoveredZone === 'hands' || hoveredZone === 'systemic';
-                            const armsAffected = playerStats.baselineAilments.some(a => a.zone === 'upper arms' || a.zone === 'lower arms' || a.zone === 'hands');
-                            const armStyle = armsHovered
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : armsAffected
-                                ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
-                                : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <path d="M 88 48 Q 98 52 102 65 L 108 95 Q 110 105 112 115 L 114 130 Q 116 136 112 140 L 106 142 Q 102 142 102 138 L 100 120 L 96 95 Q 94 80 88 68" {...armStyle} />;
-                          })()}
+                              {/* Neck */}
+                              {(() => {
+                                const neckHovered = hoveredZone === 'neck' || hoveredZone === 'throat';
+                                const neckBuboes = playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'neck';
+                                const throatAffected = playerStats.baselineAilments.some(a => a.zone === 'throat' || a.zone === 'neck');
+                                const neckStyle = neckHovered
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : neckBuboes
+                                    ? { fill: 'rgba(168,85,247,0.4)', stroke: 'rgba(168,85,247,0.7)', filter: 'url(#glow-purple)' }
+                                    : throatAffected
+                                      ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: 'url(#glow-blue)' }
+                                      : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                const neckWidth = isFemale ? 10 : 12;
+                                return <rect x={60 - neckWidth/2} y="26" width={neckWidth} height="12" rx="3" {...neckStyle} />;
+                              })()}
 
-                          {/* Pelvis/Hips */}
-                          {(() => {
-                            const groinHovered = hoveredZone === 'groin' || hoveredZone === 'pelvis';
-                            const groinBuboes = playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'groin';
-                            const pelvisStyle = groinHovered
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : groinBuboes
-                                ? { fill: 'rgba(168,85,247,0.4)', stroke: 'rgba(168,85,247,0.7)', filter: 'url(#glow-purple)' }
-                                : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <path d="M 42 120 L 38 135 Q 36 142 42 145 L 48 148 L 48 150 L 42 152 Q 38 154 40 160 L 78 160 Q 82 154 78 152 L 72 150 L 72 148 L 78 145 Q 84 142 82 135 L 78 120" {...pelvisStyle} />;
-                          })()}
+                              {/* Torso */}
+                              {(() => {
+                                const torsoHovered = hoveredZone === 'torso' || hoveredZone === 'chest' || hoveredZone === 'lungs' || hoveredZone === 'abdomen' || hoveredZone === 'systemic';
+                                const torsoStyle = torsoHovered
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : playerStats.plague.coughingBlood > 0
+                                    ? { fill: 'rgba(239,68,68,0.25)', stroke: 'rgba(239,68,68,0.6)', filter: 'url(#glow-red)' }
+                                    : playerStats.plague.weakness > 0
+                                      ? { fill: 'rgba(245,158,11,0.2)', stroke: 'rgba(245,158,11,0.5)', filter: 'url(#glow-amber)' }
+                                      : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                return <path d={paths.torso} {...torsoStyle} />;
+                              })()}
 
-                          {/* Left Leg */}
-                          {(() => {
-                            const legsHovered = hoveredZone === 'legs' || hoveredZone === 'thighs' || hoveredZone === 'calves' || hoveredZone === 'feet' || hoveredZone === 'systemic';
-                            const legsAffected = playerStats.baselineAilments.some(a => a.zone === 'thighs' || a.zone === 'calves' || a.zone === 'feet' || a.zone === 'legs');
-                            const legStyle = legsHovered
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : playerStats.plague.gangrene > 0
-                                ? { fill: 'rgba(15,23,42,0.5)', stroke: 'rgba(100,116,139,0.8)', filter: '' }
-                                : legsAffected
-                                  ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
-                                  : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <path d="M 42 155 L 40 175 L 38 195 Q 38 200 40 205 L 40 215 Q 40 220 46 220 L 50 218 Q 52 216 50 212 L 48 200 L 50 175 L 52 155" {...legStyle} />;
-                          })()}
+                              {/* Left Arm */}
+                              {(() => {
+                                const armsHovered = hoveredZone === 'arms' || hoveredZone === 'upper arms' || hoveredZone === 'lower arms' || hoveredZone === 'hands' || hoveredZone === 'systemic';
+                                const armsAffected = playerStats.baselineAilments.some(a => a.zone === 'upper arms' || a.zone === 'lower arms' || a.zone === 'hands');
+                                const armStyle = armsHovered
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : armsAffected
+                                    ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
+                                    : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                return <path d={paths.leftArm} {...armStyle} />;
+                              })()}
 
-                          {/* Right Leg */}
-                          {(() => {
-                            const legsHovered = hoveredZone === 'legs' || hoveredZone === 'thighs' || hoveredZone === 'calves' || hoveredZone === 'feet' || hoveredZone === 'systemic';
-                            const legsAffected = playerStats.baselineAilments.some(a => a.zone === 'thighs' || a.zone === 'calves' || a.zone === 'feet' || a.zone === 'legs');
-                            const legStyle = legsHovered
-                              ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
-                              : playerStats.plague.gangrene > 0
-                                ? { fill: 'rgba(15,23,42,0.5)', stroke: 'rgba(100,116,139,0.8)', filter: '' }
-                                : legsAffected
-                                  ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
-                                  : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
-                            return <path d="M 78 155 L 80 175 L 82 195 Q 82 200 80 205 L 80 215 Q 80 220 74 220 L 70 218 Q 68 216 70 212 L 72 200 L 70 175 L 68 155" {...legStyle} />;
-                          })()}
-                        </g>
+                              {/* Right Arm */}
+                              {(() => {
+                                const armsHovered = hoveredZone === 'arms' || hoveredZone === 'upper arms' || hoveredZone === 'lower arms' || hoveredZone === 'hands' || hoveredZone === 'systemic';
+                                const armsAffected = playerStats.baselineAilments.some(a => a.zone === 'upper arms' || a.zone === 'lower arms' || a.zone === 'hands');
+                                const armStyle = armsHovered
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : armsAffected
+                                    ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
+                                    : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                return <path d={paths.rightArm} {...armStyle} />;
+                              })()}
 
-                        {/* Armpit bubo indicators */}
+                              {/* Pelvis/Hips */}
+                              {(() => {
+                                const groinHovered = hoveredZone === 'groin' || hoveredZone === 'pelvis';
+                                const groinBuboes = playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'groin';
+                                const pelvisStyle = groinHovered
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : groinBuboes
+                                    ? { fill: 'rgba(168,85,247,0.4)', stroke: 'rgba(168,85,247,0.7)', filter: 'url(#glow-purple)' }
+                                    : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                return <path d={paths.pelvis} {...pelvisStyle} />;
+                              })()}
+
+                              {/* Left Leg */}
+                              {(() => {
+                                const legsHovered = hoveredZone === 'legs' || hoveredZone === 'thighs' || hoveredZone === 'calves' || hoveredZone === 'feet' || hoveredZone === 'systemic';
+                                const legsAffected = playerStats.baselineAilments.some(a => a.zone === 'thighs' || a.zone === 'calves' || a.zone === 'feet' || a.zone === 'legs');
+                                const legStyle = legsHovered
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : playerStats.plague.gangrene > 0
+                                    ? { fill: 'rgba(15,23,42,0.5)', stroke: 'rgba(100,116,139,0.8)', filter: '' }
+                                    : legsAffected
+                                      ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
+                                      : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                return <path d={paths.leftLeg} {...legStyle} />;
+                              })()}
+
+                              {/* Right Leg */}
+                              {(() => {
+                                const legsHovered = hoveredZone === 'legs' || hoveredZone === 'thighs' || hoveredZone === 'calves' || hoveredZone === 'feet' || hoveredZone === 'systemic';
+                                const legsAffected = playerStats.baselineAilments.some(a => a.zone === 'thighs' || a.zone === 'calves' || a.zone === 'feet' || a.zone === 'legs');
+                                const legStyle = legsHovered
+                                  ? { fill: 'rgba(250,204,21,0.4)', stroke: 'rgba(250,204,21,0.9)', filter: 'url(#glow-yellow)' }
+                                  : playerStats.plague.gangrene > 0
+                                    ? { fill: 'rgba(15,23,42,0.5)', stroke: 'rgba(100,116,139,0.8)', filter: '' }
+                                    : legsAffected
+                                      ? { fill: 'rgba(59,130,246,0.25)', stroke: 'rgba(59,130,246,0.6)', filter: '' }
+                                      : { fill: 'url(#bodyGradient)', stroke: 'rgba(245,158,11,0.3)', filter: '' };
+                                return <path d={paths.rightLeg} {...legStyle} />;
+                              })()}
+                            </g>
+                          );
+                        })()}
+
+                        {/* Armpit bubo indicators - adjusted for new torso position */}
                         {(() => {
                           const armpitHovered = hoveredZone === 'armpit';
                           const armpitBuboes = playerStats.plague.buboes > 0 && playerStats.plague.buboLocation === 'armpit';
@@ -1176,24 +1228,24 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                               : { fill: 'rgba(168,85,247,0.5)', stroke: 'rgba(168,85,247,0.8)', filter: 'url(#glow-purple)' };
                             return (
                               <>
-                                <circle cx="34" cy="55" r="6" {...style} />
-                                <circle cx="86" cy="55" r="6" {...style} />
+                                <circle cx="40" cy="48" r="4" {...style} />
+                                <circle cx="80" cy="48" r="4" {...style} />
                               </>
                             );
                           }
                           return null;
                         })()}
 
-                        {/* Lung indicators for coughing blood */}
+                        {/* Lung indicators for coughing blood - adjusted positions */}
                         {(playerStats.plague.coughingBlood > 0 || hoveredZone === 'lungs') && (
                           <>
-                            <ellipse cx="50" cy="65" rx="8" ry="12"
+                            <ellipse cx="52" cy="55" rx="6" ry="9"
                               fill={hoveredZone === 'lungs' ? 'rgba(250,204,21,0.4)' : 'rgba(239,68,68,0.3)'}
                               stroke={hoveredZone === 'lungs' ? 'rgba(250,204,21,0.9)' : 'rgba(239,68,68,0.6)'}
                               strokeWidth="0.5"
                               filter={hoveredZone === 'lungs' ? 'url(#glow-yellow)' : ''}
                             />
-                            <ellipse cx="70" cy="65" rx="8" ry="12"
+                            <ellipse cx="68" cy="55" rx="6" ry="9"
                               fill={hoveredZone === 'lungs' ? 'rgba(250,204,21,0.4)' : 'rgba(239,68,68,0.3)'}
                               stroke={hoveredZone === 'lungs' ? 'rgba(250,204,21,0.9)' : 'rgba(239,68,68,0.6)'}
                               strokeWidth="0.5"
@@ -1202,19 +1254,19 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                           </>
                         )}
 
-                        {/* Skin bleeding indicator - dotted pattern */}
+                        {/* Skin bleeding indicator - dotted pattern adjusted */}
                         {(playerStats.plague.skinBleeding > 0 || hoveredZone === 'skin') && (
                           <g fill={hoveredZone === 'skin' ? 'rgba(250,204,21,0.8)' : 'rgba(239,68,68,0.6)'}>
-                            <circle cx="45" cy="80" r="1.5" />
-                            <circle cx="75" cy="85" r="1.5" />
-                            <circle cx="55" cy="100" r="1.5" />
-                            <circle cx="65" cy="95" r="1.5" />
-                            <circle cx="50" cy="115" r="1.5" />
-                            <circle cx="70" cy="110" r="1.5" />
+                            <circle cx="50" cy="65" r="1.5" />
+                            <circle cx="70" cy="70" r="1.5" />
+                            <circle cx="55" cy="82" r="1.5" />
+                            <circle cx="65" cy="78" r="1.5" />
+                            <circle cx="52" cy="145" r="1.5" />
+                            <circle cx="68" cy="150" r="1.5" />
                           </g>
                         )}
 
-                        {/* Face details */}
+                        {/* Face details - adjusted for new head position (cy=14) */}
                         <g strokeWidth="0.5">
                           {/* Eyes */}
                           {(() => {
@@ -1227,13 +1279,13 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                                 : { fill: 'rgba(245,158,11,0.15)', stroke: 'rgba(245,158,11,0.25)' };
                             return (
                               <>
-                                <circle cx="55" cy="15" r="2" {...eyeStyle} />
-                                <circle cx="65" cy="15" r="2" {...eyeStyle} />
+                                <circle cx="55" cy="12" r="2" {...eyeStyle} />
+                                <circle cx="65" cy="12" r="2" {...eyeStyle} />
                               </>
                             );
                           })()}
 
-                          {/* Mouth */}
+                          {/* Mouth - expression changes based on health */}
                           {(() => {
                             const mouthHovered = hoveredZone === 'mouth';
                             const mouthAffected = playerStats.baselineAilments.some(a => a.zone === 'mouth');
@@ -1241,8 +1293,28 @@ export const PlayerDossierModal: React.FC<PlayerDossierModalProps> = ({
                               ? 'rgba(250,204,21,0.9)'
                               : mouthAffected
                                 ? 'rgba(59,130,246,0.6)'
-                                : 'rgba(245,158,11,0.25)';
-                            return <path d="M 57 23 Q 60 26 63 23" stroke={mouthStroke} fill="none" />;
+                                : 'rgba(245,158,11,0.35)';
+
+                            // Determine mouth path based on health state (adjusted y positions for head at cy=14)
+                            let mouthPath: string;
+                            if (playerStats.plague.state === AgentState.HEALTHY) {
+                              // Slight smile
+                              mouthPath = "M 56 18 Q 60 21 64 18";
+                            } else if (playerStats.plague.state === AgentState.INCUBATING) {
+                              // Neutral/flat
+                              mouthPath = "M 56 19 L 64 19";
+                            } else if (playerStats.plague.overallSeverity < 40) {
+                              // Slight frown
+                              mouthPath = "M 56 20 Q 60 18 64 20";
+                            } else if (playerStats.plague.overallSeverity < 70) {
+                              // More pronounced frown
+                              mouthPath = "M 55 21 Q 60 17 65 21";
+                            } else {
+                              // Grimace/severe distress
+                              mouthPath = "M 55 22 Q 60 16 65 22";
+                            }
+
+                            return <path d={mouthPath} stroke={mouthStroke} strokeWidth="0.8" fill="none" />;
                           })()}
                         </g>
                       </svg>

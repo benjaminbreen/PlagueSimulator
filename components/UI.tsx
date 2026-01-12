@@ -160,6 +160,9 @@ interface UIProps {
   currentBuildingType?: import('../types').BuildingType;
   /** Current building profession for context */
   currentBuildingProfession?: string;
+  /** Debug: toggle outer robe visibility */
+  hideOuterRobe?: boolean;
+  onToggleOuterRobe?: () => void;
 }
 
 interface InventoryEntry {
@@ -1020,7 +1023,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, getNarratorContext, onNarratorHighlight, getNpcListEntries, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome, onUnequipHeadwear, onEquipHeadwear, isInPrivateSpace = false, currentBuildingType, currentBuildingProfession }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, getNarratorContext, onNarratorHighlight, getNpcListEntries, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome, onUnequipHeadwear, onEquipHeadwear, isInPrivateSpace = false, currentBuildingType, currentBuildingProfession, hideOuterRobe, onToggleOuterRobe }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -1518,16 +1521,36 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     };
     const entries = playerStats.inventory.map((item) => {
       const details = getItemDetailsByItemId(item.itemId);
+      // Format letter item names nicely
+      let displayName = details?.name ?? item.itemId ?? 'Unknown Item';
+      const isLetter = item.itemId?.startsWith('letter:') || item.itemId?.startsWith('letter-');
+
+      if (item.itemId?.startsWith('letter:')) {
+        // New format: "letter:Recipient Name:timestamp"
+        const parts = item.itemId.split(':');
+        if (parts.length >= 2) {
+          displayName = `Letter to ${parts[1]}`;
+        }
+      } else if (item.itemId?.startsWith('letter-to-')) {
+        // Legacy format: "letter-to-john-1234567890"
+        const parts = item.itemId.replace('letter-to-', '').split('-');
+        parts.pop(); // Remove timestamp
+        const recipient = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+        displayName = `Letter to ${recipient}`;
+      }
+
       return {
         ...item,
-        name: details?.name ?? item.itemId,
-        description: details?.description ?? 'No description available.',
+        name: displayName,
+        description: details?.description ?? (isLetter ? 'A sealed letter written by a scribe.' : 'No description available.'),
         rarity: details?.rarity ?? 'common',
-        category: details?.category ?? 'Unknown',
+        category: details?.category ?? (isLetter ? 'Document' : 'Unknown'),
         effects: details?.effects ?? []
       };
     });
     entries.sort((a, b) => {
+      const aName = a.name ?? '';
+      const bName = b.name ?? '';
       if (inventorySortBy === 'quantity') {
         if (b.quantity !== a.quantity) return b.quantity - a.quantity;
       } else if (inventorySortBy === 'rarity') {
@@ -1535,10 +1558,10 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           return rarityRank[b.rarity] - rarityRank[a.rarity];
         }
       } else {
-        const nameOrder = a.name.localeCompare(b.name);
+        const nameOrder = aName.localeCompare(bName);
         if (nameOrder !== 0) return nameOrder;
       }
-      return a.name.localeCompare(b.name);
+      return aName.localeCompare(bName);
     });
     return entries;
   }, [playerStats.inventory, inventorySortBy]);
@@ -1924,6 +1947,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         showSettings={showSettings}
         onToggleSettings={() => setShowSettings(!showSettings)}
         onOpenAbout={() => setShowAbout(true)}
+        reputation={playerStats.reputation}
       />
 
       <MobilePerspectiveMenu
@@ -2748,6 +2772,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         onGoHome={onGoHome}
         onUnequipHeadwear={onUnequipHeadwear}
         onEquipHeadwear={onEquipHeadwear}
+        hideOuterRobe={hideOuterRobe}
+        onToggleOuterRobe={onToggleOuterRobe}
       />
 
       {selectedInventoryItem && (

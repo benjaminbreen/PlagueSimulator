@@ -357,6 +357,21 @@ export const useEventSystem = ({
   const handleConversationResult = useCallback((npcId: string, summary: import('../types').ConversationSummary, impact: ConversationImpact, meta?: { action?: 'end_conversation' | null }) => {
     setConversationHistories(prev => [...prev, summary]);
 
+    // Apply reputation change based on conversation outcome
+    // Positive conversations build reputation, negative ones damage it
+    if (impact.sentiment === 'positive') {
+      setPlayerStats(prev => ({
+        ...prev,
+        reputation: Math.min(100, prev.reputation + 1) // +1 for positive conversations
+      }));
+    } else if (impact.sentiment === 'negative' || meta?.action === 'end_conversation') {
+      // Negative or forced-end conversations hurt reputation
+      setPlayerStats(prev => ({
+        ...prev,
+        reputation: Math.max(0, prev.reputation - 2) // -2 for negative or forced-end
+      }));
+    }
+
     setOutdoorNpcPool(prev => prev.map(record => {
       if (record.stats.id !== npcId) return record;
       const { newDisposition, newPanicLevel } = applyConversationImpact(record.stats, impact);
@@ -428,7 +443,7 @@ export const useEventSystem = ({
       }
       void enqueueEventWithOptionalLLM(convoEvent);
     }
-  }, [currentWeather, enqueueEventWithOptionalLLM, outdoorNpcPool, params.mapX, params.mapY, params.timeOfDay, playerStats, setConversationHistories, setOutdoorNpcPool, statsSimTime, npcThreatMemoryRef]);
+  }, [currentWeather, enqueueEventWithOptionalLLM, outdoorNpcPool, params.mapX, params.mapY, params.timeOfDay, playerStats, setConversationHistories, setOutdoorNpcPool, setPlayerStats, statsSimTime, npcThreatMemoryRef]);
 
   const handleTriggerConversationEvent = useCallback((eventId: string, npcContext?: { npcId: string; npcName: string }, delayMs = 0) => {
     if (eventId === 'npc_dismissed_player' && suppressDismissalEventRef.current) {

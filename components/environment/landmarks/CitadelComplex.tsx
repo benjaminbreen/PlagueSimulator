@@ -17,7 +17,7 @@
 import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getDistrictType } from '../../../types';
+import { getDistrictType, BuildingMetadata, BuildingType } from '../../../types';
 import { HoverableGroup, HoverWireframeContext, HoverLabelContext } from '../shared/HoverSystem';
 import { HOVER_WIREFRAME_COLORS } from '../constants';
 
@@ -52,6 +52,7 @@ import {
 // ========================================
 // MAIN GATEWAY COMPONENT
 // ========================================
+// Redesigned with proper walkable passage through the gate
 
 const MainGateway: React.FC<{
   position: [number, number, number];
@@ -62,21 +63,52 @@ const MainGateway: React.FC<{
 }> = ({ position, ablaqTexture, woodTexture, brassTexture, lod }) => {
   if (lod === 'far') return null;
 
+  const gateWidth = 6; // Width of walkable passage
+  const gateHeight = 8; // Height of walkable passage (player can walk through)
+  const structureWidth = 14;
+  const structureHeight = 14;
+  const structureDepth = 6;
+
   return (
     <group position={position}>
-      {/* Gateway structure */}
-      <mesh position={[0, 7, 0]} castShadow receiveShadow>
-        <boxGeometry args={[12, 14, 6]} />
+      {/* Left pillar of gateway */}
+      <mesh position={[-(gateWidth / 2 + 2), structureHeight / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[4, structureHeight, structureDepth]} />
         <meshStandardMaterial map={ablaqTexture} roughness={0.88} />
       </mesh>
 
-      {/* Pointed arch opening */}
+      {/* Right pillar of gateway */}
+      <mesh position={[(gateWidth / 2 + 2), structureHeight / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[4, structureHeight, structureDepth]} />
+        <meshStandardMaterial map={ablaqTexture} roughness={0.88} />
+      </mesh>
+
+      {/* Top lintel above gate (not blocking passage) */}
+      <mesh position={[0, gateHeight + (structureHeight - gateHeight) / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[gateWidth, structureHeight - gateHeight, structureDepth]} />
+        <meshStandardMaterial map={ablaqTexture} roughness={0.88} />
+      </mesh>
+
+      {/* Decorative arch frame (visual only, passage is clear) */}
       <PointedArch
-        width={6}
-        height={10}
-        depth={6.5}
-        position={[0, 5, 0]}
+        width={gateWidth}
+        height={gateHeight}
+        depth={0.5}
+        position={[0, gateHeight / 2, structureDepth / 2 - 0.25]}
       />
+      <PointedArch
+        width={gateWidth}
+        height={gateHeight}
+        depth={0.5}
+        position={[0, gateHeight / 2, -structureDepth / 2 + 0.25]}
+      />
+
+      {/* Gate passage floor (darker stone to show depth) */}
+      {/* Raised slightly (0.1) to prevent z-fighting with citadel floor */}
+      <mesh position={[0, 0.1, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[gateWidth, structureDepth]} />
+        <meshStandardMaterial color="#6a5a4a" roughness={0.95} />
+      </mesh>
 
       {lod === 'close' && (
         <>
@@ -92,65 +124,35 @@ const MainGateway: React.FC<{
 
           {/* Geometric tile panels (flanking) */}
           <GeometricTile
-            position={[-4.5, 8, 0.1]}
+            position={[-5, 10, structureDepth / 2 + 0.1]}
             size={2}
             pattern="star8"
             primaryColor="#1a4a7a"
             accentColor="#c9a23a"
           />
           <GeometricTile
-            position={[4.5, 8, 0.1]}
+            position={[5, 10, structureDepth / 2 + 0.1]}
             size={2}
             pattern="star8"
             primaryColor="#1a4a7a"
             accentColor="#c9a23a"
           />
 
-          {/* Guardian lions */}
+          {/* Guardian lions outside gate */}
           <LionSculpture
-            position={[-3.5, 0, 2]}
+            position={[-4.5, 0, structureDepth / 2 + 2]}
             rotation={Math.PI / 4}
             material="stone"
           />
           <LionSculpture
-            position={[3.5, 0, 2]}
+            position={[4.5, 0, structureDepth / 2 + 2]}
             rotation={-Math.PI / 4}
             material="stone"
           />
 
-          {/* Wooden doors */}
-          <mesh position={[0, 5, 3]} castShadow>
-            <boxGeometry args={[5.8, 9.5, 0.4]} />
-            <meshStandardMaterial map={woodTexture} roughness={0.85} />
-          </mesh>
-
-          {/* Brass door studs (decorative) */}
-          {Array.from({ length: 40 }).map((_, i) => {
-            const row = Math.floor(i / 8);
-            const col = i % 8;
-            return (
-              <mesh
-                key={`stud-${i}`}
-                position={[
-                  -2.5 + col * 0.7,
-                  1 + row * 1.5,
-                  3.25
-                ]}
-                castShadow
-              >
-                <sphereGeometry args={[0.08, 8, 8]} />
-                <meshStandardMaterial
-                  map={brassTexture}
-                  metalness={0.7}
-                  roughness={0.3}
-                />
-              </mesh>
-            );
-          })}
-
           {/* Murder holes above entrance */}
           {[-2, 0, 2].map((x, i) => (
-            <mesh key={`hole-${i}`} position={[x, 13, 2]} castShadow>
+            <mesh key={`hole-${i}`} position={[x, 13, structureDepth / 2 - 0.5]} castShadow>
               <boxGeometry args={[0.4, 0.6, 1]} />
               <meshStandardMaterial color="#1a1a1a" />
             </mesh>
@@ -162,8 +164,63 @@ const MainGateway: React.FC<{
 };
 
 // ========================================
+// SECONDARY GATE (for other walls)
+// ========================================
+// Simpler gate design for side entrances
+
+const SecondaryGate: React.FC<{
+  position: [number, number, number];
+  rotation: number;
+  ablaqTexture: THREE.Texture;
+  lod: 'close' | 'medium' | 'far';
+}> = ({ position, rotation, ablaqTexture, lod }) => {
+  if (lod === 'far') return null;
+
+  const gateWidth = 4;
+  const gateHeight = 6;
+
+  return (
+    <group position={position} rotation={[0, rotation, 0]}>
+      {/* Left pillar */}
+      <mesh position={[-(gateWidth / 2 + 1.5), 5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 10, 4]} />
+        <meshStandardMaterial map={ablaqTexture} roughness={0.88} />
+      </mesh>
+
+      {/* Right pillar */}
+      <mesh position={[(gateWidth / 2 + 1.5), 5, 0]} castShadow receiveShadow>
+        <boxGeometry args={[3, 10, 4]} />
+        <meshStandardMaterial map={ablaqTexture} roughness={0.88} />
+      </mesh>
+
+      {/* Top lintel */}
+      <mesh position={[0, gateHeight + 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[gateWidth, 4, 4]} />
+        <meshStandardMaterial map={ablaqTexture} roughness={0.88} />
+      </mesh>
+
+      {/* Arch frame */}
+      <PointedArch
+        width={gateWidth}
+        height={gateHeight}
+        depth={0.4}
+        position={[0, gateHeight / 2, 2]}
+      />
+
+      {/* Gate passage floor */}
+      {/* Raised slightly (0.1) to prevent z-fighting with citadel floor */}
+      <mesh position={[0, 0.1, 0]} receiveShadow rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[gateWidth, 4]} />
+        <meshStandardMaterial color="#6a5a4a" roughness={0.95} />
+      </mesh>
+    </group>
+  );
+};
+
+// ========================================
 // THRONE ROOM / AUDIENCE HALL
 // ========================================
+// Simplified - clearly a closed building with ornate door, not enterable
 
 const ThroneRoom: React.FC<{
   position: [number, number, number];
@@ -181,61 +238,63 @@ const ThroneRoom: React.FC<{
         <meshStandardMaterial map={ablaqTexture} roughness={0.88} />
       </mesh>
 
+      {/* Ornate wooden door (clearly closed) */}
+      <mesh position={[0, 2.5, 4.05]} castShadow>
+        <boxGeometry args={[2.5, 5, 0.3]} />
+        <meshStandardMaterial color="#3a2a1a" roughness={0.85} />
+      </mesh>
+
       {lod === 'close' && (
         <>
+          {/* Door frame with geometric decoration */}
+          <mesh position={[0, 5.2, 4.1]} castShadow>
+            <boxGeometry args={[3.5, 0.4, 0.2]} />
+            <meshStandardMaterial color="#1a4a7a" roughness={0.8} />
+          </mesh>
+          <mesh position={[-1.5, 2.5, 4.1]} castShadow>
+            <boxGeometry args={[0.3, 5.2, 0.2]} />
+            <meshStandardMaterial color="#1a4a7a" roughness={0.8} />
+          </mesh>
+          <mesh position={[1.5, 2.5, 4.1]} castShadow>
+            <boxGeometry args={[0.3, 5.2, 0.2]} />
+            <meshStandardMaterial color="#1a4a7a" roughness={0.8} />
+          </mesh>
+
           {/* Mashrabiya window screens (upper level) */}
           <Mashrabiya
-            position={[-5.5, 7, 4.1]}
+            position={[-4, 7, 4.1]}
             width={2}
             height={2}
             pattern="star"
           />
           <Mashrabiya
-            position={[5.5, 7, 4.1]}
+            position={[4, 7, 4.1]}
             width={2}
             height={2}
             pattern="star"
           />
 
-          {/* Entrance with muqarnas */}
-          <PointedArch
-            width={3}
-            height={6}
-            depth={1}
-            position={[0, 3, 4.5]}
-          />
+          {/* Muqarnas decoration above door */}
           <Muqarnas
-            position={[0, 6.5, 4.5]}
-            width={4}
-            depth={1}
-            tiers={3}
+            position={[0, 6, 4.2]}
+            width={3}
+            depth={0.5}
+            tiers={2}
             color="#d9c9a9"
             accentColor="#1a4a7a"
           />
 
-          {/* Interior muqarnas dome (visible through door) */}
-          <Muqarnas
-            position={[0, 8.5, 0]}
-            width={8}
-            depth={8}
-            tiers={5}
-            color="#1a4a7a"
-            accentColor="#c9a23a"
+          {/* Side windows */}
+          <Window
+            position={[-6.05, 5, 0]}
+            width={1.5}
+            height={2}
           />
-
-          {/* Central fountain */}
-          <OrnateFountain
-            position={[0, 0, 0]}
-            variant="octagonal"
-            scale={1.5}
-            hasWaterAnimation={true}
+          <Window
+            position={[6.05, 5, 0]}
+            width={1.5}
+            height={2}
           />
-
-          {/* Floor paving */}
-          <mesh position={[0, 0.05, 0]} receiveShadow rotation={[-Math.PI/2, 0, 0]}>
-            <planeGeometry args={[11, 7]} />
-            <meshStandardMaterial map={pavingTexture} />
-          </mesh>
         </>
       )}
 
@@ -251,6 +310,7 @@ const ThroneRoom: React.FC<{
 // ========================================
 // PALACE COURTYARD
 // ========================================
+// Simplified - removed clutter, kept fountain and minimal decorations
 
 const PalaceCourtyard: React.FC<{
   position: [number, number, number];
@@ -261,72 +321,57 @@ const PalaceCourtyard: React.FC<{
 
   return (
     <group position={position}>
-      {/* Geometric paving */}
-      <mesh position={[0, 0.05, 0]} receiveShadow rotation={[-Math.PI/2, 0, 0]}>
-        <planeGeometry args={[20, 15]} />
+      {/* Geometric paving - larger for open feel */}
+      {/* Raised (0.12) above main citadel floor (0.08) to prevent z-fighting */}
+      <mesh position={[0, 0.12, 0]} receiveShadow rotation={[-Math.PI/2, 0, 0]}>
+        <planeGeometry args={[22, 16]} />
         <meshStandardMaterial map={pavingTexture} />
       </mesh>
 
-      {/* Central fountain */}
+      {/* Central fountain - slightly smaller for more open space */}
       <OrnateFountain
         position={[0, 0, 0]}
         variant="tiered"
-        scale={2.5}
+        scale={2.0}
         hasWaterAnimation={true}
       />
 
       {lod === 'close' && (
         <>
-          {/* Trees in terracotta pots */}
+          {/* Just two citrus trees flanking the fountain */}
           {[
-            [-7, 0, -5],
-            [7, 0, -5],
-            [-7, 0, 5],
-            [7, 0, 5]
+            [-6, 0, 0],
+            [6, 0, 0],
           ].map((pos, i) => (
             <group key={`tree-${i}`} position={pos as [number, number, number]}>
               <DecorativeUrn
                 variant="amphora"
-                scale={0.8}
+                scale={0.7}
                 position={[0, 0.4, 0]}
               />
               {/* Citrus tree */}
-              <mesh position={[0, 2.5, 0]} castShadow>
-                <sphereGeometry args={[1.2, 8, 6]} />
+              <mesh position={[0, 2.2, 0]} castShadow>
+                <sphereGeometry args={[1.0, 8, 6]} />
                 <meshStandardMaterial color="#4a6a3a" roughness={0.85} />
               </mesh>
               {/* Tree trunk */}
-              <mesh position={[0, 1.2, 0]} castShadow>
-                <cylinderGeometry args={[0.15, 0.2, 1.5, 6]} />
+              <mesh position={[0, 1.0, 0]} castShadow>
+                <cylinderGeometry args={[0.12, 0.15, 1.2, 6]} />
                 <meshStandardMaterial color="#5a4a3a" roughness={0.9} />
               </mesh>
             </group>
           ))}
 
-          {/* Decorative urns at corners */}
+          {/* Simple stone benches instead of cluttered arcade */}
           {[
-            [-9, 0, -7],
-            [9, 0, -7],
-            [-9, 0, 7],
-            [9, 0, 7]
+            [-8, 0, -5],
+            [8, 0, -5],
           ].map((pos, i) => (
-            <DecorativeUrn
-              key={`urn-${i}`}
-              variant="vase"
-              scale={0.6}
-              position={pos as [number, number, number]}
-            />
+            <mesh key={`bench-${i}`} position={pos as [number, number, number]} castShadow>
+              <boxGeometry args={[2, 0.5, 0.8]} />
+              <meshStandardMaterial color="#9a8a7a" roughness={0.95} />
+            </mesh>
           ))}
-
-          {/* Arcade colonnade (west side) */}
-          <ArcadeColonnade
-            position={[-10, 0, 0]}
-            length={14}
-            columns={5}
-            style="ornate"
-            height={6}
-            orientation="north-south"
-          />
         </>
       )}
     </group>
@@ -336,6 +381,7 @@ const PalaceCourtyard: React.FC<{
 // ========================================
 // BARRACKS BUILDING
 // ========================================
+// Simplified design - solid building with proper windows, no misleading arches
 
 const Barracks: React.FC<{
   position: [number, number, number];
@@ -357,18 +403,25 @@ const Barracks: React.FC<{
         <meshStandardMaterial color="#8a7a6a" roughness={0.95} />
       </mesh>
 
+      {/* Main entrance door */}
+      <mesh position={[0, 1.5, 4.05]} castShadow>
+        <boxGeometry args={[2, 3, 0.3]} />
+        <meshStandardMaterial color="#4a3a2a" roughness={0.9} />
+      </mesh>
+
       {lod === 'close' && (
         <>
-          {/* Arcade bays (8 arches) */}
-          {Array.from({ length: 8 }).map((_, i) => {
-            const x = -12.5 + i * 3.2 + 1.6;
+          {/* Ground floor windows (replacing misleading arches) */}
+          {Array.from({ length: 6 }).map((_, i) => {
+            const x = -10 + i * 4;
+            // Skip center position where door is
+            if (Math.abs(x) < 2) return null;
             return (
-              <PointedArch
-                key={`bay-${i}`}
-                position={[x, 1.8, 4.2]}
-                width={2.4}
-                height={3}
-                depth={0.5}
+              <Window
+                key={`window-lower-${i}`}
+                position={[x, 2, 4.05]}
+                width={1.2}
+                height={1.8}
               />
             );
           })}
@@ -378,8 +431,21 @@ const Barracks: React.FC<{
             const x = -10 + i * 4;
             return (
               <Window
-                key={`window-${i}`}
+                key={`window-upper-${i}`}
                 position={[x, 4.5, 4.05]}
+                width={0.8}
+                height={1.2}
+              />
+            );
+          })}
+
+          {/* Back side windows */}
+          {Array.from({ length: 4 }).map((_, i) => {
+            const x = -9 + i * 6;
+            return (
+              <Window
+                key={`window-back-${i}`}
+                position={[x, 3, -4.05]}
                 width={0.8}
                 height={1.2}
               />
@@ -394,6 +460,7 @@ const Barracks: React.FC<{
 // ========================================
 // STABLES
 // ========================================
+// Enclosed building with large stable doors - clearly not enterable
 
 const Stables: React.FC<{
   position: [number, number, number];
@@ -403,7 +470,7 @@ const Stables: React.FC<{
 
   return (
     <group position={position}>
-      {/* Main structure */}
+      {/* Main structure - enclosed */}
       <mesh position={[0, 2, 0]} castShadow receiveShadow>
         <boxGeometry args={[18, 4, 10]} />
         <meshStandardMaterial color="#b8a886" roughness={0.92} />
@@ -415,37 +482,57 @@ const Stables: React.FC<{
         <meshStandardMaterial color="#7a6a5a" roughness={0.95} />
       </mesh>
 
+      {/* Large stable doors (3 sets) */}
+      {[-5, 0, 5].map((x, i) => (
+        <mesh key={`door-${i}`} position={[x, 1.8, 5.05]} castShadow>
+          <boxGeometry args={[3, 3.5, 0.3]} />
+          <meshStandardMaterial color="#4a3a2a" roughness={0.9} />
+        </mesh>
+      ))}
+
       {lod === 'close' && (
         <>
-          {/* Open front with wooden pillars */}
-          {Array.from({ length: 5 }).map((_, i) => {
-            const x = -7 + i * 3.5;
-            return (
-              <mesh key={`pillar-${i}`} position={[x, 1.5, 5.2]} castShadow>
-                <cylinderGeometry args={[0.2, 0.25, 3, 8]} />
-                <meshStandardMaterial color="#5a4a3a" roughness={0.9} />
+          {/* Door frames */}
+          {[-5, 0, 5].map((x, i) => (
+            <group key={`frame-${i}`}>
+              <mesh position={[x - 1.6, 1.8, 5.1]} castShadow>
+                <boxGeometry args={[0.2, 3.6, 0.2]} />
+                <meshStandardMaterial color="#3a2a1a" roughness={0.9} />
               </mesh>
-            );
-          })}
+              <mesh position={[x + 1.6, 1.8, 5.1]} castShadow>
+                <boxGeometry args={[0.2, 3.6, 0.2]} />
+                <meshStandardMaterial color="#3a2a1a" roughness={0.9} />
+              </mesh>
+            </group>
+          ))}
 
-          {/* Hay bales visible inside */}
+          {/* Ventilation windows on sides */}
+          {[-6, 0, 6].map((x, i) => (
+            <Window
+              key={`vent-${i}`}
+              position={[x, 3.2, -5.05]}
+              width={1}
+              height={0.8}
+            />
+          ))}
+
+          {/* Water trough outside */}
+          <mesh position={[8, 0.3, 3]} castShadow receiveShadow>
+            <boxGeometry args={[1.5, 0.6, 4]} />
+            <meshStandardMaterial color="#6a5a4a" roughness={0.9} />
+          </mesh>
+
+          {/* Hay bales stacked outside */}
           {[
-            [-4, 0.5, -2],
-            [-1, 0.5, -3],
-            [2, 0.5, -2],
-            [5, 0.5, -3]
+            [8, 0.5, -2],
+            [8, 1.5, -2],
+            [7.5, 0.5, -3.5],
           ].map((pos, i) => (
             <mesh key={`hay-${i}`} position={pos as [number, number, number]} castShadow>
               <boxGeometry args={[1.2, 1, 1]} />
               <meshStandardMaterial color="#d8c898" roughness={0.95} />
             </mesh>
           ))}
-
-          {/* Water trough */}
-          <mesh position={[-6, 0.3, 0]} castShadow receiveShadow>
-            <boxGeometry args={[1.5, 0.6, 4]} />
-            <meshStandardMaterial color="#6a5a4a" roughness={0.9} />
-          </mesh>
         </>
       )}
     </group>
@@ -541,8 +628,8 @@ const ParadeGround: React.FC<{
 
   return (
     <group position={position}>
-      {/* Stone paving */}
-      <mesh position={[0, 0.05, 0]} receiveShadow rotation={[-Math.PI/2, 0, 0]}>
+      {/* Stone paving - raised to 0.1 to be above main citadel floor (0.08) */}
+      <mesh position={[0, 0.1, 0]} receiveShadow rotation={[-Math.PI/2, 0, 0]}>
         <planeGeometry args={[30, 30]} />
         <meshStandardMaterial color="#b8a896" roughness={0.95} />
       </mesh>
@@ -623,6 +710,146 @@ export const getCitadelLandmarks = (): Array<{ x: number; z: number; label: stri
 };
 
 // ========================================
+// CITADEL BUILDING METADATA GENERATOR
+// ========================================
+
+/**
+ * Generates BuildingMetadata for citadel buildings that can be entered.
+ * These buildings block movement and can be entered like other buildings.
+ *
+ * Enterable buildings:
+ * - Throne Room: Sultan's audience hall (CIVIC type)
+ * - Barracks: Mamluk soldiers' quarters (CIVIC type)
+ * - Stables: Cavalry horse stables (COMMERCIAL type)
+ * - Arsenal: Weapons and armor storage (CIVIC type)
+ */
+export const generateCitadelBuildings = (): BuildingMetadata[] => {
+  const buildings: BuildingMetadata[] = [];
+
+  // Throne Room - Sultan's audience hall
+  buildings.push({
+    id: 'citadel-throne-room',
+    type: BuildingType.CIVIC,
+    ownerName: 'Sultan al-Nasir Hasan',
+    ownerAge: 45,
+    ownerProfession: 'Sultan',
+    ownerGender: 'Male',
+    position: [15, 0, 15],
+    sizeScale: 1.8, // Large building (matches boxSize 13x9)
+    storyCount: 2,
+    doorSide: 2, // West facing (toward parade ground)
+    hasSymmetricalWindows: true,
+    isPointOfInterest: true,
+    isOpen: true,
+    district: 'CIVIC',
+    hasCourtyard: false,
+  });
+
+  // Barracks - Mamluk soldiers' quarters
+  buildings.push({
+    id: 'citadel-barracks',
+    type: BuildingType.CIVIC,
+    ownerName: 'Amir Sayf al-Din',
+    ownerAge: 38,
+    ownerProfession: 'Garrison Commander',
+    ownerGender: 'Male',
+    position: [-18, 0, -5],
+    sizeScale: 2.2, // Very large (matches boxSize 26x9)
+    storyCount: 2,
+    doorSide: 1, // East facing (toward parade ground)
+    hasSymmetricalWindows: true,
+    isPointOfInterest: true,
+    isOpen: true,
+    district: 'CIVIC',
+    hasCourtyard: false,
+  });
+
+  // Stables - Cavalry horse stables
+  buildings.push({
+    id: 'citadel-stables',
+    type: BuildingType.COMMERCIAL,
+    ownerName: 'Khalid ibn Rashid',
+    ownerAge: 52,
+    ownerProfession: 'Master of Horse',
+    ownerGender: 'Male',
+    position: [-12, 0, -18],
+    sizeScale: 1.6, // Large (matches boxSize 19x11)
+    storyCount: 1,
+    doorSide: 0, // South facing (toward parade ground)
+    hasSymmetricalWindows: false,
+    isPointOfInterest: true,
+    isOpen: true,
+    district: 'CIVIC',
+    hasCourtyard: false,
+  });
+
+  // Arsenal - Weapons and armor storage
+  buildings.push({
+    id: 'citadel-arsenal',
+    type: BuildingType.CIVIC,
+    ownerName: 'Baibars al-Mansuri',
+    ownerAge: 42,
+    ownerProfession: 'Arsenal Master',
+    ownerGender: 'Male',
+    position: [18, 0, -15],
+    sizeScale: 1.5, // Medium-large (matches boxSize 13x13)
+    storyCount: 2,
+    doorSide: 3, // West facing (toward parade ground)
+    hasSymmetricalWindows: true,
+    isPointOfInterest: true,
+    isOpen: true,
+    district: 'CIVIC',
+    hasCourtyard: false,
+  });
+
+  return buildings;
+};
+
+/**
+ * Returns collision obstacles for citadel walls.
+ * These block player movement at wall boundaries.
+ */
+export const getCitadelWallCollisions = (): Array<{ position: [number, number, number]; radius: number }> => {
+  const collisions: Array<{ position: [number, number, number]; radius: number }> = [];
+
+  // North wall segments (with gate gap in center)
+  // Left segment: from x=-30 to x=-10 at z=-30
+  for (let x = -30; x <= -10; x += 4) {
+    collisions.push({ position: [x, 0, -30], radius: 2.5 });
+  }
+  // Right segment: from x=10 to x=30 at z=-30
+  for (let x = 10; x <= 30; x += 4) {
+    collisions.push({ position: [x, 0, -30], radius: 2.5 });
+  }
+
+  // South wall segments (with gate gap in center)
+  for (let x = -30; x <= -6; x += 4) {
+    collisions.push({ position: [x, 0, 30], radius: 2.5 });
+  }
+  for (let x = 6; x <= 30; x += 4) {
+    collisions.push({ position: [x, 0, 30], radius: 2.5 });
+  }
+
+  // West wall (full length)
+  for (let z = -30; z <= 30; z += 4) {
+    collisions.push({ position: [-30, 0, z], radius: 2.5 });
+  }
+
+  // East wall (full length)
+  for (let z = -30; z <= 30; z += 4) {
+    collisions.push({ position: [30, 0, z], radius: 2.5 });
+  }
+
+  // Corner towers (larger collision radius)
+  collisions.push({ position: [-30, 0, -30], radius: 5 });
+  collisions.push({ position: [30, 0, -30], radius: 5 });
+  collisions.push({ position: [-30, 0, 30], radius: 5 });
+  collisions.push({ position: [30, 0, 30], radius: 5 });
+
+  return collisions;
+};
+
+// ========================================
 // MAIN CITADEL COMPLEX
 // ========================================
 
@@ -664,47 +891,77 @@ export const CitadelComplex: React.FC<{
     <HoverWireframeContext.Provider value={wireframeEnabled}>
       <HoverLabelContext.Provider value={labelEnabled}>
         <group position={[0, 0, 0]}>
+          {/* NOTE: Individual areas (parade ground, courtyard, gates) have their own floors */}
+          {/* No main citadel floor needed - prevents z-fighting with overlapping planes */}
+
           {/* ===== OUTER DEFENSIVE WALLS ===== */}
+          {/* Walls are split to create gate openings */}
 
-          {/* North wall */}
-      <AblaqWall
-        position={[0, 0, -30]}
-        width={60}
-        height={12}
-        depth={4}
-        orientation="east-west"
-        ablaqTexture={ablaqTexture}
-      />
+          {/* North wall - LEFT segment (west of main gate) */}
+          <AblaqWall
+            position={[-20, 0, -30]}
+            width={20}
+            height={12}
+            depth={4}
+            orientation="east-west"
+            ablaqTexture={ablaqTexture}
+          />
+          {/* North wall - RIGHT segment (east of main gate) */}
+          <AblaqWall
+            position={[20, 0, -30]}
+            width={20}
+            height={12}
+            depth={4}
+            orientation="east-west"
+            ablaqTexture={ablaqTexture}
+          />
 
-      {/* South wall */}
-      <AblaqWall
-        position={[0, 0, 30]}
-        width={60}
-        height={12}
-        depth={4}
-        orientation="east-west"
-        ablaqTexture={ablaqTexture}
-      />
+          {/* South wall - LEFT segment (west of south gate) */}
+          <AblaqWall
+            position={[-20, 0, 30]}
+            width={20}
+            height={12}
+            depth={4}
+            orientation="east-west"
+            ablaqTexture={ablaqTexture}
+          />
+          {/* South wall - RIGHT segment (east of south gate) */}
+          <AblaqWall
+            position={[20, 0, 30]}
+            width={20}
+            height={12}
+            depth={4}
+            orientation="east-west"
+            ablaqTexture={ablaqTexture}
+          />
 
-      {/* West wall */}
-      <AblaqWall
-        position={[-30, 0, 0]}
-        width={60}
-        height={12}
-        depth={4}
-        orientation="north-south"
-        ablaqTexture={ablaqTexture}
-      />
+          {/* West wall - full length (no gate) */}
+          <AblaqWall
+            position={[-30, 0, 0]}
+            width={60}
+            height={12}
+            depth={4}
+            orientation="north-south"
+            ablaqTexture={ablaqTexture}
+          />
 
-      {/* East wall */}
-      <AblaqWall
-        position={[30, 0, 0]}
-        width={60}
-        height={12}
-        depth={4}
-        orientation="north-south"
-        ablaqTexture={ablaqTexture}
-      />
+          {/* East wall - full length (no gate) */}
+          <AblaqWall
+            position={[30, 0, 0]}
+            width={60}
+            height={12}
+            depth={4}
+            orientation="north-south"
+            ablaqTexture={ablaqTexture}
+          />
+
+          {/* ===== SECONDARY GATE (South wall) ===== */}
+          <SecondaryGate
+            position={[0, 0, 30]}
+            rotation={Math.PI}
+            ablaqTexture={ablaqTexture}
+            lod={lod}
+          />
 
       {/* ===== CORNER DEFENSIVE TOWERS ===== */}
 

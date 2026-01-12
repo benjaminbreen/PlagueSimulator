@@ -54,6 +54,7 @@ interface SimulationShellProps {
   onCrimeWitnessed?: (crime: { type: 'theft' | 'vandalism'; witnessCount: number }) => void;
   onGravestoneDesecrated?: () => void;
   onNearReadable?: (readable: { id: string; position: any; epitaph: any } | null) => void;
+  onNearWater?: (nearWater: boolean) => void;
   onFallDamage: (fallHeight: number, fatal: boolean) => void;
   cameraViewTarget: [number, number, number] | null;
   onPlayerStartMove: () => void;
@@ -67,6 +68,7 @@ interface SimulationShellProps {
   onNearRoofHatch?: (hatch: { id: string; position: [number, number, number] } | null) => void;
   onNearBirdcage?: (birdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
   onNearRooftopHatch?: (hatch: { buildingId: string; building: import('../types').BuildingMetadata; position: [number, number, number] } | null) => void;
+  onNearSpecialNpc?: (specialNpc: { type: 'ASTROLOGER' | 'SCRIBE' | 'SUFI_MYSTIC'; stats: import('../types').NPCStats; state: import('../types').AgentState } | null) => void;
   onShowLootModal?: (data: {
     type: 'shatter';
     sourceObjectName: string;
@@ -92,6 +94,7 @@ interface SimulationShellProps {
     devSettings: DevSettings;
     setDevSettings: React.Dispatch<React.SetStateAction<DevSettings>>;
   };
+  hideOuterRobe?: boolean;
 }
 
 export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
@@ -142,6 +145,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   onCrimeWitnessed,
   onGravestoneDesecrated,
   onNearReadable,
+  onNearWater,
   onFallDamage,
   cameraViewTarget,
   onPlayerStartMove,
@@ -155,9 +159,11 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   onNearRoofHatch,
   onNearBirdcage,
   onNearRooftopHatch,
+  onNearSpecialNpc,
   onShowLootModal,
   narratorHighlight,
-  performanceMonitor
+  performanceMonitor,
+  hideOuterRobe
 }) => {
   return (
     <Canvas
@@ -249,6 +255,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onNPCInitiatedEncounter={onNPCInitiatedEncounter}
             onGravestoneDesecrated={onGravestoneDesecrated}
             onNearReadable={onNearReadable}
+            onNearWater={onNearWater}
             onFallDamage={onFallDamage}
             cameraViewTarget={cameraViewTarget}
             onPlayerStartMove={onPlayerStartMove}
@@ -261,7 +268,9 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onNearChest={onNearChest}
             onNearBirdcage={onNearBirdcage}
             onNearRooftopHatch={onNearRooftopHatch}
+            onNearSpecialNpc={onNearSpecialNpc}
             narratorHighlight={narratorHighlight}
+            hideOuterRobe={hideOuterRobe}
           />
         )}
         {!transitioning && sceneMode === 'interior' && interiorSpec && (

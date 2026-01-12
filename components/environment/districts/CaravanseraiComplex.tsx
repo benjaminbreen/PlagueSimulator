@@ -137,21 +137,20 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
   const darkSandstone = DARK_SANDSTONE;
   const lightSandstone = LIGHT_SANDSTONE;
 
-  // Number of arcade bays per side (procedurally varied)
-  const baysPerSide = 6 + Math.floor(variation * 2); // 6-7 bays
-
-  // Create arcade bays with arches
-  const createArcadeBays = (sideLength: number, depth: number, height: number, rotation: number, offset: [number, number, number]) => {
+  // Create arcade bays with arches - now accepts bayCount parameter for split segments
+  const createArcadeBays = (sideLength: number, depth: number, height: number, rotation: number, offset: [number, number, number], bayCount?: number) => {
     const bays = [];
-    const bayWidth = sideLength / baysPerSide;
+    // Calculate bay count based on length if not provided (roughly 8-9 units per bay)
+    const numBays = bayCount ?? Math.max(2, Math.floor(sideLength / 8.5));
+    const bayWidth = sideLength / numBays;
 
-    for (let i = 0; i < baysPerSide; i++) {
+    for (let i = 0; i < numBays; i++) {
       const x = -sideLength / 2 + bayWidth * i + bayWidth / 2;
       const pillarWidth = bayWidth * 0.2;
       const archWidth = bayWidth * 0.8;
 
       // Pillars
-      if (i < baysPerSide) {
+      if (i < numBays) {
         bays.push(
           <mesh
             key={`pillar-${i}`}
@@ -224,31 +223,48 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
     );
   };
 
-  // Four directional entrances with half-dome arches
+  // Four directional entrances with half-dome arches - ACTUAL OPENINGS for player passage
   const createEntrance = (rotation: number, offset: [number, number, number], direction: string) => {
+    const gateHeight = wallHeight * 0.75; // Height of the walkable opening
+    const archTopHeight = wallHeight - gateHeight; // Height above the opening for arch frame
+
     return (
       <group position={offset} rotation={[0, rotation, 0]}>
-        {/* Entrance arch structure */}
+        {/* Entrance arch structure - frame around opening, NOT solid */}
         <group>
-          {/* Side pillars */}
+          {/* Left pillar/jamb */}
           <mesh position={[-entranceWidth / 2 - 1, wallHeight / 2, 0]} castShadow receiveShadow>
             <boxGeometry args={[2, wallHeight, wallThickness * 2]} />
-            <meshStandardMaterial color={darkSandstone} roughness={0.92} />
+            <meshStandardMaterial
+              map={sandstoneBlockTexture}
+              color={darkSandstone}
+              roughness={0.92}
+            />
           </mesh>
+
+          {/* Right pillar/jamb */}
           <mesh position={[entranceWidth / 2 + 1, wallHeight / 2, 0]} castShadow receiveShadow>
             <boxGeometry args={[2, wallHeight, wallThickness * 2]} />
-            <meshStandardMaterial color={darkSandstone} roughness={0.92} />
+            <meshStandardMaterial
+              map={sandstoneBlockTexture}
+              color={darkSandstone}
+              roughness={0.92}
+            />
           </mesh>
 
-          {/* Arch opening */}
-          <mesh position={[0, wallHeight * 0.4, 0]} castShadow receiveShadow>
-            <boxGeometry args={[entranceWidth, wallHeight * 0.8, wallThickness * 2]} />
-            <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+          {/* Top lintel above the opening (not blocking the opening itself) */}
+          <mesh position={[0, gateHeight + archTopHeight / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[entranceWidth, archTopHeight, wallThickness * 2]} />
+            <meshStandardMaterial
+              map={sandstoneBlockTexture}
+              color={sandstoneColor}
+              roughness={0.9}
+            />
           </mesh>
 
-          {/* Half-dome arch top */}
-          <mesh position={[0, wallHeight * 0.8, 0]} rotation={[0, 0, Math.PI / 2]} castShadow receiveShadow>
-            <cylinderGeometry args={[entranceWidth / 2, entranceWidth / 2, wallThickness * 2, 16, 1, false, 0, Math.PI]} />
+          {/* Half-dome arch top (decorative) */}
+          <mesh position={[0, wallHeight * 0.85, 0]} rotation={[0, 0, Math.PI / 2]} castShadow receiveShadow>
+            <cylinderGeometry args={[entranceWidth / 2.5, entranceWidth / 2.5, wallThickness * 1.5, 16, 1, false, 0, Math.PI]} />
             <meshStandardMaterial color={lightSandstone} roughness={0.85} />
           </mesh>
 
@@ -258,10 +274,16 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
             <meshStandardMaterial color="#9aaa9a" roughness={0.7} metalness={0.2} />
           </mesh>
 
-          {/* Entrance passage */}
-          <mesh position={[0, 3, -wallThickness]} receiveShadow>
-            <boxGeometry args={[entranceWidth - 0.5, 6, wallThickness * 2]} />
-            <meshStandardMaterial color={darkSandstone} roughness={0.93} />
+          {/* Gate passage floor (darker stone to show depth) */}
+          <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+            <planeGeometry args={[entranceWidth, wallThickness * 3]} />
+            <meshStandardMaterial color="#7a6a5a" roughness={0.95} />
+          </mesh>
+
+          {/* Interior arch ceiling (visible when walking through) */}
+          <mesh position={[0, gateHeight - 0.1, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
+            <planeGeometry args={[entranceWidth - 0.2, wallThickness * 2.5]} />
+            <meshStandardMaterial color={darkSandstone} roughness={0.93} side={THREE.DoubleSide} />
           </mesh>
         </group>
 
@@ -276,7 +298,6 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
               <coneGeometry args={[0.2, 0.4, 6]} />
               <meshStandardMaterial color="#2a1a0a" roughness={0.9} />
             </mesh>
-            {/* Torch light removed for performance */}
           </group>
         ))}
       </group>
@@ -306,45 +327,77 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
 
   return (
     <group>
-      {/* Four outer wall segments (between entrances and corners) */}
+      {/* Four outer wall segments (between entrances and corners) - with limestone block texture */}
       {/* North wall segments */}
       <mesh position={[-outerSize / 2 + wallSegmentLength / 2 + 3, wallHeight / 2, -outerSize / 2]} castShadow receiveShadow>
         <boxGeometry args={[wallSegmentLength, wallHeight, wallThickness]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
       <mesh position={[outerSize / 2 - wallSegmentLength / 2 - 3, wallHeight / 2, -outerSize / 2]} castShadow receiveShadow>
         <boxGeometry args={[wallSegmentLength, wallHeight, wallThickness]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
 
       {/* South wall segments */}
       <mesh position={[-outerSize / 2 + wallSegmentLength / 2 + 3, wallHeight / 2, outerSize / 2]} castShadow receiveShadow>
         <boxGeometry args={[wallSegmentLength, wallHeight, wallThickness]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
       <mesh position={[outerSize / 2 - wallSegmentLength / 2 - 3, wallHeight / 2, outerSize / 2]} castShadow receiveShadow>
         <boxGeometry args={[wallSegmentLength, wallHeight, wallThickness]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
 
       {/* East wall segments */}
       <mesh position={[outerSize / 2, wallHeight / 2, -outerSize / 2 + wallSegmentLength / 2 + 3]} castShadow receiveShadow>
         <boxGeometry args={[wallThickness, wallHeight, wallSegmentLength]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
       <mesh position={[outerSize / 2, wallHeight / 2, outerSize / 2 - wallSegmentLength / 2 - 3]} castShadow receiveShadow>
         <boxGeometry args={[wallThickness, wallHeight, wallSegmentLength]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
 
       {/* West wall segments */}
       <mesh position={[-outerSize / 2, wallHeight / 2, -outerSize / 2 + wallSegmentLength / 2 + 3]} castShadow receiveShadow>
         <boxGeometry args={[wallThickness, wallHeight, wallSegmentLength]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
       <mesh position={[-outerSize / 2, wallHeight / 2, outerSize / 2 - wallSegmentLength / 2 - 3]} castShadow receiveShadow>
         <boxGeometry args={[wallThickness, wallHeight, wallSegmentLength]} />
-        <meshStandardMaterial color={sandstoneColor} roughness={0.9} />
+        <meshStandardMaterial
+          map={sandstoneBlockTexture}
+          color={sandstoneColor}
+          roughness={0.88}
+        />
       </mesh>
 
       {/* Four directional entrances */}
@@ -359,11 +412,36 @@ export const CaravanseraiComplex: React.FC<{ mapX: number; mapY: number; timeOfD
       {createCornerTower(-outerSize / 2, outerSize / 2)}
       {createCornerTower(outerSize / 2, outerSize / 2)}
 
-      {/* Inner arcade bays (four sides) */}
-      {createArcadeBays(outerSize - 10, arcadeDepth, 6, 0, [0, 0, -outerSize / 2 + arcadeDepth / 2 + 2])}
-      {createArcadeBays(outerSize - 10, arcadeDepth, 6, Math.PI, [0, 0, outerSize / 2 - arcadeDepth / 2 - 2])}
-      {createArcadeBays(outerSize - 10, arcadeDepth, 6, Math.PI / 2, [outerSize / 2 - arcadeDepth / 2 - 2, 0, 0])}
-      {createArcadeBays(outerSize - 10, arcadeDepth, 6, -Math.PI / 2, [-outerSize / 2 + arcadeDepth / 2 + 2, 0, 0])}
+      {/* Inner arcade bays (four sides) - split into segments to leave entrance gaps */}
+      {/* Each side has two arcade segments flanking the central entrance */}
+      {(() => {
+        const arcadeSegmentLength = (outerSize - 10 - entranceWidth - 4) / 2; // ~24 units per segment
+        const segmentOffset = entranceWidth / 2 + arcadeSegmentLength / 2 + 2; // Distance from center to segment center
+        const arcadeZ = -outerSize / 2 + arcadeDepth / 2 + 2;
+        const arcadeZSouth = outerSize / 2 - arcadeDepth / 2 - 2;
+        const arcadeX = outerSize / 2 - arcadeDepth / 2 - 2;
+        const arcadeXWest = -outerSize / 2 + arcadeDepth / 2 + 2;
+
+        return (
+          <>
+            {/* North arcade - two segments */}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, 0, [-segmentOffset, 0, arcadeZ], 3)}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, 0, [segmentOffset, 0, arcadeZ], 3)}
+
+            {/* South arcade - two segments */}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, Math.PI, [-segmentOffset, 0, arcadeZSouth], 3)}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, Math.PI, [segmentOffset, 0, arcadeZSouth], 3)}
+
+            {/* East arcade - two segments */}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, Math.PI / 2, [arcadeX, 0, -segmentOffset], 3)}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, Math.PI / 2, [arcadeX, 0, segmentOffset], 3)}
+
+            {/* West arcade - two segments */}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, -Math.PI / 2, [arcadeXWest, 0, -segmentOffset], 3)}
+            {createArcadeBays(arcadeSegmentLength, arcadeDepth, 6, -Math.PI / 2, [arcadeXWest, 0, segmentOffset], 3)}
+          </>
+        );
+      })()}
 
       {/* Central ornate square fountain */}
       <group position={[0, 0, 0]}>

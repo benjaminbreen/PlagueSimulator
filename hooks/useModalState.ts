@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { LootModalData } from '../components/LootModal';
 import { MedicalEstablishmentType } from '../types';
-import { ReadableEpitaph } from '../components/ReadModal';
+import { ReadableEpitaph, MausoleumEpitaph } from '../components/ReadModal';
+
+export interface ReadModalData {
+  id: string;
+  position: any;
+  epitaph: ReadableEpitaph | MausoleumEpitaph;
+  graveShape?: 'rectangular' | 'arch' | 'peaked' | 'platform';
+  graveType?: 'flat' | 'raised' | 'double_marker';
+  graveScale?: number;
+  isMausoleum?: boolean;
+}
 
 export interface MedicalModalState {
   isOpen: boolean;
@@ -18,7 +28,7 @@ export const useModalState = () => {
   const [showReadModal, setShowReadModal] = useState(false);
   const [lootModalData, setLootModalData] = useState<LootModalData | null>(null);
   const [medicalModal, setMedicalModal] = useState<MedicalModalState | null>(null);
-  const [readModalData, setReadModalData] = useState<ReadableEpitaph | null>(null);
+  const [readModalData, setReadModalData] = useState<ReadModalData | null>(null);
 
   return {
     showEnterModal,

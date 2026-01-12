@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem' | 'storageChest' | 'gravestone';
+export type PushableKind = 'bench' | 'clayJar' | 'geranium' | 'basket' | 'olivePot' | 'lemonPot' | 'palmPot' | 'bougainvilleaPot' | 'coin' | 'olive' | 'lemon' | 'potteryShard' | 'linenScrap' | 'candleStub' | 'twine' | 'interior' | 'boulder' | 'crate' | 'amphora' | 'droppedItem' | 'storageChest' | 'gravestone' | 'mausoleum';
 export type PushableMaterial = 'stone' | 'wood' | 'ceramic' | 'cloth' | 'metal';
 
 // Break chances when pushed with force (shift + release)
@@ -55,6 +55,7 @@ export const PUSHABLE_DISPLAY_NAMES: Record<PushableKind, string> = {
   droppedItem: 'Item',
   storageChest: 'Storage Chest',
   gravestone: 'Gravestone',
+  mausoleum: 'Mausoleum',
 };
 
 export const getPushableDisplayName = (kind: PushableKind): string => {
@@ -99,6 +100,14 @@ export interface PushableObject {
     age: number;                     // Age at death
     title?: string;                  // Optional title/descriptor
     inscription?: string;            // Optional Quranic verse or saying
+  };
+  mausoleumEpitaph?: {               // Custom epitaph for major mausoleums
+    name: string;                    // Name of the deceased
+    title: string;                   // Full title/position
+    deathYear: number;               // Year of death (Hijri)
+    deathYearCE: number;             // Year of death (CE)
+    inscription: string;             // Carved inscription text
+    historicalNote?: string;         // Historical context for player
   };
 }
 
@@ -345,4 +354,89 @@ export const generateGraveEpitaph = (seed: number): {
   const inscription = rand() < 0.5 ? QURAN_VERSES[Math.floor(rand() * QURAN_VERSES.length)] : undefined;
 
   return { name, age, title, inscription };
+};
+
+/**
+ * Historical mausoleum epitaphs for Qubaybat district
+ * Based on actual historical figures buried in Damascus by 1348 CE
+ */
+export const QUBAYBAT_MAUSOLEUM_EPITAPHS: Array<{
+  name: string;
+  title: string;
+  deathYear: number;      // Hijri
+  deathYearCE: number;
+  inscription: string;
+  historicalNote: string;
+}> = [
+  {
+    name: 'Shams al-Din al-Dhahabi',
+    title: 'Imam, Hafiz, and Master of Hadith Sciences',
+    deathYear: 748,
+    deathYearCE: 1348,
+    inscription: 'Here lies the Imam Shams al-Din Muhammad ibn Ahmad al-Dhahabi, who preserved the lives of the righteous in his writings. He was the greatest historian of his age, author of the Siyar A\'lam al-Nubala. May Allah illuminate his grave as he illuminated the path of knowledge.',
+    historicalNote: 'Al-Dhahabi was one of the greatest Islamic historians, dying in Damascus just as the Black Death arrived. His biographical dictionary remains a crucial historical source.',
+  },
+  {
+    name: 'Jamal al-Din Yusuf al-Mizzi',
+    title: 'Shaykh al-Islam and Hadith Master of the Levant',
+    deathYear: 742,
+    deathYearCE: 1341,
+    inscription: 'In the name of Allah, the Most Gracious, the Most Merciful. This is the resting place of the noble Imam al-Mizzi, compiler of Tahdhib al-Kamal. He devoted sixty years to the science of hadith. Every soul shall taste death.',
+    historicalNote: 'Al-Mizzi was the foremost hadith scholar of Damascus and father-in-law of Ibn Kathir. His work organizing hadith transmitter biographies remains authoritative.',
+  },
+  {
+    name: 'Emir Sayf al-Din Tankiz al-Husami',
+    title: 'Viceroy of Damascus and Builder of Monuments',
+    deathYear: 740,
+    deathYearCE: 1340,
+    inscription: 'This turbah contains the remains of the noble Emir Tankiz, naib of al-Sham for twenty-eight years under Sultan al-Nasir Muhammad. He built madrasas, khans, and bridges. His works endure though he has passed to Allah\'s mercy.',
+    historicalNote: 'Tankiz was the powerful Mamluk governor who transformed Damascus with ambitious building projects. He fell from favor and was executed in Alexandria, but his body was returned to Damascus.',
+  },
+  {
+    name: 'Sitt Hajar bint al-Qadi Kamal al-Din',
+    title: 'Scholar and Teacher of Women',
+    deathYear: 735,
+    deathYearCE: 1335,
+    inscription: 'She taught the daughters of Damascus to read the Holy Quran and instructed them in the sciences of religion. A woman of piety and learning, she is now with the righteous women of Paradise. Inna lillahi wa inna ilayhi raji\'un.',
+    historicalNote: 'Women scholars were not uncommon in medieval Damascus, often teaching other women in private settings and receiving ijazas (teaching licenses) from male scholars.',
+  },
+  {
+    name: 'Emir Arghun Shah al-Nasiri',
+    title: 'Commander of the Damascus Citadel Guard',
+    deathYear: 744,
+    deathYearCE: 1343,
+    inscription: 'The Emir Arghun Shah served the Sultan faithfully for thirty years. He was known for his justice to the soldiers under his command and his charity to the poor of Damascus. May Allah accept his good deeds.',
+    historicalNote: 'Mamluk military commanders often built elaborate tombs, their domes visible across the cemetery districts as symbols of their status and piety.',
+  },
+  {
+    name: 'Abu al-Fida Ismail ibn Kathir',
+    title: 'Student of al-Mizzi, Compiler of Tafsir',
+    deathYear: 746,
+    deathYearCE: 1345,
+    inscription: 'Here rests the young scholar Abu al-Fida, son-in-law of al-Mizzi, who began a great tafsir of the Quran. Though called early to Paradise, his works shall continue. The best provision is piety.',
+    historicalNote: 'Note: This represents a fictional early death. The real Ibn Kathir lived until 1373, but the epitaph reflects the high mortality among scholars\' families.',
+  },
+  {
+    name: 'Khadija bint Emir Baybars al-Mansuri',
+    title: 'Daughter of the Emir, Patroness of the Poor',
+    deathYear: 738,
+    deathYearCE: 1338,
+    inscription: 'Khadija, daughter of the great Emir Baybars, established a waqf for feeding the poor of Damascus. She distributed bread at this very gate each Friday. Now she awaits the reward of the generous.',
+    historicalNote: 'Wealthy women often established charitable endowments (waqf) that provided ongoing services to the community after their deaths.',
+  },
+  {
+    name: 'Sharaf al-Din al-Barzali',
+    title: 'Chronicler of Damascus',
+    deathYear: 739,
+    deathYearCE: 1339,
+    inscription: 'Al-Barzali recorded the events of his time so that those who come after might learn. His chronicle preserves the memory of sultans and scholars, plagues and victories. Knowledge is the inheritance of the prophets.',
+    historicalNote: 'Al-Barzali\'s chronicle of Damascus was an important source for later historians, documenting the social and political life of the city.',
+  },
+];
+
+/**
+ * Get a mausoleum epitaph by index (for the major tombs in Qubaybat)
+ */
+export const getMausoleumEpitaph = (index: number) => {
+  return QUBAYBAT_MAUSOLEUM_EPITAPHS[index % QUBAYBAT_MAUSOLEUM_EPITAPHS.length];
 };

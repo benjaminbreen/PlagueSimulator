@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { MoraleStats } from '../components/Agents';
 import { seededRandom } from './procedural';
+import { getReputationTier, getReputationContextForLLM, getReputationLabel } from './reputation';
 
 // Generate a deterministic seed from NPC ID for consistent personality
 function npcIdToSeed(npcId: string): number {
@@ -453,6 +454,15 @@ ${threatLevel === 'high' ? "- The situation is grave. Death has visited many hom
 ${sharedReligion ? `- KINSHIP: You share the same faith (${npc.religion}). This creates trust and warmth.` : ""}
 ${sharedEthnicity ? `- KINSHIP: You are both ${npc.ethnicity}. This creates a sense of community.` : ""}
 ${!sharedReligion && !sharedEthnicity ? "- They are a stranger of different background. You are cautious but not hostile." : ""}
+${(() => {
+  const tier = getReputationTier(player.reputation);
+  const reputationContext = getReputationContextForLLM(tier);
+  const label = getReputationLabel(tier);
+  return `
+## THEIR REPUTATION IN DAMASCUS
+- City-wide reputation: ${label} (${player.reputation}/100)
+- ${reputationContext}`;
+})()}
 ${getPlayerInfluence(player, npc)}
 ${buildFamilyContext(npc.id, player.familyMembers || [], player.gender, npc.age)}
 

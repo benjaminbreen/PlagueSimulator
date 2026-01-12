@@ -15,13 +15,15 @@ interface AstrologerProps {
   timeOfDay?: number;
   onSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   isSelected?: boolean;
+  onApproach?: (npc: { stats: NPCStats; state: AgentState } | null, distance: number) => void;
 }
 
 export const Astrologer: React.FC<AstrologerProps> = ({
   position,
   timeOfDay = 12,
   onSelect,
-  isSelected = false
+  isSelected = false,
+  onApproach
 }) => {
   const astrolabeRef = useRef<THREE.Group>(null);
   const headRef = useRef<THREE.Group>(null);
@@ -69,6 +71,10 @@ export const Astrologer: React.FC<AstrologerProps> = ({
     };
   }, [position]);
 
+  // Track approach state to avoid spamming callback
+  const wasNearRef = useRef(false);
+  const INTERACTION_DISTANCE = 8; // Larger to account for camera offset from player
+
   // Simplified animations with distance-based LOD
   useFrame((state, delta) => {
     animTime.current += delta;
@@ -77,6 +83,18 @@ export const Astrologer: React.FC<AstrologerProps> = ({
     // PERFORMANCE: Check distance for LOD
     const dist = camera.position.distanceTo(positionVec);
     const isClose = dist < 30;
+
+    // Approach detection for interaction
+    const isNear = dist < INTERACTION_DISTANCE;
+    if (onApproach) {
+      if (isNear && !wasNearRef.current) {
+        onApproach({ stats: npcStats, state: AgentState.HEALTHY }, dist);
+        wasNearRef.current = true;
+      } else if (!isNear && wasNearRef.current) {
+        onApproach(null, dist);
+        wasNearRef.current = false;
+      }
+    }
 
     // Only animate when player is close enough to notice
     if (!isClose) return;

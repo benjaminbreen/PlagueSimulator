@@ -107,6 +107,7 @@ interface PlayerProps {
   onPropertyDamaged?: (position: THREE.Vector3) => void; // Crime detection for breaking interior objects
   onGravestoneDesecrated?: () => void; // Reputation penalty for knocking over graves
   onNearReadable?: (readable: { id: string; position: THREE.Vector3; epitaph: any } | null) => void; // Near gravestone for reading
+  onNearWater?: (nearWater: boolean) => void; // Near water source (canal/river) for collection
   onFallDamage?: (fallHeight: number, fatal: boolean) => void;
   cameraViewTarget?: [number, number, number] | null;
   onPlayerStartMove?: () => void;
@@ -119,6 +120,7 @@ interface PlayerProps {
   mapEntryToken?: string;
   isInterior?: boolean;
   enableCameraOcclusion?: boolean;
+  hideOuterRobe?: boolean;
 }
 
 export const Player = forwardRef<THREE.Group, PlayerProps>(({
@@ -160,6 +162,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onPropertyDamaged,
   onGravestoneDesecrated,
   onNearReadable,
+  onNearWater,
   onFallDamage,
   cameraViewTarget,
   onPlayerStartMove,
@@ -171,7 +174,8 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   onIsometricOcclusionChange,
   mapEntryToken,
   isInterior = false,
-  enableCameraOcclusion = true
+  enableCameraOcclusion = true,
+  hideOuterRobe = false
 }, ref) => {
   const group = useRef<THREE.Group>(null);
   const orbitRef = useRef<any>(null);
@@ -2916,30 +2920,119 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       }
     }
 
-    // 3f. Readable object detection (gravestones with epitaphs)
+    // 3f. Readable object detection (gravestones and mausoleums with epitaphs)
     if (pushablesRef?.current && onNearReadable) {
-      let nearestReadable: { id: string; position: THREE.Vector3; epitaph: any } | null = null;
+      let nearestReadable: { id: string; position: THREE.Vector3; epitaph: any; isMausoleum?: boolean } | null = null;
       let nearestDistSq = Infinity;
-      const READ_RANGE = 2.0; // Slightly larger range than pickup
+      const READ_RANGE_GRAVE = 2.0; // Range for gravestones
+      const READ_RANGE_MAUSOLEUM = 6.0; // Larger range for mausoleums
 
       for (const item of pushablesRef.current) {
-        if (item.kind !== 'gravestone' || !item.graveEpitaph) continue;
-        const dx = item.position.x - group.current.position.x;
-        const dz = item.position.z - group.current.position.z;
-        const distSq = dx * dx + dz * dz;
-        if (distSq < READ_RANGE * READ_RANGE && distSq < nearestDistSq) {
-          nearestDistSq = distSq;
-          nearestReadable = {
-            id: item.id,
-            position: item.position.clone(),
-            epitaph: item.graveEpitaph,
-            graveShape: item.graveShape,
-            graveType: item.graveType,
-            graveScale: item.graveScale
-          };
+        // Check for gravestones
+        if (item.kind === 'gravestone' && item.graveEpitaph) {
+          const dx = item.position.x - group.current.position.x;
+          const dz = item.position.z - group.current.position.z;
+          const distSq = dx * dx + dz * dz;
+          if (distSq < READ_RANGE_GRAVE * READ_RANGE_GRAVE && distSq < nearestDistSq) {
+            nearestDistSq = distSq;
+            nearestReadable = {
+              id: item.id,
+              position: item.position.clone(),
+              epitaph: item.graveEpitaph,
+              graveShape: item.graveShape,
+              graveType: item.graveType,
+              graveScale: item.graveScale,
+              isMausoleum: false
+            };
+          }
+        }
+        // Check for mausoleums
+        if (item.kind === 'mausoleum' && item.mausoleumEpitaph) {
+          const dx = item.position.x - group.current.position.x;
+          const dz = item.position.z - group.current.position.z;
+          const distSq = dx * dx + dz * dz;
+          if (distSq < READ_RANGE_MAUSOLEUM * READ_RANGE_MAUSOLEUM && distSq < nearestDistSq) {
+            nearestDistSq = distSq;
+            nearestReadable = {
+              id: item.id,
+              position: item.position.clone(),
+              epitaph: item.mausoleumEpitaph,
+              isMausoleum: true
+            };
+          }
         }
       }
       onNearReadable(nearestReadable);
+    }
+
+    // 3g. Water source detection (canals, rivers, fountains)
+    if (onNearWater && group.current && !isInterior) {
+      const px = group.current.position.x;
+      const pz = group.current.position.z;
+      const WATER_DETECT_RANGE = 3.0;
+      const FOUNTAIN_DETECT_RANGE = 5.0;
+
+      // Water sources exist in farm/ghouta districts - canals and rivers run diagonally
+      const waterDistricts = ['QANAWAT', 'OUTSKIRTS_FARMLAND', 'EAST_GHOUTA', 'SOUTH_GHOUTA', 'NORTH_GHOUTA', 'RABWE'];
+      const isWaterDistrict = district && waterDistricts.includes(district);
+
+      let nearWater = false;
+
+      if (isWaterDistrict) {
+        // Canals and rivers in these districts run diagonally (roughly x = z or x = -z)
+        // Main canal runs from ~(-40, -40) to (40, 40) at various angles
+        // River runs perpendicular
+        // We'll use a simple distance-to-line calculation
+
+        // Main canal line: approximately follows x/z diagonal
+        // Distance from point (px, pz) to line through origin with direction (1, 1)
+        const mainCanalDist = Math.abs(px - pz) / Math.sqrt(2);
+
+        // Secondary canal (perpendicular): line through origin with direction (1, -1)
+        const secondaryCanalDist = Math.abs(px + pz) / Math.sqrt(2);
+
+        // Check if near either canal (canals are ~2.2 units wide, so check within that + buffer)
+        if (mainCanalDist < WATER_DETECT_RANGE || secondaryCanalDist < WATER_DETECT_RANGE) {
+          nearWater = true;
+        }
+      }
+
+      // Also check for QANAWAT district which has more complex canal network
+      if (district === 'QANAWAT') {
+        // Qanawat has canals running through it
+        nearWater = true; // Simplified - entire district has accessible water
+      }
+
+      // Check for fountains in specific districts
+      // Central Market fountain - at world origin (0, 0)
+      if (district === 'MARKET') {
+        const distToFountain = Math.sqrt(px * px + pz * pz);
+        if (distToFountain < FOUNTAIN_DETECT_RANGE) {
+          nearWater = true;
+        }
+      }
+
+      // Umayyad Mosque ablution fountain - at approximately (15, -5) relative to mosque center
+      // Mosque is centered around origin in its tile
+      if (district === 'UMAYYAD_MOSQUE') {
+        const fountainX = 15;
+        const fountainZ = -5;
+        const distToAblution = Math.sqrt((px - fountainX) ** 2 + (pz - fountainZ) ** 2);
+        if (distToAblution < FOUNTAIN_DETECT_RANGE) {
+          nearWater = true;
+        }
+      }
+
+      // Wealthy districts may have garden fountains near the center
+      if (district === 'WEALTHY' || district === 'QAYMARIYYA' || district === 'AMARA') {
+        // Garden plazas with fountains tend to be near center
+        const distToCenter = Math.sqrt(px * px + pz * pz);
+        if (distToCenter < FOUNTAIN_DETECT_RANGE * 2) {
+          nearWater = true;
+        }
+      }
+
+      onNearWater(nearWater);
     }
 
     // 4. Camera Positioning
@@ -3756,6 +3849,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             movementStopTimeRef={movementStopTimeRef}
             sprintTransitionRef={sprintTransitionRef}
             isPlayer={true}
+            hideOuterRobe={hideOuterRobe}
           />
         )}
         

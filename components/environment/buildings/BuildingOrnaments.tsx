@@ -12,7 +12,7 @@ import {
 } from '../decorations/IslamicOrnaments';
 import { HoverableGroup } from '../shared/HoverSystem';
 import { useNightTintedMaterial } from '../shared/nightMaterials';
-import { CACHED_WOOD_TEXTURES } from '../../../utils/environment/wood';
+import { CACHED_WOOD_TEXTURES, FOLIAGE_MATERIAL, DARK_FOLIAGE_MATERIAL } from '../../../utils/environment/wood';
 
 // Shared material for wooden beams
 const BEAM_MATERIAL = new THREE.MeshStandardMaterial({
@@ -55,21 +55,69 @@ const Torch: React.FC<{ position: [number, number, number]; rotation: [number, n
   </group>
 );
 
+// Shared materials for pot tree (using shared foliage materials from wood.ts)
+const POT_TERRACOTTA = new THREE.MeshStandardMaterial({ color: '#a0522d', roughness: 0.85 });
+const POT_TERRACOTTA_DARK = new THREE.MeshStandardMaterial({ color: '#8b4513', roughness: 0.9 });
+const POT_SOIL = new THREE.MeshStandardMaterial({ color: '#3a2a1a', roughness: 1.0 });
+const OLIVE_TRUNK = new THREE.MeshStandardMaterial({ color: '#4a3a2a', roughness: 0.95 });
+
 const PotTree: React.FC<{ position: [number, number, number] }> = ({ position }) => (
   <HoverableGroup
-    position={position}
-    boxSize={[1.1, 1.0, 1.1]}
+    position={[position[0], 0, position[2]]}
+    boxSize={[1.0, 1.4, 1.0]}
     labelTitle="Potted Olive Tree"
     labelLines={['Fragrant foliage', 'Terracotta pot', 'Shaded fruit']}
-    labelOffset={[0, 1.1, 0]}
+    labelOffset={[0, 1.2, 0]}
   >
-    <mesh castShadow>
-      <cylinderGeometry args={[0.35, 0.45, 0.4, 10]} />
-      <meshStandardMaterial color="#8b5a2b" roughness={0.9} />
+    {/* Decorative terracotta pot with rim and base - sitting on ground */}
+    {/* Pot base/foot */}
+    <mesh position={[0, 0.06, 0]} castShadow receiveShadow material={POT_TERRACOTTA_DARK}>
+      <cylinderGeometry args={[0.24, 0.28, 0.12, 12]} />
     </mesh>
-    <mesh position={[0, 0.45, 0]} castShadow>
-      <sphereGeometry args={[0.45, 10, 8]} />
-      <meshStandardMaterial color="#4b6b3a" roughness={0.9} />
+    {/* Main pot body - tapered */}
+    <mesh position={[0, 0.24, 0]} castShadow receiveShadow material={POT_TERRACOTTA}>
+      <cylinderGeometry args={[0.36, 0.26, 0.32, 12]} />
+    </mesh>
+    {/* Pot rim - decorative lip */}
+    <mesh position={[0, 0.42, 0]} castShadow receiveShadow material={POT_TERRACOTTA_DARK}>
+      <cylinderGeometry args={[0.40, 0.36, 0.06, 12]} />
+    </mesh>
+    {/* Soil surface */}
+    <mesh position={[0, 0.44, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow material={POT_SOIL}>
+      <circleGeometry args={[0.32, 12]} />
+    </mesh>
+
+    {/* Olive tree trunk - gnarled and organic */}
+    <mesh position={[0, 0.58, 0]} castShadow material={OLIVE_TRUNK}>
+      <cylinderGeometry args={[0.05, 0.07, 0.32, 6]} />
+    </mesh>
+    {/* Trunk bend/character */}
+    <mesh position={[0.02, 0.72, 0.01]} rotation={[0.08, 0, 0.12]} castShadow material={OLIVE_TRUNK}>
+      <cylinderGeometry args={[0.03, 0.05, 0.18, 6]} />
+    </mesh>
+
+    {/* Foliage - using shared textured materials */}
+    <mesh position={[0, 0.88, 0]} castShadow material={FOLIAGE_MATERIAL}>
+      <sphereGeometry args={[0.36, 10, 8]} />
+    </mesh>
+    <mesh position={[-0.14, 0.94, 0.10]} castShadow material={DARK_FOLIAGE_MATERIAL}>
+      <sphereGeometry args={[0.22, 8, 6]} />
+    </mesh>
+    <mesh position={[0.16, 0.82, -0.06]} castShadow material={FOLIAGE_MATERIAL}>
+      <sphereGeometry args={[0.20, 8, 6]} />
+    </mesh>
+    <mesh position={[0.04, 0.98, 0.12]} castShadow material={DARK_FOLIAGE_MATERIAL}>
+      <sphereGeometry args={[0.18, 8, 6]} />
+    </mesh>
+
+    {/* Small olives visible in foliage */}
+    <mesh position={[0.22, 0.84, 0.10]} castShadow>
+      <sphereGeometry args={[0.03, 6, 5]} />
+      <meshStandardMaterial color="#2a3a2a" roughness={0.7} />
+    </mesh>
+    <mesh position={[-0.18, 0.90, -0.12]} castShadow>
+      <sphereGeometry args={[0.028, 6, 5]} />
+      <meshStandardMaterial color="#3a4a3a" roughness={0.7} />
     </mesh>
   </HoverableGroup>
 );
@@ -372,7 +420,7 @@ export const BuildingOrnaments: React.FC<BuildingOrnamentsProps> = ({
       {/* Market ornaments - now rendered with instanced meshes */}
       {hasResidentialClutter && (
         <group position={[0, -finalHeight / 2, 0]}>
-          {clutterType === 1 && <PotTree position={[-finalBuildingSize / 2 - 0.9, 0.2, 1.1]} />}
+          {/* clutterType === 1 (PotTree) is now handled as a pushable in Simulation.tsx */}
           {clutterType === 2 && <StoneSculpture position={[finalBuildingSize / 2 + 0.7, 0.2, 1.3]} />}
         </group>
       )}

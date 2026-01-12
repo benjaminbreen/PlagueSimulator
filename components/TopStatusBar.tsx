@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Calendar, Sun, Moon, Pause, Play, FastForward, Keyboard, MousePointer2, Camera, Menu, X, ChevronDown, Cloud, CloudMoon, Wind } from 'lucide-react';
+import { Calendar, Sun, Moon, Pause, Play, FastForward, Keyboard, MousePointer2, Camera, Menu, X, ChevronDown, Cloud, CloudMoon, Wind, Users } from 'lucide-react';
 import { PlayerStats } from '../types';
 import { SicknessMeter } from './SicknessMeter';
+import { getReputationTier, getReputationLabel, getReputationColorClass, getReputationBgClass } from '../utils/reputation';
 
 interface TopStatusBarProps {
   dateStr: string;
@@ -22,6 +23,7 @@ interface TopStatusBarProps {
   showSettings: boolean;
   onToggleSettings: () => void;
   onOpenAbout: () => void;
+  reputation?: number;
 }
 
 // Get speed icon and label
@@ -66,8 +68,14 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   onToggleMobilePerspectiveMenu,
   showSettings,
   onToggleSettings,
-  onOpenAbout
+  onOpenAbout,
+  reputation
 }) => {
+  // Reputation display
+  const reputationTier = reputation !== undefined ? getReputationTier(reputation) : null;
+  const reputationLabel = reputationTier ? getReputationLabel(reputationTier) : null;
+  const reputationColorClass = reputationTier ? getReputationColorClass(reputationTier) : '';
+  const reputationBgClass = reputationTier ? getReputationBgClass(reputationTier) : '';
   const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const speedInfo = getSpeedInfo(simulationSpeed);
   const SpeedIcon = speedInfo.icon;
@@ -179,7 +187,18 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
             <div className="flex items-center gap-2"><span>V to Change Perspective</span><MousePointer2 size={10} /></div>
           </button>
         ) : (
-          <div className="hidden lg:block mr-4">
+          <div className="hidden lg:flex items-center gap-3 mr-4">
+            {/* Reputation indicator */}
+            {reputationTier && (
+              <button
+                onClick={onOpenPlayerModal}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg ${reputationBgClass} border border-white/10 hover:border-white/20 transition-all`}
+                title={`Reputation: ${reputationLabel} (${reputation})`}
+              >
+                <Users size={12} className={reputationColorClass} />
+                <span className={`text-[10px] font-medium ${reputationColorClass}`}>{reputationLabel}</span>
+              </button>
+            )}
             <SicknessMeter
               plague={plague}
               hasPlayerMoved={hasPlayerMoved || showHealthMeter}

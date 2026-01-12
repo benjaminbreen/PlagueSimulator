@@ -3,7 +3,7 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import { useFrame, useThree } from '@react-three/fiber';
 import { Environment as DreiEnvironment, Stars, ContactShadows } from '@react-three/drei';
 import * as THREE from 'three';
-import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent, PlagueStatus, NpcStateOverride, NPCRecord, BuildingInfectionState, DroppedItemRequest } from '../types';
+import { SimulationParams, SimulationCounts, DevSettings, PlayerStats, CONSTANTS, BuildingMetadata, BuildingType, Obstacle, CameraMode, NPCStats, AgentState, MarketStall as MarketStallData, MarketStallType, MerchantNPC as MerchantNPCType, MiniMapData, getDistrictType, PlayerActionEvent, PlagueStatus, NpcStateOverride, NPCRecord, BuildingInfectionState, DroppedItemRequest, SocialClass } from '../types';
 import { Environment as WorldEnvironment } from './Environment';
 import { Agents, MoraleStats } from './Agents';
 import { Rats, Rat } from './Rats';
@@ -11,7 +11,7 @@ import { Player } from './Player';
 import { MarketStall } from './MarketStall';
 import { MerchantNPC } from './MerchantNPC';
 import { AgentSnapshot, SpatialHash, buildBuildingHash, buildObstacleHash, queryNearbyAgents } from '../utils/spatial';
-import { PushableObject, PickupInfo, createPushable, ShatterLootItem, PushableKind, getPushableDisplayName, generateGraveEpitaph } from '../utils/pushables';
+import { PushableObject, PickupInfo, createPushable, ShatterLootItem, PushableKind, getPushableDisplayName, generateGraveEpitaph, getMausoleumEpitaph } from '../utils/pushables';
 import { seededRandom } from '../utils/procedural';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { ImpactPuffs, ImpactPuffSlot, MAX_PUFFS } from './ImpactPuffs';
@@ -26,7 +26,7 @@ import { SkyGradient } from './SkyGradient';
 import { AmbientAudio, SpatialSource } from './AmbientAudio';
 import { getBirdcagePlacements } from './environment/buildings/BirdcageSystem';
 import { getFarmlandLandmarks } from './environment/districts/OutskirtsFarmlandDecor';
-import { getCitadelLandmarks } from './environment/landmarks/CitadelComplex';
+import { getCitadelLandmarks, getCitadelWallCollisions } from './environment/landmarks/CitadelComplex';
 import { SnakeCharmer } from './npcs/SnakeCharmer';
 import { FluteMusic } from './audio/FluteMusic';
 import { Astrologer } from './npcs/Astrologer';
@@ -61,6 +61,7 @@ interface SimulationProps {
   onClimbingStateChange?: (climbing: boolean) => void;
   onGravestoneDesecrated?: () => void;
   onNearReadable?: (readable: { id: string; position: any; epitaph: any } | null) => void;
+  onNearWater?: (nearWater: boolean) => void;
   climbInputRef?: React.RefObject<'up' | 'down' | 'cancel' | null>;
   pickupTriggerRef?: React.MutableRefObject<boolean>;    // Mobile/touch trigger for pickup
   climbTriggerRef?: React.MutableRefObject<boolean>;     // Mobile/touch trigger for initiating climb
@@ -110,11 +111,15 @@ interface SimulationProps {
   onNearBirdcage?: (birdcage: { id: string; label: string; position: [number, number, number]; locationName: string } | null) => void;
   /** Callback when player is on rooftop near a roof hatch */
   onNearRooftopHatch?: (hatch: { buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null) => void;
+  /** Callback when player is near a special NPC (Astrologer, Scribe, Snake Charmer) */
+  onNearSpecialNpc?: (specialNpc: { type: 'ASTROLOGER' | 'SCRIBE' | 'SUFI_MYSTIC'; stats: NPCStats; state: AgentState } | null) => void;
   narratorHighlight?: {
     position: [number, number, number];
     startedAt: number;
     expiresAt: number;
   } | null;
+  /** Debug: hide outer robe to reveal underclothing */
+  hideOuterRobe?: boolean;
 }
 
 const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
@@ -852,10 +857,177 @@ const MilkyWay: React.FC<{ visible: boolean; simTime: number }> = ({ visible, si
   );
 };
 
+// ============================================================================
+// TWINKLING STARS - Shader-based animated starfield
+// ============================================================================
+// Creates a magical night sky with stars that twinkle at different rates
+// Each star has unique brightness, size, color temperature, and twinkle speed
+const TwinklingStars: React.FC<{
+  visible: boolean;
+  count?: number;
+  radius?: number;
+  moonBrightness?: number;
+}> = ({ visible, count = 800, radius = 200, moonBrightness = 0 }) => {
+  const pointsRef = useRef<THREE.Points>(null);
+  const materialRef = useRef<THREE.ShaderMaterial>(null);
+
+  // Generate star positions, sizes, and twinkle parameters
+  const { positions, sizes, twinkleSeeds, colors } = useMemo(() => {
+    const positions = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    const twinkleSeeds = new Float32Array(count);
+    const colors = new Float32Array(count * 3);
+
+    for (let i = 0; i < count; i++) {
+      // Distribute stars on a sphere, biased toward upper hemisphere
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(1 - Math.random() * 1.2); // Bias toward zenith
+      const r = radius + (Math.random() - 0.5) * 40;
+
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = r * Math.cos(phi);
+      positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+
+      // Star sizes: mostly small, few bright ones (stellar magnitude)
+      const magnitude = Math.random();
+      sizes[i] = magnitude < 0.9 ? 1.5 + Math.random() * 2.0 : 3.0 + Math.random() * 3.0;
+
+      // Unique twinkle phase per star
+      twinkleSeeds[i] = Math.random();
+
+      // Star colors: mostly white, some warm, some cool
+      const colorTemp = Math.random();
+      if (colorTemp < 0.7) {
+        colors[i * 3] = 1.0; colors[i * 3 + 1] = 1.0; colors[i * 3 + 2] = 1.0;
+      } else if (colorTemp < 0.85) {
+        colors[i * 3] = 1.0; colors[i * 3 + 1] = 0.9 + Math.random() * 0.1; colors[i * 3 + 2] = 0.7 + Math.random() * 0.2;
+      } else {
+        colors[i * 3] = 0.85 + Math.random() * 0.1; colors[i * 3 + 1] = 0.9 + Math.random() * 0.1; colors[i * 3 + 2] = 1.0;
+      }
+    }
+    return { positions, sizes, twinkleSeeds, colors };
+  }, [count, radius]);
+
+  // Custom shader material for twinkling
+  const shaderMaterial = useMemo(() => {
+    return new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        opacity: { value: 1.0 },
+      },
+      vertexShader: `
+        attribute float size;
+        attribute float twinkleSeed;
+        attribute vec3 starColor;
+        varying float vTwinkle;
+        varying vec3 vColor;
+        uniform float time;
+
+        void main() {
+          vColor = starColor;
+          // Multiple sine waves for natural twinkle (atmospheric scintillation)
+          float phase = twinkleSeed * 6.28318;
+          float twinkle1 = sin(time * 2.0 + phase) * 0.3;
+          float twinkle2 = sin(time * 5.0 + phase * 2.3) * 0.2;
+          float twinkle3 = sin(time * 0.7 + phase * 0.7) * 0.15;
+          vTwinkle = clamp(0.5 + twinkle1 + twinkle2 + twinkle3, 0.2, 1.0);
+          // Brighter stars twinkle less
+          float sizeNorm = size / 6.0;
+          vTwinkle = mix(vTwinkle, 1.0, sizeNorm * 0.5);
+
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = clamp(size * vTwinkle * (200.0 / -mvPosition.z), 1.0, 8.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        varying float vTwinkle;
+        varying vec3 vColor;
+        uniform float opacity;
+
+        void main() {
+          vec2 center = gl_PointCoord - vec2(0.5);
+          float dist = length(center);
+          float alpha = 1.0 - smoothstep(0.3, 0.5, dist);
+          vec3 color = vColor * (0.7 + vTwinkle * 0.5);
+          alpha *= vTwinkle * opacity;
+          if (alpha < 0.01) discard;
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+  }, []);
+
+  // Animate twinkle
+  useFrame((state) => {
+    if (materialRef.current && visible) {
+      materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+      materialRef.current.uniforms.opacity.value = 1.0 - moonBrightness * 0.6;
+    }
+  });
+
+  if (!visible) return null;
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" count={count} array={positions} itemSize={3} />
+        <bufferAttribute attach="attributes-size" count={count} array={sizes} itemSize={1} />
+        <bufferAttribute attach="attributes-twinkleSeed" count={count} array={twinkleSeeds} itemSize={1} />
+        <bufferAttribute attach="attributes-starColor" count={count} array={colors} itemSize={3} />
+      </bufferGeometry>
+      <primitive object={shaderMaterial} ref={materialRef} attach="material" />
+    </points>
+  );
+};
+
+// HSL interpolation for smoother, more natural color transitions
+const lerpColorHSL = (color1: THREE.Color, color2: THREE.Color, t: number): THREE.Color => {
+  const hsl1 = { h: 0, s: 0, l: 0 };
+  const hsl2 = { h: 0, s: 0, l: 0 };
+  color1.getHSL(hsl1);
+  color2.getHSL(hsl2);
+  // Handle hue wrapping (e.g., red to purple across 0)
+  let hDiff = hsl2.h - hsl1.h;
+  if (hDiff > 0.5) hDiff -= 1;
+  if (hDiff < -0.5) hDiff += 1;
+  const result = new THREE.Color();
+  result.setHSL(
+    (hsl1.h + hDiff * t + 1) % 1,
+    hsl1.s + (hsl2.s - hsl1.s) * t,
+    hsl1.l + (hsl2.l - hsl1.l) * t
+  );
+  return result;
+};
+
+// DAWN palettes - softer pinks, corals, lavenders (morning optimism)
+const DAWN_PALETTES = [
+  { top: '#4a3a6a', mid: '#c87898', bottom: '#ffc888' },  // Classic pink-gold
+  { top: '#5a4878', mid: '#b888a8', bottom: '#ffd4a8' },  // Lavender morning
+  { top: '#3a4a6a', mid: '#d89080', bottom: '#ffe0b8' },  // Coral sunrise
+  { top: '#5a3868', mid: '#c86090', bottom: '#ffb070' },  // Magenta dawn
+  { top: '#4a4878', mid: '#a878a0', bottom: '#f8c898' },  // Dusty rose
+];
+
+// DUSK palettes - deeper reds, oranges, dramatic purples (evening drama)
+const DUSK_PALETTES = [
+  { top: '#2a2050', mid: '#b85040', bottom: '#ff8838' },  // Classic orange-red
+  { top: '#1a1840', mid: '#884068', bottom: '#e87050' },  // Purple-pink
+  { top: '#3a1838', mid: '#c83828', bottom: '#ff9028' },  // Fiery sunset
+  { top: '#2a2848', mid: '#a06070', bottom: '#e0a060' },  // Dusty rose dusk
+  { top: '#1a1030', mid: '#902848', bottom: '#f07038' },  // Dramatic crimson
+  { top: '#2a2858', mid: '#985080', bottom: '#f89858' },  // Mauve twilight
+];
+
 const SkyGradientDome: React.FC<{ timeOfDay: number; weatherType: WeatherType }> = ({ timeOfDay, weatherType }) => {
-  const sunriseBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
-  const sunsetBoost = useMemo(() => 0.6 + Math.random() * 0.4, []);
-  const dawnVariant = useMemo(() => Math.random(), []);
+  // Randomized palette selection (consistent per session)
+  const dawnPaletteIndex = useMemo(() => Math.floor(Math.random() * DAWN_PALETTES.length), []);
+  const duskPaletteIndex = useMemo(() => Math.floor(Math.random() * DUSK_PALETTES.length), []);
+  const intensityVariation = useMemo(() => 0.7 + Math.random() * 0.3, []); // 0.7-1.0
+
   const prevTextureRef = useRef<THREE.CanvasTexture | null>(null);
   const skyKey = Math.round(timeOfDay * 12) / 12; // Update every 5 min of sim time
 
@@ -869,48 +1041,89 @@ const SkyGradientDome: React.FC<{ timeOfDay: number; weatherType: WeatherType }>
     const t = skyKey;
     const sunAngle = (t / 24) * Math.PI * 2;
     const elevation = Math.sin(sunAngle - Math.PI / 2);
+
+    // Determine if we're in dawn (morning) or dusk (evening)
+    const isDawn = t >= 3 && t < 12;
+    const isDusk = t >= 15 && t < 24;
+
+    // Calculate base factors
     const dayFactor = smoothstep(-0.1, 0.35, elevation);
-    const twilightFactor = smoothstep(-0.35, 0.05, elevation) * (1 - dayFactor);
     const nightFactor = 1 - smoothstep(-0.45, 0.1, elevation);
 
-    const dawnTop = dawnVariant > 0.5 ? new THREE.Color('#3a2f52') : new THREE.Color('#1b2438');
-    const dawnMid = dawnVariant > 0.7
-      ? new THREE.Color('#9a6a8a')
-      : dawnVariant > 0.3
-        ? new THREE.Color('#8a5a7a')
-        : new THREE.Color('#6a3f61');
-    const dawnBottom = dawnVariant > 0.6
-      ? new THREE.Color('#f5b8a8')
-      : new THREE.Color('#f0a06a');
+    // Dawn peaks around 5:30-6:30 AM
+    const dawnFactor = isDawn
+      ? Math.pow(Math.max(0, 1 - Math.abs(t - 6) / 3.5), 1.3) * (1 - dayFactor * 0.8)
+      : 0;
 
+    // Dusk peaks around 18:00-19:00
+    const duskFactor = isDusk
+      ? Math.pow(Math.max(0, 1 - Math.abs(t - 18.5) / 3.5), 1.3) * (1 - dayFactor * 0.8)
+      : 0;
+
+    // Get the selected palettes
+    const dawnPalette = DAWN_PALETTES[dawnPaletteIndex];
+    const duskPalette = DUSK_PALETTES[duskPaletteIndex];
+
+    // Base colors
     const dayTop = new THREE.Color('#5aa6e8');
     const dayMid = new THREE.Color('#49a6ef');
-    const dayBottom = new THREE.Color('#2f95ee');
-    const duskTop = new THREE.Color('#2a3558');
-    const duskMid = new THREE.Color('#a05044');
-    const duskBottom = new THREE.Color('#f7b25a');
+    const dayBottom = new THREE.Color('#c8d8e8');
     const nightTop = new THREE.Color('#05080f');
     const nightMid = new THREE.Color('#0a1220');
     const nightBottom = new THREE.Color('#0c1426');
 
-    const soften = (v: number) => Math.pow(v, 0.7);
-    const dayMix = soften(dayFactor);
-    const duskMix = soften(twilightFactor);
-    const nightMix = soften(nightFactor);
+    // Dawn colors from palette
+    const dawnTop = new THREE.Color(dawnPalette.top);
+    const dawnMid = new THREE.Color(dawnPalette.mid);
+    const dawnBottom = new THREE.Color(dawnPalette.bottom);
 
-    const duskBlend = duskMix * (1 - nightMix * 0.8);
-    const top = nightTop.clone()
-      .lerp(dayTop, dayMix)
-      .lerp(duskTop, duskBlend)
-      .lerp(dawnTop, duskBlend * 0.9);
-    const mid = nightMid.clone()
-      .lerp(dayMid, dayMix)
-      .lerp(duskMid, duskBlend)
-      .lerp(dawnMid, duskBlend * 0.9);
-    const bottom = nightBottom.clone()
-      .lerp(dayBottom, dayMix)
-      .lerp(duskBottom, duskBlend)
-      .lerp(dawnBottom, duskBlend * 0.9);
+    // Dusk colors from palette
+    const duskTop = new THREE.Color(duskPalette.top);
+    const duskMid = new THREE.Color(duskPalette.mid);
+    const duskBottom = new THREE.Color(duskPalette.bottom);
+
+    // Apply intensity variation to twilight colors
+    const applyIntensity = (color: THREE.Color) => {
+      const hsl = { h: 0, s: 0, l: 0 };
+      color.getHSL(hsl);
+      color.setHSL(hsl.h, hsl.s * intensityVariation, hsl.l);
+      return color;
+    };
+
+    // Build colors using HSL interpolation for smoother transitions
+    let top = nightTop.clone();
+    let mid = nightMid.clone();
+    let bottom = nightBottom.clone();
+
+    // First blend to day
+    const dayMix = Math.pow(dayFactor, 0.7);
+    top = lerpColorHSL(top, dayTop, dayMix);
+    mid = lerpColorHSL(mid, dayMid, dayMix);
+    bottom = lerpColorHSL(bottom, dayBottom, dayMix);
+
+    // Then blend dawn (only in morning hours)
+    if (dawnFactor > 0.02) {
+      const dawnMix = Math.pow(dawnFactor, 0.6) * intensityVariation;
+      top = lerpColorHSL(top, applyIntensity(dawnTop.clone()), dawnMix);
+      mid = lerpColorHSL(mid, applyIntensity(dawnMid.clone()), dawnMix * 1.1);
+      bottom = lerpColorHSL(bottom, applyIntensity(dawnBottom.clone()), dawnMix * 1.2);
+    }
+
+    // Then blend dusk (only in evening hours) - MORE intense than dawn
+    if (duskFactor > 0.02) {
+      const duskMix = Math.pow(duskFactor, 0.55) * intensityVariation * 1.15;
+      top = lerpColorHSL(top, applyIntensity(duskTop.clone()), duskMix);
+      mid = lerpColorHSL(mid, applyIntensity(duskMid.clone()), duskMix * 1.2);
+      bottom = lerpColorHSL(bottom, applyIntensity(duskBottom.clone()), duskMix * 1.3);
+    }
+
+    // Blend back towards night
+    if (nightFactor > 0.1) {
+      const nightMix = Math.pow(nightFactor, 0.8);
+      top = lerpColorHSL(top, nightTop, nightMix);
+      mid = lerpColorHSL(mid, nightMid, nightMix * 0.9);
+      bottom = lerpColorHSL(bottom, nightBottom, nightMix * 0.85);
+    }
 
     // Midday desaturation for washed Damascus light
     const desat = THREE.MathUtils.lerp(0.2, 0, Math.abs(elevation));
@@ -939,13 +1152,20 @@ const SkyGradientDome: React.FC<{ timeOfDay: number; weatherType: WeatherType }>
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Secondary warm band near horizon
-    const bandStrength = Math.max(0, twilightFactor - 0.1);
-    if (bandStrength > 0.01) {
+    // Secondary warm band near horizon - different for dawn vs dusk
+    const twilightStrength = Math.max(dawnFactor, duskFactor);
+    if (twilightStrength > 0.05) {
       const bandStart = canvas.height * 0.65;
       const flare = ctx.createLinearGradient(0, bandStart, 0, canvas.height);
-      flare.addColorStop(0, `rgba(255,140,90,${0.35 * sunsetBoost * bandStrength})`);
-      flare.addColorStop(1, `rgba(255,210,150,${0.45 * sunsetBoost * bandStrength})`);
+      if (duskFactor > dawnFactor) {
+        // Dusk: warmer orange-red band
+        flare.addColorStop(0, `rgba(255,120,70,${0.4 * intensityVariation * twilightStrength})`);
+        flare.addColorStop(1, `rgba(255,180,100,${0.5 * intensityVariation * twilightStrength})`);
+      } else {
+        // Dawn: softer pink-peach band
+        flare.addColorStop(0, `rgba(255,160,140,${0.3 * intensityVariation * twilightStrength})`);
+        flare.addColorStop(1, `rgba(255,200,170,${0.4 * intensityVariation * twilightStrength})`);
+      }
       ctx.fillStyle = flare;
       ctx.fillRect(0, bandStart, canvas.width, canvas.height - bandStart);
     }
@@ -955,7 +1175,7 @@ const SkyGradientDome: React.FC<{ timeOfDay: number; weatherType: WeatherType }>
     tex.minFilter = THREE.LinearFilter;
     tex.colorSpace = THREE.SRGBColorSpace;
     return tex;
-  }, [skyKey, sunriseBoost, sunsetBoost, dawnVariant, weatherType]);
+  }, [skyKey, dawnPaletteIndex, duskPaletteIndex, intensityVariation, weatherType]);
 
   const easedTexture = useMemo(() => {
     if (!texture) return null;
@@ -1176,7 +1396,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, onGravestoneDesecrated, onNearReadable, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch, narratorHighlight }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, onGravestoneDesecrated, onNearReadable, onNearWater, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch, onNearSpecialNpc, narratorHighlight, hideOuterRobe }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1243,6 +1463,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [currentNearChest, setCurrentNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const [currentNearBirdcage, setCurrentNearBirdcage] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const [currentNearRooftopHatch, setCurrentNearRooftopHatch] = useState<{ buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null>(null);
+  const [currentNearSpecialNpc, setCurrentNearSpecialNpc] = useState<{ type: 'ASTROLOGER' | 'SCRIBE' | 'SUFI_MYSTIC'; stats: NPCStats; state: AgentState } | null>(null);
   const nearSpeakableNpcTickRef = useRef(0);
 
   // Ambient audio state
@@ -1622,6 +1843,93 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       });
     }
 
+    // QUBAYBAT (Little Domes): Mausoleums with historical epitaphs + procedural gravestones
+    if (district === 'QUBAYBAT') {
+      const rand = (offset: number) => seededRandom(sessionSeed + offset);
+      const QIBLA_ANGLE = (190 * Math.PI) / 180;
+
+      // Major mausoleums with custom historical epitaphs (matching QubaybatDecor positions)
+      const mausoleumPositions: Array<{ x: number; z: number; epitaphIndex: number }> = [
+        { x: 0, z: 0, epitaphIndex: 0 },         // Central grand mausoleum - Al-Dhahabi
+        { x: -22, z: -18, epitaphIndex: 1 },     // NW corner - Al-Mizzi
+        { x: 22, z: -18, epitaphIndex: 2 },      // NE corner - Emir Tankiz
+        { x: -22, z: 22, epitaphIndex: 3 },      // SW corner - Sitt Hajar
+        { x: 22, z: 22, epitaphIndex: 4 },       // SE corner - Emir Arghun Shah
+        { x: -10, z: -28, epitaphIndex: 5 },     // South - Ibn Kathir (fictional early death)
+        { x: 12, z: -25, epitaphIndex: 6 },      // South - Khadija bint Baybars
+        { x: -8, z: 32, epitaphIndex: 7 },       // North - Al-Barzali
+      ];
+
+      mausoleumPositions.forEach(({ x, z, epitaphIndex }, i) => {
+        const jitterX = (rand(i * 3 + 2000) - 0.5) * 2;
+        const jitterZ = (rand(i * 3 + 2001) - 0.5) * 2;
+
+        const mausoleum = createPushable(
+          `mausoleum-${i}`,
+          'mausoleum',
+          [x + jitterX, 0, z + jitterZ],
+          4.0, // Large collision radius (but these are static/immovable)
+          99999, // Extremely heavy - cannot be moved
+          QIBLA_ANGLE,
+          'stone'
+        );
+
+        // Assign the historical epitaph
+        const epitaph = getMausoleumEpitaph(epitaphIndex);
+        mausoleum.mausoleumEpitaph = epitaph;
+        mausoleum.isSleeping = true;
+
+        items.push(mausoleum);
+      });
+
+      // Scattered gravestones between mausoleums (fewer than cemetery, using same procedural system)
+      const graveClusterCenters: Array<[number, number]> = [
+        [-15, -5], [15, -5], [-15, 12], [15, 12],
+        [0, -20], [0, 25], [-30, -15], [30, -15]
+      ];
+
+      graveClusterCenters.forEach(([cx, cz], clusterIdx) => {
+        const graveCount = 3 + Math.floor(rand(clusterIdx * 100 + 3000) * 3); // 3-5 graves per cluster
+
+        for (let i = 0; i < graveCount; i++) {
+          const angle = rand(clusterIdx * 100 + i * 10 + 3010) * Math.PI * 2;
+          const dist = 2 + rand(clusterIdx * 100 + i * 10 + 3011) * 4;
+          const x = cx + Math.cos(angle) * dist;
+          const z = cz + Math.sin(angle) * dist;
+          const rotJitter = (rand(clusterIdx * 100 + i * 10 + 3012) - 0.5) * 0.15;
+
+          const shapeRoll = rand(clusterIdx * 100 + i * 10 + 3013);
+          const graveShape = shapeRoll < 0.40 ? 'rectangular'
+            : shapeRoll < 0.70 ? 'arch'
+            : shapeRoll < 0.90 ? 'peaked'
+            : 'platform';
+
+          const scale = 1.2 + rand(clusterIdx * 100 + i * 10 + 3014) * 0.6;
+
+          const gravestone = createPushable(
+            `qubaybat-grave-${clusterIdx}-${i}`,
+            'gravestone',
+            [x, 0, z],
+            0.5 * scale,
+            150 * scale,
+            QIBLA_ANGLE + rotJitter,
+            'stone'
+          );
+
+          gravestone.graveShape = graveShape as any;
+          gravestone.graveScale = scale;
+          gravestone.graveType = rand(clusterIdx * 100 + i * 10 + 3015) > 0.6 ? 'ornate' : 'raised';
+          gravestone.isTipped = false;
+          gravestone.tippedRotation = 0;
+          gravestone.wobbleAngle = 0;
+          gravestone.wobbleVelocity = 0;
+          gravestone.graveEpitaph = generateGraveEpitaph(sessionSeed + clusterIdx * 1000 + i * 777 + 5000);
+
+          items.push(gravestone);
+        }
+      });
+    }
+
     return items;
   }, [params.mapX, params.mapY]);
   const [pushables, setPushables] = useState<PushableObject[]>(() => buildPushables());
@@ -1658,6 +1966,55 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       return next;
     });
   }, [dropRequests]);
+
+  // Add pushable pots near buildings when buildings are loaded (replacing static decorations)
+  const addedBuildingClutterRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (buildingsState.length === 0) return;
+
+    const newPushables: PushableObject[] = [];
+    const marketDistrict = district === 'MARKET' || district === 'SOUQ_AL_QALA';
+
+    buildingsState.forEach((building) => {
+      const localSeed = building.position[0] * 1000 + building.position[2] * 100 + params.mapX * 10 + params.mapY;
+      const clutterKey = `building-clutter-${building.id}`;
+
+      // Skip if we already added clutter for this building
+      if (addedBuildingClutterRef.current.has(clutterKey)) return;
+
+      const hasResidentialClutter = !marketDistrict && seededRandom(localSeed + 83) > 0.5;
+      const clutterType = Math.floor(seededRandom(localSeed + 84) * 3);
+
+      // clutterType === 1 means pot tree
+      if (hasResidentialClutter && clutterType === 1) {
+        const buildingSize = building.size || 8;
+        const potPos: [number, number, number] = [
+          building.position[0] - buildingSize / 2 - 0.9,
+          0,
+          building.position[2] + 1.1
+        ];
+
+        const pot = createPushable(
+          clutterKey,
+          'olivePot',
+          potPos,
+          0.8,
+          2.0,
+          seededRandom(localSeed + 85) * Math.PI * 2,
+          'ceramic'
+        );
+        pot.potSize = 0.85 + seededRandom(localSeed + 86) * 0.3;
+        pot.potStyle = Math.floor(seededRandom(localSeed + 87) * 3);
+        newPushables.push(pot);
+        addedBuildingClutterRef.current.add(clutterKey);
+      }
+    });
+
+    if (newPushables.length > 0) {
+      setPushables(prev => [...prev, ...newPushables]);
+    }
+  }, [buildingsState, district, params.mapX, params.mapY]);
+
   const handlePickupItem = useCallback((itemId: string, pickup: PickupInfo) => {
     setPushables(prev => prev.filter(item => item.id !== itemId));
     onPickupItem?.(pickup);
@@ -2086,6 +2443,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   }, [params.mapX, params.mapY, sessionSeed]);
 
   const [snakeCharmerDistance, setSnakeCharmerDistance] = useState(100);
+  const snakeCharmerNearRef = useRef(false); // Track if we've notified about being near snake charmer
 
   // Astrologer - 50% chance in marketplace and standard street biomes
   const astrologerPosition = useMemo<[number, number, number] | null>(() => {
@@ -2135,6 +2493,94 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     return null;
   }, [params.mapX, params.mapY, sessionSeed]);
 
+  // Memoized stats for special NPCs - used for proximity detection
+  const snakeCharmerStats = useMemo<NPCStats | null>(() => {
+    if (!snakeCharmerPosition) return null;
+    const seed = snakeCharmerPosition[0] * 1000 + snakeCharmerPosition[2];
+    const seededRandom2 = (s: number) => { const x = Math.sin(s) * 10000; return x - Math.floor(x); };
+    const names = ['Jalal', 'Rashid', 'Yusuf', 'Ibrahim', 'Ahmad'];
+    const name = names[Math.floor(seededRandom2(seed) * names.length)];
+    return {
+      id: `sufi-mystic-${snakeCharmerPosition[0]}-${snakeCharmerPosition[2]}`,
+      name: `${name} al-Saʿdi`,
+      age: 35 + Math.floor(seededRandom2(seed + 1) * 25),
+      profession: 'Sufi Snake Charmer',
+      gender: 'Male',
+      socialClass: SocialClass.CLERGY,
+      ethnicity: 'Arab',
+      religion: 'Sunni Islam',
+      language: 'Arabic',
+      height: 165,
+      weight: 70,
+      disposition: 70,
+      mood: 'Mystical',
+      awarenessLevel: 45,
+      panicLevel: 10,
+      goalOfDay: 'Charm snakes and offer blessings',
+      heldItem: 'none',
+      headwearStyle: 'turban',
+      accessories: ['Incense burner', 'Al-nāy flute']
+    };
+  }, [snakeCharmerPosition]);
+
+  const astrologerStats = useMemo<NPCStats | null>(() => {
+    if (!astrologerPosition) return null;
+    const seed = astrologerPosition[0] * 1000 + astrologerPosition[2];
+    const seededRandom2 = (s: number) => { const x = Math.sin(s) * 10000; return x - Math.floor(x); };
+    const names = ['Hasan', 'Omar', 'Khalil', 'Mansur', 'Zakariya'];
+    const name = names[Math.floor(seededRandom2(seed) * names.length)];
+    return {
+      id: `astrologer-${astrologerPosition[0]}-${astrologerPosition[2]}`,
+      name: `${name} al-Munajjim`,
+      age: 45 + Math.floor(seededRandom2(seed + 1) * 30),
+      profession: 'Astrologer & Astronomer',
+      gender: 'Male',
+      socialClass: SocialClass.MERCHANT,
+      ethnicity: 'Persian',
+      religion: 'Shia Islam',
+      language: 'Persian',
+      height: 165,
+      weight: 75,
+      disposition: 60,
+      mood: 'Contemplative',
+      awarenessLevel: 75,
+      panicLevel: 35,
+      goalOfDay: 'Consult the stars for omens',
+      heldItem: 'none',
+      headwearStyle: 'turban',
+      accessories: ['Brass astrolabe', 'Star charts', 'Ink and quill']
+    };
+  }, [astrologerPosition]);
+
+  const scribeStats = useMemo<NPCStats | null>(() => {
+    if (!scribePosition) return null;
+    const seed = scribePosition[0] * 1000 + scribePosition[2];
+    const seededRandom2 = (s: number) => { const x = Math.sin(s) * 10000; return x - Math.floor(x); };
+    const names = ['Mustafa', 'Ali', 'Hamza', 'Tariq', 'Nasir'];
+    const name = names[Math.floor(seededRandom2(seed) * names.length)];
+    return {
+      id: `scribe-${scribePosition[0]}-${scribePosition[2]}`,
+      name: `${name} al-Warrāq`,
+      age: 40 + Math.floor(seededRandom2(seed + 1) * 35),
+      profession: 'Scribe & Calligrapher',
+      gender: 'Male',
+      socialClass: SocialClass.MERCHANT,
+      ethnicity: 'Arab',
+      religion: 'Sunni Islam',
+      language: 'Arabic',
+      height: 165,
+      weight: 72,
+      disposition: 55,
+      mood: 'Focused',
+      awarenessLevel: 60,
+      panicLevel: 25,
+      goalOfDay: 'Copy manuscripts and write letters',
+      heldItem: 'none',
+      headwearStyle: 'turban',
+      accessories: ['Reed pens', 'Colored inks', 'Wax seal']
+    };
+  }, [scribePosition]);
+
   // Tree obstacles for boulder collision
   const [treeObstacles, setTreeObstacles] = useState<Obstacle[]>([]);
   const handleTreePositions = useCallback((positions: Array<[number, number, number]>) => {
@@ -2149,8 +2595,14 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const obstacles = useMemo<Obstacle[]>(() => {
     const district = getDistrictType(params.mapX, params.mapY);
     if (params.mapX !== 0 || params.mapY !== 0) {
-      // Allow obstacles for outskirts, caravanserai, and canal district
-      if (!isOutskirts && district !== 'CARAVANSERAI' && district !== 'QANAWAT') return [];
+      // Allow obstacles for outskirts, caravanserai, canal district, and citadel (CIVIC)
+      if (!isOutskirts && district !== 'CARAVANSERAI' && district !== 'QANAWAT' && district !== 'CIVIC') return [];
+    }
+
+    // Citadel district: add wall collision obstacles
+    if (district === 'CIVIC') {
+      const citadelWalls = getCitadelWallCollisions();
+      return citadelWalls;
     }
 
     const baseObstacles: Obstacle[] = isOutskirts
@@ -2267,7 +2719,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     targetWeatherType: WeatherType.CLEAR,
     weatherBlend: 0,
   });
-  const envPreset = params.timeOfDay < 6 || params.timeOfDay > 18 ? 'night' : 'sunset';
+  // Use 'city' preset instead of 'sunset' - more reliable CDN availability
+  const envPreset = params.timeOfDay < 6 || params.timeOfDay > 18 ? 'night' : 'city';
   const npcStatsById = useMemo(() => {
     const map = new Map<string, NPCStats>();
     npcPool.forEach((record) => {
@@ -2412,9 +2865,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         weather.current.targetCloudCover = 0.15 + Math.random() * 0.7;
         weather.current.targetHumidity = 0.1 + Math.random() * 0.5;
         weather.current.wind.set(0.2 + Math.random() * 0.6, 0.1 + Math.random() * 0.4);
-        weather.current.nextShift = t + 45 + Math.random() * 60;
+        // Weather shifts every 3-6 minutes (180-360 seconds) for more stable conditions
+        weather.current.nextShift = t + 180 + Math.random() * 180;
         const roll = Math.random();
-        weather.current.targetWeatherType = roll > 0.85 ? WeatherType.SANDSTORM : roll > 0.55 ? WeatherType.OVERCAST : WeatherType.CLEAR;
+        // Adjusted probabilities: CLEAR 70%, OVERCAST 25%, SANDSTORM 5% (rare event)
+        weather.current.targetWeatherType = roll > 0.95 ? WeatherType.SANDSTORM : roll > 0.70 ? WeatherType.OVERCAST : WeatherType.CLEAR;
       }
       const cloudTarget = devSettings.enabled && devSettings.cloudCoverOverride !== null
         ? devSettings.cloudCoverOverride
@@ -2595,18 +3050,29 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           skyColor.lerp(temp2, 0.5).lerp(temp3, nightFactor * 0.5);
         }
 
-        // Night clamp to avoid bright whites + cool moonlight lift
-        const nightClamp = 1 - nightFactor * 0.36;
+        // Night clamp - gentler reduction for prettier nights
+        const nightClamp = 1 - nightFactor * 0.28; // Reduced from 0.36 for brighter nights
         ambientIntensity *= nightClamp;
         hemiIntensity *= nightClamp;
-        if (nightFactor > 0.2) {
-          const moonLift = (nightFactor - 0.2) * 0.6;
+
+        // Moonlight lift - silvery-blue ambient glow
+        if (nightFactor > 0.15) {
+          const moonLift = (nightFactor - 0.15) * 0.85; // Increased from 0.6
           hemiIntensity += moonLift;
-          temp1.set("#6b7fa8");
-          hemiSky.lerp(temp1, nightFactor * 0.6);
+          // Prettier moonlight: silvery blue-white instead of dull gray
+          temp1.set("#8899cc"); // Brighter, more saturated blue
+          hemiSky.lerp(temp1, nightFactor * 0.7);
+          // Add subtle warm ground bounce from building lamps
+          temp2.set("#a08878"); // Warm amber-tan
+          hemiGround.lerp(temp2, nightFactor * 0.35);
         }
-        if (nightFactor > 0.6) {
-          ambientIntensity += (nightFactor - 0.6) * 0.08;
+
+        // Additional ambient lift for deep night - prevents pure black
+        if (nightFactor > 0.5) {
+          ambientIntensity += (nightFactor - 0.5) * 0.15; // Increased from 0.08
+          // Shift ambient toward moonlit blue-silver
+          temp1.set("#7888aa");
+          ambientColor.lerp(temp1, (nightFactor - 0.5) * 0.4);
         }
 
         const centerX = playerRef.current?.position.x ?? 0;
@@ -3014,6 +3480,54 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
       }
 
+      // Check for nearby special NPCs (Astrologer, Scribe, SnakeCharmer) using player position
+      {
+        const SPECIAL_NPC_RANGE = 4; // Same range as regular speakable NPCs
+        let nearestSpecialNpc: { type: 'ASTROLOGER' | 'SCRIBE' | 'SUFI_MYSTIC'; stats: NPCStats; state: AgentState } | null = null;
+        let nearestDist = SPECIAL_NPC_RANGE;
+
+        // Check Snake Charmer
+        if (snakeCharmerPosition && snakeCharmerStats) {
+          const dx = snakeCharmerPosition[0] - pos.x;
+          const dz = snakeCharmerPosition[2] - pos.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestSpecialNpc = { type: 'SUFI_MYSTIC', stats: snakeCharmerStats, state: AgentState.HEALTHY };
+          }
+        }
+
+        // Check Astrologer
+        if (astrologerPosition && astrologerStats) {
+          const dx = astrologerPosition[0] - pos.x;
+          const dz = astrologerPosition[2] - pos.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestSpecialNpc = { type: 'ASTROLOGER', stats: astrologerStats, state: AgentState.HEALTHY };
+          }
+        }
+
+        // Check Scribe
+        if (scribePosition && scribeStats) {
+          const dx = scribePosition[0] - pos.x;
+          const dz = scribePosition[2] - pos.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestSpecialNpc = { type: 'SCRIBE', stats: scribeStats, state: AgentState.HEALTHY };
+          }
+        }
+
+        // Update state if changed
+        if (nearestSpecialNpc?.stats.id !== currentNearSpecialNpc?.stats.id) {
+          setCurrentNearSpecialNpc(nearestSpecialNpc);
+          if (onNearSpecialNpc) {
+            onNearSpecialNpc(nearestSpecialNpc);
+          }
+        }
+      }
+
       if (onMinimapUpdate) {
         const now = state.clock.elapsedTime;
         if (now - minimapTickRef.current > MINIMAP_UPDATE_INTERVAL) {
@@ -3207,7 +3721,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         preset={envPreset}
         background={false}
         blur={0.6}
-        environmentIntensity={(0.35 + dayFactor * 0.75) * Math.max(0, 1 - nightFactor * 0.6)}
+        environmentIntensity={(0.35 + dayFactor * 0.75) * Math.max(0.25, 1 - nightFactor * 0.45)}
       />
       {/* SkyGradient disabled to avoid shader fallback to black; SkyGradientDome handles sky */}
       <HorizonHaze timeOfDay={params.timeOfDay} />
@@ -3218,13 +3732,24 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         <Stars
           radius={180}
           depth={80}
-          count={2000}
+          count={1500}
           factor={5}
           saturation={0.95}
           fade
           speed={0.6}
         />
       )}
+      {/* GRAPHICS: Twinkling stars with shader-based animation - magical night sky effect */}
+      {/* Each star has unique twinkle rate and color temperature */}
+      <TwinklingStars
+        visible={dayFactor < 0.35}
+        count={600}
+        radius={190}
+        moonBrightness={(() => {
+          const moonPhase = (simTime / 29.5) % 1;
+          return 1 - Math.abs(moonPhase - 0.5) * 2;
+        })()}
+      />
       <Moon timeOfDay={params.timeOfDay} simTime={simTime} />
       <MilkyWay visible={dayFactor <= 0.4} simTime={simTime} />
 
@@ -3293,7 +3818,10 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         <SnakeCharmer
           position={snakeCharmerPosition}
           timeOfDay={params.timeOfDay}
-          onApproach={setSnakeCharmerDistance}
+          onApproach={(_npc, distance) => {
+            // Only used for flute music distance - proximity detection is in useFrame
+            setSnakeCharmerDistance(distance);
+          }}
           onSelect={onNpcSelect}
           isSelected={selectedNpcId === `sufi-mystic-${snakeCharmerPosition[0]}-${snakeCharmerPosition[2]}`}
         />
@@ -3437,6 +3965,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         climbTriggerRef={climbTriggerRef}
         onGravestoneDesecrated={onGravestoneDesecrated}
         onNearReadable={onNearReadable}
+        onNearWater={onNearWater}
         onFallDamage={onFallDamage}
         cameraViewTarget={cameraViewTarget}
         onPlayerStartMove={onPlayerStartMove}
@@ -3446,6 +3975,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         onIsometricOcclusionChange={handleIsometricOcclusionChange}
         mapEntryToken={`${params.mapX},${params.mapY}`}
         enableCameraOcclusion={!devSettings.disableCameraOcclusion}
+        hideOuterRobe={hideOuterRobe}
       />
       <BoundaryHeadingIndicator playerRef={playerRef} mapX={params.mapX} mapY={params.mapY} />
 

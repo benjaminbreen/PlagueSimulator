@@ -56,7 +56,7 @@ export const GROUND_PALETTE = {
   CIVIC: ['#d8c2a0', '#d1b896'],
   SALHIYYA: ['#6a8a4a', '#5f7d45', '#548040'],
   CEMETERY: ['#7a5a48', '#6a4a38', '#755040', '#6f5442'], // Dry brown dirt
-  QUBAYBAT: ['#8a7a68', '#7a6a58', '#9a8a78', '#857560'], // Dusty stone and sandy soil (mausoleum district)
+  QUBAYBAT: ['#6a8a4a', '#5f7d45', '#548040', '#6b7d5a'], // Green grass like hillside shrines
   OUTSKIRTS_FARMLAND: ['#6e8f4a', '#5f7f42', '#6a934f', '#57823f'],
   OUTSKIRTS_DESERT: ['#d89556', '#c8904e', '#db9e62', '#c87d42'], // Warm amber-yellow-orange desert sand
   OUTSKIRTS_SCRUBLAND: ['#8d8465', '#7f7658', '#9a8f6b', '#8a7d5e'], // Dusty scrub soil

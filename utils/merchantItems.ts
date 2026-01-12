@@ -113,6 +113,7 @@ export const TRADER_ITEMS: ItemTemplate[] = [
   { name: 'Olives', description: 'Brined olives from the grove', category: MerchantType.TRADER, basePrice: 3, rarity: 'common', effects: [{ type: 'heal', value: 8 }, { type: 'symptomRelief', stat: 'weakness', value: 6 }] },
   { name: 'Lemons', description: 'Tart citrus, good for fever and the heat', category: MerchantType.TRADER, basePrice: 3, rarity: 'common', effects: [{ type: 'heal', value: 6 }, { type: 'symptomRelief', stat: 'fever', value: 5 }] },
   { name: 'Leather Waterskin', description: 'Holds water for travel', category: MerchantType.TRADER, basePrice: 7, rarity: 'common' },
+  { name: 'Fresh Water', description: 'Clean water from the Barada river system', category: MerchantType.TRADER, basePrice: 1, rarity: 'common', effects: [{ type: 'heal', value: 5 }, { type: 'symptomRelief', stat: 'fever', value: 8 }] },
   { name: 'Hemp Rope', description: 'Useful cordage, 10 cubits', category: MerchantType.TRADER, basePrice: 5, rarity: 'common' },
   { name: 'Candles (Set of 6)', description: 'Beeswax candles for light', category: MerchantType.TRADER, basePrice: 6, rarity: 'common' },
   { name: 'Candle Stub', description: 'Leftover beeswax, can be remelted', category: MerchantType.TRADER, basePrice: 1, rarity: 'common' },

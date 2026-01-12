@@ -2445,6 +2445,471 @@ const createInnUpstairsGuests = (
   return npcs;
 };
 
+// ========================================
+// CITADEL INTERIOR GENERATION
+// ========================================
+
+/**
+ * Generate custom interiors for citadel buildings.
+ * Each building has a unique layout suited to its purpose.
+ */
+const generateCitadelInterior = (
+  building: BuildingMetadata,
+  seed: number
+): InteriorSpec => {
+  let s = seed;
+  const rand = () => seededRandom(s++);
+  const ROOM_HEIGHT = 4.5; // Higher ceilings for citadel buildings
+
+  const buildingId = building.id;
+  const rooms: InteriorRoom[] = [];
+  const props: InteriorProp[] = [];
+  const npcs: InteriorNPC[] = [];
+
+  // Determine interior based on building ID
+  if (buildingId === 'citadel-throne-room') {
+    // THRONE ROOM - Grand audience hall with throne, guards, and courtiers
+    const mainHall: InteriorRoom = {
+      id: 'throne-hall',
+      type: InteriorRoomType.HALL,
+      center: [0, 0, 0],
+      size: [16, ROOM_HEIGHT, 12],
+    };
+    rooms.push(mainHall);
+
+    // Throne on far wall
+    props.push({
+      id: 'prop-throne',
+      type: InteriorPropType.CHAIR, // Will render as ornate throne
+      roomId: mainHall.id,
+      position: [0, 0.5, -4],
+      rotation: [0, 0, 0],
+      scale: [1.5, 1.5, 1.5],
+      label: 'Sultan\'s Throne',
+    });
+
+    // Large ornate rug before throne
+    props.push({
+      id: 'prop-throne-rug',
+      type: InteriorPropType.RUG,
+      roomId: mainHall.id,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [2, 1, 2],
+      label: 'Persian carpet',
+    });
+
+    // Damascus lanterns flanking throne
+    props.push({
+      id: 'prop-lantern-left',
+      type: InteriorPropType.LANTERN,
+      roomId: mainHall.id,
+      position: [-3, 2.5, -4],
+      rotation: [0, 0, 0],
+      scale: [1.3, 1.3, 1.3],
+      label: 'Damascus lamp',
+    });
+    props.push({
+      id: 'prop-lantern-right',
+      type: InteriorPropType.LANTERN,
+      roomId: mainHall.id,
+      position: [3, 2.5, -4],
+      rotation: [0, 0, 0],
+      scale: [1.3, 1.3, 1.3],
+      label: 'Damascus lamp',
+    });
+
+    // Writing desk for scribes
+    props.push({
+      id: 'prop-scribe-desk',
+      type: InteriorPropType.DESK,
+      roomId: mainHall.id,
+      position: [-5, 0, 2],
+      rotation: [0, Math.PI / 4, 0],
+      scale: [1, 1, 1],
+      label: 'Scribe\'s desk',
+    });
+
+    // Books and ink on desk
+    props.push({
+      id: 'prop-books',
+      type: InteriorPropType.BOOKS,
+      roomId: mainHall.id,
+      position: [-5, 0.8, 2],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Court records',
+    });
+
+    // Brazier for incense
+    props.push({
+      id: 'prop-brazier',
+      type: InteriorPropType.BRAZIER,
+      roomId: mainHall.id,
+      position: [5, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Incense brazier',
+    });
+
+    // Guards (2-3)
+    for (let i = 0; i < 2 + Math.floor(rand() * 2); i++) {
+      const guardStats = generateNPCStats(seed + 100 + i);
+      guardStats.profession = 'Mamluk Guard';
+      guardStats.gender = 'Male';
+      guardStats.socialClass = SocialClass.PEASANT;
+      guardStats.age = 25 + Math.floor(rand() * 15);
+      npcs.push({
+        id: `npc-guard-${i}`,
+        role: 'worker',
+        position: [i === 0 ? -6 : 6, 0, i === 0 ? -3 : -3],
+        rotation: [0, 0, 0],
+        stats: guardStats,
+        state: AgentState.HEALTHY,
+      });
+    }
+
+  } else if (buildingId === 'citadel-barracks') {
+    // BARRACKS - Long room with sleeping pallets, weapon racks, soldiers
+    const mainRoom: InteriorRoom = {
+      id: 'barracks-hall',
+      type: InteriorRoomType.HALL,
+      center: [0, 0, 0],
+      size: [20, ROOM_HEIGHT, 10],
+    };
+    rooms.push(mainRoom);
+
+    // Rows of sleeping mats
+    for (let i = 0; i < 6; i++) {
+      const x = -8 + i * 3;
+      props.push({
+        id: `prop-bed-${i}`,
+        type: InteriorPropType.SLEEPING_MAT,
+        roomId: mainRoom.id,
+        position: [x, 0, -3],
+        rotation: [0, 0, 0],
+        scale: [1, 1, 1],
+        label: 'Soldier\'s mat',
+      });
+    }
+
+    // Weapon racks along wall
+    props.push({
+      id: 'prop-weapons-1',
+      type: InteriorPropType.TOOL_RACK,
+      roomId: mainRoom.id,
+      position: [-8, 0, 4],
+      rotation: [0, Math.PI, 0],
+      scale: [1, 1, 1],
+      label: 'Sword rack',
+    });
+    props.push({
+      id: 'prop-weapons-2',
+      type: InteriorPropType.TOOL_RACK,
+      roomId: mainRoom.id,
+      position: [0, 0, 4],
+      rotation: [0, Math.PI, 0],
+      scale: [1, 1, 1],
+      label: 'Spear rack',
+    });
+    props.push({
+      id: 'prop-weapons-3',
+      type: InteriorPropType.TOOL_RACK,
+      roomId: mainRoom.id,
+      position: [8, 0, 4],
+      rotation: [0, Math.PI, 0],
+      scale: [1, 1, 1],
+      label: 'Shield rack',
+    });
+
+    // Chests for belongings
+    props.push({
+      id: 'prop-chest-1',
+      type: InteriorPropType.CHEST,
+      roomId: mainRoom.id,
+      position: [-8, 0, -1],
+      rotation: [0, Math.PI / 2, 0],
+      scale: [1, 1, 1],
+      label: 'Soldier\'s trunk',
+    });
+    props.push({
+      id: 'prop-chest-2',
+      type: InteriorPropType.CHEST,
+      roomId: mainRoom.id,
+      position: [8, 0, -1],
+      rotation: [0, -Math.PI / 2, 0],
+      scale: [1, 1, 1],
+      label: 'Soldier\'s trunk',
+    });
+
+    // Oil lamp
+    props.push({
+      id: 'prop-lamp',
+      type: InteriorPropType.LAMP,
+      roomId: mainRoom.id,
+      position: [0, 2.5, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Oil lamp',
+    });
+
+    // Soldiers (3-5)
+    for (let i = 0; i < 3 + Math.floor(rand() * 3); i++) {
+      const soldierStats = generateNPCStats(seed + 200 + i);
+      soldierStats.profession = 'Mamluk Soldier';
+      soldierStats.gender = 'Male';
+      soldierStats.socialClass = SocialClass.PEASANT;
+      soldierStats.age = 20 + Math.floor(rand() * 20);
+      npcs.push({
+        id: `npc-soldier-${i}`,
+        role: 'worker',
+        position: [-6 + i * 3, 0, rand() > 0.5 ? 1 : -1],
+        rotation: [0, rand() * Math.PI * 2, 0],
+        stats: soldierStats,
+        state: AgentState.HEALTHY,
+      });
+    }
+
+  } else if (buildingId === 'citadel-stables') {
+    // STABLES - Horses, hay, stable hand
+    const mainRoom: InteriorRoom = {
+      id: 'stable-hall',
+      type: InteriorRoomType.STORAGE, // Storage type for barn-like feel
+      center: [0, 0, 0],
+      size: [14, ROOM_HEIGHT - 1, 10], // Lower ceiling
+    };
+    rooms.push(mainRoom);
+
+    // Hay bales
+    for (let i = 0; i < 4; i++) {
+      props.push({
+        id: `prop-hay-${i}`,
+        type: InteriorPropType.CRATE, // Will render as hay bale
+        roomId: mainRoom.id,
+        position: [-5 + i * 3, 0, 4],
+        rotation: [0, rand() * 0.3, 0],
+        scale: [1.2, 0.8, 1],
+        label: 'Hay bale',
+      });
+    }
+
+    // Water troughs
+    props.push({
+      id: 'prop-trough-1',
+      type: InteriorPropType.WATER_BASIN,
+      roomId: mainRoom.id,
+      position: [-4, 0, -3],
+      rotation: [0, 0, 0],
+      scale: [1.5, 1, 1.5],
+      label: 'Water trough',
+    });
+    props.push({
+      id: 'prop-trough-2',
+      type: InteriorPropType.WATER_BASIN,
+      roomId: mainRoom.id,
+      position: [4, 0, -3],
+      rotation: [0, 0, 0],
+      scale: [1.5, 1, 1.5],
+      label: 'Water trough',
+    });
+
+    // Amphora with grain
+    props.push({
+      id: 'prop-grain',
+      type: InteriorPropType.AMPHORA,
+      roomId: mainRoom.id,
+      position: [-6, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Grain storage',
+    });
+
+    // Tool rack for grooming
+    props.push({
+      id: 'prop-tools',
+      type: InteriorPropType.TOOL_RACK,
+      roomId: mainRoom.id,
+      position: [6, 0, 0],
+      rotation: [0, -Math.PI / 2, 0],
+      scale: [1, 1, 1],
+      label: 'Grooming tools',
+    });
+
+    // Stable hand
+    const stablehandStats = generateNPCStats(seed + 300);
+    stablehandStats.profession = 'Stable Hand';
+    stablehandStats.gender = rand() > 0.8 ? 'Female' : 'Male';
+    stablehandStats.socialClass = SocialClass.PEASANT;
+    stablehandStats.age = 18 + Math.floor(rand() * 25);
+    npcs.push({
+      id: 'npc-stablehand',
+      role: 'worker',
+      position: [0, 0, 0],
+      rotation: [0, rand() * Math.PI * 2, 0],
+      stats: stablehandStats,
+      state: AgentState.HEALTHY,
+    });
+
+  } else if (buildingId === 'citadel-arsenal') {
+    // ARSENAL - Weapons storage, armor, arsenal master
+    const mainRoom: InteriorRoom = {
+      id: 'arsenal-hall',
+      type: InteriorRoomType.STORAGE,
+      center: [0, 0, 0],
+      size: [12, ROOM_HEIGHT, 12],
+    };
+    rooms.push(mainRoom);
+
+    // Weapon racks along all walls
+    const positions = [
+      { pos: [-4, 0, -5] as [number, number, number], rot: 0, label: 'Sword rack' },
+      { pos: [0, 0, -5] as [number, number, number], rot: 0, label: 'Mace rack' },
+      { pos: [4, 0, -5] as [number, number, number], rot: 0, label: 'Axe rack' },
+      { pos: [-5, 0, 0] as [number, number, number], rot: Math.PI / 2, label: 'Spear rack' },
+      { pos: [5, 0, 0] as [number, number, number], rot: -Math.PI / 2, label: 'Bow rack' },
+    ];
+    positions.forEach((p, i) => {
+      props.push({
+        id: `prop-weapons-${i}`,
+        type: InteriorPropType.TOOL_RACK,
+        roomId: mainRoom.id,
+        position: p.pos,
+        rotation: [0, p.rot, 0],
+        scale: [1, 1.2, 1],
+        label: p.label,
+      });
+    });
+
+    // Armor stands (chests as proxies)
+    props.push({
+      id: 'prop-armor-1',
+      type: InteriorPropType.CHEST,
+      roomId: mainRoom.id,
+      position: [-3, 0, 4],
+      rotation: [0, Math.PI, 0],
+      scale: [1.2, 1.2, 1.2],
+      label: 'Armor chest',
+    });
+    props.push({
+      id: 'prop-armor-2',
+      type: InteriorPropType.CHEST,
+      roomId: mainRoom.id,
+      position: [3, 0, 4],
+      rotation: [0, Math.PI, 0],
+      scale: [1.2, 1.2, 1.2],
+      label: 'Armor chest',
+    });
+
+    // Crates with arrows/supplies
+    props.push({
+      id: 'prop-arrows',
+      type: InteriorPropType.CRATE,
+      roomId: mainRoom.id,
+      position: [-5, 0, 4],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Arrow crates',
+    });
+    props.push({
+      id: 'prop-supplies',
+      type: InteriorPropType.CRATE,
+      roomId: mainRoom.id,
+      position: [5, 0, 4],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Supply crates',
+    });
+
+    // Central table with ledger
+    props.push({
+      id: 'prop-table',
+      type: InteriorPropType.LOW_TABLE,
+      roomId: mainRoom.id,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Work table',
+    });
+    props.push({
+      id: 'prop-ledger',
+      type: InteriorPropType.LEDGER,
+      roomId: mainRoom.id,
+      position: [0, 0.4, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+      label: 'Arsenal inventory',
+    });
+
+    // Lanterns
+    props.push({
+      id: 'prop-lantern',
+      type: InteriorPropType.LANTERN,
+      roomId: mainRoom.id,
+      position: [0, 2.5, 0],
+      rotation: [0, 0, 0],
+      scale: [1.2, 1.2, 1.2],
+      label: 'Iron lantern',
+    });
+
+    // Arsenal master
+    const masterStats = generateNPCStats(seed + 400);
+    masterStats.profession = 'Arsenal Master';
+    masterStats.gender = 'Male';
+    masterStats.socialClass = SocialClass.MERCHANT; // Skilled craftsman
+    masterStats.age = 40 + Math.floor(rand() * 15);
+    npcs.push({
+      id: 'npc-arsenal-master',
+      role: 'owner',
+      position: [1, 0, 1],
+      rotation: [0, -Math.PI / 4, 0],
+      stats: masterStats,
+      state: AgentState.HEALTHY,
+    });
+
+    // Assistant
+    const assistantStats = generateNPCStats(seed + 401);
+    assistantStats.profession = 'Arsenal Assistant';
+    assistantStats.gender = rand() > 0.7 ? 'Female' : 'Male';
+    assistantStats.socialClass = SocialClass.PEASANT;
+    assistantStats.age = 18 + Math.floor(rand() * 20);
+    npcs.push({
+      id: 'npc-arsenal-assistant',
+      role: 'worker',
+      position: [-3, 0, 2],
+      rotation: [0, Math.PI / 3, 0],
+      stats: assistantStats,
+      state: AgentState.HEALTHY,
+    });
+  }
+
+  // Build the spec
+  const spec: InteriorSpec = {
+    buildingId: building.id,
+    socialClass: SocialClass.NOBILITY, // Citadel buildings are high status
+    profession: building.ownerProfession,
+    rooms,
+    props,
+    npcs,
+    entrySide: building.doorSide === 0 ? 'north' : building.doorSide === 1 ? 'south' : building.doorSide === 2 ? 'east' : 'west',
+    hasExteriorDoor: true,
+    hasLightSource: props.some(p => p.type === InteriorPropType.LAMP || p.type === InteriorPropType.LANTERN || p.type === InteriorPropType.BRAZIER),
+    wallHeight: ROOM_HEIGHT,
+  };
+
+  // Add narrator state
+  spec.narratorState = {
+    buildingId: spec.buildingId,
+    roomCount: spec.rooms.length,
+    socialClass: spec.socialClass,
+    profession: spec.profession,
+    rooms: spec.rooms.map((room) => ({ id: room.id, type: room.type, size: room.size })),
+    objects: spec.props.map((prop) => ({ id: prop.id, type: prop.type, roomId: prop.roomId, label: prop.label })),
+    npcs: spec.npcs.map((npc) => ({ id: npc.id, role: npc.role, name: npc.stats.name, profession: npc.stats.profession })),
+  };
+
+  return spec;
+};
+
 const buildNarratorState = (spec: InteriorSpec) => ({
   buildingId: spec.buildingId,
   roomCount: spec.rooms.length,
@@ -2461,6 +2926,11 @@ export const generateInteriorSpec = (
   overrides?: InteriorOverrides,
   familyContext?: FamilyInteriorContext
 ): InteriorSpec => {
+  // Handle citadel buildings with custom interiors
+  if (building.id.startsWith('citadel-')) {
+    return generateCitadelInterior(building, seed);
+  }
+
   const socialClass = inferSocialClass(building);
   const profession = building.ownerProfession;
   const sizeScale = building.sizeScale ?? 1;

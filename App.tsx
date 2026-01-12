@@ -36,6 +36,8 @@ import { useOverworldPath } from './hooks/useOverworldPath';
 import { useEventSystem } from './hooks/useEventSystem';
 import { NarratorContext } from './utils/narratorPrompt';
 import { NarratorHighlightEntry } from './components/NarratorPanel';
+import { AstrologerModal, SnakeCharmerModal, ScribeModal } from './components/SpecialNpcModals';
+import { getReputationTier, getPriceModifier, getSellPriceModifier, willMerchantDeal, getMerchantRefusalMessage, willNpcTalk, getNpcRefusalMessage, canAccessBuilding, getBuildingDenialMessage, canReceiveMedicalTreatment, getMedicalRefusalMessage, getMedicalCostModifier } from './utils/reputation';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -131,7 +133,12 @@ function App() {
   const [nearStairs, setNearStairs] = useState<{ id: string; label: string; position: [number, number, number]; type: InteriorPropType } | null>(null);
   const [nearRoofHatch, setNearRoofHatch] = useState<{ id: string; position: [number, number, number] } | null>(null);
   const [nearRooftopHatch, setNearRooftopHatch] = useState<{ buildingId: string; building: BuildingMetadata; position: [number, number, number] } | null>(null);
+  const [nearSpecialNpc, setNearSpecialNpc] = useState<{ type: 'ASTROLOGER' | 'SCRIBE' | 'SUFI_MYSTIC'; stats: NPCStats; state: AgentState } | null>(null);
+  const [showAstrologerModal, setShowAstrologerModal] = useState(false);
+  const [showSnakeCharmerModal, setShowSnakeCharmerModal] = useState(false);
+  const [showScribeModal, setShowScribeModal] = useState(false);
   const [nearReadable, setNearReadable] = useState<{ id: string; position: THREE.Vector3; epitaph: any } | null>(null);
+  const [nearWaterSource, setNearWaterSource] = useState(false);
   const [selectedGuideEntryId, setSelectedGuideEntryId] = useState<string | null>(null);
   const [narratorHighlight, setNarratorHighlight] = useState<{
     position: [number, number, number];
@@ -185,6 +192,38 @@ function App() {
   const [toastMessages, setToastMessages] = useState<ToastMessage[]>([]);
   const toastIdCounter = useRef(0);
   const [treatmentOutcome, setTreatmentOutcome] = useState<TreatmentOutcome | null>(null);
+
+  // Helper tips system - tracks which tips have been shown
+  const shownTipsRef = useRef<Set<string>>((() => {
+    try {
+      const stored = localStorage.getItem('damascus-shown-tips');
+      return stored ? new Set<string>(JSON.parse(stored)) : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  })());
+
+  const showHelperTip = useCallback((tipId: string, message: string, duration = 5000) => {
+    // Don't show if already shown
+    if (shownTipsRef.current.has(tipId)) return;
+
+    // Mark as shown
+    shownTipsRef.current.add(tipId);
+    try {
+      localStorage.setItem('damascus-shown-tips', JSON.stringify([...shownTipsRef.current]));
+    } catch {
+      // localStorage might be unavailable
+    }
+
+    // Show the tip toast
+    const toastId = `tip-${tipId}-${++toastIdCounter.current}`;
+    setToastMessages(prev => [...prev, {
+      id: toastId,
+      text: `💡 ${message}`,
+      type: 'info',
+      duration
+    }]);
+  }, []);
   const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const [cameraViewTarget, setCameraViewTarget] = useState<[number, number, number] | null>(null);
   const [deceasedCycleIndex, setDeceasedCycleIndex] = useState(0);
@@ -242,7 +281,111 @@ function App() {
     if (cameraViewTarget) {
       setCameraViewTarget(null);
     }
-  }, [cameraViewTarget]);
+    // Show sprint tip on first movement
+    showHelperTip('sprint', 'Hold SHIFT to sprint faster');
+  }, [cameraViewTarget, showHelperTip]);
+
+  // Show tip when first approaching an NPC
+  useEffect(() => {
+    if (nearSpeakableNpc && !nearMerchant && !nearSpecialNpc) {
+      showHelperTip('interact-npc', 'Press E to talk to people');
+    }
+  }, [nearSpeakableNpc, nearMerchant, nearSpecialNpc, showHelperTip]);
+
+  // Show tip when first approaching a pushable object (when push charge starts)
+  useEffect(() => {
+    if (pushCharge > 0) {
+      showHelperTip('push-object', 'Hold SPACE to push objects');
+    }
+  }, [pushCharge, showHelperTip]);
+
+  // === PHASE 1 TIPS (High Priority) ===
+
+  // Show tip when first approaching a merchant
+  useEffect(() => {
+    if (nearMerchant) {
+      showHelperTip('merchant', 'Press E to browse this merchant\'s wares');
+    }
+  }, [nearMerchant, showHelperTip]);
+
+  // Show tip when first entering an interior
+  useEffect(() => {
+    if (sceneMode === 'interior') {
+      showHelperTip('exit-interior', 'Press ESC to exit this building');
+    }
+  }, [sceneMode, showHelperTip]);
+
+  // Show tip when first approaching a chest
+  useEffect(() => {
+    if (nearChest) {
+      showHelperTip('open-chest', 'Press O to open containers');
+    }
+  }, [nearChest, showHelperTip]);
+
+  // Show tip when in a medical building
+  useEffect(() => {
+    if (sceneMode === 'interior' && interiorBuilding?.type === BuildingType.MEDICAL) {
+      showHelperTip('medical-building', 'Press T to request medical treatment');
+    }
+  }, [sceneMode, interiorBuilding, showHelperTip]);
+
+  // === PHASE 2 TIPS (Medium Priority) ===
+
+  // Show tip when first approaching a readable object (gravestone)
+  useEffect(() => {
+    if (nearReadable) {
+      showHelperTip('read-gravestone', 'Press R to read the inscription');
+    }
+  }, [nearReadable, showHelperTip]);
+
+  // Show tip when near water source
+  useEffect(() => {
+    if (nearWaterSource) {
+      showHelperTip('collect-water', 'Hold SHIFT to collect water');
+    }
+  }, [nearWaterSource, showHelperTip]);
+
+  // Show tip when near stairs in interior
+  useEffect(() => {
+    if (nearStairs) {
+      showHelperTip('use-stairs', 'Press E to use the stairs');
+    }
+  }, [nearStairs, showHelperTip]);
+
+  // Show tip when near roof hatch in interior
+  useEffect(() => {
+    if (nearRoofHatch) {
+      showHelperTip('roof-hatch', 'Press E to climb to the rooftop');
+    }
+  }, [nearRoofHatch, showHelperTip]);
+
+  // Show tip when near special NPCs
+  useEffect(() => {
+    if (nearSpecialNpc?.type === 'ASTROLOGER') {
+      showHelperTip('astrologer', 'Press E to have your horoscope read');
+    } else if (nearSpecialNpc?.type === 'SUFI_MYSTIC') {
+      showHelperTip('snake-charmer', 'Press E to receive mystical wisdom');
+    } else if (nearSpecialNpc?.type === 'SCRIBE') {
+      showHelperTip('scribe', 'Press E to commission a letter');
+    }
+  }, [nearSpecialNpc, showHelperTip]);
+
+  // Show tip when climbable prompt appears
+  useEffect(() => {
+    if (climbablePrompt) {
+      showHelperTip('climb-start', 'Press C to climb');
+    }
+  }, [climbablePrompt, showHelperTip]);
+
+  // Show tip when player first navigates to a new map tile
+  const initialMapRef = useRef({ mapX: params.mapX, mapY: params.mapY });
+  useEffect(() => {
+    const hasMovedTile = params.mapX !== initialMapRef.current.mapX ||
+                         params.mapY !== initialMapRef.current.mapY;
+    if (hasMovedTile) {
+      showHelperTip('map-navigation', 'Explore Damascus by walking to the edges of each district');
+    }
+  }, [params.mapX, params.mapY, showHelperTip]);
 
   const getDistrictScale = useCallback((district: ReturnType<typeof getDistrictType>) => {
     if (district === 'WEALTHY') return 1.35;
@@ -714,6 +857,36 @@ function App() {
     }
   }, [playerStats.homeBuildingId, playerStats.homeMapPosition, playerStats.name, playerStats.profession, params.mapX, params.mapY, tileBuildings]);
 
+  // Show inventory tip after first item pickup
+  const prevInventorySizeRef = useRef(playerStats.inventory.length);
+  useEffect(() => {
+    const currentSize = playerStats.inventory.length;
+    if (currentSize > prevInventorySizeRef.current && prevInventorySizeRef.current === 0) {
+      // First item was just picked up
+      showHelperTip('inventory', 'Press I to view your inventory');
+    }
+    prevInventorySizeRef.current = currentSize;
+  }, [playerStats.inventory.length, showHelperTip]);
+
+  // Show plague-related tips based on plague state changes
+  const prevPlagueStateRef = useRef(playerStats.plague.state);
+  useEffect(() => {
+    const currentState = playerStats.plague.state;
+    const prevState = prevPlagueStateRef.current;
+
+    // Tip when first exposed (transition to INCUBATING)
+    if (prevState === AgentState.HEALTHY && currentState === AgentState.INCUBATING) {
+      showHelperTip('plague-exposure', 'You\'ve been exposed to plague! Seek remedies or medical treatment');
+    }
+
+    // Tip when symptoms appear (transition to INFECTED)
+    if (prevState === AgentState.INCUBATING && currentState === AgentState.INFECTED) {
+      showHelperTip('symptoms-appear', 'Symptoms have appeared! Visit a physician, barber, or bimaristan');
+    }
+
+    prevPlagueStateRef.current = currentState;
+  }, [playerStats.plague.state, showHelperTip]);
+
   // Plague notification state
   const [showPlagueModal, setShowPlagueModal] = useState(false);
   const [plagueNotification, setPlagueNotification] = useState<string | null>(null);
@@ -902,6 +1075,53 @@ function App() {
     setNearReadable(readable);
   }, []);
 
+  // Handle water proximity change
+  const handleNearWater = useCallback((near: boolean) => {
+    setNearWaterSource(near);
+  }, []);
+
+  // Handle collecting water from a water source (canal/river)
+  const handleCollectWater = useCallback(() => {
+    if (!nearWaterSource) return;
+
+    // Check inventory space
+    const currentInventorySize = playerStats.inventory.reduce((sum, i) => sum + i.quantity, 0);
+    if (currentInventorySize >= playerStats.maxInventorySlots) {
+      const toastId = `toast-${++toastIdCounter.current}`;
+      setToastMessages(prev => [...prev, { id: toastId, text: 'Inventory full', type: 'error' }]);
+      return;
+    }
+
+    // Add water to inventory
+    setPlayerStats(prev => {
+      const existingWaterIndex = prev.inventory.findIndex(i => i.itemId === 'Fresh Water');
+      let newInventory = [...prev.inventory];
+
+      if (existingWaterIndex >= 0) {
+        newInventory[existingWaterIndex] = {
+          ...newInventory[existingWaterIndex],
+          quantity: newInventory[existingWaterIndex].quantity + 1
+        };
+      } else {
+        newInventory.push({
+          id: `player-item-${Date.now()}`,
+          itemId: 'Fresh Water',
+          quantity: 1,
+          acquiredAt: stats.simTime
+        });
+      }
+
+      return {
+        ...prev,
+        inventory: newInventory
+      };
+    });
+
+    // Show toast
+    const toastId = `toast-${++toastIdCounter.current}`;
+    setToastMessages(prev => [...prev, { id: toastId, text: 'Collected fresh water', type: 'success' }]);
+  }, [nearWaterSource, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
+
   // Handle closing read modal (switch back to isometric camera)
   const handleCloseReadModal = useCallback(() => {
     setShowReadModal(false);
@@ -924,11 +1144,11 @@ function App() {
       ? `You were caught stealing! Reputation ${totalPenalty}`
       : `You were seen breaking property! Reputation ${totalPenalty}`;
 
-    setToasts(prev => [...prev, {
+    setToastMessages(prev => [...prev, {
       id: `crime-${Date.now()}`,
-      message,
-      type: 'warning',
-      timestamp: Date.now()
+      text: message,
+      type: 'error',
+      duration: 4000
     }]);
   }, []);
 
@@ -1129,6 +1349,21 @@ function App() {
 
   // Direct medical treatment trigger (doesn't require NPC proximity)
   const handleTriggerMedicalTreatment = useCallback(() => {
+    // Check reputation - may be refused treatment
+    const reputationTier = getReputationTier(playerStats.reputation);
+    if (!canReceiveMedicalTreatment(reputationTier)) {
+      const refusalMessage = getMedicalRefusalMessage(reputationTier);
+      if (refusalMessage) {
+        setToastMessages(prev => [...prev, {
+          id: `medical-refuse-${Date.now()}`,
+          text: refusalMessage,
+          type: 'error',
+          duration: 4000
+        }]);
+      }
+      return;
+    }
+
     // Determine establishment type from interior spec or building
     const buildingName = interiorSpec?.name ?? interiorBuilding?.name ?? '';
     const buildingNameLower = buildingName.toLowerCase();
@@ -1149,11 +1384,26 @@ function App() {
       establishmentType,
       practitionerName
     });
-  }, [interiorSpec, interiorBuilding, setMedicalModal]);
+  }, [interiorSpec, interiorBuilding, setMedicalModal, playerStats.reputation]);
 
   // Mobile/touch trigger for speaking to NPC (equivalent to pressing E)
   const handleTriggerSpeakToNpc = useCallback(() => {
     if (nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal && !medicalModal) {
+      // Check reputation - NPC may refuse to talk
+      const reputationTier = getReputationTier(playerStats.reputation);
+      if (!willNpcTalk(reputationTier, nearSpeakableNpc.stats.disposition)) {
+        const refusalMessage = getNpcRefusalMessage(reputationTier);
+        if (refusalMessage) {
+          setToastMessages(prev => [...prev, {
+            id: `npc-refuse-${Date.now()}`,
+            text: refusalMessage,
+            type: 'error',
+            duration: 3000
+          }]);
+        }
+        return;
+      }
+
       // Check if we're in a MEDICAL building and talking to the owner (medical practitioner)
       const buildingType = interiorSpec?.buildingType ?? interiorBuilding?.type;
       const isOwner = nearSpeakableNpc.role === 'owner';
@@ -1182,11 +1432,11 @@ function App() {
             religion: nearSpeakableNpc.stats.religion
           }
         },
-        source: 'player'
+        source: 'action'
       });
       setShowEncounterModal(true);
     }
-  }, [nearSpeakableNpc, nearMerchant, showEncounterModal, showMerchantModal, showEnterModal, showPlayerModal, medicalModal, sceneMode, interiorSpec, interiorBuilding, triggerMedicalModal, tryTriggerEvent]);
+  }, [nearSpeakableNpc, nearMerchant, showEncounterModal, showMerchantModal, showEnterModal, showPlayerModal, medicalModal, sceneMode, interiorSpec, interiorBuilding, triggerMedicalModal, tryTriggerEvent, playerStats.reputation]);
 
   // Mobile/touch trigger for trading with merchant (equivalent to pressing E near merchant)
   const handleTriggerMerchant = useCallback(() => {
@@ -1317,8 +1567,34 @@ function App() {
           source: 'environment'
         });
       }
-      // Open encounter modal with 'E' key when near an NPC (but not if near a merchant)
-      else if (e.key === 'e' && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+      // Open special NPC modal (Astrologer) with 'E' key - takes priority over regular NPCs
+      else if (e.key === 'e' && sceneMode === 'outdoor' && nearSpecialNpc?.type === 'ASTROLOGER' && !showAstrologerModal && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        setShowAstrologerModal(true);
+      }
+      // Open special NPC modal (Snake Charmer) with 'E' key
+      else if (e.key === 'e' && sceneMode === 'outdoor' && nearSpecialNpc?.type === 'SUFI_MYSTIC' && !showSnakeCharmerModal && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        setShowSnakeCharmerModal(true);
+      }
+      // Open special NPC modal (Scribe) with 'E' key
+      else if (e.key === 'e' && sceneMode === 'outdoor' && nearSpecialNpc?.type === 'SCRIBE' && !showScribeModal && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        setShowScribeModal(true);
+      }
+      // Open encounter modal with 'E' key when near an NPC (but not if near a merchant or special NPC)
+      else if (e.key === 'e' && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !nearSpecialNpc && !showEncounterModal && !showMerchantModal && !showEnterModal && !showPlayerModal) {
+        // Check reputation - NPC may refuse to talk
+        const reputationTier = getReputationTier(playerStats.reputation);
+        if (!willNpcTalk(reputationTier, nearSpeakableNpc.stats.disposition)) {
+          const refusalMessage = getNpcRefusalMessage(reputationTier);
+          if (refusalMessage) {
+            setToastMessages(prev => [...prev, {
+              id: `npc-refuse-${Date.now()}`,
+              text: refusalMessage,
+              type: 'error',
+              duration: 3000
+            }]);
+          }
+          return;
+        }
         setSelectedNpc(nearSpeakableNpc);
         setIsNPCInitiatedEncounter(false);
         setIsFollowingAfterDismissal(false);
@@ -1337,7 +1613,7 @@ function App() {
               religion: nearSpeakableNpc.stats.religion
             }
           },
-          source: 'player'
+          source: 'action'
         });
         setShowEncounterModal(true);
       }
@@ -1390,6 +1666,15 @@ function App() {
         setShowEncounterModal(false);
         setIsNPCInitiatedEncounter(false);
       }
+      if (e.key === 'Escape' && showAstrologerModal) {
+        setShowAstrologerModal(false);
+      }
+      if (e.key === 'Escape' && showSnakeCharmerModal) {
+        setShowSnakeCharmerModal(false);
+      }
+      if (e.key === 'Escape' && showScribeModal) {
+        setShowScribeModal(false);
+      }
       if (e.key === 'Escape' && medicalModal) {
         setMedicalModal(null);
       }
@@ -1411,7 +1696,18 @@ function App() {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, nearBirdcage, lootModalData, handleOpenChest, handleOpenBirdcage, nearStairs, handleTriggerUseStairs, nearRoofHatch, handleExitViaRoofHatch, medicalModal, setMedicalModal, interiorSpec, interiorBuilding, handleTriggerMedicalTreatment, transitioning]);
+  }, [nearBuilding, showEnterModal, nearMerchant, nearSpeakableNpc, showMerchantModal, sceneMode, selectedNpc, showEncounterModal, showPlayerModal, tryTriggerEvent, observeMode, stopObserveMode, nearChest, nearBirdcage, lootModalData, handleOpenChest, handleOpenBirdcage, nearStairs, handleTriggerUseStairs, nearRoofHatch, handleExitViaRoofHatch, medicalModal, setMedicalModal, interiorSpec, interiorBuilding, handleTriggerMedicalTreatment, transitioning, nearSpecialNpc, showAstrologerModal, showSnakeCharmerModal, showScribeModal]);
+
+  // Water collection on SHIFT release when near water source
+  useEffect(() => {
+    const handleWaterKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift' && nearWaterSource && sceneMode === 'outdoor' && !showMerchantModal && !showEncounterModal && !showEnterModal && !showPlayerModal && !pickupPrompt) {
+        handleCollectWater();
+      }
+    };
+    window.addEventListener('keyup', handleWaterKeyUp);
+    return () => window.removeEventListener('keyup', handleWaterKeyUp);
+  }, [nearWaterSource, sceneMode, showMerchantModal, showEncounterModal, showEnterModal, showPlayerModal, pickupPrompt, handleCollectWater]);
 
   // Push trigger function
   const triggerPush = useCallback(() => {
@@ -2419,13 +2715,16 @@ function App() {
     } else {
       setNearBuilding(building);
     }
-  }, [playerStats.homeBuildingId, playerStats.name, playerStats.profession]);
+    // Show helper tip when first approaching an enterable building
+    if (building && building.isOpen) {
+      showHelperTip('enter-building', 'Press ENTER to enter buildings');
+    }
+  }, [playerStats.homeBuildingId, playerStats.name, playerStats.profession, showHelperTip]);
 
   // Helper to select player home based on social class
   const selectPlayerHome = useCallback((buildings: BuildingMetadata[], socialClass: SocialClass): BuildingMetadata | null => {
     const residential = buildings.filter(b =>
-      b.type === BuildingType.RESIDENTIAL ||
-      b.type === BuildingType.COURTYARD_HOUSE
+      b.type === BuildingType.RESIDENTIAL
     );
     if (residential.length === 0) return null;
 
@@ -2620,14 +2919,45 @@ function App() {
   const enterInterior = useCallback((building: BuildingMetadata) => {
     if (transitioning) return;
 
+    // Check if this is the player's home (always allowed)
+    const isPlayerHome = building.id === playerStats.homeBuildingId;
+
+    // Check reputation - may be denied entry (but player's own home is always accessible)
+    if (!isPlayerHome) {
+      const reputationTier = getReputationTier(playerStats.reputation);
+      const isWealthyDistrict = building.district === 'WEALTHY' || building.district === 'SALHIYYA';
+      if (!canAccessBuilding(reputationTier, building.type, isWealthyDistrict)) {
+        const denialMessage = getBuildingDenialMessage(reputationTier, building.type);
+        setToastMessages(prev => [...prev, {
+          id: `building-denied-${Date.now()}`,
+          text: denialMessage,
+          type: 'error',
+          duration: 4000
+        }]);
+        setShowEnterModal(false);
+        return;
+      }
+    }
+
+    // Grant small reputation boost for visiting religious buildings (prayer/devotion)
+    if (building.type === BuildingType.RELIGIOUS) {
+      setPlayerStats(prev => ({
+        ...prev,
+        reputation: Math.min(100, prev.reputation + 1)
+      }));
+      setToastMessages(prev => [...prev, {
+        id: `prayer-rep-${Date.now()}`,
+        message: 'Your devotion is noticed. (+1 reputation)',
+        type: 'success',
+        duration: 3000
+      }]);
+    }
+
     setTransitioning(true);
 
     // Start fade, then do the actual entry after fade completes
     setTimeout(() => {
       const seed = hashToSeed(building.id);
-
-      // Check if this is the player's home and prepare family context
-      const isPlayerHome = building.id === playerStats.homeBuildingId;
       let familyContext: FamilyInteriorContext | undefined;
 
       console.log('[Family Debug] enterInterior called:', {
@@ -2751,7 +3081,7 @@ function App() {
 
       setTransitioning(false);
     }, 300);
-  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers, transitioning]);
+  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers, playerStats.reputation, transitioning]);
 
   // Enter building via rooftop hatch (from outdoor scene on roof)
   // Similar to enterInterior but starts at top floor instead of ground floor
@@ -2888,7 +3218,25 @@ function App() {
   const handlePurchase = useCallback((item: import('./types').MerchantItem, quantity: number) => {
     if (!nearMerchant) return;
 
-    const finalPrice = Math.round(item.basePrice * nearMerchant.haggleModifier) * quantity;
+    // Check reputation - merchant may refuse to deal
+    const reputationTier = getReputationTier(playerStats.reputation);
+    if (!willMerchantDeal(reputationTier)) {
+      const refusalMessage = getMerchantRefusalMessage(reputationTier);
+      if (refusalMessage) {
+        setToastMessages(prev => [...prev, {
+          id: `merchant-refuse-${Date.now()}`,
+          text: refusalMessage,
+          type: 'error',
+          duration: 4000
+        }]);
+      }
+      return;
+    }
+
+    // Apply reputation price modifier
+    const reputationModifier = getPriceModifier(reputationTier);
+    const basePrice = Math.round(item.basePrice * nearMerchant.haggleModifier);
+    const finalPrice = Math.round(basePrice * reputationModifier) * quantity;
 
     // Check if player can afford
     if (playerStats.currency < finalPrice) {
@@ -2955,16 +3303,32 @@ function App() {
         }
       };
     });
-  }, [nearMerchant, playerStats.currency, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
+  }, [nearMerchant, playerStats.currency, playerStats.inventory, playerStats.maxInventorySlots, playerStats.reputation, stats.simTime]);
 
   const handleSell = useCallback((playerItem: import('./types').PlayerItem, quantity: number) => {
     if (!nearMerchant) return;
+
+    // Check reputation - merchants won't buy from pariahs
+    const reputationTier = getReputationTier(playerStats.reputation);
+    if (!willMerchantDeal(reputationTier)) {
+      const refusalMessage = getMerchantRefusalMessage(reputationTier);
+      if (refusalMessage) {
+        setToastMessages(prev => [...prev, {
+          id: Date.now().toString(),
+          message: refusalMessage,
+          type: 'error'
+        }]);
+      }
+      return;
+    }
 
     // Find the base item
     const baseItem = nearMerchant.inventory.items.find(i => i.id === playerItem.itemId);
     if (!baseItem) return;
 
-    const sellPrice = Math.round(baseItem.basePrice * 0.7) * quantity;
+    // Apply reputation-based sell price modifier
+    const sellModifier = getSellPriceModifier(reputationTier);
+    const sellPrice = Math.round(baseItem.basePrice * sellModifier) * quantity;
 
     // Check if player has enough to sell
     const inventoryItem = playerStats.inventory.find(i => i.id === playerItem.id);
@@ -2991,7 +3355,7 @@ function App() {
         inventory: newInventory
       };
     });
-  }, [nearMerchant, playerStats.inventory]);
+  }, [nearMerchant, playerStats.inventory, playerStats.reputation]);
 
   // Handle consuming an item from inventory
   const handleConsumeItem = useCallback((playerItem: import('./types').PlayerItem) => {
@@ -3205,9 +3569,11 @@ function App() {
     );
 
     // Update player stats with new plague status from outcome
+    // Also gain +1 reputation for seeking proper medical treatment
     setPlayerStats(prev => ({
       ...prev,
       currency: prev.currency - cost,
+      reputation: Math.min(100, prev.reputation + 1),
       plague: {
         ...prev.plague,
         ...outcome.newPlagueStatus
@@ -3510,7 +3876,6 @@ function App() {
     if (homeBuilding) {
       switch (homeBuilding.type) {
         case BuildingType.RESIDENTIAL: buildingType = 'Private Residence'; break;
-        case BuildingType.COURTYARD_HOUSE: buildingType = 'Courtyard House'; break;
         default: buildingType = 'Residence';
       }
     }
@@ -3580,6 +3945,12 @@ function App() {
         unequippedHeadwear: undefined
       };
     });
+  }, []);
+
+  // Debug: toggle outer robe visibility to reveal underclothing
+  const [hideOuterRobe, setHideOuterRobe] = useState(false);
+  const handleToggleOuterRobe = useCallback(() => {
+    setHideOuterRobe(prev => !prev);
   }, []);
 
   const uiProps = useMemo(() => ({
@@ -3669,7 +4040,9 @@ function App() {
     onEquipHeadwear: handleEquipHeadwear,
     isInPrivateSpace,
     currentBuildingType,
-    currentBuildingProfession
+    currentBuildingProfession,
+    hideOuterRobe,
+    onToggleOuterRobe: handleToggleOuterRobe
   }), [
     actionSlots,
     activeEvent,
@@ -3740,7 +4113,9 @@ function App() {
     handleEquipHeadwear,
     isInPrivateSpace,
     currentBuildingType,
-    currentBuildingProfession
+    currentBuildingProfession,
+    hideOuterRobe,
+    handleToggleOuterRobe
   ]);
 
   const simulationShellProps = useMemo(() => ({
@@ -3792,6 +4167,7 @@ function App() {
     onCrimeWitnessed: handleCrimeWitnessed,
     onGravestoneDesecrated: handleGravestoneDesecrated,
     onNearReadable: handleNearReadable,
+    onNearWater: handleNearWater,
     onFallDamage: handleFallDamage,
     cameraViewTarget,
     onPlayerStartMove: handlePlayerStartMove,
@@ -3806,9 +4182,11 @@ function App() {
     onNearRoofHatch: setNearRoofHatch,
     onNearBirdcage: setNearBirdcage,
     onNearRooftopHatch: setNearRooftopHatch,
+    onNearSpecialNpc: setNearSpecialNpc,
     onShowLootModal: handleShowLootModal,
     narratorHighlight,
-    performanceMonitor: performanceMonitorConfig
+    performanceMonitor: performanceMonitorConfig,
+    hideOuterRobe
   }), [
     actionEvent,
     buildingInfectionState,
@@ -3824,6 +4202,7 @@ function App() {
     handleFallDamage,
     handleGravestoneDesecrated,
     handleNearReadable,
+    handleNearWater,
     handleMapChange,
     handleMoraleUpdate,
     handleNPCInitiatedEncounter,
@@ -3869,7 +4248,8 @@ function App() {
     showPlayerModal,
     nearMerchant,
     stats,
-    transitioning
+    transitioning,
+    hideOuterRobe
   ]);
 
   return (
@@ -3924,6 +4304,14 @@ function App() {
         nearBirdcage={nearBirdcage}
         onTriggerOpenBirdcage={handleTriggerOpenBirdcage}
         nearReadable={nearReadable}
+        nearWaterSource={nearWaterSource}
+        nearSpecialNpc={nearSpecialNpc}
+        showAstrologerModal={showAstrologerModal}
+        showSnakeCharmerModal={showSnakeCharmerModal}
+        showScribeModal={showScribeModal}
+        onTriggerAstrologer={() => setShowAstrologerModal(true)}
+        onTriggerSnakeCharmer={() => setShowSnakeCharmerModal(true)}
+        onTriggerScribe={() => setShowScribeModal(true)}
         showEncounterModal={showEncounterModal}
         showPlayerModal={showPlayerModal}
         showEnterModalActive={showEnterModal}
@@ -3958,6 +4346,129 @@ function App() {
 
       <SimulationShell {...simulationShellProps} />
 
+      {/* Astrologer Modal */}
+      {showAstrologerModal && nearSpecialNpc?.type === 'ASTROLOGER' && (
+        <AstrologerModal
+          npc={nearSpecialNpc.stats}
+          player={playerStats}
+          onClose={() => setShowAstrologerModal(false)}
+        />
+      )}
+
+      {/* Snake Charmer Modal */}
+      {showSnakeCharmerModal && nearSpecialNpc?.type === 'SUFI_MYSTIC' && (
+        <SnakeCharmerModal
+          npc={nearSpecialNpc.stats}
+          onClose={() => setShowSnakeCharmerModal(false)}
+        />
+      )}
+
+      {/* Scribe Modal */}
+      {showScribeModal && nearSpecialNpc?.type === 'SCRIBE' && (
+        <ScribeModal
+          npc={nearSpecialNpc.stats}
+          player={playerStats}
+          onClose={() => setShowScribeModal(false)}
+          onCreateLetter={(letterText, recipient, cost) => {
+            // Create a letter item and add to inventory, deduct cost
+            const timestamp = Date.now();
+            const letterId = `letter:${recipient}:${timestamp}`;
+            setPlayerStats(prev => ({
+              ...prev,
+              currency: prev.currency - cost,
+              inventory: [...prev.inventory, {
+                id: `player-item-${timestamp}`,
+                itemId: letterId,
+                quantity: 1,
+                acquiredAt: stats.simTime
+              }]
+            }));
+            // Show toast notification
+            const toastId = `toast-${++toastIdCounter.current}`;
+            setToastMessages(prev => [...prev, { id: toastId, text: `You received a letter addressed to ${recipient} (-${cost} dirhams)`, type: 'success' }]);
+            setShowScribeModal(false);
+          }}
+        />
+      )}
+
+      {/* Vignette overlay effect */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          background: 'radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,0.55) 100%)',
+          zIndex: 10,
+        }}
+      />
+
+      {/* Tilt-shift blur effect - top blur layers */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 2,
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          mask: 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0) 18%, rgba(0,0,0,0) 100%)',
+          WebkitMask: 'linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0) 18%, rgba(0,0,0,0) 100%)',
+        }}
+      />
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 3,
+          backdropFilter: 'blur(2px)',
+          WebkitBackdropFilter: 'blur(2px)',
+          mask: 'linear-gradient(to bottom, rgba(0,0,0,0) 10%, rgba(0,0,0,0.8) 15%, rgba(0,0,0,0) 25%, rgba(0,0,0,0) 100%)',
+          WebkitMask: 'linear-gradient(to bottom, rgba(0,0,0,0) 10%, rgba(0,0,0,0.8) 15%, rgba(0,0,0,0) 25%, rgba(0,0,0,0) 100%)',
+        }}
+      />
+
+      {/* Tilt-shift blur effect - bottom blur layers */}
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 2,
+          backdropFilter: 'blur(4px)',
+          WebkitBackdropFilter: 'blur(4px)',
+          mask: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0) 18%, rgba(0,0,0,0) 100%)',
+          WebkitMask: 'linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0) 18%, rgba(0,0,0,0) 100%)',
+        }}
+      />
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          pointerEvents: 'none',
+          zIndex: 3,
+          backdropFilter: 'blur(2px)',
+          WebkitBackdropFilter: 'blur(2px)',
+          mask: 'linear-gradient(to top, rgba(0,0,0,0) 10%, rgba(0,0,0,0.8) 15%, rgba(0,0,0,0) 25%, rgba(0,0,0,0) 100%)',
+          WebkitMask: 'linear-gradient(to top, rgba(0,0,0,0) 10%, rgba(0,0,0,0.8) 15%, rgba(0,0,0,0) 25%, rgba(0,0,0,0) 100%)',
+        }}
+      />
+
       {/* Read modal for gravestones */}
       {showReadModal && readModalData && (
         <ReadModal
@@ -3965,6 +4476,7 @@ function App() {
           graveShape={readModalData.graveShape}
           graveType={readModalData.graveType}
           graveScale={readModalData.graveScale}
+          isMausoleum={readModalData.isMausoleum}
           onClose={handleCloseReadModal}
         />
       )}

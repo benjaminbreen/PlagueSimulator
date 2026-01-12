@@ -13,7 +13,7 @@ import { NPCStats, SocialClass, AgentState } from '../../types';
 interface SnakeCharmerProps {
   position: [number, number, number];
   timeOfDay?: number;
-  onApproach?: (distance: number) => void;
+  onApproach?: (npc: { stats: NPCStats; state: AgentState } | null, distance: number) => void;
   onSelect?: (npc: { stats: NPCStats; state: AgentState } | null) => void;
   isSelected?: boolean;
 }
@@ -79,6 +79,13 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
     };
   }, [position]);
 
+  // Track approach state to avoid spamming callback
+  const wasNearRef = useRef(false);
+  const INTERACTION_DISTANCE = 8; // Larger to account for camera offset from player
+  // Cache the NPC data object to avoid creating new objects every frame
+  const npcDataRef = useRef({ stats: npcStats, state: AgentState.HEALTHY });
+  npcDataRef.current.stats = npcStats;
+
   // Animate sufi and snake with distance-based LOD
   useFrame((state, delta) => {
     if (!groupRef.current) return;
@@ -89,7 +96,15 @@ export const SnakeCharmer: React.FC<SnakeCharmerProps> = ({
     // PERFORMANCE: Reuse vector instead of creating new one
     const dist = camera.position.distanceTo(positionVec);
     distanceRef.current = dist;
-    onApproach?.(dist);
+
+    // Approach detection - call every frame for flute music, include NPC data when near
+    const isNear = dist < INTERACTION_DISTANCE;
+    if (onApproach) {
+      // Always call with distance for flute music volume
+      // Include NPC data only when within interaction range
+      onApproach(isNear ? npcDataRef.current : null, dist);
+      wasNearRef.current = isNear;
+    }
 
     // LOD: Skip expensive animations when far away
     const isClose = dist < 25;

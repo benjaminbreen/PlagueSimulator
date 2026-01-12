@@ -42,64 +42,128 @@ export const buildFarmlandLayout = (mapX: number, mapY: number): FarmlandLayout 
   const rand = () => seededRandom(seed + i++ * 37);
   const jitter = (amount: number) => (rand() - 0.5) * amount;
 
+  // Spread fields across the whole map - not just center
   const fields: FieldDef[] = [
+    // Northwest field
     {
-      pos: [-18 + jitter(1.2), 0.01, -8 + jitter(1.0)],
-      size: [19, 10],
+      pos: [-18 + jitter(1.2), 0.01, -16 + jitter(1.0)],
+      size: [14, 9],
       rotation: jitter(0.06),
       color: '#6f8f48',
       furrowColor: '#577a3b',
       cropType: 0,
       cropPositions: []
     },
+    // Northeast field
     {
-      pos: [12 + jitter(1.0), 0.01, -12 + jitter(1.0)],
-      size: [17, 8],
+      pos: [16 + jitter(1.0), 0.01, -14 + jitter(1.0)],
+      size: [12, 10],
       rotation: jitter(0.06),
       color: '#5f7f3f',
       furrowColor: '#4f6f35',
       cropType: 0,
       cropPositions: []
     },
+    // Southwest field
     {
-      pos: [-4 + jitter(1.0), 0.01, 16 + jitter(1.2)],
-      size: [15, 11],
+      pos: [-16 + jitter(1.0), 0.01, 14 + jitter(1.2)],
+      size: [13, 10],
       rotation: jitter(0.06),
       color: '#6a8b46',
       furrowColor: '#587b3d',
       cropType: 0,
       cropPositions: []
+    },
+    // Southeast field
+    {
+      pos: [14 + jitter(1.0), 0.01, 16 + jitter(1.0)],
+      size: [11, 9],
+      rotation: jitter(0.06),
+      color: '#5a7a3a',
+      furrowColor: '#4a6a30',
+      cropType: 0,
+      cropPositions: []
+    },
+    // Small central field
+    {
+      pos: [jitter(2.0), 0.01, jitter(2.0)],
+      size: [8, 7],
+      rotation: jitter(0.08),
+      color: '#658a42',
+      furrowColor: '#557a38',
+      cropType: 0,
+      cropPositions: []
     }
   ];
 
+  // Main irrigation canal - one long channel cutting diagonally across the entire farmland
+  // This represents a branch of the Barada river system that fed the Ghouta
+  // Map is ~52 units across, diagonal needs ~75 units to span corner to corner
+  const mainCanalAngle = 0.2 + jitter(0.08); // Slight diagonal
   const canals: Array<{ pos: [number, number, number]; size: [number, number]; rotation: number }> = [
-    { pos: [-8 + jitter(0.8), 0.02, -8 + jitter(0.6)], size: [20, 1.6], rotation: 0.02 + jitter(0.04) },
-    { pos: [12 + jitter(0.6), 0.02, -12 + jitter(0.6)], size: [17, 1.4], rotation: -0.02 + jitter(0.04) },
-    { pos: [-4 + jitter(0.6), 0.02, 15 + jitter(0.8)], size: [15, 1.6], rotation: 0.01 + jitter(0.04) }
+    // Main canal running diagonally across the whole map - 80 units ensures edge-to-edge
+    { pos: [0, 0.02, 0], size: [80, 2.2], rotation: mainCanalAngle },
+    // Secondary feeder canal branching off (only sometimes) - also long enough to reach edges
+    ...(rand() > 0.5 ? [{
+      pos: [0, 0.02, 0] as [number, number, number],
+      size: [75, 1.6] as [number, number],
+      rotation: -mainCanalAngle + jitter(0.05) // Opposite diagonal direction
+    }] : [])
   ];
 
+  // Helper function to check if a position is too close to any canal
+  // Canals are rotated lines through origin - distance to rotated line is |x*sin(θ) - z*cos(θ)|
+  const CANAL_CLEARANCE = 2.0; // Clearance distance from canals for crops/trees
+  const isNearCanal = (x: number, z: number, clearance: number): boolean => {
+    for (const canal of canals) {
+      const theta = canal.rotation;
+      const halfWidth = canal.size[1] / 2;
+      // Distance from point to rotated line through origin
+      const distToLine = Math.abs(x * Math.sin(theta) - z * Math.cos(theta));
+      if (distToLine < halfWidth + clearance) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Dirt paths crossing the farmland - simple straight lines, flat on ground
+  // Note: size is [width, height] where width is along local X, height along local Y
+  // After -PI/2 X rotation, local Y becomes world Z, so [width, depth] in world space
   const paths: Array<{ pos: [number, number, number]; size: [number, number]; rotation: number }> = [
-    { pos: [2 + jitter(0.4), 0.012, -2 + jitter(0.4)], size: [36, 2.2], rotation: 0.02 + jitter(0.04) },
-    { pos: [-10 + jitter(0.4), 0.012, 10 + jitter(0.4)], size: [26, 1.8], rotation: -0.02 + jitter(0.04) }
+    // Main east-west path (long in X direction)
+    { pos: [0 + jitter(0.4), 0.012, 8 + jitter(0.4)], size: [52, 2.2], rotation: jitter(0.03) },
+    // North-south path - swap dimensions to make it long in Z direction, no Y rotation needed
+    { pos: [-10 + jitter(0.4), 0.012, 0 + jitter(0.4)], size: [1.8, 48], rotation: jitter(0.03) }
   ];
 
+  // Houses pushed to far edges
   const houses: Array<[number, number, number, number]> = [
-    [-24 + jitter(1.2), 0, 18 + jitter(1.0), 1],
-    [24 + jitter(1.0), 0, 20 + jitter(1.0), -1],
-    [20 + jitter(0.8), 0, -24 + jitter(0.8), 1]
+    [-24 + jitter(1.2), 0, -22 + jitter(1.0), 1],
+    [24 + jitter(1.0), 0, 22 + jitter(1.0), -1],
+    [22 + jitter(0.8), 0, -20 + jitter(0.8), 1]
   ];
 
-  const haystacks: Array<[number, number, number]> = [
-    [-8 + jitter(0.8), 0, 3 + jitter(0.8)],
-    [14 + jitter(0.8), 0, -4 + jitter(0.8)],
-    [2 + jitter(0.8), 0, 18 + jitter(0.8)]
+  // Haystacks spread across different zones - filter out those on canals
+  const haystackCandidates: Array<[number, number, number]> = [
+    [-20 + jitter(1.0), 0, -6 + jitter(1.0)],
+    [18 + jitter(1.0), 0, 8 + jitter(1.0)],
+    [-14 + jitter(1.0), 0, 18 + jitter(1.0)],
+    [8 + jitter(1.0), 0, -18 + jitter(1.0)],
   ];
+  const haystacks = haystackCandidates.filter(([x, _, z]) => !isNearCanal(x, z, CANAL_CLEARANCE));
 
-  const boulders: Array<[number, number, number]> = Array.from({ length: 6 }).map(() => [
-    -22 + rand() * 44,
-    0,
-    -22 + rand() * 44
-  ]);
+  // Boulders distributed across edges - filter out those on canals
+  const boulderCandidates: Array<[number, number, number]> = Array.from({ length: 8 }).map((_, idx) => {
+    const angle = (idx / 8) * Math.PI * 2 + rand() * 0.5;
+    const distance = 16 + rand() * 8;
+    return [
+      Math.cos(angle) * distance + jitter(2.0),
+      0,
+      Math.sin(angle) * distance + jitter(2.0)
+    ];
+  });
+  const boulders = boulderCandidates.filter(([x, _, z]) => !isNearCanal(x, z, CANAL_CLEARANCE));
 
   const cropTypes = 5;
   fields.forEach((field, fieldIdx) => {
@@ -113,9 +177,18 @@ export const buildFarmlandLayout = (mapX: number, mapY: number): FarmlandLayout 
       for (let c = 0; c < cols; c += 1) {
         if (positions.length > 140) break;
         if (rand() > 0.92) continue;
+        const localX = -field.size[0] / 2 + spacing * (c + 0.5) + jitter(spacing * 0.4);
+        const localZ = -field.size[1] / 2 + spacing * (r + 0.5) + jitter(spacing * 0.4);
+        // Transform to world coordinates (accounting for field position and rotation)
+        const cos = Math.cos(field.rotation);
+        const sin = Math.sin(field.rotation);
+        const worldX = field.pos[0] + localX * cos - localZ * sin;
+        const worldZ = field.pos[2] + localX * sin + localZ * cos;
+        // Skip if too close to a canal
+        if (isNearCanal(worldX, worldZ, CANAL_CLEARANCE)) continue;
         positions.push({
-          x: -field.size[0] / 2 + spacing * (c + 0.5) + jitter(spacing * 0.4),
-          z: -field.size[1] / 2 + spacing * (r + 0.5) + jitter(spacing * 0.4),
+          x: localX,
+          z: localZ,
           scale: 0.85 + rand() * 0.35
         });
       }
@@ -128,12 +201,13 @@ export const buildFarmlandLayout = (mapX: number, mapY: number): FarmlandLayout 
     };
   });
 
+  // River - runs along one edge of the map, spanning the full width
   const hasRiver = rand() < 0.5;
-  const riverEdge = rand() > 0.5 ? 26 : -26;
+  const riverEdge = rand() > 0.5 ? 22 : -22; // Position along north or south edge
   const river = hasRiver ? {
-    pos: [0 + jitter(2.0), 0.012, riverEdge + jitter(0.8)] as [number, number, number],
-    size: [84, 6.2] as [number, number],
-    rotation: jitter(0.04),
+    pos: [0, 0.012, riverEdge] as [number, number, number],
+    size: [90, 5.5] as [number, number], // 90 units ensures full edge-to-edge coverage
+    rotation: jitter(0.03), // Very slight angle for naturalism
   } : null;
   const waterwheel = hasRiver ? {
     pos: [
@@ -145,21 +219,76 @@ export const buildFarmlandLayout = (mapX: number, mapY: number): FarmlandLayout 
     scale: 1.25 + rand() * 0.6
   } : null;
 
-  const orchardRows: Array<[number, number, number]> = [];
-  for (let row = 0; row < 3; row += 1) {
-    for (let col = 0; col < 6; col += 1) {
-      orchardRows.push([
-        -6 + col * 4.2 + jitter(0.5),
+  // Orchards distributed in multiple groves across the map
+  // Generate candidate positions first, then filter out those near canals
+  const orchardCandidates: Array<[number, number, number]> = [];
+
+  // Northwest orchard grove
+  for (let row = 0; row < 2; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      orchardCandidates.push([
+        -20 + col * 4.5 + jitter(0.8),
         0,
-        -2 + row * 4.2 + jitter(0.5)
+        -4 + row * 4.5 + jitter(0.8)
       ]);
     }
   }
 
+  // Northeast orchard grove
+  for (let row = 0; row < 2; row += 1) {
+    for (let col = 0; col < 3; col += 1) {
+      orchardCandidates.push([
+        10 + col * 4.5 + jitter(0.8),
+        0,
+        -18 + row * 4.5 + jitter(0.8)
+      ]);
+    }
+  }
+
+  // Southwest orchard grove
+  for (let row = 0; row < 2; row += 1) {
+    for (let col = 0; col < 2; col += 1) {
+      orchardCandidates.push([
+        -8 + col * 5.0 + jitter(0.8),
+        0,
+        18 + row * 4.5 + jitter(0.8)
+      ]);
+    }
+  }
+
+  // Southeast scattered trees
+  for (let row = 0; row < 2; row += 1) {
+    for (let col = 0; col < 2; col += 1) {
+      orchardCandidates.push([
+        16 + col * 5.0 + jitter(1.0),
+        0,
+        4 + row * 5.0 + jitter(1.0)
+      ]);
+    }
+  }
+
+  // Filter out orchard trees that would be placed on canals
+  const orchardRows = orchardCandidates.filter(
+    ([x, _, z]) => !isNearCanal(x, z, CANAL_CLEARANCE + 1.0) // Extra clearance for trees
+  );
+
+  // Fence posts around field perimeters - spread out
   const fencePosts: Array<[number, number, number]> = [];
-  for (let idx = 0; idx < 7; idx += 1) {
-    fencePosts.push([-24 + idx * 4.2, 0, -14 + jitter(0.4)]);
-    fencePosts.push([22 - idx * 4.2, 0, 20 + jitter(0.4)]);
+  // Northern fence line
+  for (let idx = 0; idx < 6; idx += 1) {
+    fencePosts.push([-22 + idx * 8.5 + jitter(0.5), 0, -22 + jitter(0.4)]);
+  }
+  // Southern fence line
+  for (let idx = 0; idx < 6; idx += 1) {
+    fencePosts.push([-22 + idx * 8.5 + jitter(0.5), 0, 22 + jitter(0.4)]);
+  }
+  // Western fence line
+  for (let idx = 0; idx < 4; idx += 1) {
+    fencePosts.push([-22 + jitter(0.4), 0, -14 + idx * 10 + jitter(0.5)]);
+  }
+  // Eastern fence line
+  for (let idx = 0; idx < 4; idx += 1) {
+    fencePosts.push([22 + jitter(0.4), 0, -14 + idx * 10 + jitter(0.5)]);
   }
 
   // Bedouin tent spawning (0-1 tent in outer perimeter only)
@@ -245,6 +374,7 @@ export const OutskirtsFarmlandDecor: React.FC<{ mapX: number; mapY: number; time
   if (district !== 'OUTSKIRTS_FARMLAND' && district !== 'EAST_GHOUTA' && district !== 'SOUTH_GHOUTA' && district !== 'NORTH_GHOUTA' && district !== 'RABWE') return null;
 
   const layout = useMemo(() => buildFarmlandLayout(mapX, mapY), [mapX, mapY]);
+  const seed = mapX * 1000 + mapY * 100 + 911; // Same seed as buildFarmlandLayout
   const waterwheelRef = useRef<THREE.Group>(null);
   const waterFlowRef = useRef<THREE.Mesh>(null);
 
@@ -325,33 +455,75 @@ export const OutskirtsFarmlandDecor: React.FC<{ mapX: number; mapY: number; time
         );
       })}
 
-      {/* River */}
+      {/* River - naturalistic water like canal district but with irregular banks */}
       {layout.river && (
         <HoverableGroup
           position={layout.river.pos}
           boxSize={[layout.river.size[0], 0.6, layout.river.size[1] + 0.6]}
           boxOffset={[0, 0.1, 0]}
-          labelTitle="Irrigation Channel"
-          labelLines={['Fresh water', 'Artery of the fields']}
+          labelTitle="Barada River Branch"
+          labelLines={['Fresh water from the mountains', 'Lifeblood of the Ghouta']}
           labelOffset={[0, 1.2, 0]}
         >
           <group rotation={[0, layout.river.rotation, 0]}>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-              <planeGeometry args={layout.river.size} />
-              <meshStandardMaterial color="#2f4f5a" roughness={0.6} metalness={0.1} transparent opacity={0.75} />
+            {/* Water depth layer (darker underneath) - like canal district */}
+            <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[layout.river.size[0], layout.river.size[1] - 0.4]} />
+              <meshStandardMaterial color="#1a3a4a" roughness={0.9} transparent opacity={0.7} />
             </mesh>
-            <mesh ref={waterFlowRef} position={[0, 0.06, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-              <planeGeometry args={[layout.river.size[0] * 0.6, layout.river.size[1] * 0.55]} />
-              <meshStandardMaterial color="#3f6a78" roughness={0.35} metalness={0.2} transparent opacity={0.45} depthWrite={false} />
+            {/* Main water surface - reflective like canal water */}
+            <mesh position={[0, 0.12, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+              <planeGeometry args={[layout.river.size[0], layout.river.size[1] - 0.6]} />
+              <meshStandardMaterial
+                color="#3a6a7a"
+                transparent
+                opacity={0.88}
+                roughness={0.12}
+                metalness={0.28}
+                envMapIntensity={0.75}
+              />
             </mesh>
-            <mesh position={[0, 0.03, layout.river.size[1] / 2 + 0.2]} castShadow>
-              <boxGeometry args={[layout.river.size[0], 0.12, 0.3]} />
-              <meshStandardMaterial color="#6b7c55" roughness={0.95} />
+            {/* Animated flow highlight */}
+            <mesh ref={waterFlowRef} position={[0, 0.14, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[layout.river.size[0] * 0.5, layout.river.size[1] * 0.4]} />
+              <meshStandardMaterial color="#4a7a8a" roughness={0.08} metalness={0.35} transparent opacity={0.35} depthWrite={false} />
             </mesh>
-            <mesh position={[0, 0.03, -layout.river.size[1] / 2 - 0.2]} castShadow>
-              <boxGeometry args={[layout.river.size[0], 0.12, 0.3]} />
-              <meshStandardMaterial color="#6b7c55" roughness={0.95} />
-            </mesh>
+            {/* Irregular naturalistic banks - earth and reeds, not stone */}
+            {Array.from({ length: 12 }).map((_, i) => {
+              const xPos = -layout.river.size[0] / 2 + (i / 11) * layout.river.size[0];
+              const jitterZ = (seededRandom(seed + i * 31) - 0.5) * 0.8;
+              const bankWidth = 0.4 + seededRandom(seed + i * 37) * 0.5;
+              return (
+                <React.Fragment key={`bank-${i}`}>
+                  {/* Top bank - muddy earth with vegetation */}
+                  <mesh position={[xPos, 0.06, layout.river.size[1] / 2 + 0.3 + jitterZ]} castShadow>
+                    <boxGeometry args={[layout.river.size[0] / 10, 0.15, bankWidth]} />
+                    <meshStandardMaterial color="#5a6b45" roughness={0.95} />
+                  </mesh>
+                  {/* Bottom bank */}
+                  <mesh position={[xPos, 0.06, -layout.river.size[1] / 2 - 0.3 - jitterZ]} castShadow>
+                    <boxGeometry args={[layout.river.size[0] / 10, 0.15, bankWidth]} />
+                    <meshStandardMaterial color="#5a6b45" roughness={0.95} />
+                  </mesh>
+                </React.Fragment>
+              );
+            })}
+            {/* Reed clumps along banks */}
+            {Array.from({ length: 6 }).map((_, i) => {
+              const xPos = -layout.river.size[0] / 3 + (i / 5) * (layout.river.size[0] * 0.66);
+              const side = seededRandom(seed + i * 43) > 0.5 ? 1 : -1;
+              const zPos = side * (layout.river.size[1] / 2 + 0.1);
+              return (
+                <group key={`reeds-${i}`} position={[xPos, 0, zPos]}>
+                  {Array.from({ length: 4 }).map((_, j) => (
+                    <mesh key={j} position={[(j - 1.5) * 0.15, 0.4, 0]} rotation={[0.1 * (j - 1.5), 0, 0.05 * (j - 1.5)]}>
+                      <cylinderGeometry args={[0.02, 0.03, 0.8, 4]} />
+                      <meshStandardMaterial color="#4a5a3a" roughness={0.9} />
+                    </mesh>
+                  ))}
+                </group>
+              );
+            })}
           </group>
         </HoverableGroup>
       )}
@@ -406,30 +578,52 @@ export const OutskirtsFarmlandDecor: React.FC<{ mapX: number; mapY: number; time
         </HoverableGroup>
       )}
 
-      {/* Irrigation canals */}
+      {/* Irrigation canals - improved water quality with earthen banks */}
       {layout.canals.map((canal, idx) => (
         <HoverableGroup
           key={`canal-${idx}`}
           position={canal.pos}
           boxSize={[canal.size[0], 0.6, canal.size[1] + 0.8]}
           boxOffset={[0, 0.1, 0]}
-          labelTitle="Irrigation Canal"
-          labelLines={['Fed by Barada', 'Stone-lined banks']}
+          labelTitle="Irrigation Ditch"
+          labelLines={['Fed by Barada', 'Earthen banks']}
           labelOffset={[0, 1.2, 0]}
         >
           <group rotation={[0, canal.rotation, 0]}>
-            <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-              <planeGeometry args={canal.size} />
-              <meshStandardMaterial color="#3f5a4c" roughness={0.8} transparent opacity={0.7} />
+            {/* Water depth layer */}
+            <mesh position={[0, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+              <planeGeometry args={[canal.size[0], canal.size[1] - 0.2]} />
+              <meshStandardMaterial color="#1a3a4a" roughness={0.9} transparent opacity={0.6} />
             </mesh>
-            <mesh position={[0, 0.03, canal.size[1] / 2]} castShadow>
-              <boxGeometry args={[canal.size[0], 0.12, 0.18]} />
-              <meshStandardMaterial color="#6b7c55" roughness={0.95} />
+            {/* Main water surface - reflective */}
+            <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+              <planeGeometry args={[canal.size[0], canal.size[1] - 0.3]} />
+              <meshStandardMaterial
+                color="#3a6a7a"
+                transparent
+                opacity={0.85}
+                roughness={0.15}
+                metalness={0.25}
+                envMapIntensity={0.6}
+              />
             </mesh>
-            <mesh position={[0, 0.03, -canal.size[1] / 2]} castShadow>
-              <boxGeometry args={[canal.size[0], 0.12, 0.18]} />
-              <meshStandardMaterial color="#6b7c55" roughness={0.95} />
-            </mesh>
+            {/* Irregular earthen banks */}
+            {Array.from({ length: 6 }).map((_, i) => {
+              const xPos = -canal.size[0] / 2 + (i / 5) * canal.size[0];
+              const jitterZ = (seededRandom(seed + idx * 100 + i * 31) - 0.5) * 0.3;
+              return (
+                <React.Fragment key={`canal-bank-${i}`}>
+                  <mesh position={[xPos, 0.04, canal.size[1] / 2 + 0.12 + jitterZ]} castShadow>
+                    <boxGeometry args={[canal.size[0] / 5, 0.1, 0.25 + seededRandom(seed + i * 41) * 0.15]} />
+                    <meshStandardMaterial color="#5a6b45" roughness={0.95} />
+                  </mesh>
+                  <mesh position={[xPos, 0.04, -canal.size[1] / 2 - 0.12 - jitterZ]} castShadow>
+                    <boxGeometry args={[canal.size[0] / 5, 0.1, 0.25 + seededRandom(seed + i * 47) * 0.15]} />
+                    <meshStandardMaterial color="#5a6b45" roughness={0.95} />
+                  </mesh>
+                </React.Fragment>
+              );
+            })}
           </group>
         </HoverableGroup>
       ))}
