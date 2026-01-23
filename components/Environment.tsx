@@ -700,76 +700,8 @@ const Building: React.FC<{
     }
     return mat;
   }, [data.type, localSeed, mainMaterial, noiseTextures]);
-  const baseColorRef = useRef<THREE.Color>(new THREE.Color());
-  const fadeTargetRef = useRef<THREE.Color>(new THREE.Color('#d4c4a8')); // Warm beige/sand tone instead of bluish gray
-  const lastFadeUpdateRef = useRef(0);
-
-  useEffect(() => {
-    if (buildingMaterial instanceof THREE.MeshStandardMaterial) {
-      baseColorRef.current.copy(buildingMaterial.color);
-    }
-  }, [buildingMaterial]);
-
-  // PERFORMANCE: Throttle distance fade to every 0.5s instead of every frame
-  // Reduces 30-50 distanceTo() calculations per frame to 6-10 per second
-  useFrame((state) => {
-    if (!groupRef.current) return;
-    if (!(buildingMaterial instanceof THREE.MeshStandardMaterial)) return;
-
-    const elapsed = state.clock.elapsedTime;
-    if (elapsed - lastFadeUpdateRef.current < 0.5) return;
-    lastFadeUpdateRef.current = elapsed;
-
-    const dist = camera.position.distanceTo(groupRef.current.position);
-    const fade = THREE.MathUtils.clamp((dist - 45) / 60, 0, 0.55); // Start fade at greater distance (45 instead of 18)
-    buildingMaterial.color.copy(baseColorRef.current).lerp(fadeTargetRef.current, fade);
-
-    // GRAPHICS: Sun-baked emissive glow during peak daylight (10am-3pm)
-    // Applies to ALL buildings for warm sun-radiating effect
-    // Use torchIntensity as proxy for time-of-day (low = day, high = night)
-    const isDaytime = torchIntensity < 0.8; // Day when torch intensity is low
-    const isNoonish = torchIntensity < 0.4; // Peak sun when torches are minimal
-
-    if (isDaytime && isNoonish) {
-      // Sun-baked warm glow - BOOSTED for Mediterranean feel
-      const emissiveIntensity = (0.8 - torchIntensity) / 0.8 * 0.28; // Boosted from 0.12
-      buildingMaterial.emissive.setRGB(0.95, 0.85, 0.55); // Warmer, more saturated sun-baked stone
-      buildingMaterial.emissiveIntensity = emissiveIntensity;
-    } else {
-      // Fade out emissive outside peak sun hours
-      buildingMaterial.emissiveIntensity = THREE.MathUtils.lerp(buildingMaterial.emissiveIntensity, 0, 0.1);
-    }
-  });
-  const baseResidentialColor = useMemo(() => {
-    if (!(buildingMaterial instanceof THREE.MeshStandardMaterial)) return null;
-    return buildingMaterial.color.clone();
-  }, [buildingMaterial]);
-
-  // PERFORMANCE FIX: Throttle material updates to every 2 seconds instead of every frame
-  // This reduces GPU uploads from 30 per frame (1800/sec) to 15 per 2s (7.5/sec) = 240x less frequent!
-  const lastMaterialUpdateRef = useRef(0);
-  const nightTintRef = useRef(new THREE.Color('#6f7f96'));
-  const tintedColorRef = useRef(new THREE.Color());
-
-  useFrame((state) => {
-    if (!(buildingMaterial instanceof THREE.MeshStandardMaterial)) return;
-    if (!baseResidentialColor || data.type !== BuildingType.RESIDENTIAL) return;
-
-    const elapsed = state.clock.elapsedTime;
-    // Update every 2 seconds instead of every frame (60 FPS → 0.5 updates/sec = 120x reduction!)
-    if (elapsed - lastMaterialUpdateRef.current < 2.0) return;
-    lastMaterialUpdateRef.current = elapsed;
-
-    const nightDarken = 1 - nightFactor * 0.55;
-    tintedColorRef.current.copy(baseResidentialColor).lerp(nightTintRef.current, nightFactor);
-    tintedColorRef.current.multiplyScalar(nightDarken);
-
-    // FIX: Update baseColorRef so distance fade uses the tinted color as base
-    // This prevents the two useFrame hooks from fighting each other
-    baseColorRef.current.copy(tintedColorRef.current);
-
-    buildingMaterial.envMapIntensity = 1.35 - nightFactor * 0.9;
-  });
+  // PERFORMANCE: Removed per-building per-frame material updates (distance fade + emissive + night tint).
+  // These are purely visual and were contributing to stutter in dense scenes.
 
   // Door positioning based on metadata
   const doorRotation = data.doorSide * (Math.PI / 2);
@@ -796,7 +728,8 @@ const Building: React.FC<{
   const isOccluded = occludedBuildingIds?.has(data.id) ?? false;
   const showWireframe = (wireframeEnabled && hovered) || showSelected || isOccluded;
   const showLabel = (labelEnabled && hovered) || showSelected;
-  useHoverFade(groupRef, showWireframe, isOccluded ? 0.12 : 0.35);
+  // Do not fade materials for occluded buildings to avoid cutout artifacts.
+  useHoverFade(groupRef, (wireframeEnabled && hovered) || showSelected, 0.35);
   // PERFORMANCE: Torches disabled (user reported 10 FPS)
   const torchCount = 0;
   const torchOffsets: [number, number, number][] = [];

@@ -21,6 +21,7 @@ import { PushableObject, PickupInfo, PushableMaterial, isClimbablePushable, getP
 import { sampleTerrainHeight, TerrainHeightmap } from '../utils/terrain';
 import { calculateTerrainGradient } from '../utils/terrain-gradient';
 import { collisionSounds, CollisionMaterial } from './audio/CollisionSounds';
+import { AUDIO_ENABLED } from '../utils/audioConfig';
 import { EXPOSURE_CONFIG, calculatePlagueProtection } from '../utils/plagueExposure';
 import { Rat } from './Rats';
 import { getAllItems, getItemDetailsByItemId } from '../utils/merchantItems';
@@ -366,6 +367,10 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   // Camera collision - how far to pull camera forward when obstructed
   const cameraCollisionOffsetRef = useRef(0);
+  const cameraCollisionCheckRef = useRef(0);
+  const cameraCollisionLastPlayerRef = useRef(new THREE.Vector3());
+  const cameraCollisionLastCameraRef = useRef(new THREE.Vector3());
+  const cameraCollisionDirRef = useRef(new THREE.Vector3(0, 0, -1));
 
   // Camera mode transition system
   const prevCameraModeRef = useRef<CameraMode>(cameraMode);
@@ -584,7 +589,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if ((e.target as HTMLElement | null)?.isContentEditable) return;
       const k = e.key.toLowerCase();
-      if (!audioCtxRef.current) {
+      if (AUDIO_ENABLED && !audioCtxRef.current) {
         const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
         if (AudioCtor) {
           audioCtxRef.current = new AudioCtor();
@@ -826,6 +831,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   }, [district]);
 
   const playFootstep = (variant: 'walk' | 'run') => {
+    if (!AUDIO_ENABLED) return;
     const ctx = audioCtxRef.current;
     const buffer = noiseBufferRef.current;
     if (!ctx || !buffer) return;
@@ -846,6 +852,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   };
 
   const playJump = () => {
+    if (!AUDIO_ENABLED) return;
     const ctx = audioCtxRef.current;
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume();
@@ -862,6 +869,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   };
 
   const playPickup = () => {
+    if (!AUDIO_ENABLED) return;
     const ctx = audioCtxRef.current;
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume();
@@ -879,6 +887,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   };
 
   const playLand = () => {
+    if (!AUDIO_ENABLED) return;
     const ctx = audioCtxRef.current;
     const buffer = noiseBufferRef.current;
     if (!ctx || !buffer) return;
@@ -916,6 +925,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   };
 
   const playObjectImpact = (material: PushableObject['material'] | 'wall', intensity: number) => {
+    if (!AUDIO_ENABLED) return;
     // Use the new collision sounds system
     if (material === 'wall') {
       collisionSounds.play('wall', intensity);
@@ -925,6 +935,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
   };
 
   const playNpcBump = (intensity: number) => {
+    if (!AUDIO_ENABLED) return;
     const ctx = audioCtxRef.current;
     if (!ctx) return;
     if (ctx.state === 'suspended') ctx.resume();
@@ -1730,9 +1741,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
                   onImpactPuff?.(item.position, 1.0);
                   // Play appropriate shatter sound
                   if (item.material === 'wood') {
-                    collisionSounds.playWoodShatter(intensity);
+                    if (AUDIO_ENABLED) collisionSounds.playWoodShatter(intensity);
                   } else {
-                    collisionSounds.playShatter(intensity);
+                    if (AUDIO_ENABLED) collisionSounds.playShatter(intensity);
                   }
                   // Generate loot from shattered object
                   const loot = generateShatterLoot(item.position, getAllItems);
@@ -2689,9 +2700,9 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
               onImpactPuff?.(hitItem.position.clone(), 1.0);
               // Play appropriate shatter sound based on material
               if (hitItem.material === 'wood') {
-                collisionSounds.playWoodShatter(0.8 + strength * 0.2);
+                if (AUDIO_ENABLED) collisionSounds.playWoodShatter(0.8 + strength * 0.2);
               } else {
-                collisionSounds.playShatter(0.8 + strength * 0.2);
+                if (AUDIO_ENABLED) collisionSounds.playShatter(0.8 + strength * 0.2);
               }
               // Generate loot from shattered object (50% chance, 1-2 items)
               const loot = generateShatterLoot(hitItem.position, getAllItems);
@@ -2878,7 +2889,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
               swing.shatterTime = now;
 
               // Play prominent glass shattering sound
-              collisionSounds.playShatter(1.0); // Full volume for dramatic effect
+              if (AUDIO_ENABLED) collisionSounds.playShatter(1.0); // Full volume for dramatic effect
 
               // Play additional metal impact for the lantern frame hitting ground
               setTimeout(() => {
@@ -3379,14 +3390,6 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
                 material.needsUpdate = true;
               }
             }
-            if ('depthWrite' in material) {
-              const matWithDepth = material as THREE.Material & { depthWrite?: boolean };
-              const nextDepthWrite = !shouldBeTransparent;
-              if (matWithDepth.depthWrite !== nextDepthWrite) {
-                matWithDepth.depthWrite = nextDepthWrite;
-                material.needsUpdate = true;
-              }
-            }
           };
 
           if (isBlocked) {
@@ -3434,13 +3437,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
                     if (!('opacity' in mat)) return;
                     (mat as THREE.Material & { opacity: number }).opacity = 1.0;
                     if ('transparent' in mat) mat.transparent = false;
-                    if ('depthWrite' in mat) mat.depthWrite = true;
                     mat.needsUpdate = true;
                   });
                 } else if (mesh.material && 'opacity' in mesh.material) {
                   (mesh.material as THREE.Material & { opacity: number }).opacity = 1.0;
                   if ('transparent' in mesh.material) mesh.material.transparent = false;
-                  if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
                   mesh.material.needsUpdate = true;
                 }
                 occludedMeshesRef.current.delete(mesh);
@@ -3544,13 +3545,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
                   if (!('opacity' in mat)) return;
                   (mat as THREE.Material & { opacity: number }).opacity = 1.0;
                   if ('transparent' in mat) mat.transparent = false;
-                  if ('depthWrite' in mat) mat.depthWrite = true;
                   mat.needsUpdate = true;
                 });
               } else if (mesh.material && 'opacity' in mesh.material) {
                 (mesh.material as THREE.Material & { opacity: number }).opacity = 1.0;
                 if ('transparent' in mesh.material) mesh.material.transparent = false;
-                if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
                 mesh.material.needsUpdate = true;
               }
               occludedMeshesRef.current.delete(mesh);
@@ -3566,13 +3565,11 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
             if (!('opacity' in material)) return;
             (material as THREE.Material & { opacity: number }).opacity = 1.0;
             if ('transparent' in material) material.transparent = false;
-            if ('depthWrite' in material) material.depthWrite = true;
             material.needsUpdate = true;
           });
         } else if (mesh.material && 'opacity' in mesh.material) {
           (mesh.material as THREE.Material & { opacity: number }).opacity = 1.0;
           if ('transparent' in mesh.material) mesh.material.transparent = false;
-          if ('depthWrite' in mesh.material) mesh.material.depthWrite = true;
           mesh.material.needsUpdate = true;
         }
       });
@@ -3581,41 +3578,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
     // === CAMERA EFFECTS SYSTEM ===
 
-    // 4a. Camera collision prevention - pull camera forward when obstructed
-    if (cameraMode !== CameraMode.FIRST_PERSON && cameraMode !== CameraMode.OVERHEAD && group.current) {
-      const playerPos = group.current.position.clone().add(new THREE.Vector3(0, 1.5, 0));
-      const cameraPos = camera.position.clone();
-      const toCamera = cameraPos.clone().sub(playerPos);
-      const distance = toCamera.length();
-
-      if (distance > 0.5) {
-        const direction = toCamera.normalize();
-        raycasterRef.current.set(playerPos, direction);
-        raycasterRef.current.far = distance;
-
-        const intersects = raycasterRef.current.intersectObjects(camera.parent?.children || [], true);
-
-        let closestObstruction = distance;
-        for (const hit of intersects) {
-          // Check for buildings/terrain (not the player or decorations)
-          if (hit.object.userData?.isBuildingWall || hit.object.userData?.isBuilding || hit.object.userData?.isTerrain) {
-            if (hit.distance < closestObstruction) {
-              closestObstruction = hit.distance;
-            }
-          }
-        }
-
-        // Calculate how much to pull camera forward
-        const targetOffset = closestObstruction < distance ? (distance - closestObstruction + 0.5) : 0;
-        cameraCollisionOffsetRef.current = THREE.MathUtils.lerp(cameraCollisionOffsetRef.current, targetOffset, 0.15);
-
-        // Apply the offset
-        if (cameraCollisionOffsetRef.current > 0.1) {
-          const pullDirection = direction.negate();
-          camera.position.add(pullDirection.multiplyScalar(cameraCollisionOffsetRef.current));
-        }
-      }
-    }
+    // 4a. Camera collision prevention disabled for performance.
 
     // 4b. Sprint FOV widening - increase FOV when sprinting for speed sensation
     if (camera instanceof THREE.PerspectiveCamera) {

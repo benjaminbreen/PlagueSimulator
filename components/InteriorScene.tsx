@@ -53,6 +53,11 @@ interface InteriorSceneProps {
   onCrimeWitnessed?: (crime: { type: 'theft' | 'vandalism'; witnessCount: number }) => void;
 }
 
+const INTERIOR_LIGHT_PROP_TYPES = new Set<InteriorPropType>([
+  InteriorPropType.LAMP,
+  InteriorPropType.FLOOR_LAMP,
+  InteriorPropType.LANTERN
+]);
  
 
 
@@ -840,7 +845,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
           : 'west'
   ), [activeExteriorDoorSide]);
   const isDay = params.timeOfDay >= 7 && params.timeOfDay <= 17;
-  // PERFORMANCE: Cap lights to 4 per floor to prevent GPU overload from too many PointLights
+  // PERFORMANCE: Cap lights to 2 per floor to prevent GPU overload from too many PointLights
   const lampProps = useMemo(
     () => {
       const allLamps = activeProps.filter((prop) => (
@@ -863,7 +868,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         };
         return priority(a.type) - priority(b.type);
       });
-      return prioritized.slice(0, 4); // Max 4 lights per floor
+      return prioritized.slice(0, 2); // Max 2 lights per floor
     },
     [activeProps]
   );
@@ -1845,6 +1850,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
         // Skip light for shattered lamps
         const pushable = pushables.find((item) => item.sourceId === prop.id);
         if (pushable?.isShattered) return null;
+        const swingable = swingables.find((item) => item.sourceId === prop.id);
 
         const baseY = prop.type === InteriorPropType.CANDLE ? prop.position[1] + 0.2
           : prop.type === InteriorPropType.LANTERN ? prop.position[1] - 0.15
@@ -1864,10 +1870,13 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
               : prop.type === InteriorPropType.CANDLE ? 9
                 : prop.type === InteriorPropType.LANTERN ? 16
                   : 12;
+        const lightPosition: [number, number, number] = swingable?.position
+          ? [swingable.position.x, swingable.position.y, swingable.position.z]
+          : [prop.position[0], baseY, prop.position[2]];
         return (
           <FlickerLight
             key={`lamp-light-${prop.id}`}
-            position={[prop.position[0], baseY, prop.position[2]]}
+            position={lightPosition}
             intensity={intensity}
             color={prop.type === InteriorPropType.LANTERN ? "#f7c48a" : "#f0c07d"}
             distance={distance}
@@ -2010,6 +2019,11 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             positionVector={swingable?.position ?? pushable?.position}
             roomSize={roomForProp?.size}
             isShattered={pushable?.isShattered || swingable?.isShattered}
+            allowLight={
+              prop.type !== InteriorPropType.LAMP
+              && prop.type !== InteriorPropType.FLOOR_LAMP
+              && prop.type !== InteriorPropType.LANTERN
+            }
           />
         );
       })}

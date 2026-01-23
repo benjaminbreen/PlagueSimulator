@@ -305,6 +305,7 @@ export const NPC: React.FC<NPCProps> = memo(({
 
   // PERFORMANCE: Distance LOD - calculate distance from camera for detail level
   const distanceFromCameraRef = useRef(0);
+  const repulsionCandidatesRef = useRef<Array<{ agent: AgentSnapshot; distSq: number }>>([]);
 
   // PERFORMANCE: Throttle infection checks to once per second instead of every frame
   const infectionCheckTimerRef = useRef(0);
@@ -344,9 +345,10 @@ export const NPC: React.FC<NPCProps> = memo(({
     escapeDir: new THREE.Vector3(), // For panic escape direction
     actionPos: new THREE.Vector3() // For player action response
   });
-  // Enhanced 12-angle avoidance with adaptive probe distance
+  const obstacleCheckFrameRef = useRef(0);
+  // Reduced-angle avoidance to lower per-frame collision cost
   const avoidanceRotations = useMemo(() => {
-    const angles = [30, 60, 90, 120, 150, 180]; // Degrees, will mirror for left/right
+    const angles = [30, 60, 90]; // Degrees, will mirror for left/right
     return angles.flatMap(deg => {
       const rad = (deg * Math.PI) / 180;
       return [
@@ -794,21 +796,42 @@ export const NPC: React.FC<NPCProps> = memo(({
       if (agentHash && !isFar) {
         // PERFORMANCE: Only query spatial hash every 3 frames (3x reduction in queries)
         spatialQueryFrameCountRef.current++;
-        if (spatialQueryFrameCountRef.current >= 3) {
+        if (spatialQueryFrameCountRef.current >= 4) {
           cachedNeighborsRef.current = queryNearbyAgents(currentPosRef.current, agentHash);
           spatialQueryFrameCountRef.current = 0;
         }
 
-        // Use cached neighbors for steering calculation
+        // Use cached neighbors for steering calculation (cap to nearest few)
         const repel = temps.repel.set(0, 0, 0);
+        const candidates = repulsionCandidatesRef.current;
+        candidates.length = 0;
+        const MAX_REPULSE_NEIGHBORS = 6;
         for (const other of cachedNeighborsRef.current) {
           if (other.id === stats.id) continue;
           const offset = temps.offset.copy(currentPosRef.current).sub(other.pos);
           const d2 = offset.lengthSq();
           if (d2 > 0.0001 && d2 < 4.0) {
-            offset.normalize();
-            repel.addScaledVector(offset, 0.35 / d2);
+            if (candidates.length < MAX_REPULSE_NEIGHBORS) {
+              candidates.push({ agent: other, distSq: d2 });
+            } else {
+              let worstIndex = 0;
+              let worstDist = candidates[0].distSq;
+              for (let i = 1; i < candidates.length; i++) {
+                if (candidates[i].distSq > worstDist) {
+                  worstDist = candidates[i].distSq;
+                  worstIndex = i;
+                }
+              }
+              if (d2 < worstDist) {
+                candidates[worstIndex] = { agent: other, distSq: d2 };
+              }
+            }
           }
+        }
+        for (const item of candidates) {
+          const offset = temps.offset.copy(currentPosRef.current).sub(item.agent.pos);
+          offset.normalize();
+          repel.addScaledVector(offset, 0.35 / item.distSq);
         }
         if (repel.lengthSq() > 0.0001) {
           dir.add(repel).normalize();
@@ -864,10 +887,12 @@ export const NPC: React.FC<NPCProps> = memo(({
         const step = temps.step.copy(dir).multiplyScalar(speed * simDelta);
         const nextPos = temps.nextPos.copy(currentPosRef.current).add(step);
 
-        // PERFORMANCE & BEHAVIOR: Multi-angle obstacle avoidance (12 directions with adaptive distance)
+        // PERFORMANCE & BEHAVIOR: Multi-angle obstacle avoidance (reduced directions, throttled)
         if (isBlockedByBuildings(nextPos, buildings, 0.5, buildingHash || undefined) || isBlockedByObstacles(nextPos, obstacles, 0.5, obstacleHash || undefined)) {
+          obstacleCheckFrameRef.current += 1;
+          const shouldProbe = obstacleCheckFrameRef.current % 2 === 0;
           let foundPath = false;
-          if (!isFar) {
+          if (!isFar && shouldProbe) {
             for (const rot of avoidanceRotations) {
               // Rotate direction vector by angle
               const rotatedDir = temps.rotatedDir.set(
@@ -889,8 +914,20 @@ export const NPC: React.FC<NPCProps> = memo(({
           }
 
           // EDGE-FOLLOWING: If all probe angles failed, enter edge-following mode
-          if (!foundPath) {
-            if (!edgeFollowingRef.current) {
+          const allowEdgeFollow = isSelected;
+          if (!foundPath && !allowEdgeFollow) {
+            edgeFollowingRef.current = false;
+            pickNewTarget(dir, true);
+            retargetTimerRef.current = 0;
+            nextRetargetRef.current = 3 + Math.random() * 5;
+          } else if (!foundPath) {
+            if (!shouldProbe) {
+              edgeFollowingRef.current = false;
+              if (group.current) {
+                group.current.position.copy(currentPosRef.current);
+                group.current.lookAt(temps.lookAtTarget.copy(currentPosRef.current).add(dir));
+              }
+            } else if (!edgeFollowingRef.current) {
               // ENTER EDGE-FOLLOWING MODE
               edgeFollowingRef.current = true;
               edgeFollowStartTimeRef.current = 0;
@@ -918,23 +955,25 @@ export const NPC: React.FC<NPCProps> = memo(({
               }
             }
 
-            // FOLLOW EDGE: Move along tangent
-            edgeFollowStartTimeRef.current += simDelta;
-            const edgeStep = temps.step.copy(edgeTangentRef.current).multiplyScalar(speed * simDelta);
-            const edgeNextPos = temps.nextPos.copy(currentPosRef.current).add(edgeStep);
+            if (shouldProbe) {
+              // FOLLOW EDGE: Move along tangent
+              edgeFollowStartTimeRef.current += simDelta;
+              const edgeStep = temps.step.copy(edgeTangentRef.current).multiplyScalar(speed * simDelta);
+              const edgeNextPos = temps.nextPos.copy(currentPosRef.current).add(edgeStep);
 
-            // Check if edge path is clear
-            if (!isBlockedByBuildings(edgeNextPos, buildings, 0.5, buildingHash || undefined) &&
-                !isBlockedByObstacles(edgeNextPos, obstacles, 0.5, obstacleHash || undefined)) {
-              currentPosRef.current.copy(edgeNextPos);
-            }
+              // Check if edge path is clear
+              if (!isBlockedByBuildings(edgeNextPos, buildings, 0.5, buildingHash || undefined) &&
+                  !isBlockedByObstacles(edgeNextPos, obstacles, 0.5, obstacleHash || undefined)) {
+                currentPosRef.current.copy(edgeNextPos);
+              }
 
-            // Exit edge-following after randomized duration OR if we cleared the obstacle
-            if (edgeFollowStartTimeRef.current > edgeFollowDurationRef.current) {
-              edgeFollowingRef.current = false;
-              pickNewTarget(dir, true); // Retarget with stuck flag
-              retargetTimerRef.current = 0;
-              nextRetargetRef.current = 3 + Math.random() * 5;
+              // Exit edge-following after randomized duration OR if we cleared the obstacle
+              if (edgeFollowStartTimeRef.current > edgeFollowDurationRef.current) {
+                edgeFollowingRef.current = false;
+                pickNewTarget(dir, true); // Retarget with stuck flag
+                retargetTimerRef.current = 0;
+                nextRetargetRef.current = 3 + Math.random() * 5;
+              }
             }
           } else {
             // Successfully found path - exit edge-following mode
@@ -1184,7 +1223,8 @@ export const NPC: React.FC<NPCProps> = memo(({
       infectionCheckTimerRef.current += simDelta;
 
       // Only check infection on a jittered interval (de-synced across NPCs)
-      if (infectionCheckTimerRef.current >= 1.2 + infectionCheckJitterRef.current) {
+      const infectionInterval = distanceFromCameraRef.current < 30 ? 1.2 : 2.4;
+      if (infectionCheckTimerRef.current >= infectionInterval + infectionCheckJitterRef.current) {
         infectionCheckTimerRef.current = 0;
         infectionCheckJitterRef.current = Math.random() * 0.6;
 
@@ -1222,7 +1262,8 @@ export const NPC: React.FC<NPCProps> = memo(({
     if (agentHash) {
       rumorCheckTimerRef.current += simDelta;
 
-      if (rumorCheckTimerRef.current >= 0.9 + rumorCheckJitterRef.current) {
+      const rumorInterval = distanceFromCameraRef.current < 30 ? 0.9 : 2.0;
+      if (rumorCheckTimerRef.current >= rumorInterval + rumorCheckJitterRef.current) {
         rumorCheckTimerRef.current = 0;
         rumorCheckJitterRef.current = Math.random() * 0.4;
 

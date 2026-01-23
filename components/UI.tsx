@@ -22,6 +22,7 @@ import {
 import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from './audio/BiomeAmbience';
 import { AdhanSynth, MelodyName } from './audio/synthesis/AdhanSynth';
 import { SoundDebugPanel } from './audio/SoundDebugPanel';
+import { AUDIO_ENABLED } from '../utils/audioConfig';
 import { EncounterModal } from './EncounterModal/EncounterModal';
 import { EventModal } from './EventModal';
 import { ConversationSummary } from '../types';
@@ -1427,6 +1428,14 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
   // Biome ambience preview for settings
   const { currentPreview, playPreview, stopPreview } = useBiomeAmbiencePreview();
+  const safePlayPreview = useCallback((biome: BiomeType) => {
+    if (!AUDIO_ENABLED) return;
+    playPreview(biome);
+  }, [playPreview]);
+  const safeStopPreview = useCallback(() => {
+    if (!AUDIO_ENABLED) return;
+    stopPreview();
+  }, [stopPreview]);
 
   // Sacred tune (Adhan) preview for settings
   const [currentAdhanPreview, setCurrentAdhanPreview] = useState<MelodyName | null>(null);
@@ -1434,6 +1443,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   const audioContextRef = useRef<AudioContext | null>(null);
 
   const playAdhanPreview = useCallback((melody: MelodyName) => {
+    if (!AUDIO_ENABLED) return;
     // Stop any currently playing adhan
     if (adhanSynthRef.current) {
       adhanSynthRef.current.stop();
@@ -1469,6 +1479,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
   }, []);
 
   const stopAdhanPreview = useCallback(() => {
+    if (!AUDIO_ENABLED) return;
     if (adhanSynthRef.current) {
       adhanSynthRef.current.stop();
       adhanSynthRef.current = null;
@@ -2733,8 +2744,8 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         llmEventsEnabled={llmEventsEnabled}
         setLlmEventsEnabled={setLlmEventsEnabled}
         currentPreview={currentPreview}
-        playPreview={playPreview}
-        stopPreview={stopPreview}
+        playPreview={safePlayPreview}
+        stopPreview={safeStopPreview}
         currentAdhanPreview={currentAdhanPreview}
         playAdhanPreview={playAdhanPreview}
         stopAdhanPreview={stopAdhanPreview}

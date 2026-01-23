@@ -404,7 +404,8 @@ const InteriorPropMesh: React.FC<{
   positionVector?: THREE.Vector3;
   roomSize?: [number, number, number];
   isShattered?: boolean;
-}> = ({ prop, rugMaterial, prayerRugMaterial, profession, socialClass, positionVector, roomSize, isShattered }) => {
+  allowLight?: boolean;
+}> = ({ prop, rugMaterial, prayerRugMaterial, profession, socialClass, positionVector, roomSize, isShattered, allowLight = true }) => {
   const itemRef = useRef<THREE.Object3D>(null);
   const base = positionVector ?? new THREE.Vector3(prop.position[0], prop.position[1], prop.position[2]);
   const rotation = prop.rotation as [number, number, number];
@@ -1951,13 +1952,15 @@ const InteriorPropMesh: React.FC<{
             <ContactShadow size={[0.25, 0.25]} />
 
             {/* Dim point light - poor quality oil gives weak light */}
-            <pointLight
-              position={[0, 0.12, 0]}
-              color="#ff9955"
-              intensity={0.6}
-              distance={2.5}
-              decay={2}
-            />
+            {allowLight && (
+              <pointLight
+                position={[0, 0.12, 0]}
+                color="#ff9955"
+                intensity={0.6}
+                distance={2.5}
+                decay={2}
+              />
+            )}
 
             {/* Simple clay dish base - hand-formed, slightly irregular */}
             <mesh position={[0, 0.02, 0]} receiveShadow castShadow>
@@ -2005,13 +2008,15 @@ const InteriorPropMesh: React.FC<{
           <ContactShadow size={[0.4, 0.4]} />
 
           {/* Point light for actual illumination */}
-          <pointLight
-            position={[0, 0.4, 0]}
-            color="#ffc470"
-            intensity={1.2}
-            distance={4}
-            decay={2}
-          />
+          {allowLight && (
+            <pointLight
+              position={[0, 0.4, 0]}
+              color="#ffc470"
+              intensity={1.2}
+              distance={4}
+              decay={2}
+            />
+          )}
 
           {/* Base plate */}
           <mesh position={[0, 0.02, 0]} receiveShadow castShadow>
@@ -2204,13 +2209,15 @@ const InteriorPropMesh: React.FC<{
           <ContactShadow size={[0.6, 0.6]} />
 
           {/* Point light for actual illumination */}
-          <pointLight
-            position={[0, 1.55, 0]}
-            color="#ffc470"
-            intensity={2.2}
-            distance={7}
-            decay={2}
-          />
+          {allowLight && (
+            <pointLight
+              position={[0, 1.55, 0]}
+              color="#ffc470"
+              intensity={2.2}
+              distance={7}
+              decay={2}
+            />
+          )}
 
           {/* Large base plate - weighted for stability */}
           <mesh position={[0, 0.03, 0]} receiveShadow castShadow>
@@ -2500,17 +2507,19 @@ const InteriorPropMesh: React.FC<{
       return (
         <group {...common} position={lanternPosition}>
           {/* Point light for actual illumination - outside scaled group */}
-          <pointLight
-            position={[0, 0, 0]}
-            color={lightColor}
-            intensity={lightIntensity}
-            distance={12}
-            decay={1.8}
-            castShadow
-            shadow-mapSize-width={256}
-            shadow-mapSize-height={256}
-            shadow-bias={-0.0005}
-          />
+          {allowLight && (
+            <pointLight
+              position={[0, 0, 0]}
+              color={lightColor}
+              intensity={lightIntensity}
+              distance={12}
+              decay={1.8}
+              castShadow
+              shadow-mapSize-width={256}
+              shadow-mapSize-height={256}
+              shadow-bias={-0.0005}
+            />
+          )}
 
           <group scale={[lanternScale, lanternScale, lanternScale]}>
 
@@ -3722,7 +3731,8 @@ export const InteriorPropRenderer: React.FC<{
   roomSize?: [number, number, number];
   positionVector?: THREE.Vector3;
   isShattered?: boolean;
-}> = ({ prop, rugMaterial, prayerRugMaterial, profession, socialClass, roomSize, positionVector, isShattered }) => {
+  allowLight?: boolean;
+}> = ({ prop, rugMaterial, prayerRugMaterial, profession, socialClass, roomSize, positionVector, isShattered, allowLight = true }) => {
   const labelOffset = useMemo(() => getPropLabelOffset(prop.type), [prop.type]);
   const zeroVector = useMemo(() => new THREE.Vector3(0, 0, 0), []);
   const displayProp = useMemo(() => ({
@@ -3746,6 +3756,7 @@ export const InteriorPropRenderer: React.FC<{
         positionVector={positionVector ? zeroVector : undefined}
         roomSize={roomSize}
         isShattered={isShattered}
+        allowLight={allowLight}
       />
     </InteriorHoverable>
   );

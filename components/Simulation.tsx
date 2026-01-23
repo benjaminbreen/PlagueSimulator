@@ -29,6 +29,7 @@ import { getFarmlandLandmarks } from './environment/districts/OutskirtsFarmlandD
 import { getCitadelLandmarks, getCitadelWallCollisions } from './environment/landmarks/CitadelComplex';
 import { SnakeCharmer } from './npcs/SnakeCharmer';
 import { FluteMusic } from './audio/FluteMusic';
+import { AUDIO_ENABLED } from '../utils/audioConfig';
 import { Astrologer } from './npcs/Astrologer';
 import { Scribe } from './npcs/Scribe';
 import { exposePlayerToPlague } from '../utils/plague';
@@ -1408,6 +1409,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const catPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const ratPositionsRef = useRef<THREE.Vector3[]>([]);
   const npcPositionsRef = useRef<THREE.Vector3[]>([]);
+  const npcSyncTickRef = useRef(0);
   const playerRef = useRef<THREE.Group>(null);
   const sprintStateRef = useRef(false);
   const { scene, gl } = useThree();
@@ -2140,6 +2142,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
   // Generate spatial audio sources from buildings
   const spatialAudioSources = useMemo<SpatialSource[]>(() => {
+    if (!AUDIO_ENABLED) return [];
     const sources: SpatialSource[] = [];
 
     // Central fountain/well (always at origin in main square)
@@ -2816,44 +2819,56 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   useFrame((state) => {
     const t = state.clock.elapsedTime;
 
-    // Update rat positions for cat to hunt
-    const rats = ratsRef.current;
-    if (rats && rats.length > 0) {
-      ratPositionsRef.current = rats
-        .filter(r => r.active)
-        .map(r => r.position);
-    }
-
-    // Update NPC positions for rats to avoid
-    if (agentHashRef.current) {
-      const positions: THREE.Vector3[] = [];
-      agentHashRef.current.buckets.forEach(bucket => {
-        for (const agent of bucket) {
-          positions.push(agent.pos);
+    const doNpcSync = t - npcSyncTickRef.current >= 0.2;
+    if (doNpcSync) {
+      npcSyncTickRef.current = t;
+      // Update rat positions for cat to hunt
+      const rats = ratsRef.current;
+      if (rats && rats.length > 0) {
+        const ratPositions = ratPositionsRef.current;
+        ratPositions.length = 0;
+        for (const rat of rats) {
+          if (rat.active) ratPositions.push(rat.position);
         }
-      });
-      npcPositionsRef.current = positions;
+      } else {
+        ratPositionsRef.current.length = 0;
+      }
 
-      // Update nearby infected/deceased counts for ambient audio
-      if (playerRef.current) {
-        const playerPos = playerRef.current.position;
-        playerPositionRef.current = [playerPos.x, playerPos.y, playerPos.z];
-        let nearbyInfected = 0;
-        let nearbyDeceased = 0;
-        const proximityRadius = 15;
-
+      // Update NPC positions for rats to avoid
+      if (agentHashRef.current) {
+        const positions = npcPositionsRef.current;
+        positions.length = 0;
         agentHashRef.current.buckets.forEach(bucket => {
           for (const agent of bucket) {
-            const dist = agent.pos.distanceTo(playerPos);
-            if (dist < proximityRadius) {
-              if (agent.state === AgentState.INFECTED) nearbyInfected++;
-              if (agent.state === AgentState.DECEASED) nearbyDeceased++;
-            }
+            positions.push(agent.pos);
           }
         });
 
-        nearbyInfectedRef.current = nearbyInfected;
-        nearbyDeceasedRef.current = nearbyDeceased;
+        // Update nearby infected/deceased counts for ambient audio
+        if (playerRef.current) {
+          const playerPos = playerRef.current.position;
+          playerPositionRef.current = [playerPos.x, playerPos.y, playerPos.z];
+          let nearbyInfected = 0;
+          let nearbyDeceased = 0;
+          const proximityRadiusSq = 15 * 15;
+
+          agentHashRef.current.buckets.forEach(bucket => {
+            for (const agent of bucket) {
+              const dx = agent.pos.x - playerPos.x;
+              const dz = agent.pos.z - playerPos.z;
+              const distSq = dx * dx + dz * dz;
+              if (distSq < proximityRadiusSq) {
+                if (agent.state === AgentState.INFECTED) nearbyInfected++;
+                if (agent.state === AgentState.DECEASED) nearbyDeceased++;
+              }
+            }
+          });
+
+          nearbyInfectedRef.current = nearbyInfected;
+          nearbyDeceasedRef.current = nearbyDeceased;
+        }
+      } else {
+        npcPositionsRef.current.length = 0;
       }
     }
 
@@ -3828,10 +3843,12 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       )}
 
       {/* Al-Nāy flute music - distance-based ambient audio */}
-      <FluteMusic
-        distance={snakeCharmerDistance}
-        enabled={snakeCharmerPosition !== null}
-      />
+      {AUDIO_ENABLED && (
+        <FluteMusic
+          distance={snakeCharmerDistance}
+          enabled={snakeCharmerPosition !== null}
+        />
+      )}
 
       {/* Astrologer - celestial scholar with brass astrolabe */}
       {astrologerPosition && (
@@ -3993,25 +4010,27 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <ActionEffects actionEvent={actionEvent} />
 
       {/* Ambient sound system */}
-      <AmbientAudio
-        timeOfDay={params.timeOfDay}
-        mapX={params.mapX}
-        mapY={params.mapY}
-        weatherType={weather.current.weatherType as 'CLEAR' | 'OVERCAST' | 'SANDSTORM'}
-        windDirection={Math.atan2(weather.current.wind.y, weather.current.wind.x)}
-        windStrength={weather.current.wind.length()}
-        humidity={weather.current.humidity}
-        activeNpcCount={moraleStatsRef.current.agentCount}
-        avgPanic={moraleStatsRef.current.avgPanic}
-        avgAwareness={moraleStatsRef.current.avgAwareness}
-        sceneMode="outdoor"
-        playerPosition={playerPositionRef.current}
-        nearbyInfected={nearbyInfectedRef.current}
-        nearbyDeceased={nearbyDeceasedRef.current}
-        spatialSources={spatialAudioSources}
-        enabled={true}
-        masterVolume={0.4}
-      />
+      {AUDIO_ENABLED && (
+        <AmbientAudio
+          timeOfDay={params.timeOfDay}
+          mapX={params.mapX}
+          mapY={params.mapY}
+          weatherType={weather.current.weatherType as 'CLEAR' | 'OVERCAST' | 'SANDSTORM'}
+          windDirection={Math.atan2(weather.current.wind.y, weather.current.wind.x)}
+          windStrength={weather.current.wind.length()}
+          humidity={weather.current.humidity}
+          activeNpcCount={moraleStatsRef.current.agentCount}
+          avgPanic={moraleStatsRef.current.avgPanic}
+          avgAwareness={moraleStatsRef.current.avgAwareness}
+          sceneMode="outdoor"
+          playerPosition={playerPositionRef.current}
+          nearbyInfected={nearbyInfectedRef.current}
+          nearbyDeceased={nearbyDeceasedRef.current}
+          spatialSources={spatialAudioSources}
+          enabled={true}
+          masterVolume={0.4}
+        />
+      )}
     </>
   );
 };

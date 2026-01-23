@@ -9,6 +9,40 @@ interface InfectedBuildingMarkersProps {
   playerPosition?: [number, number, number]; // Optional, not currently used but kept for API compatibility
 }
 
+const MARKER_MAX_DISTANCE = 80;
+const MARKER_MAX_COUNT = 2;
+const LIGHT_MAX_DISTANCE = 35;
+const LIGHT_MAX_COUNT = 1;
+
+const groundMarkerTextureCache = new Map<'infected' | 'deceased', THREE.CanvasTexture>();
+
+const getGroundMarkerTexture = (status: 'infected' | 'deceased') => {
+  const cached = groundMarkerTextureCache.get(status);
+  if (cached) return cached;
+
+  const markerColor = status === 'deceased' ? '#aa0000' : '#ff0000';
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+  gradient.addColorStop(0, markerColor + 'ff');
+  gradient.addColorStop(0.3, markerColor + 'ee');
+  gradient.addColorStop(0.6, markerColor + '88');
+  gradient.addColorStop(0.85, markerColor + '33');
+  gradient.addColorStop(1, markerColor + '00');
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 256);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  groundMarkerTextureCache.set(status, texture);
+  return texture;
+};
+
 /**
  * Renders big red diamond markers and wireframes above infected/deceased buildings
  * Visible from far away in all camera modes
@@ -23,32 +57,42 @@ export const InfectedBuildingMarkers: React.FC<InfectedBuildingMarkersProps> = (
 
   // Filter to infected/deceased buildings - NO distance culling, visible from anywhere
   const infectedBuildings = useMemo(() => {
-    if (!buildingInfection) return [];
+    if (!buildingInfection || !playerPosition) return [];
 
-    return buildings
-      .filter((building) => {
+    const maxDistanceSq = MARKER_MAX_DISTANCE * MARKER_MAX_DISTANCE;
+    const withDistance = buildings
+      .map((building) => {
         const state = buildingInfection[building.id];
-        if (!state) return false;
-        if (state.status !== 'infected' && state.status !== 'deceased') return false;
-        return true;
+        if (!state) return null;
+        if (state.status !== 'infected' && state.status !== 'deceased') return null;
+        const dx = building.position[0] - playerPosition[0];
+        const dz = building.position[2] - playerPosition[2];
+        const distanceSq = dx * dx + dz * dz;
+        if (distanceSq > maxDistanceSq) return null;
+        return {
+          building,
+          state,
+          playerPosition,
+          distanceSq
+        };
       })
-      .map((building) => ({
-        building,
-        state: buildingInfection[building.id]!,
-        playerPosition
-      }));
+      .filter((entry): entry is { building: BuildingMetadata; state: BuildingInfectionState; playerPosition: [number, number, number]; distanceSq: number } => Boolean(entry));
+
+    withDistance.sort((a, b) => a.distanceSq - b.distanceSq);
+    return withDistance.slice(0, MARKER_MAX_COUNT);
   }, [buildings, buildingInfection, playerPosition]);
 
   if (infectedBuildings.length === 0) return null;
 
   return (
     <group ref={groupRef}>
-      {infectedBuildings.map(({ building, state, playerPosition: localPlayerPosition }) => (
+      {infectedBuildings.map(({ building, state, playerPosition: localPlayerPosition, distanceSq }, index) => (
         <InfectedBuildingMarker
           key={building.id}
           building={building}
           status={state.status as 'infected' | 'deceased'}
           playerPosition={localPlayerPosition}
+          allowLight={index < LIGHT_MAX_COUNT && distanceSq <= LIGHT_MAX_DISTANCE * LIGHT_MAX_DISTANCE}
         />
       ))}
     </group>
@@ -60,9 +104,10 @@ interface InfectedBuildingMarkerProps {
   building: BuildingMetadata;
   status: 'infected' | 'deceased';
   playerPosition?: [number, number, number];
+  allowLight?: boolean;
 }
 
-const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ building, status, playerPosition }) => {
+const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ building, status, playerPosition, allowLight = false }) => {
   const [isHovered, setIsHovered] = useState(false);
   const distanceSq = useMemo(() => {
     if (!playerPosition) return 0;
@@ -70,9 +115,8 @@ const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ buildin
     const dz = building.position[2] - playerPosition[2];
     return dx * dx + dz * dz;
   }, [building.position, playerPosition]);
-  const skipAnimation = distanceSq > 140 * 140;
-  const disableLight = distanceSq > 90 * 90;
-  const disableLabel = distanceSq > 120 * 120;
+  const skipAnimation = distanceSq > 120 * 120;
+  const disableLabel = distanceSq > 110 * 110;
 
   return (
     <group>
@@ -84,7 +128,7 @@ const InfectedBuildingMarker: React.FC<InfectedBuildingMarkerProps> = ({ buildin
         onHoverChange={setIsHovered}
       />
       {/* Red light to illuminate building walls */}
-      {!disableLight && (
+      {allowLight && (
         <BuildingLight
           position={building.position}
           storyCount={building.storyCount ?? 1}
@@ -239,33 +283,7 @@ const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status
   const buildingSize = CONSTANTS.BUILDING_SIZE * sizeScale;
   const circleRadius = (buildingSize * 0.8); // Slightly larger than building footprint
 
-  const markerColor = status === 'deceased' ? '#aa0000' : '#ff0000';
-
-  // Create radial gradient texture for smooth fade-out effect
-  const gradientTexture = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-
-    // Create radial gradient from center to edge
-    const gradient = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-
-    // Bright glow in center fading to transparent at edges
-    gradient.addColorStop(0, markerColor + 'ff'); // Fully opaque center
-    gradient.addColorStop(0.3, markerColor + 'ee'); // Very bright inner glow
-    gradient.addColorStop(0.6, markerColor + '88'); // Medium glow
-    gradient.addColorStop(0.85, markerColor + '33'); // Faint outer glow
-    gradient.addColorStop(1, markerColor + '00'); // Transparent edge
-
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 256, 256);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
-  }, [markerColor]);
+  const gradientTexture = useMemo(() => getGroundMarkerTexture(status), [status]);
 
   useEffect(() => {
     if (!skipAnimation || !meshRef.current) return;
@@ -304,7 +322,7 @@ const GroundMarker: React.FC<GroundMarkerProps> = ({ position, sizeScale, status
         document.body.style.cursor = 'auto';
       }}
     >
-      <circleGeometry args={[circleRadius, 64]} />
+      <circleGeometry args={[circleRadius, 32]} />
       <meshBasicMaterial
         map={gradientTexture}
         transparent

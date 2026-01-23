@@ -21,7 +21,7 @@ export const HoverLabelContext = React.createContext(false);
  * Stores original material properties and restores them when inactive
  */
 export const useHoverFade = (ref: React.RefObject<THREE.Object3D>, active: boolean, opacity = 0.35) => {
-  const originals = useRef(new Map<THREE.Material, { opacity: number; transparent: boolean; depthWrite: boolean }>());
+  const originals = useRef(new Map<THREE.Material, { opacity: number; transparent: boolean }>());
 
   useEffect(() => {
     const root = ref.current;
@@ -33,21 +33,18 @@ export const useHoverFade = (ref: React.RefObject<THREE.Object3D>, active: boole
         if (!originals.current.has(mat)) {
           originals.current.set(mat, {
             opacity: mat.opacity ?? 1,
-            transparent: mat.transparent ?? false,
-            depthWrite: mat.depthWrite ?? true
+            transparent: mat.transparent ?? false
           });
         }
         if (active) {
           mat.transparent = true;
           mat.opacity = Math.min(mat.opacity ?? 1, opacity);
-          mat.depthWrite = false;
           mat.needsUpdate = true;
         } else {
           const original = originals.current.get(mat);
           if (original) {
             mat.opacity = original.opacity;
             mat.transparent = original.transparent;
-            mat.depthWrite = original.depthWrite;
             mat.needsUpdate = true;
           }
         }
