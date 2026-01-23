@@ -2134,7 +2134,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     }
 
     const carpets = generateMarketCarpets(buildingsRef.current, params.mapX, params.mapY, sessionSeed);
-    setHangingCarpets(carpets);
+    // PERFORMANCE: Reduce hanging carpets by ~50% to cut animation cost.
+    setHangingCarpets(carpets.filter((_, idx) => idx % 2 === 0));
   }, [buildingsState, params.mapX, params.mapY, sessionSeed]);
 
   const birdcagePlacements = useMemo(
