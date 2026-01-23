@@ -1436,6 +1436,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const impactPuffsRef = useRef<ImpactPuffSlot[]>(Array.from({ length: MAX_PUFFS }, () => null));
   const impactPuffIndexRef = useRef(0);
   const atmosphereTickRef = useRef(0);
+  const shadowUpdateRef = useRef(0);
+  const shadowUpdateIntervalRef = useRef(1.0);
   const minimapTickRef = useRef(0);
   const MINIMAP_UPDATE_INTERVAL = 0.75;
   const lastMinimapPosRef = useRef<THREE.Vector3 | null>(null);
@@ -2803,7 +2805,28 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     setShouldEnableShadows(enableShadows);
     gl.shadowMap.enabled = enableShadows;
     gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    if (lightRef.current?.shadow) {
+      lightRef.current.shadow.autoUpdate = false;
+      lightRef.current.shadow.needsUpdate = true;
+    }
   }, [gl, devSettings.showShadows]);
+
+  useEffect(() => {
+    if (!devSettings.showShadows) return;
+    // Disable shadow casting on non-building meshes to cut shadow map cost.
+    scene.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      if (mesh.userData?.isBuildingWall) {
+        mesh.castShadow = true;
+      } else {
+        mesh.castShadow = false;
+      }
+    });
+    if (lightRef.current?.shadow) {
+      lightRef.current.shadow.needsUpdate = true;
+    }
+  }, [scene, buildingsState, devSettings.showShadows]);
 
   const sunAngle = (params.timeOfDay / 24) * Math.PI * 2;
   const sunElevation = Math.sin(sunAngle - Math.PI / 2);
@@ -3129,8 +3152,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // GRAPHICS: Dynamic shadow radius - sharp at noon, soft at dawn/dusk
         // Lower radius = crisper shadow edges, higher = blurrier
         let shadowRadius = THREE.MathUtils.lerp(
-          2.0,   // Soft shadows at dawn/dusk (diffuse light)
-          0.5,   // Sharp shadows at noon (direct overhead sun)
+          2.5,   // Softer shadows at dawn/dusk (hide lower res)
+          0.6,   // Slightly sharper at noon
           dayFactor
         );
 
@@ -3144,7 +3167,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
         if (lightRef.current.shadow) {
           lightRef.current.shadow.bias = baseShadowSoftness;
-          lightRef.current.shadow.radius = shadowRadius;
+          // Increase blur as sun lowers to hide aliasing at low angles
+          const duskFactor = 1 - smoothstep(0.15, 0.35, sunElevation);
+          lightRef.current.shadow.radius = shadowRadius + duskFactor * 1.2;
+        if (gl.shadowMap.enabled && t - shadowUpdateRef.current > shadowUpdateIntervalRef.current) {
+          shadowUpdateRef.current = t;
+          lightRef.current.shadow.needsUpdate = true;
+        }
         }
 
         // GRAPHICS: Darker shadows at peak sun - reduce fill light in shadowed areas
@@ -3704,13 +3733,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         ref={lightRef}
         position={[50, 50, 20]}
         castShadow={shouldEnableShadows}
-        shadow-mapSize={[1024, 1024]}
-        shadow-camera-left={-24}
-        shadow-camera-right={24}
-        shadow-camera-top={24}
-        shadow-camera-bottom={-24}
-        shadow-camera-near={6}
-        shadow-camera-far={90}
+        shadow-mapSize={[512, 512]}
+        shadow-camera-left={-20}
+        shadow-camera-right={20}
+        shadow-camera-top={20}
+        shadow-camera-bottom={-20}
+        shadow-camera-near={8}
+        shadow-camera-far={70}
         shadow-bias={-0.00015}
         shadow-normalBias={0.015}
         shadow-radius={1.2}
