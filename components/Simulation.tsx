@@ -1437,7 +1437,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const impactPuffIndexRef = useRef(0);
   const atmosphereTickRef = useRef(0);
   const shadowUpdateRef = useRef(0);
-  const shadowUpdateIntervalRef = useRef(1.0);
+  const shadowUpdateIntervalRef = useRef(0.1);
   const minimapTickRef = useRef(0);
   const MINIMAP_UPDATE_INTERVAL = 0.75;
   const lastMinimapPosRef = useRef<THREE.Vector3 | null>(null);
@@ -2818,9 +2818,13 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     scene.traverse((child) => {
       const mesh = child as THREE.Mesh;
       if (!mesh.isMesh) return;
-      if (mesh.userData?.isBuildingWall) {
+      const isBuilding = mesh.userData?.isBuildingWall;
+      const isCharacter = !!(mesh.userData?.isCharacter ||
+        mesh.parent?.userData?.isCharacter ||
+        mesh.parent?.parent?.userData?.isCharacter);
+      if (isBuilding) {
         mesh.castShadow = true;
-      } else {
+      } else if (!isCharacter) {
         mesh.castShadow = false;
       }
     });
@@ -2962,18 +2966,18 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           // Overcast: diffuse light from cloud layer, reduced but still present
           sunIntensity *= 0.45;
         }
-        // TESTING: Boosted ambient to make blue visible
-        let ambientIntensity = 0.3 + dayFactor * 0.8 + cloudCover * 0.08;
-        // Boosted hemisphere for blue sky fill
-        let hemiIntensity = 0.5 + dayFactor * 0.8 + cloudCover * 0.16;
+        // Darker base fill for bolder shadows
+        let ambientIntensity = 0.08 + dayFactor * 0.35 + cloudCover * 0.04;
+        // Reduced sky fill for higher contrast
+        let hemiIntensity = 0.18 + dayFactor * 0.4 + cloudCover * 0.08;
 
         // GRAPHICS: Peak sun shadow enrichment - darker, more saturated shadows at noon
         // Reduce ambient during peak day for higher contrast shadows
         if (dayFactor > 0.7) {
           const noonIntensity = (dayFactor - 0.7) / 0.3; // 0-1 from 10am-2pm
-          ambientIntensity += noonIntensity * 0.05; // Reduced from 0.15 for darker shadows
-          // Tier 2: Increased ground hemisphere for warm fill during peak sun
-          hemiIntensity += noonIntensity * 0.35;
+          ambientIntensity += noonIntensity * 0.006;
+          // Smaller ground fill to keep shadows bold
+          hemiIntensity += noonIntensity * 0.08;
         }
 
         // Sun-baked: Warmer, golden sun color for Mediterranean heat
@@ -3153,17 +3157,17 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // GRAPHICS: Dynamic shadow radius - sharp at noon, soft at dawn/dusk
         // Lower radius = crisper shadow edges, higher = blurrier
         let shadowRadius = THREE.MathUtils.lerp(
-          2.5,   // Softer shadows at dawn/dusk (hide lower res)
-          0.6,   // Slightly sharper at noon
+          1.6,   // Softer shadows at dawn/dusk
+          0.4,   // Sharper at noon
           dayFactor
         );
 
         // Weather-based shadow radius adjustment
         if (resolvedWeatherType === WeatherType.OVERCAST) {
           // Very soft, diffuse shadows for overcast (light scattered by clouds)
-          shadowRadius = THREE.MathUtils.lerp(shadowRadius, 3.0, 0.8);
+          shadowRadius = THREE.MathUtils.lerp(shadowRadius, 2.2, 0.8);
         } else if (resolvedWeatherType === WeatherType.SANDSTORM) {
-          shadowRadius = THREE.MathUtils.lerp(shadowRadius, 3.5, 0.85);
+          shadowRadius = THREE.MathUtils.lerp(shadowRadius, 2.6, 0.85);
         }
 
         if (lightRef.current.shadow) {
@@ -3184,8 +3188,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           shadowContrast *= 0.3; // Much less contrast on overcast days
         }
         // Keep ambient visible in shadows to show blue color
-        ambientIntensity *= 1 - shadowContrast * 0.25;  // Less reduction so blue shows
-        hemiIntensity *= 1 - shadowContrast * 0.20;     // Keep hemi visible too
+        ambientIntensity *= 1 - shadowContrast * 0.75;
+        hemiIntensity *= 1 - shadowContrast * 0.6;
         ambientRef.current.intensity = ambientIntensity;  // Immediate set for testing
         // GRAPHICS: BLUE SHADOWS - ambient light fills shadows, so blue ambient = blue shadows
         // Stronger blue during peak day creates warm sun / cool shadow contrast
@@ -3219,8 +3223,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // GRAPHICS: Shadow fill light - EXTREME blue tint to shadows
         // WEATHER-AWARE: Color and intensity adjust based on atmospheric conditions
         if (shadowFillLightRef.current) {
-          // EXTREME intensity for very visible blue shadows
-          let shadowFillIntensity = dayFactor * 2.0;
+          // Reduced fill so shadows stay bold
+          let shadowFillIntensity = dayFactor * 0.08;
 
           // Weather-based adjustments
           if (resolvedWeatherType === WeatherType.OVERCAST) {
@@ -3260,7 +3264,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         if (gl) {
           // WARMER: Boosted exposure for sun-baked Mediterranean feel
           // Peak day now ~1.30 (was 1.16)
-          const targetExposure = 1.02 + dayFactor * 0.14 + nightFactor * 0.10 + twilightFactor * 0.08;
+          const targetExposure = 0.94 + dayFactor * 0.08 + nightFactor * 0.06 + twilightFactor * 0.05;
           gl.toneMappingExposure = THREE.MathUtils.lerp(gl.toneMappingExposure, targetExposure, 0.05);
         }
 

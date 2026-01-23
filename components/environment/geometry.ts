@@ -104,6 +104,41 @@ export const createGrimeTexture = (size = 256): THREE.CanvasTexture | null => {
 };
 
 /**
+ * Create a vertical grime band texture (dark at bottom, lighter toward top)
+ * Used for wall dirt banding without transparency.
+ */
+export const createGrimeBandTexture = (width = 64, height = 128): THREE.CanvasTexture | null => {
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const imageData = ctx.createImageData(width, height);
+  for (let y = 0; y < height; y++) {
+    const t = y / (height - 1); // 0 at top, 1 at bottom (canvas coords)
+    const inv = 1 - t; // 1 at top, 0 at bottom
+    const base = 95 + inv * 75; // bottom darker, top lighter
+    for (let x = 0; x < width; x++) {
+      const idx = (y * width + x) * 4;
+      const noise = (Math.random() - 0.5) * 18;
+      const value = Math.max(0, Math.min(255, base + noise));
+      imageData.data[idx] = value;
+      imageData.data[idx + 1] = value;
+      imageData.data[idx + 2] = value;
+      imageData.data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(imageData, 0, 0);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.flipY = false;
+  texture.needsUpdate = true;
+  return texture;
+};
+
+/**
  * Create a blotch texture for surface variation
  */
 export const createBlotchTexture = (size = 512): THREE.CanvasTexture | null => {

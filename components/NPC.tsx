@@ -252,9 +252,9 @@ export const NPC: React.FC<NPCProps> = memo(({
   familyRelationship
 }) => {
   const ENABLE_SIMPLE_LOD = true;
-  const SIMPLE_LOD_DISTANCE = 80;
-  const ANIMATION_LOD_DISTANCE = 60;
-  const SHADOW_LOD_DISTANCE = 26;
+  const SIMPLE_LOD_DISTANCE = 60;
+  const ANIMATION_LOD_DISTANCE = 42;
+  const SHADOW_LOD_DISTANCE = 20;
   const group = useRef<THREE.Group>(null);
   const [hovered, setHovered] = useState(false);
   const [displayState, setDisplayState] = useState<AgentState>(initialState);
@@ -291,6 +291,7 @@ export const NPC: React.FC<NPCProps> = memo(({
   const statusMarkerMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const propGroupRef = useRef<THREE.Group>(null);
   const idSeed = useMemo(() => hashStringToSeed(stats.id), [stats.id]);
+  const detailEligible = useMemo(() => idSeed % 3 === 0, [idSeed]);
   const propPhase = useMemo(() => seededRandom(idSeed + 77) * Math.PI * 2, [idSeed]);
   const impactStemMatRef = useRef<THREE.MeshBasicMaterial>(null);
   const impactDotMatRef = useRef<THREE.MeshBasicMaterial>(null);
@@ -364,7 +365,9 @@ export const NPC: React.FC<NPCProps> = memo(({
   const lastSpeedUpdateStateRef = useRef<AgentState>(initialState);
 
   // PERFORMANCE: Simplify far-away NPC steering without throttling visible movement
-  const FAR_SIMPLIFY_DISTANCE = 45;
+  const FAR_SIMPLIFY_DISTANCE = 35;
+  const DETAIL_HIGH_DISTANCE = 18;
+  const DETAIL_MID_DISTANCE = 30;
 
   // BUILDING ENTRY/EXIT: Track when NPCs go inside buildings
   const activityStateRef = useRef<'WANDERING' | 'INSIDE_BUILDING'>('WANDERING');
@@ -1228,7 +1231,7 @@ export const NPC: React.FC<NPCProps> = memo(({
         infectionCheckTimerRef.current = 0;
         infectionCheckJitterRef.current = Math.random() * 0.6;
 
-        if (distanceFromCameraRef.current < 45) {
+        if (distanceFromCameraRef.current < 35) {
           const neighbors = getNeighbors();
           for (const other of neighbors) {
             if (other.id === stats.id) continue;
@@ -1267,7 +1270,7 @@ export const NPC: React.FC<NPCProps> = memo(({
         rumorCheckTimerRef.current = 0;
         rumorCheckJitterRef.current = Math.random() * 0.4;
 
-        if (distanceFromCameraRef.current < 55) {
+        if (distanceFromCameraRef.current < 42) {
           const neighbors = getNeighbors();
           const panicMod = PANIC_SUSCEPTIBILITY[stats.socialClass] ?? 1.0;
 
@@ -1531,6 +1534,21 @@ export const NPC: React.FC<NPCProps> = memo(({
     return null;
   }
 
+  const distanceForDetail = distanceFromCameraRef.current;
+  const highDetail = isSelected || (distanceForDetail < DETAIL_HIGH_DISTANCE && detailEligible);
+  const midDetail = !highDetail && distanceForDetail < DETAIL_MID_DISTANCE;
+  const lowDetail = !highDetail && !midDetail;
+  const lodDistance = distanceForDetail + (lowDetail ? 20 : midDetail ? 8 : 0);
+  const lodAccessories = highDetail ? effectiveAccessories : midDetail ? effectiveAccessories.slice(0, 1) : [];
+  const lodRobePattern = highDetail ? stats.robePattern : 'none';
+  const lodSashPattern = highDetail ? stats.sashPattern : 'none';
+  const lodEmbroidery = highDetail ? appearance.hasEmbroidery : false;
+  const lodHeadscarfPattern = highDetail ? appearance.scarfPattern : 'none';
+  const lodTurbanPattern = highDetail ? appearance.turbanPattern : 'none';
+  const lodMouthExpression = highDetail ? mouthExpression : 0;
+  const lodFacialHair = highDetail || midDetail ? stats.facialHair : 'none';
+  const lodFacialHairColor = stats.facialHairColor;
+
   return (
     <group
       ref={group}
@@ -1622,25 +1640,25 @@ export const NPC: React.FC<NPCProps> = memo(({
           robeHemBand={stats.robeHemBand}
           robeSpread={stats.robeSpread}
           robeOverwrap={stats.robeOverwrap}
-          robePattern={stats.robePattern}
+          robePattern={lodRobePattern}
           robePatternScale={stats.robePatternScale}
-          sashPattern={stats.sashPattern}
+          sashPattern={lodSashPattern}
           hairStyle={stats.hairStyle}
           headwearStyle={stats.headwearStyle}
           headscarfStyle={stats.headscarfStyle}
-          headscarfPattern={appearance.scarfPattern}
+          headscarfPattern={lodHeadscarfPattern}
           headscarfAccentColor={appearance.scarfAccent}
           headwearGarmentType={appearance.garmentType}
-          hasEmbroidery={appearance.hasEmbroidery}
-          turbanPattern={appearance.turbanPattern}
+          hasEmbroidery={lodEmbroidery}
+          turbanPattern={lodTurbanPattern}
           turbanAccentColor={appearance.turbanAccent}
-          facialHair={stats.facialHair}
-          facialHairColor={stats.facialHairColor}
-          mouthExpression={mouthExpression}
+          facialHair={lodFacialHair}
+          facialHairColor={lodFacialHairColor}
+          mouthExpression={lodMouthExpression}
           sleeveCoverage={stats.sleeveCoverage}
           footwearStyle={stats.footwearStyle}
           footwearColor={stats.footwearColor}
-          accessories={effectiveAccessories}
+          accessories={lodAccessories}
           sicknessLevel={stateRef.current === AgentState.INFECTED ? 1.0 : stateRef.current === AgentState.INCUBATING ? 0.4 : 0}
           isInfected={stateRef.current === AgentState.INFECTED}
           isIncubating={stateRef.current === AgentState.INCUBATING}
@@ -1653,7 +1671,7 @@ export const NPC: React.FC<NPCProps> = memo(({
             stateRef.current === AgentState.INCUBATING ? 0.8 : // 20% slower when incubating
             1.0 // Normal speed
           )}
-          distanceFromCamera={distanceFromCameraRef.current}
+          distanceFromCamera={lodDistance}
           enableSimpleLod={ENABLE_SIMPLE_LOD}
           simpleLodDistance={SIMPLE_LOD_DISTANCE}
           animationLodDistance={ANIMATION_LOD_DISTANCE}
@@ -1663,7 +1681,7 @@ export const NPC: React.FC<NPCProps> = memo(({
           gazeTarget={distanceFromCameraRef.current < 12 && playerRef?.current ? playerRef.current.position : undefined}
           worldPosition={distanceFromCameraRef.current < 12 ? currentPosRef.current : undefined}
         />
-        {stats.heldItem && stats.heldItem !== 'none' && (
+        {stats.heldItem && stats.heldItem !== 'none' && highDetail && (
           <group ref={propGroupRef} position={[0.38, 1.02, 0.15]}>
             {stats.heldItem === 'staff' && (
               <group>

@@ -2529,19 +2529,6 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
             </div>
           )}
         </div>
-        {pickupToast && (
-          <div
-            className={`absolute bottom-36 left-1/2 -translate-x-1/2 px-6 py-2 rounded-full border text-[10px] uppercase tracking-widest pointer-events-none shadow-[0_0_30px_rgba(245,158,11,0.35)] backdrop-blur-md ${
-              pickupToast.toLowerCase().startsWith('dropped')
-                ? 'bg-gradient-to-r from-amber-900/90 via-black/80 to-amber-900/90 border-amber-400/70 text-amber-100 shadow-[0_0_40px_rgba(245,158,11,0.55)]'
-                : 'bg-gradient-to-r from-amber-950/90 via-black/80 to-amber-950/90 border-amber-500/50 text-amber-100'
-            }`}
-          >
-            {pickupToast.toLowerCase().startsWith('dropped') ? '⬇ ' : ''}
-            {pickupToast}
-          </div>
-        )}
-
         {/* Push Charge Meter - shows when holding shift near a pushable object */}
         {pushCharge > 0 && (
           <div className="absolute bottom-48 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 pointer-events-none">

@@ -1,5 +1,5 @@
 
-import React, { useRef, memo, useMemo } from 'react';
+import React, { useRef, memo, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { WornItemMesh, getWornItemConfig, WornItemConfig } from './items/WornItemMeshes';
@@ -638,6 +638,12 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
   const leftFoot = useRef<THREE.Group>(null);
   const rightFoot = useRef<THREE.Group>(null);
   const bodyGroup = useRef<THREE.Group>(null);
+
+  useEffect(() => {
+    if (rootRef.current) {
+      rootRef.current.userData.isCharacter = true;
+    }
+  }, []);
   const torsoGroup = useRef<THREE.Group>(null);
   const hipGroup = useRef<THREE.Group>(null);
   const headGroup = useRef<THREE.Group>(null);

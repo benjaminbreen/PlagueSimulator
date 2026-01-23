@@ -78,7 +78,7 @@ export const CourtyardBuilding: React.FC<CourtyardBuildingProps> = ({
   const hasLintel = seededRandom(localSeed + 415) > 0.3;
   const showSelected = selectionEnabled && isSelected;
   const showLabel = (labelEnabled && hovered) || showSelected;
-  const showWireframe = (wireframeEnabled && hovered) || showSelected || isOccluded;
+  const showWireframe = (wireframeEnabled && hovered) || showSelected;
 
   const floorMat = otherMaterials?.courtyardFloor ?? new THREE.MeshStandardMaterial({ color: '#d7cfbf', roughness: 0.95, metalness: 0 });
   const vineMat = otherMaterials?.vine ?? new THREE.MeshStandardMaterial({ color: '#3a5a3c', roughness: 0.9, metalness: 0 });

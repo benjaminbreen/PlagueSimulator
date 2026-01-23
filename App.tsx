@@ -191,7 +191,42 @@ function App() {
   });
   const [toastMessages, setToastMessages] = useState<ToastMessage[]>([]);
   const toastIdCounter = useRef(0);
+  const toastCooldownsRef = useRef<Map<string, number>>(new Map());
   const [treatmentOutcome, setTreatmentOutcome] = useState<TreatmentOutcome | null>(null);
+
+  const enqueueToast = useCallback((toast: {
+    message?: string;
+    text?: string;
+    type?: ToastMessage['type'];
+    duration?: number;
+    priority?: 'critical' | 'warning' | 'info' | 'hint';
+    category?: string;
+    key?: string;
+    cooldownMs?: number;
+  }) => {
+    const displayText = toast.message ?? toast.text ?? '';
+    if (!displayText) return;
+    const category = toast.category ?? 'general';
+    const key = toast.key ?? displayText.toLowerCase();
+    const dedupeKey = `${category}:${key}`;
+    const now = Date.now();
+    const cooldown = toast.cooldownMs ?? (toast.priority === 'hint' ? 8000 : toast.priority === 'info' ? 6000 : 4000);
+    const lastShown = toastCooldownsRef.current.get(dedupeKey);
+    if (lastShown && now - lastShown < cooldown) return;
+    toastCooldownsRef.current.set(dedupeKey, now);
+
+    const toastId = `toast-${++toastIdCounter.current}`;
+    setToastMessages((prev) => {
+      const next = [...prev, {
+        id: toastId,
+        message: toast.message,
+        text: toast.text,
+        type: toast.type,
+        duration: toast.duration
+      }];
+      return next.length > 20 ? next.slice(-20) : next;
+    });
+  }, []);
 
   // Helper tips system - tracks which tips have been shown
   const shownTipsRef = useRef<Set<string>>((() => {
@@ -215,15 +250,29 @@ function App() {
       // localStorage might be unavailable
     }
 
-    // Show the tip toast
-    const toastId = `tip-${tipId}-${++toastIdCounter.current}`;
-    setToastMessages(prev => [...prev, {
-      id: toastId,
+    enqueueToast({
       text: `💡 ${message}`,
-      type: 'info',
+      type: 'hint',
+      priority: 'hint',
+      category: 'tip',
+      key: tipId,
       duration
-    }]);
-  }, []);
+    });
+  }, [enqueueToast]);
+
+  useEffect(() => {
+    if (!pickupToast) return;
+    enqueueToast({
+      message: pickupToast.message,
+      type: 'item',
+      priority: 'hint',
+      category: 'pickup',
+      key: pickupToast.message.toLowerCase(),
+      duration: 2200,
+      cooldownMs: 800
+    });
+    setPickupToast(null);
+  }, [enqueueToast, pickupToast]);
   const playerPositionRef = useRef<THREE.Vector3>(new THREE.Vector3(0, 0, 0));
   const [cameraViewTarget, setCameraViewTarget] = useState<[number, number, number] | null>(null);
   const [deceasedCycleIndex, setDeceasedCycleIndex] = useState(0);
@@ -1087,8 +1136,14 @@ function App() {
     // Check inventory space
     const currentInventorySize = playerStats.inventory.reduce((sum, i) => sum + i.quantity, 0);
     if (currentInventorySize >= playerStats.maxInventorySlots) {
-      const toastId = `toast-${++toastIdCounter.current}`;
-      setToastMessages(prev => [...prev, { id: toastId, text: 'Inventory full', type: 'error' }]);
+      enqueueToast({
+        text: 'Inventory full',
+        type: 'error',
+        priority: 'warning',
+        category: 'inventory',
+        key: 'inventory-full',
+        duration: 3000
+      });
       return;
     }
 
@@ -1118,16 +1173,22 @@ function App() {
     });
 
     // Show toast
-    const toastId = `toast-${++toastIdCounter.current}`;
-    setToastMessages(prev => [...prev, { id: toastId, text: 'Collected fresh water', type: 'success' }]);
-  }, [nearWaterSource, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
+    enqueueToast({
+      text: 'Collected fresh water',
+      type: 'success',
+      priority: 'info',
+      category: 'inventory',
+      key: 'fresh-water',
+      duration: 2500
+    });
+  }, [enqueueToast, nearWaterSource, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
 
   // Handle closing read modal (switch back to isometric camera)
   const handleCloseReadModal = useCallback(() => {
     setShowReadModal(false);
     setReadModalData(null);
     setParams(prev => ({ ...prev, cameraMode: CameraMode.ISOMETRIC }));
-  }, []);
+  }, [enqueueToast]);
 
   // Handle crime witnessed by NPCs (theft, vandalism)
   const handleCrimeWitnessed = useCallback(({ type, witnessCount }: { type: 'theft' | 'vandalism'; witnessCount: number }) => {
@@ -1144,12 +1205,14 @@ function App() {
       ? `You were caught stealing! Reputation ${totalPenalty}`
       : `You were seen breaking property! Reputation ${totalPenalty}`;
 
-    setToastMessages(prev => [...prev, {
-      id: `crime-${Date.now()}`,
+    enqueueToast({
       text: message,
       type: 'error',
+      priority: 'warning',
+      category: 'crime',
+      key: type,
       duration: 4000
-    }]);
+    });
   }, []);
 
   useEffect(() => {
@@ -1354,12 +1417,14 @@ function App() {
     if (!canReceiveMedicalTreatment(reputationTier)) {
       const refusalMessage = getMedicalRefusalMessage(reputationTier);
       if (refusalMessage) {
-        setToastMessages(prev => [...prev, {
-          id: `medical-refuse-${Date.now()}`,
+        enqueueToast({
           text: refusalMessage,
           type: 'error',
+          priority: 'warning',
+          category: 'medical',
+          key: `refuse-${reputationTier}`,
           duration: 4000
-        }]);
+        });
       }
       return;
     }
@@ -1384,7 +1449,7 @@ function App() {
       establishmentType,
       practitionerName
     });
-  }, [interiorSpec, interiorBuilding, setMedicalModal, playerStats.reputation]);
+  }, [enqueueToast, interiorSpec, interiorBuilding, setMedicalModal, playerStats.reputation]);
 
   // Mobile/touch trigger for speaking to NPC (equivalent to pressing E)
   const handleTriggerSpeakToNpc = useCallback(() => {
@@ -1394,12 +1459,14 @@ function App() {
       if (!willNpcTalk(reputationTier, nearSpeakableNpc.stats.disposition)) {
         const refusalMessage = getNpcRefusalMessage(reputationTier);
         if (refusalMessage) {
-          setToastMessages(prev => [...prev, {
-            id: `npc-refuse-${Date.now()}`,
+          enqueueToast({
             text: refusalMessage,
             type: 'error',
+            priority: 'warning',
+            category: 'npc',
+            key: `refuse-${reputationTier}`,
             duration: 3000
-          }]);
+          });
         }
         return;
       }
@@ -1436,7 +1503,7 @@ function App() {
       });
       setShowEncounterModal(true);
     }
-  }, [nearSpeakableNpc, nearMerchant, showEncounterModal, showMerchantModal, showEnterModal, showPlayerModal, medicalModal, sceneMode, interiorSpec, interiorBuilding, triggerMedicalModal, tryTriggerEvent, playerStats.reputation]);
+  }, [enqueueToast, nearSpeakableNpc, nearMerchant, showEncounterModal, showMerchantModal, showEnterModal, showPlayerModal, medicalModal, sceneMode, interiorSpec, interiorBuilding, triggerMedicalModal, tryTriggerEvent, playerStats.reputation]);
 
   // Mobile/touch trigger for trading with merchant (equivalent to pressing E near merchant)
   const handleTriggerMerchant = useCallback(() => {
@@ -1586,12 +1653,14 @@ function App() {
         if (!willNpcTalk(reputationTier, nearSpeakableNpc.stats.disposition)) {
           const refusalMessage = getNpcRefusalMessage(reputationTier);
           if (refusalMessage) {
-            setToastMessages(prev => [...prev, {
-              id: `npc-refuse-${Date.now()}`,
+            enqueueToast({
               text: refusalMessage,
               type: 'error',
+              priority: 'warning',
+              category: 'npc',
+              key: `refuse-${reputationTier}`,
               duration: 3000
-            }]);
+            });
           }
           return;
         }
@@ -2080,9 +2149,16 @@ function App() {
               building.position[2]
             );
             const district = formatDistrictName(getDistrictType(params.mapX, params.mapY));
-            const id = `infection-${toastIdCounter.current++}`;
             const message = `${record.stats.name} is now infected with plague in their home to the ${direction} of the ${district} area`;
-            setToastMessages((prev) => [...prev, { id, message, duration: 6000 }]);
+            enqueueToast({
+              message,
+              type: 'warning',
+              priority: 'warning',
+              category: 'plague-house',
+              key: `infection-${record.stats.id}`,
+              duration: 6000,
+              cooldownMs: 15000
+            });
           }
         }
 
@@ -2570,11 +2646,15 @@ function App() {
           console.log(`[DEATH MODE] Killed NPC: ${npc.stats.name}`);
 
           // Show toast notification
-          setToastMessages(prev => [...prev, {
-            id: `death-${toastIdCounter.current++}`,
+          enqueueToast({
             message: `☠️ ${npc.stats.name} has been slain`,
-            duration: 2000
-          }]);
+            type: 'warning',
+            priority: 'warning',
+            category: 'npc',
+            key: `death-${npc.stats.id}`,
+            duration: 2000,
+            cooldownMs: 2000
+          });
 
           return;
         }
@@ -2583,7 +2663,7 @@ function App() {
 
     // Normal NPC selection (not in death mode or already deceased)
     setSelectedNpc(npc);
-  }, [devSettings.deathMode, params.mapX, params.mapY, stats.simTime]);
+  }, [enqueueToast, devSettings.deathMode, params.mapX, params.mapY, stats.simTime]);
 
   const handleNpcUpdate = useCallback((id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, location: 'outdoor' | 'interior', plagueMeta?: import('./types').NPCPlagueMeta) => {
     const tileKey = getTileKey(params.mapX, params.mapY);
@@ -2644,11 +2724,15 @@ function App() {
 
           // Show grief notification for family death
           const relationLabel = getRelationshipLabel(familyMember.relationship, familyMember.gender);
-          setToastMessages(prev => [...prev, {
-            id: `family-death-${toastIdCounter.current++}`,
+          enqueueToast({
             message: `Tragedy has struck. Your ${relationLabel.toLowerCase()}, ${familyMember.name}, has succumbed to the plague.`,
-            duration: 8000
-          }]);
+            type: 'warning',
+            priority: 'critical',
+            category: 'family',
+            key: `death-${familyMember.npcId}`,
+            duration: 8000,
+            cooldownMs: 20000
+          });
         }
       }
     }
@@ -2658,11 +2742,15 @@ function App() {
       const familyMember = playerStats.familyMembers.find(m => m.npcId === id);
       if (familyMember && familyMember.alive) {
         const relationLabel = getRelationshipLabel(familyMember.relationship, familyMember.gender);
-        setToastMessages(prev => [...prev, {
-          id: `family-sick-${toastIdCounter.current++}`,
+        enqueueToast({
           message: `Your ${relationLabel.toLowerCase()}, ${familyMember.name}, has fallen ill with plague symptoms. Return home quickly!`,
-          duration: 7000
-        }]);
+          type: 'warning',
+          priority: 'critical',
+          category: 'family',
+          key: `infected-${familyMember.npcId}`,
+          duration: 7000,
+          cooldownMs: 20000
+        });
       }
     }
 
@@ -2671,11 +2759,15 @@ function App() {
       const familyMember = playerStats.familyMembers.find(m => m.npcId === id);
       if (familyMember && familyMember.alive) {
         const relationLabel = getRelationshipLabel(familyMember.relationship, familyMember.gender);
-        setToastMessages(prev => [...prev, {
-          id: `family-exposed-${toastIdCounter.current++}`,
+        enqueueToast({
           message: `Your ${relationLabel.toLowerCase()}, ${familyMember.name}, has been exposed to the plague and is showing early signs.`,
-          duration: 6000
-        }]);
+          type: 'warning',
+          priority: 'warning',
+          category: 'family',
+          key: `exposed-${familyMember.npcId}`,
+          duration: 6000,
+          cooldownMs: 15000
+        });
       }
     }
 
@@ -2690,7 +2782,7 @@ function App() {
       activity,
       location
     });
-  }, [addDistrictRumor, buildNpcActivityLabel, params.mapX, params.mapY, stats.simTime, tileBuildings, playerStats.familyMembers]);
+  }, [enqueueToast, addDistrictRumor, buildNpcActivityLabel, params.mapX, params.mapY, stats.simTime, tileBuildings, playerStats.familyMembers]);
 
   const handleBuildingsUpdate = useCallback((buildings: BuildingMetadata[]) => {
     scheduleTickRef.current = 0;
@@ -2928,12 +3020,14 @@ function App() {
       const isWealthyDistrict = building.district === 'WEALTHY' || building.district === 'SALHIYYA';
       if (!canAccessBuilding(reputationTier, building.type, isWealthyDistrict)) {
         const denialMessage = getBuildingDenialMessage(reputationTier, building.type);
-        setToastMessages(prev => [...prev, {
-          id: `building-denied-${Date.now()}`,
+        enqueueToast({
           text: denialMessage,
           type: 'error',
+          priority: 'warning',
+          category: 'building',
+          key: `denied-${building.type}-${reputationTier}`,
           duration: 4000
-        }]);
+        });
         setShowEnterModal(false);
         return;
       }
@@ -2945,12 +3039,15 @@ function App() {
         ...prev,
         reputation: Math.min(100, prev.reputation + 1)
       }));
-      setToastMessages(prev => [...prev, {
-        id: `prayer-rep-${Date.now()}`,
+      enqueueToast({
         message: 'Your devotion is noticed. (+1 reputation)',
         type: 'success',
-        duration: 3000
-      }]);
+        priority: 'info',
+        category: 'reputation',
+        key: `devotion-${building.id}`,
+        duration: 3000,
+        cooldownMs: 10000
+      });
     }
 
     setTransitioning(true);
@@ -3081,7 +3178,7 @@ function App() {
 
       setTransitioning(false);
     }, 300);
-  }, [currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers, playerStats.reputation, transitioning]);
+  }, [enqueueToast, currentWeather, ensureTileRegistry, hashToSeed, params.mapX, params.mapY, params.timeOfDay, tileBuildings, tryTriggerEvent, playerStats.homeBuildingId, playerStats.familyMembers, playerStats.reputation, transitioning]);
 
   // Enter building via rooftop hatch (from outdoor scene on roof)
   // Similar to enterInterior but starts at top floor instead of ground floor
@@ -3223,12 +3320,14 @@ function App() {
     if (!willMerchantDeal(reputationTier)) {
       const refusalMessage = getMerchantRefusalMessage(reputationTier);
       if (refusalMessage) {
-        setToastMessages(prev => [...prev, {
-          id: `merchant-refuse-${Date.now()}`,
+        enqueueToast({
           text: refusalMessage,
           type: 'error',
+          priority: 'warning',
+          category: 'merchant',
+          key: `refuse-${reputationTier}`,
           duration: 4000
-        }]);
+        });
       }
       return;
     }
@@ -3303,7 +3402,7 @@ function App() {
         }
       };
     });
-  }, [nearMerchant, playerStats.currency, playerStats.inventory, playerStats.maxInventorySlots, playerStats.reputation, stats.simTime]);
+  }, [enqueueToast, nearMerchant, playerStats.currency, playerStats.inventory, playerStats.maxInventorySlots, playerStats.reputation, stats.simTime]);
 
   const handleSell = useCallback((playerItem: import('./types').PlayerItem, quantity: number) => {
     if (!nearMerchant) return;
@@ -3313,11 +3412,14 @@ function App() {
     if (!willMerchantDeal(reputationTier)) {
       const refusalMessage = getMerchantRefusalMessage(reputationTier);
       if (refusalMessage) {
-        setToastMessages(prev => [...prev, {
-          id: Date.now().toString(),
+        enqueueToast({
           message: refusalMessage,
-          type: 'error'
-        }]);
+          type: 'error',
+          priority: 'warning',
+          category: 'merchant',
+          key: `refuse-${reputationTier}`,
+          duration: 4000
+        });
       }
       return;
     }
@@ -3355,7 +3457,7 @@ function App() {
         inventory: newInventory
       };
     });
-  }, [nearMerchant, playerStats.inventory, playerStats.reputation]);
+  }, [enqueueToast, nearMerchant, playerStats.inventory, playerStats.reputation]);
 
   // Handle consuming an item from inventory
   const handleConsumeItem = useCallback((playerItem: import('./types').PlayerItem) => {
@@ -3436,12 +3538,16 @@ function App() {
       toastMessage = 'A numbing calm spreads through you... but your body grows weaker.';
     }
 
-    setToastMessages(prev => [...prev, {
-      id: `consume-${toastIdCounter.current++}`,
+    enqueueToast({
       message: toastMessage,
-      duration: 4000
-    }]);
-  }, [playerStats.plague, playerStats.activeEffects, playerStats.inventory, stats.simTime]);
+      type: 'info',
+      priority: 'info',
+      category: 'inventory',
+      key: `consume-${itemDetails.name}`,
+      duration: 4000,
+      cooldownMs: 3000
+    });
+  }, [enqueueToast, playerStats.plague, playerStats.activeEffects, playerStats.inventory, stats.simTime]);
 
   // Handle apothecary compounding
   const handleCompound = useCallback((
@@ -3451,11 +3557,14 @@ function App() {
   ) => {
     // Check if player can afford
     if (playerStats.currency < totalCost) {
-      setToastMessages(prev => [...prev, {
-        id: `compound-error-${toastIdCounter.current++}`,
+      enqueueToast({
         message: 'Not enough dirhams for compounding.',
+        type: 'error',
+        priority: 'warning',
+        category: 'merchant',
+        key: 'compound-funds',
         duration: 3000
-      }]);
+      });
       return;
     }
 
@@ -3521,12 +3630,16 @@ function App() {
     }
 
     // Show toast
-    setToastMessages(prev => [...prev, {
-      id: `compound-${toastIdCounter.current++}`,
+    enqueueToast({
       message: `Compounded ${recipe.nameEn} (${recipe.transliteration})`,
-      duration: 4000
-    }]);
-  }, [playerStats.currency, playerStats.inventory, playerStats.plague, playerStats.activeEffects, stats.simTime, nearMerchant]);
+      type: 'success',
+      priority: 'info',
+      category: 'inventory',
+      key: `compound-${recipe.nameEn}`,
+      duration: 4000,
+      cooldownMs: 3000
+    });
+  }, [enqueueToast, playerStats.currency, playerStats.inventory, playerStats.plague, playerStats.activeEffects, stats.simTime, nearMerchant]);
 
   // Handle medical treatment from MedicalTreatmentModal
   const handleMedicalTreatment = useCallback((treatmentId: string, cost: number) => {
@@ -3535,11 +3648,14 @@ function App() {
 
     // Check if player can afford
     if (playerStats.currency < cost) {
-      setToastMessages(prev => [...prev, {
-        id: `treatment-error-${toastIdCounter.current++}`,
+      enqueueToast({
         message: 'Not enough dirhams for this treatment.',
+        type: 'error',
+        priority: 'warning',
+        category: 'medical',
+        key: 'treatment-funds',
         duration: 3000
-      }]);
+      });
       return;
     }
 
@@ -3583,7 +3699,7 @@ function App() {
     // Close treatment modal and show outcome modal
     setMedicalModal(null);
     setTreatmentOutcome(outcome);
-  }, [playerStats.currency, playerStats.plague, medicalModal, setMedicalModal]);
+  }, [enqueueToast, playerStats.currency, playerStats.plague, medicalModal, setMedicalModal]);
 
   // Loot modal handlers
   const handleLootAccept = useCallback((items: LootItem[]) => {
@@ -3597,11 +3713,14 @@ function App() {
     // Check inventory space
     const currentInventorySize = playerStats.inventory.reduce((sum, i) => sum + i.quantity, 0);
     if (currentInventorySize + items.length > playerStats.maxInventorySlots) {
-      setToastMessages(prev => [...prev, {
-        id: `loot-warning-${toastIdCounter.current++}`,
+      enqueueToast({
         message: 'Not enough inventory space!',
+        type: 'error',
+        priority: 'warning',
+        category: 'inventory',
+        key: 'loot-space',
         duration: 3000
-      }]);
+      });
       return;
     }
 
@@ -3643,11 +3762,14 @@ function App() {
 
     // Show toast
     const itemNames = items.map(i => i.itemName).join(', ');
-    setToastMessages(prev => [...prev, {
-      id: `loot-pickup-${toastIdCounter.current++}`,
+    enqueueToast({
       message: `Picked up: ${itemNames}`,
+      type: 'item',
+      priority: 'info',
+      category: 'inventory',
+      key: `loot-${items.map(i => i.itemId).join('|')}`,
       duration: 3000
-    }]);
+    });
 
     // Close modal
     setLootModalData(null);
@@ -3661,7 +3783,7 @@ function App() {
           : 'event_birdcage_theft_patrol';
       handleTriggerConversationEvent(eventId);
     }
-  }, [handleTriggerConversationEvent, lootModalData, playerSeed, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
+  }, [enqueueToast, handleTriggerConversationEvent, lootModalData, playerSeed, playerStats.inventory, playerStats.maxInventorySlots, stats.simTime]);
 
   const handleLootDecline = useCallback(() => {
     setLootModalData(null);
@@ -3854,12 +3976,16 @@ function App() {
       ...prev,
       currentTask: prev.currentTask ? { ...prev.currentTask, status: 'completed' } : prev.currentTask
     }));
-    setToastMessages(prev => [...prev, {
-      id: `task-complete-${toastIdCounter.current++}`,
+    enqueueToast({
       message: `Task complete: ${task.title}.`,
-      duration: 5000
-    }]);
-  }, [interiorBuilding, isOnHomeTile, nearBuilding, params.mapX, params.mapY, playerStats.currentTask, playerStats.homeBuildingId, sceneMode]);
+      type: 'success',
+      priority: 'info',
+      category: 'task',
+      key: `task-${task.id ?? task.title}`,
+      duration: 5000,
+      cooldownMs: 8000
+    });
+  }, [enqueueToast, interiorBuilding, isOnHomeTile, nearBuilding, params.mapX, params.mapY, playerStats.currentTask, playerStats.homeBuildingId, sceneMode]);
 
   const homeDisplayInfo = useMemo(() => {
     if (!playerStats.homeBuildingId || !playerStats.homeMapPosition) {
@@ -4384,8 +4510,15 @@ function App() {
               }]
             }));
             // Show toast notification
-            const toastId = `toast-${++toastIdCounter.current}`;
-            setToastMessages(prev => [...prev, { id: toastId, text: `You received a letter addressed to ${recipient} (-${cost} dirhams)`, type: 'success' }]);
+            enqueueToast({
+              text: `You received a letter addressed to ${recipient} (-${cost} dirhams)`,
+              type: 'success',
+              priority: 'info',
+              category: 'inventory',
+              key: `letter-${recipient}`,
+              duration: 4000,
+              cooldownMs: 5000
+            });
             setShowScribeModal(false);
           }}
         />

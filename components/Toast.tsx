@@ -4,7 +4,7 @@ export interface ToastMessage {
   id: string;
   message?: string;
   text?: string;  // Alternative field name for backwards compatibility
-  type?: 'success' | 'error' | 'info' | 'item';
+  type?: 'success' | 'error' | 'info' | 'item' | 'warning' | 'hint';
   duration?: number;
 }
 
@@ -72,12 +72,19 @@ export const Toast: React.FC<ToastProps> = ({ messages, onDismiss }) => {
       case 'success': return 'border-green-800/40';
       case 'item': return 'border-amber-600/50';
       case 'info': return 'border-sky-600/50';
+      case 'warning': return 'border-amber-700/60';
+      case 'hint': return 'border-amber-500/30';
       default: return 'border-amber-900/30';
     }
   };
 
-  // Limit visible toasts (max 4 on desktop, 2 on mobile)
-  const displayMessages = messages.slice(-4);
+  const getToneClass = (type?: string) => {
+    if (type === 'hint') return 'bg-black/75 text-amber-200/80';
+    return 'bg-black/95 text-[#f4e4c1]';
+  };
+
+  // Limit visible toasts (max 2)
+  const displayMessages = messages.slice(-2);
   const mobileMessages = messages.slice(-2);
 
   return (
@@ -95,7 +102,7 @@ export const Toast: React.FC<ToastProps> = ({ messages, onDismiss }) => {
               transitionDelay: `${index * 50}ms`
             }}
             className={`
-              bg-black/90 text-amber-100 px-4 py-2.5 rounded-lg
+              ${getToneClass(msg.type)} px-4 py-2.5 rounded-lg
               text-sm leading-snug
               shadow-lg border ${getBorderColor(msg.type)}
               text-center
@@ -120,7 +127,7 @@ export const Toast: React.FC<ToastProps> = ({ messages, onDismiss }) => {
               transitionDelay: `${index * 50}ms`
             }}
             className={`
-              bg-black/95 text-[#f4e4c1] px-6 py-3 rounded-lg
+              ${getToneClass(msg.type)} px-6 py-3 rounded-lg
               font-serif text-sm leading-relaxed
               shadow-lg border ${getBorderColor(msg.type)}
               text-center max-w-lg

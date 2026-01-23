@@ -27,6 +27,7 @@ import {
 import {
   createNoiseTexture,
   createGrimeTexture,
+  createGrimeBandTexture,
   createBlotchTexture,
   createLinenTexture,
   createDirtTexture,
@@ -492,12 +493,13 @@ const Building: React.FC<{
   nightFactor: number;
   noiseTextures?: THREE.Texture[];
   grimeTexture?: THREE.Texture | null;
+  grimeBandTexture?: THREE.Texture | null;
   allowOrnate: boolean;
   selectionEnabled?: boolean;
   isSelected?: boolean;
   onSelectBuilding?: (buildingId: string | null) => void;
   occludedBuildingIds?: Set<string>;
-}> = ({ data, mainMaterial, otherMaterials, isNear, torchIntensity, district, nightFactor, noiseTextures, grimeTexture, allowOrnate, selectionEnabled = false, isSelected = false, onSelectBuilding, occludedBuildingIds }) => {
+}> = ({ data, mainMaterial, otherMaterials, isNear, torchIntensity, district, nightFactor, noiseTextures, grimeTexture, grimeBandTexture, allowOrnate, selectionEnabled = false, isSelected = false, onSelectBuilding, occludedBuildingIds }) => {
   const wireframeEnabled = useContext(HoverWireframeContext);
   const labelEnabled = useContext(HoverLabelContext);
   const [hovered, setHovered] = useState(false);
@@ -726,10 +728,10 @@ const Building: React.FC<{
   const activeGlow = isNear || hovered || showSelected;
   const wireColor = data.isQuarantined ? HOVER_WIREFRAME_COLORS.danger : data.isPointOfInterest ? HOVER_WIREFRAME_COLORS.poi : HOVER_WIREFRAME_COLORS.default;
   const isOccluded = occludedBuildingIds?.has(data.id) ?? false;
-  const showWireframe = (wireframeEnabled && hovered) || showSelected || isOccluded;
+  const showWireframe = (wireframeEnabled && hovered) || showSelected;
   const showLabel = (labelEnabled && hovered) || showSelected;
-  // Do not fade materials for occluded buildings to avoid cutout artifacts.
-  useHoverFade(groupRef, (wireframeEnabled && hovered) || showSelected, 0.35);
+  // Only fade on actual hover to avoid transparency cutouts on selection.
+  useHoverFade(groupRef, wireframeEnabled && hovered, 0.35);
   // PERFORMANCE: Torches disabled (user reported 10 FPS)
   const torchCount = 0;
   const torchOffsets: [number, number, number][] = [];
@@ -748,6 +750,70 @@ const Building: React.FC<{
   const hasRoofCap = seededRandom(localSeed + 145) > 0.6;
   const hasParapetRing = seededRandom(localSeed + 149) > 0.7;
   const dirtBandHeight = finalHeight * 0.2;
+  const dirtBandColor = useMemo(() => {
+    const colors = ['#b79f7a', '#b09a76', '#a8916e', '#c0a682'];
+    return colors[Math.floor(seededRandom(localSeed + 305) * colors.length)];
+  }, [localSeed]);
+  const dirtBandMaterial = useMemo(() => {
+    const mat = new THREE.MeshStandardMaterial({
+      color: dirtBandColor,
+      roughness: 1,
+      metalness: 0
+    });
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.bandHeight = { value: Math.max(0.01, dirtBandHeight) };
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        `#include <common>
+         varying float vLocalY;
+         varying vec2 vBandUv;`
+      );
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+         vLocalY = position.y;
+         vBandUv = uv;`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        `#include <common>
+         uniform float bandHeight;
+         varying float vLocalY;
+         varying vec2 vBandUv;
+         float hash(vec2 p) {
+           return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+         }
+         float noise(vec2 p) {
+           vec2 i = floor(p);
+           vec2 f = fract(p);
+           float a = hash(i);
+           float b = hash(i + vec2(1.0, 0.0));
+           float c = hash(i + vec2(0.0, 1.0));
+           float d = hash(i + vec2(1.0, 1.0));
+           vec2 u = f * f * (3.0 - 2.0 * f);
+           return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+         }`
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <begin_fragment>',
+        `#include <begin_fragment>
+         // Vertical grime gradient: darker at bottom, lighter at top (local space)
+         float bandT = clamp((vLocalY / bandHeight) + 0.5, 0.0, 1.0);
+         // Darker at bottom, lighter at top
+         float grime = mix(0.55, 1.0, bandT);
+         // Add gritty variation so it doesn't read as a flat band
+         float n = noise(vBandUv * vec2(8.0, 2.0));
+         float streaks = noise(vec2(vBandUv.x * 12.0, bandT * 3.0));
+         float variation = mix(0.85, 1.15, n) * mix(0.9, 1.2, streaks);
+         vec3 baseColor = mix(diffuseColor.rgb, vec3(0.83, 0.76, 0.63), 0.25);
+         vec3 lightTan = vec3(0.83, 0.76, 0.63);
+         vec3 gradColor = mix(lightTan, baseColor, 1.0 - bandT);
+         diffuseColor.rgb = gradColor * grime * variation;`
+      );
+      mat.userData.shader = shader;
+    };
+    return mat;
+  }, [dirtBandColor, dirtBandHeight]);
   const crenelRef = useRef<THREE.InstancedMesh>(null);
   const crenelTemp = useMemo(() => new THREE.Object3D(), []);
   const crenelPositions = useMemo<[number, number, number][]>(() => {
@@ -895,8 +961,8 @@ const Building: React.FC<{
           <planeGeometry args={[finalBuildingSize * 1.2, finalBuildingSize * 1.2]} />
           <meshBasicMaterial
             map={grimeTexture}
-            transparent
-            depthWrite={false}
+            alphaTest={0.35}
+            depthWrite
             polygonOffset
             polygonOffsetFactor={-1}
             polygonOffsetUnits={-1}
@@ -904,9 +970,9 @@ const Building: React.FC<{
         </mesh>
       )}
       {/* Ambient dirt banding */}
-      <mesh position={[0, -finalHeight * 0.35, 0]} receiveShadow>
+      <mesh position={[0, -finalHeight / 2 + dirtBandHeight / 2 + 0.02, 0]} receiveShadow>
         <boxGeometry args={[finalBuildingSize * 1.01, dirtBandHeight, finalBuildingSize * 1.01]} />
-        <meshStandardMaterial color="#5e4b37" transparent opacity={0.18} roughness={1} />
+        <primitive object={dirtBandMaterial} />
       </mesh>
 
       {/* CIVIC ABLAQ BANDS - Blue & white horizontal stripes (Mamluk civic architecture) */}
@@ -1432,6 +1498,13 @@ const InstancedDecorations: React.FC<{
       }
     });
 
+    // Cap ornament density per tile for performance.
+    const MAX_CLAY_JARS = 12;
+    const MAX_POT_TREES = 6;
+    const cappedPotTrees = Math.min(potTreeBases.length, MAX_POT_TREES);
+    potTreeBases.length = cappedPotTrees;
+    potTreeFoliage.length = cappedPotTrees;
+    clayJars.length = Math.min(clayJars.length, MAX_CLAY_JARS);
     return { clayJars, potTreeBases, potTreeFoliage };
   }, [buildings, district]);
 
@@ -1827,6 +1900,17 @@ const InstancedGroundClutter: React.FC<{
       }
     });
 
+    // Cap clutter density per tile for performance.
+    ovens.length = Math.min(ovens.length, 4);
+    firewood.length = Math.min(firewood.length, 12);
+    carpets.length = Math.min(carpets.length, 8);
+    cartWheels.length = Math.min(cartWheels.length, 6);
+    strawPiles.length = Math.min(strawPiles.length, 6);
+    luggage.length = Math.min(luggage.length, 6);
+    sandalRacks.length = Math.min(sandalRacks.length, 4);
+    basins.length = Math.min(basins.length, 2);
+    birdbaths.length = Math.min(birdbaths.length, 4);
+    decorTiles.length = Math.min(decorTiles.length, 8);
     return { ovens, firewood, carpets, cartWheels, strawPiles, luggage, sandalRacks, basins, birdbaths, decorTiles };
   }, [buildings, district, CARPET_COLORS, WOOD_COLORS, TILE_COLORS]);
 
@@ -2421,6 +2505,7 @@ export const Buildings: React.FC<{
   // PERFORMANCE: Use cached textures instead of recreating on every mount
   const noiseTextures = CACHED_NOISE_TEXTURES;
   const grimeTexture = useMemo(() => createGrimeTexture(256), []);
+  const grimeBandTexture = useMemo(() => createGrimeBandTexture(64, 128), []);
   const { camera } = useThree();
 
   const materials = useMemo(() => {
@@ -3207,6 +3292,7 @@ export const Buildings: React.FC<{
           nightFactor={nightFactor}
           noiseTextures={noiseTextures}
           grimeTexture={grimeTexture}
+          grimeBandTexture={grimeBandTexture}
           allowOrnate={ornateBuildingIds.has(data.id)}
           occludedBuildingIds={occludedBuildingIdSet}
         />
@@ -3511,6 +3597,8 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
       metalness: 0
     });
   }, [blotchTexture, overlayColor, overlayOpacity]);
+
+  // (ground depth/shadow catcher removed)
 
   // Calculate night factor for road darkening
   const nightFactor = time >= 19 || time < 5 ? 1 : time >= 17 ? (time - 17) / 2 : time < 7 ? (7 - time) / 2 : 0;

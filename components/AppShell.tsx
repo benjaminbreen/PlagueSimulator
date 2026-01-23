@@ -191,6 +191,7 @@ export const AppShell = React.memo(({
 }: AppShellProps) => {
   const [showAbout, setShowAbout] = useState(false);
   const [skipIntro, setSkipIntro] = useState(false);
+  const promptOffsetClass = uiProps?.pushCharge && uiProps.pushCharge > 0 ? 'bottom-60' : 'bottom-44';
 
   // Allow Enter key to start game from loading screen
   useEffect(() => {
@@ -513,7 +514,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'outdoor' && nearMerchant && !showMerchantModal && !showEncounterModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerMerchant}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           Trade with {nearMerchant.stats.name}
@@ -524,7 +525,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'outdoor' && nearSpeakableNpc && !nearMerchant && !nearSpecialNpc && !nearRooftopHatch && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerSpeakToNpc}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           Speak to {nearSpeakableNpc.stats.name}
@@ -535,7 +536,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'outdoor' && nearSpecialNpc?.type === 'ASTROLOGER' && !showAstrologerModal && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerAstrologer}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-indigo-600/60 text-indigo-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-indigo-900/40 hover:border-indigo-500/70 active:bg-indigo-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-indigo-600/60 text-indigo-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-indigo-900/40 hover:border-indigo-500/70 active:bg-indigo-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           Speak to {nearSpecialNpc.stats.name}
@@ -546,7 +547,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'outdoor' && nearSpecialNpc?.type === 'SUFI_MYSTIC' && !showSnakeCharmerModal && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerSnakeCharmer}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-purple-600/60 text-purple-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-purple-900/40 hover:border-purple-500/70 active:bg-purple-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-purple-600/60 text-purple-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-purple-900/40 hover:border-purple-500/70 active:bg-purple-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           Speak to {nearSpecialNpc.stats.name}
@@ -557,7 +558,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'outdoor' && nearSpecialNpc?.type === 'SCRIBE' && !showScribeModal && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerScribe}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           Speak to {nearSpecialNpc.stats.name}
@@ -568,7 +569,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'outdoor' && nearRooftopHatch && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && (
         <button
           onClick={onTriggerEnterViaRooftopHatch}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-sky-600/60 text-sky-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-sky-600/60 text-sky-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           Enter through roof hatch
@@ -579,7 +580,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'interior' && isInMedicalBuilding && !medicalModal && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && onTriggerMedicalTreatment && (
         <button
           onClick={onTriggerMedicalTreatment}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-emerald-600/60 text-emerald-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-emerald-900/40 hover:border-emerald-500/70 active:bg-emerald-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-emerald-600/60 text-emerald-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-emerald-900/40 hover:border-emerald-500/70 active:bg-emerald-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[T]</span>
           Seek Medical Treatment
@@ -590,7 +591,7 @@ export const AppShell = React.memo(({
       {!observeMode && nearChest && (
         <button
           onClick={onTriggerOpenChest}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[O]</span>
           Open {nearChest.label}
@@ -601,7 +602,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'interior' && nearStairs && !nearChest && !nearBirdcage && !nearRoofHatch && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
         <button
           onClick={onTriggerUseStairs}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           {stairsPromptLabel ?? 'Use stairs'}
@@ -612,7 +613,7 @@ export const AppShell = React.memo(({
       {!observeMode && sceneMode === 'interior' && nearRoofHatch && !nearChest && !nearBirdcage && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
         <button
           onClick={onTriggerExitViaRoofHatch}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-sky-600/60 text-sky-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-sky-600/60 text-sky-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-sky-900/40 hover:border-sky-500/70 active:bg-sky-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[E]</span>
           {roofHatchPromptLabel ?? 'Climb to rooftop'}
@@ -623,7 +624,7 @@ export const AppShell = React.memo(({
       {!observeMode && nearBirdcage && !nearChest && (
         <button
           onClick={onTriggerOpenBirdcage}
-          className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse"
+          className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto cursor-pointer hover:bg-amber-900/40 hover:border-amber-500/70 active:bg-amber-800/50 active:scale-95 transition-all touch-manipulation select-none animate-pulse`}
         >
           <span className="hidden md:inline opacity-60 mr-1">[O]</span>
           Open {nearBirdcage.label}
@@ -632,7 +633,7 @@ export const AppShell = React.memo(({
 
       {/* Readable Gravestone Prompt - outdoor only */}
       {!observeMode && sceneMode === 'outdoor' && nearReadable && !nearChest && !nearBirdcage && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
-        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto select-none animate-pulse">
+        <div className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-amber-600/60 text-amber-200 text-sm tracking-wide z-50 pointer-events-auto select-none animate-pulse`}>
           <span className="hidden md:inline opacity-60 mr-1">[R]</span>
           Read Inscription
         </div>
@@ -640,7 +641,7 @@ export const AppShell = React.memo(({
 
       {/* Water Collection Prompt - outdoor only, near water sources */}
       {!observeMode && sceneMode === 'outdoor' && nearWaterSource && !nearReadable && !nearChest && !nearBirdcage && !showEncounterModal && !showMerchantModal && !showEnterModalActive && !showPlayerModal && !lootModalData && (
-        <div className="absolute bottom-44 left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-cyan-600/60 text-cyan-200 text-sm tracking-wide z-50 pointer-events-auto select-none animate-pulse">
+        <div className={`absolute ${promptOffsetClass} left-1/2 -translate-x-1/2 bg-black/70 backdrop-blur-md px-6 py-3 rounded-full border border-cyan-600/60 text-cyan-200 text-sm tracking-wide z-50 pointer-events-auto select-none animate-pulse`}>
           <span className="hidden md:inline opacity-60 mr-1">[SHIFT]</span>
           Collect Water
         </div>
