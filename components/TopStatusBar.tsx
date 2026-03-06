@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
-import { Calendar, Sun, Moon, Pause, Play, FastForward, Keyboard, MousePointer2, Camera, Menu, X, ChevronDown, Cloud, CloudMoon, Wind, Users } from 'lucide-react';
-import { PlayerStats } from '../types';
-import { SicknessMeter } from './SicknessMeter';
+import React from 'react';
+import { Activity, Calendar, Sun, Moon, Pause, Play, FastForward, Keyboard, MousePointer2, Camera, Menu, X, Cloud, CloudMoon, Wind, Users } from 'lucide-react';
+import { AgentState, PlayerStats } from '../types';
 import { getReputationTier, getReputationLabel, getReputationColorClass, getReputationBgClass } from '../utils/reputation';
 
 interface TopStatusBarProps {
@@ -76,11 +75,17 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
   const reputationLabel = reputationTier ? getReputationLabel(reputationTier) : null;
   const reputationColorClass = reputationTier ? getReputationColorClass(reputationTier) : '';
   const reputationBgClass = reputationTier ? getReputationBgClass(reputationTier) : '';
-  const [speedMenuOpen, setSpeedMenuOpen] = useState(false);
   const speedInfo = getSpeedInfo(simulationSpeed);
   const SpeedIcon = speedInfo.icon;
   const weatherInfo = getWeatherIcon(currentWeather, isDaytime);
   const WeatherIcon = weatherInfo.icon;
+  const bodyState = plague.state === AgentState.HEALTHY
+    ? { label: 'Steady', text: 'text-emerald-300', bg: 'bg-emerald-500/12 border-emerald-400/20' }
+    : plague.state === AgentState.INCUBATING
+      ? { label: 'Exposed', text: 'text-amber-200', bg: 'bg-amber-500/12 border-amber-400/20' }
+      : plague.overallSeverity >= 70
+        ? { label: 'Critical', text: 'text-red-200', bg: 'bg-red-500/12 border-red-400/20' }
+        : { label: 'Ill', text: 'text-orange-200', bg: 'bg-orange-500/12 border-orange-400/20' };
 
   return (
     <div
@@ -92,10 +97,10 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
         className="group flex flex-col items-start transition-all duration-300"
         onClick={(e) => { e.stopPropagation(); onOpenAbout(); }}
       >
-        <h1 className="text-sm md:text-xl mt-1 font-bold text-amber-500 historical-font tracking-tighter leading-none transition-all duration-300 group-hover:text-amber-400 group-hover:tracking-tight group-hover:drop-shadow-[0_0_8px_rgba(251,191,36,0.4)]">
-          PLAGUE SIMULATOR
+        <h1 className="text-sm md:text-xl mt-1 font-bold text-amber-500 historical-font tracking-[0.08em] leading-none transition-all duration-300 group-hover:text-amber-300 group-hover:drop-shadow-[0_0_8px_rgba(251,191,36,0.34)]">
+          DAMASCUS 1348
         </h1>
-        <span className="text-[8px] md:text-[11px] text-amber-200/60 uppercase tracking-[0.2em] md:tracking-[0.35em] font-light transition-all duration-300 group-hover:text-amber-200/70 group-hover:tracking-[0.25em] md:group-hover:tracking-[0.4em]">DAMASCUS 1348</span>
+        <span className="text-[8px] md:text-[11px] text-amber-200/60 uppercase tracking-[0.2em] md:tracking-[0.32em] font-light transition-all duration-300 group-hover:text-amber-100/80">A City Under Plague</span>
       </button>
 
       {/* Mobile: Ultra-compact center controls */}
@@ -199,11 +204,15 @@ export const TopStatusBar: React.FC<TopStatusBarProps> = ({
                 <span className={`text-[10px] font-medium ${reputationColorClass}`}>{reputationLabel}</span>
               </button>
             )}
-            <SicknessMeter
-              plague={plague}
-              hasPlayerMoved={hasPlayerMoved || showHealthMeter}
-              onClickDossier={onOpenPlayerModal}
-            />
+            <button
+              onClick={onOpenPlayerModal}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${bodyState.bg} hover:border-white/20 transition-all`}
+              title="Open body and symptoms"
+            >
+              <Activity size={12} className={bodyState.text} />
+              <span className={`text-[10px] uppercase tracking-[0.2em] ${bodyState.text}`}>Body</span>
+              <span className={`text-[10px] font-medium ${bodyState.text}`}>{bodyState.label}</span>
+            </button>
           </div>
         )}
         <button

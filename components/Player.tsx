@@ -341,12 +341,6 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
 
   // Wall occlusion system for over-shoulder camera
   const occludedMeshesRef = useRef<Set<THREE.Mesh>>(new Set());
-  const occlusionMaterialCacheRef = useRef(new Map<THREE.Material, {
-    color?: THREE.Color;
-    emissive?: THREE.Color;
-    opacity?: number;
-    transparent?: boolean;
-  }>());
   const raycasterRef = useRef<THREE.Raycaster>(new THREE.Raycaster());
   const occlusionCheckFrameRef = useRef(0);
   const orbitOcclusionFrameRef = useRef(0);
@@ -355,8 +349,7 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
     offset: new THREE.Vector3(),
     candidate: new THREE.Vector3(),
     direction: new THREE.Vector3(),
-    position: new THREE.Vector3(),
-    tint: new THREE.Color('#3b3f4a')
+    position: new THREE.Vector3()
   });
   const orbitOcclusionAxisRef = useRef(new THREE.Vector3(0, 1, 0));
   const ACTION_DURATION = 1.5; // seconds for full animation
@@ -3385,34 +3378,41 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
           const isBlocked = blockingHits.length > 0;
 
           const currentlyOccluded = new Set<THREE.Mesh>();
-          const setMaterialOcclusion = (material: THREE.Material, targetFactor: number, lerpSpeed: number) => {
-            if (!('color' in material)) return;
-            const cache = occlusionMaterialCacheRef.current;
-            if (!cache.has(material)) {
-              cache.set(material, {
-                color: (material as THREE.MeshStandardMaterial).color?.clone(),
-                emissive: 'emissive' in material ? (material as THREE.MeshStandardMaterial).emissive?.clone() : undefined,
-                opacity: 'opacity' in material ? (material as THREE.MeshStandardMaterial).opacity : 1,
-                transparent: 'transparent' in material ? (material as THREE.MeshStandardMaterial).transparent : false
-              });
+          const ensureOcclusionShader = (material: THREE.Material) => {
+            const mat = material as THREE.MeshStandardMaterial & { userData: any };
+            if (mat.userData?.occlusionShaderApplied) return;
+            const prev = mat.onBeforeCompile;
+            mat.onBeforeCompile = (shader) => {
+              prev?.(shader);
+              shader.uniforms.occlusionFactor = { value: 0 };
+              shader.uniforms.occlusionTint = { value: new THREE.Color('#3b3f4a') };
+              shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <dithering_fragment>',
+                `#include <dithering_fragment>
+                 gl_FragColor.rgb = mix(gl_FragColor.rgb, occlusionTint, occlusionFactor);`
+              );
+              mat.userData.occlusionShader = shader;
+            };
+            mat.userData.occlusionShaderApplied = true;
+            mat.needsUpdate = true;
+          };
+
+          const applyOcclusionToMesh = (mesh: THREE.Mesh, targetFactor: number) => {
+            mesh.userData.occlusionFactor = targetFactor;
+            if (!mesh.userData.occlusionHook) {
+              mesh.onBeforeRender = (renderer, scene, camera, geometry, material) => {
+                const mats = Array.isArray(material) ? material : [material];
+                mats.forEach((mat) => {
+                  const shader = (mat as any).userData?.occlusionShader;
+                  if (shader?.uniforms?.occlusionFactor) {
+                    shader.uniforms.occlusionFactor.value = mesh.userData.occlusionFactor ?? 0;
+                  }
+                });
+              };
+              mesh.userData.occlusionHook = true;
             }
-            const original = cache.get(material);
-            if (!original?.color) return;
-            const occlusionTint = orbitOcclusionTempsRef.current.tint ?? (orbitOcclusionTempsRef.current.tint = new THREE.Color('#3b3f4a'));
-            const targetColor = original.color.clone().lerp(occlusionTint, targetFactor);
-            (material as THREE.MeshStandardMaterial).color.lerp(targetColor, lerpSpeed);
-            if ('emissive' in material && original.emissive) {
-              const emissiveTarget = original.emissive.clone().lerp(new THREE.Color('#000000'), targetFactor * 0.9);
-              (material as THREE.MeshStandardMaterial).emissive.lerp(emissiveTarget, lerpSpeed);
-            }
-            if (targetFactor <= 0.01) {
-              if (original.opacity !== undefined && 'opacity' in material) {
-                (material as THREE.MeshStandardMaterial).opacity = original.opacity;
-              }
-              if (original.transparent !== undefined && 'transparent' in material) {
-                (material as THREE.MeshStandardMaterial).transparent = original.transparent;
-              }
-            }
+            const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+            mats.forEach((mat) => ensureOcclusionShader(mat as THREE.Material));
           };
 
           if (isBlocked) {
@@ -3436,22 +3436,14 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
                 if (!occludedMeshesRef.current.has(childMesh)) {
                   occludedMeshesRef.current.add(childMesh);
                 }
-                if (Array.isArray(childMesh.material)) {
-                  childMesh.material.forEach((material) => setMaterialOcclusion(material, 0.75, 0.18));
-                } else if (childMesh.material) {
-                  setMaterialOcclusion(childMesh.material, 0.75, 0.18);
-                }
+                applyOcclusionToMesh(childMesh, 0.75);
               });
             }
           }
 
           occludedMeshesRef.current.forEach((mesh) => {
             if (!currentlyOccluded.has(mesh)) {
-              if (Array.isArray(mesh.material)) {
-                mesh.material.forEach((material) => setMaterialOcclusion(material, 0.0, 0.12));
-              } else if (mesh.material) {
-                setMaterialOcclusion(mesh.material, 0.0, 0.12);
-              }
+              applyOcclusionToMesh(mesh, 0.0);
               occludedMeshesRef.current.delete(mesh);
             }
           });
@@ -3528,22 +3520,14 @@ export const Player = forwardRef<THREE.Group, PlayerProps>(({
               occludedMeshesRef.current.add(mesh);
             }
 
-            if (Array.isArray(mesh.material)) {
-              mesh.material.forEach((material) => setMaterialOcclusion(material, 0.8, 0.12));
-            } else if (mesh.material) {
-              setMaterialOcclusion(mesh.material, 0.8, 0.12);
-            }
+            applyOcclusionToMesh(mesh, 0.8);
           }
         }
 
         // Restore meshes that are no longer occluding
         occludedMeshesRef.current.forEach((mesh) => {
           if (!currentlyOccluded.has(mesh)) {
-            if (Array.isArray(mesh.material)) {
-              mesh.material.forEach((material) => setMaterialOcclusion(material, 0.0, 0.12));
-            } else if (mesh.material) {
-              setMaterialOcclusion(mesh.material, 0.0, 0.12);
-            }
+            applyOcclusionToMesh(mesh, 0.0);
             occludedMeshesRef.current.delete(mesh);
           }
         });

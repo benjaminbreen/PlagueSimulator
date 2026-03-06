@@ -12,6 +12,7 @@ export interface NarratorContext {
   sceneMode: 'outdoor' | 'interior';
   mapX: number;
   mapY: number;
+  simTime: number;
   district: string;
   locationLabel: string;
   nearbyDistricts?: Array<{
@@ -33,6 +34,9 @@ export interface NarratorContext {
     wealth: number;
     reputation: number;
     currency: number;
+    symptoms: string[];
+    activeProtections: string[];
+    recentRemedies: string[];
   };
   currentTask?: string | null;
   nearbyBuildings: NarratorContextItem[];
@@ -115,6 +119,9 @@ export const buildNarratorPrompt = (question: string, context: NarratorContext) 
     `Time: ${timeOfDay.toFixed(1)}h. Weather: ${weather}.`,
     `Player: ${player.name}, ${player.profession}, ${player.socialClass}. Health: ${player.healthStatus}.`,
     `Condition: ${plagueNote}. Standing: ${reputationNote}. Means: ${wealthNote}.`,
+    player.symptoms.length > 0 ? `Symptoms: ${player.symptoms.join('; ')}` : '',
+    player.activeProtections.length > 0 ? `Protective measures in effect: ${player.activeProtections.join('; ')}` : '',
+    player.recentRemedies.length > 0 ? `Recent remedies: ${player.recentRemedies.join('; ')}` : '',
     currentTask ? `Current task: ${currentTask}` : '',
     `Nearby districts: ${districtLine}`,
     `Nearby buildings: ${buildingLine}`,

@@ -2181,12 +2181,7 @@ export const generatePlayerStats = (
     }
   }
 
-  const headwearPick = buildHeadwearPick(rand, gender, headwearStyle, { isReligiousLeader, isSoldier, isOfficer }, socialClass, religion);
-  const headwearGarmentType = gender === 'Female' ? (headwearPick.garmentType ?? 'hijab') : undefined;
-  const headscarfPattern = gender === 'Female' ? (headwearPick.pattern ?? 'none') : undefined;
-  const headscarfAccentColor = gender === 'Female' ? headwearPick.accent : undefined;
-  const turbanPattern = gender === 'Male' ? (headwearPick.pattern ?? 'none') : undefined;
-  const turbanAccentColor = gender === 'Male' ? headwearPick.accent : undefined;
+  let headwearPick = buildHeadwearPick(rand, gender, headwearStyle, { isReligiousLeader, isSoldier, isOfficer }, socialClass, religion);
 
   const healthHistoryOptions = [
     'survived a childhood fever',
@@ -2353,6 +2348,11 @@ export const generatePlayerStats = (
   }
   footwearColor = footwearStyle === 'shoes' ? '#3b2a1a' : '#9b7b4f';
   footwearDescription = footwearStyle === 'bare' ? 'bare feet' : footwearStyle === 'shoes' ? 'simple leather shoes' : 'woven leather sandals';
+  const headwearGarmentType = gender === 'Female' ? (headwearPick.garmentType ?? 'hijab') : undefined;
+  const headscarfPattern = gender === 'Female' ? (headwearPick.pattern ?? 'none') : undefined;
+  const headscarfAccentColor = gender === 'Female' ? headwearPick.accent : undefined;
+  const turbanPattern = gender === 'Male' ? (headwearPick.pattern ?? 'none') : undefined;
+  const turbanAccentColor = gender === 'Male' ? headwearPick.accent : undefined;
   const accessoryPool = gender === 'Female'
     ? (socialClass === SocialClass.NOBILITY
       ? ['bronze earrings', 'copper bracelet', 'small nose ring', 'etched bracelet']

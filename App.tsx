@@ -9,7 +9,7 @@ import { applyTreatmentEffects, getEfficacyMultiplier, getTreatmentById, ESTABLI
 import { getBuildingHeight } from './utils/buildingHeights';
 import { applyCompoundEffects } from './utils/apothecaryRecipes';
 import { generatePlayerStats, seededRandom } from './utils/procedural';
-import { generateInitialTask } from './utils/tasks';
+import { generateInitialTask, generateUrgentPlagueTask } from './utils/tasks';
 import { generateInteriorSpec, FamilyInteriorContext } from './utils/interior';
 import { createTileNPCRegistry, getTileKey, hashToSeed as hashToSeedTile } from './utils/npcRegistry';
 import { NpcListEntry } from './components/NpcListModal';
@@ -38,6 +38,9 @@ import { NarratorContext } from './utils/narratorPrompt';
 import { NarratorHighlightEntry } from './components/NarratorPanel';
 import { AstrologerModal, SnakeCharmerModal, ScribeModal } from './components/SpecialNpcModals';
 import { getReputationTier, getPriceModifier, getSellPriceModifier, willMerchantDeal, getMerchantRefusalMessage, willNpcTalk, getNpcRefusalMessage, canAccessBuilding, getBuildingDenialMessage, canReceiveMedicalTreatment, getMedicalRefusalMessage, getMedicalCostModifier } from './utils/reputation';
+import { ConditionLogEntry, getPrimarySymptoms, getProtectionSummaries } from './utils/condition';
+import { buildGameOverSummary, GameOverSummary } from './utils/gameOverSummary';
+import { getRenderProfile, resolveGraphicsQuality } from './utils/renderProfile';
 
 function App() {
   const [params, setParams] = useState<SimulationParams>({
@@ -125,8 +128,11 @@ function App() {
     schedulePhase: -1,
     scheduleActive: false,
     lastScheduleMs: 0,
-    lastScheduleSimTime: 0
+    lastScheduleSimTime: 0,
+    fpsSample: null as number | null,
+    graphicsQuality: 'high' as 'high' | 'medium' | 'low'
   });
+  const [measuredFps, setMeasuredFps] = useState<number | null>(null);
   const [nearMerchant, setNearMerchant] = useState<MerchantNPC | null>(null);
   const [nearChest, setNearChest] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
   const [nearBirdcage, setNearBirdcage] = useState<{ id: string; label: string; position: [number, number, number]; locationName: string } | null>(null);
@@ -193,6 +199,8 @@ function App() {
   const toastIdCounter = useRef(0);
   const toastCooldownsRef = useRef<Map<string, number>>(new Map());
   const [treatmentOutcome, setTreatmentOutcome] = useState<TreatmentOutcome | null>(null);
+  const [recentConditionLog, setRecentConditionLog] = useState<ConditionLogEntry[]>([]);
+  const plagueTaskStageRef = useRef<'incubating' | 'infected' | null>(null);
 
   const enqueueToast = useCallback((toast: {
     message?: string;
@@ -225,6 +233,16 @@ function App() {
         duration: toast.duration
       }];
       return next.length > 20 ? next.slice(-20) : next;
+    });
+  }, []);
+
+  const pushConditionLog = useCallback((entry: Omit<ConditionLogEntry, 'id'>) => {
+    setRecentConditionLog((prev) => {
+      const next = [{
+        ...entry,
+        id: `${entry.source}-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      }, ...prev];
+      return next.slice(0, 6);
     });
   }, []);
 
@@ -557,7 +575,7 @@ function App() {
   const [conversationHistories, setConversationHistories] = useState<ConversationSummary[]>([]);
 
   // Game over state (fall death, plague death, etc.)
-  const [gameOver, setGameOver] = useState<{ reason: string; description: string } | null>(null);
+  const [gameOver, setGameOver] = useState<GameOverSummary | null>(null);
 
   useEffect(() => {
     try {
@@ -906,6 +924,25 @@ function App() {
     }
   }, [playerStats.homeBuildingId, playerStats.homeMapPosition, playerStats.name, playerStats.profession, params.mapX, params.mapY, tileBuildings]);
 
+  const createGameOverSummary = useCallback((cause: 'plague' | 'fall', base: { reason: string; description: string }) => {
+    const districtType = getDistrictType(params.mapX, params.mapY);
+    return buildGameOverSummary({
+      cause,
+      reason: base.reason,
+      description: base.description,
+      player: playerStats,
+      stats,
+      recentConditionLog,
+      locationLabel: getLocationLabel(params.mapX, params.mapY),
+      districtLabel: formatDistrictName(districtType),
+      infectedHouseholdsCount: infectedHouseholds.length
+    });
+  }, [infectedHouseholds.length, params.mapX, params.mapY, playerStats, recentConditionLog, stats]);
+
+  const handlePlagueDeath = useCallback((summary: { reason: string; description: string }) => {
+    setGameOver(createGameOverSummary('plague', summary));
+  }, [createGameOverSummary]);
+
   // Show inventory tip after first item pickup
   const prevInventorySizeRef = useRef(playerStats.inventory.length);
   useEffect(() => {
@@ -926,15 +963,33 @@ function App() {
     // Tip when first exposed (transition to INCUBATING)
     if (prevState === AgentState.HEALTHY && currentState === AgentState.INCUBATING) {
       showHelperTip('plague-exposure', 'You\'ve been exposed to plague! Seek remedies or medical treatment');
+      pushConditionLog({
+        title: 'Exposure',
+        detail: 'A vague malaise has begun. This is the time to seek counsel, fumigants, or early remedies.',
+        tone: 'warning',
+        source: 'plague',
+        simTime: stats.simTime
+      });
     }
 
     // Tip when symptoms appear (transition to INFECTED)
     if (prevState === AgentState.INCUBATING && currentState === AgentState.INFECTED) {
       showHelperTip('symptoms-appear', 'Symptoms have appeared! Visit a physician, barber, or bimaristan');
+      pushConditionLog({
+        title: 'Symptoms Emerge',
+        detail: 'The plague has become plain in the body. Relief may be possible; certainty is not.',
+        tone: 'risk',
+        source: 'plague',
+        simTime: stats.simTime
+      });
+    }
+
+    if (currentState === AgentState.HEALTHY) {
+      plagueTaskStageRef.current = null;
     }
 
     prevPlagueStateRef.current = currentState;
-  }, [playerStats.plague.state, showHelperTip]);
+  }, [playerStats.plague.state, pushConditionLog, showHelperTip, stats.simTime]);
 
   // Plague notification state
   const [showPlagueModal, setShowPlagueModal] = useState(false);
@@ -945,7 +1000,7 @@ function App() {
     plague: playerStats.plague,
     onShowInfectedModal: () => setShowPlagueModal(true),
     onNotify: (message) => setPlagueNotification(message),
-    onDeath: (summary) => setGameOver(summary)
+    onDeath: handlePlagueDeath
   });
 
   const handlePlagueModalPauseToggle = useCallback((paused: boolean) => {
@@ -1302,7 +1357,28 @@ function App() {
   const lastPerfChangeRef = useRef(0);
   const shadowsDisabledByPerf = useRef(false); // Track if we disabled shadows due to low FPS
   const PERF_DEBOUNCE_MS = 2000; // Debounce performance state changes by 2 seconds
-  const LOW_FPS_THRESHOLD = 5; // Disable shadows below this FPS
+  const LOW_FPS_THRESHOLD = 18; // Disable shadows below this FPS
+  const playerIllnessSeverity = playerStats.plague.overallSeverity / 100;
+  const graphicsQuality = useMemo(
+    () => resolveGraphicsQuality(measuredFps, performanceDegraded),
+    [measuredFps, performanceDegraded]
+  );
+  const renderProfile = useMemo(
+    () => getRenderProfile(graphicsQuality, sceneMode, playerIllnessSeverity),
+    [graphicsQuality, sceneMode, playerIllnessSeverity]
+  );
+
+  useEffect(() => {
+    setPerfDebug((prev) => (
+      prev.fpsSample === measuredFps && prev.graphicsQuality === graphicsQuality
+        ? prev
+        : {
+            ...prev,
+            fpsSample: measuredFps,
+            graphicsQuality
+          }
+    ));
+  }, [graphicsQuality, measuredFps]);
 
   useSimulationClock({
     simulationSpeed: params.simulationSpeed,
@@ -1987,7 +2063,7 @@ function App() {
   }, [params.mapX, params.mapY]);
 
   const canvasCamera = useMemo(() => ({ position: [20, 20, 20] as [number, number, number], fov: 45 }), []);
-  const canvasDpr = useMemo(() => (performanceDegraded ? [1, 1.35] : [1, 1.7]) as [number, number], [performanceDegraded]);
+  const canvasDpr = useMemo(() => renderProfile.dpr, [renderProfile]);
   const canvasGl = useMemo(() => ({ toneMappingExposure: 1.05 }), []);
 
   const handleFastTravel = useCallback((x: number, y: number) => {
@@ -2457,6 +2533,7 @@ function App() {
       sceneMode,
       mapX: params.mapX,
       mapY: params.mapY,
+      simTime: stats.simTime,
       district: districtLabel,
       locationLabel,
       nearbyDistricts,
@@ -2470,9 +2547,15 @@ function App() {
         plagueState: playerStats.plague?.state ?? 'unknown',
         wealth: playerStats.wealth,
         reputation: playerStats.reputation,
-        currency: playerStats.currency
+        currency: playerStats.currency,
+        symptoms: getPrimarySymptoms(playerStats.plague),
+        activeProtections: getProtectionSummaries(playerStats.activeEffects, stats.simTime),
+        recentRemedies: recentConditionLog
+          .filter((entry) => entry.source === 'remedy' || entry.source === 'treatment')
+          .slice(0, 3)
+          .map((entry) => `${entry.title}: ${entry.detail}`)
       },
-      currentTask: playerStats.currentTask?.description ?? null,
+      currentTask: playerStats.currentTask ? `${playerStats.currentTask.title}: ${playerStats.currentTask.description}` : null,
       nearbyBuildings,
       nearbyNpcs: sceneMode === 'interior'
         ? interiorNpcs.slice(0, 6)
@@ -2500,7 +2583,9 @@ function App() {
     params.mapY,
     params.timeOfDay,
     playerStats,
+    recentConditionLog,
     sceneMode,
+    stats.simTime,
     tileBuildings
   ]);
 
@@ -2889,7 +2974,7 @@ function App() {
   }, [tileBuildings, playerStats.homeBuildingId, playerStats.socialClass, playerStats.name, playerStats.profession, selectPlayerHome, params.mapX, params.mapY]);
 
   useEffect(() => {
-    if (playerStats.currentTask || tileBuildings.length === 0) return;
+    if (playerStats.currentTask || tileBuildings.length === 0 || playerStats.plague.state !== AgentState.HEALTHY) return;
     const task = generateInitialTask(playerStats, {
       mapX: params.mapX,
       mapY: params.mapY,
@@ -2901,7 +2986,51 @@ function App() {
     });
     if (!task) return;
     setPlayerStats(prev => (prev.currentTask ? prev : { ...prev, currentTask: task }));
-  }, [playerStats, tileBuildings, params.mapX, params.mapY, playerSeed]);
+  }, [
+    params.mapX,
+    params.mapY,
+    playerSeed,
+    playerStats,
+    tileBuildings
+  ]);
+
+  useEffect(() => {
+    if (tileBuildings.length === 0) return;
+    if (playerStats.plague.state !== AgentState.INCUBATING && playerStats.plague.state !== AgentState.INFECTED) return;
+
+    const stage = playerStats.plague.state === AgentState.INCUBATING ? 'incubating' : 'infected';
+    if (plagueTaskStageRef.current === stage) return;
+
+    const urgentTask = generateUrgentPlagueTask(playerStats, {
+      mapX: params.mapX,
+      mapY: params.mapY,
+      buildings: tileBuildings,
+      seed: playerSeed,
+      familyMembers: playerStats.familyMembers,
+      homeBuildingId: playerStats.homeBuildingId,
+      homeMapPosition: playerStats.homeMapPosition
+    });
+
+    plagueTaskStageRef.current = stage;
+    if (!urgentTask) return;
+
+    setPlayerStats((prev) => ({ ...prev, currentTask: urgentTask }));
+    pushConditionLog({
+      title: 'Immediate Need',
+      detail: urgentTask.description,
+      tone: 'warning',
+      source: 'task',
+      simTime: stats.simTime
+    });
+  }, [
+    params.mapX,
+    params.mapY,
+    playerSeed,
+    playerStats,
+    pushConditionLog,
+    stats.simTime,
+    tileBuildings
+  ]);
 
   useEffect(() => {
     if (tileBuildings.length === 0) return;
@@ -3533,7 +3662,7 @@ function App() {
 
     // Special messages for notable items
     if (itemDetails.name === 'Theriac Compound') {
-      toastMessage = 'The legendary cure courses through you! All symptoms recede.';
+      toastMessage = 'The famed theriac steadies you for a moment, though no one can swear it has mastered the plague.';
     } else if (itemDetails.name === 'Opium Paste') {
       toastMessage = 'A numbing calm spreads through you... but your body grows weaker.';
     }
@@ -3547,7 +3676,14 @@ function App() {
       duration: 4000,
       cooldownMs: 3000
     });
-  }, [enqueueToast, playerStats.plague, playerStats.activeEffects, playerStats.inventory, stats.simTime]);
+    pushConditionLog({
+      title: itemDetails.name,
+      detail: plagueMessage || toastMessage,
+      tone: hasSymptomRelief || hasPlagueProtection ? 'relief' : 'note',
+      source: 'remedy',
+      simTime: stats.simTime
+    });
+  }, [enqueueToast, playerStats.plague, playerStats.activeEffects, playerStats.inventory, pushConditionLog, stats.simTime]);
 
   // Handle apothecary compounding
   const handleCompound = useCallback((
@@ -3639,7 +3775,14 @@ function App() {
       duration: 4000,
       cooldownMs: 3000
     });
-  }, [enqueueToast, playerStats.currency, playerStats.inventory, playerStats.plague, playerStats.activeEffects, stats.simTime, nearMerchant]);
+    pushConditionLog({
+      title: recipe.nameEn,
+      detail: 'You compounded a fresh remedy in hope of easing what the body is enduring.',
+      tone: 'note',
+      source: 'remedy',
+      simTime: stats.simTime
+    });
+  }, [enqueueToast, playerStats.currency, playerStats.inventory, playerStats.plague, playerStats.activeEffects, stats.simTime, nearMerchant, pushConditionLog]);
 
   // Handle medical treatment from MedicalTreatmentModal
   const handleMedicalTreatment = useCallback((treatmentId: string, cost: number) => {
@@ -3699,7 +3842,18 @@ function App() {
     // Close treatment modal and show outcome modal
     setMedicalModal(null);
     setTreatmentOutcome(outcome);
-  }, [enqueueToast, playerStats.currency, playerStats.plague, medicalModal, setMedicalModal]);
+    pushConditionLog({
+      title: outcome.treatmentName,
+      detail: outcome.description,
+      tone: outcome.outcomeLevel === 'remarkable' || outcome.outcomeLevel === 'success'
+        ? 'relief'
+        : outcome.outcomeLevel === 'partial'
+          ? 'note'
+          : 'risk',
+      source: 'treatment',
+      simTime: stats.simTime
+    });
+  }, [enqueueToast, playerStats.currency, playerStats.plague, medicalModal, pushConditionLog, setMedicalModal, stats.simTime]);
 
   // Loot modal handlers
   const handleLootAccept = useCallback((items: LootItem[]) => {
@@ -3828,10 +3982,10 @@ function App() {
     if (fatal) {
       // Fatal fall - game over
       const stories = Math.floor(fallHeight / 3);
-      setGameOver({
+      setGameOver(createGameOverSummary('fall', {
         reason: 'Fallen to Death',
         description: `You fell ${stories > 2 ? 'from a great height' : 'from a rooftop'}, ${fallHeight.toFixed(1)} cubits to the unforgiving stones below. Your journey ends here in the narrow streets of Damascus.`
-      });
+      }));
     } else {
       // Non-fatal fall - reduce strength significantly
       const damage = Math.floor((fallHeight - 3) * 15); // 15 damage per unit above threshold
@@ -3841,7 +3995,7 @@ function App() {
         healthStatus: prev.strength - damage <= 20 ? 'Gravely injured' : 'Injured'
       }));
     }
-  }, []);
+  }, [createGameOverSummary]);
 
   useEffect(() => {
     if (interiorNarrator) {
@@ -3944,9 +4098,11 @@ function App() {
     lowFpsThreshold: LOW_FPS_THRESHOLD,
     setPerformanceDegraded,
     setIndicatorDismissed,
+    setMeasuredFps,
     devSettings,
-    setDevSettings
-  }), [devSettings, setDevSettings]);
+    setDevSettings,
+    renderProfile
+  }), [devSettings, renderProfile, setDevSettings]);
 
   // Calculate home building info for dossier display
   const isOnHomeTile = playerStats.homeMapPosition?.mapX === params.mapX &&
@@ -4143,6 +4299,7 @@ function App() {
     onDropItem: handleDropItem,
     onDropItemAtScreen: handleDropItemAtScreen,
     onConsumeItem: handleConsumeItem,
+    recentConditionLog,
     getNarratorContext,
     getNpcListEntries,
     onNarratorHighlight: handleNarratorHighlight,
@@ -4213,6 +4370,7 @@ function App() {
     pickupToast,
     playerStats,
     pushCharge,
+    recentConditionLog,
     sceneMode,
     selectedNpc,
     selectedNpcActivity,
@@ -4251,6 +4409,7 @@ function App() {
     params,
     stats,
     devSettings,
+    renderProfile,
     playerStats,
     canvasCamera,
     canvasDpr,
@@ -4321,6 +4480,7 @@ function App() {
     canvasDpr,
     canvasGl,
     devSettings,
+    renderProfile,
     dropRequests,
     gameLoading,
     handleBuildingsUpdate,

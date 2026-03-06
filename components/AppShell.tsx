@@ -1,16 +1,20 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { UI } from './UI';
-import { MerchantModal } from './MerchantModal';
-import { MedicalTreatmentModal } from './MedicalTreatmentModal';
-import { GuideModal } from './HistoricalGuide';
-import { LootModal, LootModalData, LootItem } from './LootModal';
+import type { LootModalData, LootItem } from './LootModal';
 import { ObserveController } from './observe/ObserveController';
 import { PlagueUI } from './PlagueUI';
 import { Toast, ToastMessage } from './Toast';
 import { BuildingMetadata, MerchantNPC, MerchantItem, PlayerItem, MedicalEstablishmentType } from '../types';
 import { MedicalModalState, ReadModalData } from '../hooks/useModalState';
-import { ESTABLISHMENTS, TreatmentOutcome } from '../utils/medicalTreatments';
+import { TreatmentOutcome } from '../utils/medicalTreatments';
 import { TreatmentOutcomeModal } from './medical/TreatmentOutcomeModal';
+import { GameOverPanel } from './GameOverPanel';
+import type { GameOverSummary } from '../utils/gameOverSummary';
+
+const MerchantModal = lazy(() => import('./MerchantModal').then((module) => ({ default: module.MerchantModal })));
+const MedicalTreatmentModal = lazy(() => import('./MedicalTreatmentModal'));
+const GuideModal = lazy(() => import('./HistoricalGuide').then((module) => ({ default: module.GuideModal })));
+const LootModal = lazy(() => import('./LootModal'));
 
 // Format time of day to readable string
 const formatTimeOfDay = (hour: number): string => {
@@ -23,6 +27,14 @@ const formatTimeOfDay = (hour: number): string => {
   if (hour >= 19 && hour < 21) return 'evening';
   return 'night';
 };
+
+const PanelFallback: React.FC = () => (
+  <div className="absolute inset-0 z-[180] flex items-center justify-center bg-black/35 backdrop-blur-sm">
+    <div className="rounded-full border border-amber-500/20 bg-black/70 px-4 py-2 text-[10px] uppercase tracking-[0.28em] text-amber-100/72">
+      Opening panel
+    </div>
+  </div>
+);
 
 interface AppShellProps {
   observeMode: boolean;
@@ -87,7 +99,7 @@ interface AppShellProps {
   onClosePlagueModal: () => void;
   onClearPlagueNotification: () => void;
   onPlaguePauseToggle: (paused: boolean) => void;
-  gameOver: { reason: string; description: string } | null;
+  gameOver: GameOverSummary | null;
   onRestart: () => void;
   toastMessages: ToastMessage[];
   onDismissToast: (id: string) => void;
@@ -456,47 +468,55 @@ export const AppShell = React.memo(({
 
       {/* Merchant Modal */}
       {!observeMode && showMerchantModal && nearMerchant && (
-        <MerchantModal
-          merchant={nearMerchant}
-          playerStats={uiProps.playerStats}
-          onClose={onCloseMerchant}
-          onPurchase={onPurchase}
-          onSell={onSell}
-          onCompound={onCompound}
-        />
+        <Suspense fallback={<PanelFallback />}>
+          <MerchantModal
+            merchant={nearMerchant}
+            playerStats={uiProps.playerStats}
+            onClose={onCloseMerchant}
+            onPurchase={onPurchase}
+            onSell={onSell}
+            onCompound={onCompound}
+          />
+        </Suspense>
       )}
 
       {/* Loot Modal - for shattered objects and opened chests */}
       {!observeMode && lootModalData && (
-        <LootModal
-          data={lootModalData}
-          onAccept={onLootAccept}
-          onDecline={onLootDecline}
-          onClose={onLootClose}
-        />
+        <Suspense fallback={<PanelFallback />}>
+          <LootModal
+            data={lootModalData}
+            onAccept={onLootAccept}
+            onDecline={onLootDecline}
+            onClose={onLootClose}
+          />
+        </Suspense>
       )}
 
       {/* Medical Treatment Modal */}
       {!observeMode && medicalModal && (
-        <MedicalTreatmentModal
-          isOpen={medicalModal.isOpen}
-          establishmentType={medicalModal.establishmentType}
-          practitionerName={medicalModal.practitionerName}
-          playerPlague={plague}
-          playerCurrency={playerCurrency}
-          playerSkinTone={playerSkinTone}
-          onTreatment={onMedicalTreatment}
-          onClose={onCloseMedicalModal}
-        />
+        <Suspense fallback={<PanelFallback />}>
+          <MedicalTreatmentModal
+            isOpen={medicalModal.isOpen}
+            establishmentType={medicalModal.establishmentType}
+            practitionerName={medicalModal.practitionerName}
+            playerPlague={plague}
+            playerCurrency={playerCurrency}
+            playerSkinTone={playerSkinTone}
+            onTreatment={onMedicalTreatment}
+            onClose={onCloseMedicalModal}
+          />
+        </Suspense>
       )}
 
       {/* Historical Guide Modal */}
-      {!observeMode && (
-        <GuideModal
-          isOpen={showGuideModal}
-          onClose={onCloseGuideModal}
-          initialEntryId={selectedGuideEntryId}
-        />
+      {!observeMode && showGuideModal && (
+        <Suspense fallback={<PanelFallback />}>
+          <GuideModal
+            isOpen={showGuideModal}
+            onClose={onCloseGuideModal}
+            initialEntryId={selectedGuideEntryId}
+          />
+        </Suspense>
       )}
 
       {!observeMode && sceneMode === 'interior' && interiorInfo && (
@@ -667,40 +687,10 @@ export const AppShell = React.memo(({
 
       {/* Game Over Screen */}
       {gameOver && (
-        <div className="absolute inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in duration-500">
-          <div className="bg-[#1a1209] border-4 border-red-900/60 p-10 rounded-lg shadow-2xl max-w-lg w-full text-center relative overflow-hidden">
-            {/* Dark parchment effect */}
-            <div className="absolute inset-0 opacity-20 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]"></div>
-
-            {/* Skull or death symbol */}
-            <div className="text-6xl mb-4 opacity-80">💀</div>
-
-            <h2 className="text-4xl text-red-700 mb-4 tracking-tight uppercase font-bold">
-              {gameOver.reason}
-            </h2>
-
-            <div className="w-16 h-0.5 bg-red-900/40 mx-auto mb-6"></div>
-
-            <p className="text-amber-200/80 text-lg mb-8 leading-relaxed italic">
-              {gameOver.description}
-            </p>
-
-            <p className="text-amber-400/60 text-sm mb-8">
-              Damascus, 1348
-            </p>
-
-            <button
-              onClick={onRestart}
-              className="bg-red-900 hover:bg-red-800 text-amber-100 px-12 py-4 rounded-full tracking-widest transition-all shadow-lg active:scale-95 text-lg uppercase"
-            >
-              Begin Anew
-            </button>
-
-            <div className="mt-8 text-[10px] text-amber-900/50 uppercase tracking-widest">
-              "In the midst of life we are in death"
-            </div>
-          </div>
-        </div>
+        <GameOverPanel
+          summary={gameOver}
+          onRestart={onRestart}
+        />
       )}
 
       {/* Treatment Outcome Modal */}

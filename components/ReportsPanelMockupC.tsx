@@ -235,7 +235,7 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
 
         {/* Header with pill tabs */}
         <div
-          className="flex items-center justify-between px-5 py-2.5 cursor-pointer select-none border-b border-amber-900/40"
+          className="flex items-center justify-between px-4 py-2 cursor-pointer select-none border-b border-amber-900/40"
           onClick={(e) => {
             // Only collapse if clicking the header area, not the tabs
             if ((e.target as HTMLElement).closest('button')) return;
@@ -247,12 +247,12 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
               size={16}
               className={`text-amber-500/70 transition-transform duration-200 ${collapsed ? '-rotate-90' : ''}`}
             />
-            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-500/80">Reports Panel</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-500/80">City Situation</span>
           </div>
 
           {/* Pill tabs in header */}
           {!collapsed && (
-            <div className="flex gap-1.5 bg-amber-950/40 p-1.5 rounded-full border border-amber-900/40">
+            <div className="flex gap-1 bg-amber-950/40 p-1 rounded-full border border-amber-900/40">
               {(['epidemic', 'player', 'guide'] as const).map((tab) => (
                 <button
                   key={tab}
@@ -260,13 +260,13 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
                     e.stopPropagation();
                     setActiveTab(tab);
                   }}
-                  className={`px-4 py-1.5 text-[11px] uppercase tracking-widest font-bold rounded-full transition-all
+                  className={`px-3 py-1 text-[10px] uppercase tracking-widest font-bold rounded-full transition-all
                     ${activeTab === tab
                       ? 'bg-amber-700 text-white shadow-md'
                       : 'text-amber-200/50 hover:text-amber-200'
                     }`}
                 >
-                  {tab}
+                  {tab === 'epidemic' ? 'outbreak' : tab === 'player' ? 'you' : 'context'}
                 </button>
               ))}
             </div>
@@ -277,10 +277,10 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
           <>
 
             {/* Content */}
-            <div className="p-5 max-h-[560px] overflow-y-auto">
+            <div className="p-4 max-h-[540px] overflow-y-auto">
 
               {activeTab === 'epidemic' && (
-                <div className="space-y-4 px-1 ">
+                <div className="space-y-3 px-1">
 
                   {/* Population section with view toggle */}
                   <div>
@@ -478,7 +478,7 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
                         <div className="flex items-center gap-2">
                           <div className={`w-2 h-2 rounded-full transition-colors ${epidemiologyExpanded ? 'bg-amber-400' : 'bg-amber-600/50'}`} />
                           <span className="text-[13px] uppercase tracking-[0.2em] text-amber-500/80 group-hover:text-amber-400 transition-colors font-medium">
-                            Epidemiology Mode
+                            Teaching Controls
                           </span>
                         </div>
                         <ChevronDown
@@ -689,7 +689,9 @@ export const ReportsPanelMockupC: React.FC<ReportsPanelProps> = ({
                       className={`w-full text-left bg-black/25 border border-amber-900/30 rounded-lg px-4 py-3 transition-colors ${onOpenTaskModal ? 'cursor-pointer hover:bg-amber-900/20' : 'cursor-default'}`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-xs uppercase tracking-widest text-amber-400/80">Current Task</span>
+                        <span className="text-xs uppercase tracking-widest text-amber-400/80">
+                          {playerStats.currentTask.id.startsWith('illness-') ? 'Immediate Need' : 'Current Task'}
+                        </span>
                         <span className={`text-[10px] uppercase tracking-wider ${playerStats.currentTask.status === 'completed' ? 'text-emerald-400' : 'text-amber-300/70'}`}>
                           {playerStats.currentTask.status}
                         </span>

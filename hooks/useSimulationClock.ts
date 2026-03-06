@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { CONSTANTS, PlayerStats, SimulationParams, SimulationStats } from '../types';
 import { progressPlague } from '../utils/plague';
 
@@ -21,6 +21,7 @@ export const useSimulationClock = ({
   setParams,
   setPlayerStats
 }: SimulationClockArgs) => {
+  const lastPlagueCommitRef = useRef(0);
   useEffect(() => {
     let lastTime = performance.now();
     let frameId: number;
@@ -35,7 +36,7 @@ export const useSimulationClock = ({
         timeOfDayRef.current += simHoursDelta;
         if (timeOfDayRef.current >= 24) timeOfDayRef.current -= 24;
 
-        const commitInterval = 0.1;
+        const commitInterval = 0.25;
         if ((now - lastSimCommitRef.current) / 1000 >= commitInterval) {
           lastSimCommitRef.current = now;
           const nextSimTime = simTimeRef.current;
@@ -49,15 +50,28 @@ export const useSimulationClock = ({
             ...prev,
             timeOfDay: nextTimeOfDay
           }));
+        }
+
+        const plagueInterval = 1.2;
+        if ((now - lastPlagueCommitRef.current) / 1000 >= plagueInterval) {
+          lastPlagueCommitRef.current = now;
+          const nextSimTime = simTimeRef.current;
           setPlayerStats(prevPlayer => {
             // Filter out expired active effects
             const activeEffects = prevPlayer.activeEffects.filter(
               effect => effect.expiresAt > nextSimTime
             );
+            const nextPlague = progressPlague(prevPlayer.plague, nextSimTime);
+            const effectsChanged = activeEffects.length !== prevPlayer.activeEffects.length;
+            const plagueChanged = nextPlague !== prevPlayer.plague;
+
+            if (!effectsChanged && !plagueChanged) {
+              return prevPlayer;
+            }
 
             return {
               ...prevPlayer,
-              plague: progressPlague(prevPlayer.plague, nextSimTime),
+              plague: nextPlague,
               activeEffects
             };
           });

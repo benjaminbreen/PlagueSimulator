@@ -11,8 +11,8 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'Release of corrupt blood to restore humoral balance. The physician opens a vein in the arm or leg to draw out the "bad blood" causing illness.',
     cost: 15,
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -8 },
-      { type: 'debuff', stat: 'weakness', value: 12 }
+      { type: 'symptomRelief', stat: 'fever', value: -6 },
+      { type: 'debuff', stat: 'weakness', value: 14 }
     ],
     riskLevel: 'low',
     riskDescription: 'Minor risk of infection at incision site',
@@ -30,9 +30,9 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'Heated glass cups placed on the skin create suction, drawing out corrupted humors. A gentler alternative to bloodletting, particularly favored in prophetic medicine.',
     cost: 12,
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -5 },
+      { type: 'symptomRelief', stat: 'fever', value: -4 },
       { type: 'debuff', stat: 'weakness', value: 8 },
-      { type: 'plagueProtection', value: 15, duration: 2 } // 15% protection for 2 hours
+      { type: 'plagueProtection', value: 8, duration: 2 } // modest temporary protection
     ],
     riskLevel: 'low',
     riskDescription: 'May leave temporary bruising',
@@ -47,8 +47,8 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'The swollen plague bubo is pierced with a sharp blade to drain the poisonous matter within. Extremely painful but can dramatically improve survival if the bubo has not yet corrupted the blood.',
     cost: 25,
     effects: [
-      { type: 'symptomRelief', stat: 'buboes', value: -30 },
-      { type: 'symptomRelief', stat: 'survivalChance', value: 25 }
+      { type: 'symptomRelief', stat: 'buboes', value: -24 },
+      { type: 'symptomRelief', stat: 'survivalChance', value: 14 }
     ],
     riskLevel: 'high',
     riskDescription: 'Intense pain; risk of uncontrolled bleeding; may spread infection if performed incorrectly',
@@ -88,9 +88,9 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'A powerful purgative is administered to expel corrupt humors through the bowels. The patient drinks a bitter concoction of senna and other cathartics.',
     cost: 10,
     effects: [
-      { type: 'symptomRelief', stat: 'delirium', value: -15 },
-      { type: 'symptomRelief', stat: 'fever', value: -5 },
-      { type: 'debuff', stat: 'weakness', value: 20 }
+      { type: 'symptomRelief', stat: 'delirium', value: -10 },
+      { type: 'symptomRelief', stat: 'fever', value: -3 },
+      { type: 'debuff', stat: 'weakness', value: 24 }
     ],
     riskLevel: 'medium',
     riskDescription: 'Dehydration; may weaken already frail patients',
@@ -108,8 +108,8 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'The legendary universal antidote, compounded from dozens of rare ingredients according to ancient formulas. The physician administers a carefully measured dose with prayers for the patient\'s recovery.',
     cost: 80,
     effects: [
-      { type: 'symptomRelief', stat: 'all', value: -15 },
-      { type: 'symptomRelief', stat: 'survivalChance', value: 10 }
+      { type: 'symptomRelief', stat: 'all', value: -8 },
+      { type: 'symptomRelief', stat: 'survivalChance', value: 5 }
     ],
     riskLevel: 'none',
     successChance: 95,
@@ -123,9 +123,9 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'Aromatic substances are burned to purify the corrupt air believed to carry disease. Frankincense, myrrh, sandalwood, and camphor fill the room with fragrant smoke, driving out the pestilential miasma.',
     cost: 8,
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -3 },
-      { type: 'symptomRelief', stat: 'delirium', value: -5 },
-      { type: 'plagueProtection', value: 10, duration: 4 } // 10% protection for 4 hours
+      { type: 'symptomRelief', stat: 'fever', value: -2 },
+      { type: 'symptomRelief', stat: 'delirium', value: -3 },
+      { type: 'plagueProtection', value: 6, duration: 4 } // mostly palliative and ritual
     ],
     riskLevel: 'none',
     riskDescription: 'No physical risk; smoke may irritate the lungs',
@@ -140,9 +140,9 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'Living leeches are applied to draw out corrupted blood more gently than the lancet. The creatures\' natural anesthetic makes the procedure nearly painless, and their anticoagulant saliva ensures thorough drainage.',
     cost: 18,
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -6 },
-      { type: 'symptomRelief', stat: 'buboes', value: -5 },
-      { type: 'debuff', stat: 'weakness', value: 8 }
+      { type: 'symptomRelief', stat: 'fever', value: -4 },
+      { type: 'symptomRelief', stat: 'buboes', value: -4 },
+      { type: 'debuff', stat: 'weakness', value: 10 }
     ],
     riskLevel: 'low',
     riskDescription: 'Minor blood loss; rare infection at bite sites',
@@ -160,7 +160,7 @@ export const MEDICAL_TREATMENTS: MedicalTreatment[] = [
     description: 'A warm poultice of figs, onions, and healing herbs is applied directly to the swollen bubo. The mixture draws out the poisonous matter, softening the tumor and encouraging drainage without the knife.',
     cost: 6,
     effects: [
-      { type: 'symptomRelief', stat: 'buboes', value: -8 },
+      { type: 'symptomRelief', stat: 'buboes', value: -6 },
       { type: 'symptomRelief', stat: 'fever', value: -2 }
     ],
     riskLevel: 'none',

@@ -32,30 +32,30 @@ export const TEXTILE_ITEMS: ItemTemplate[] = [
 // APOTHECARY - Medicines, spices, herbs
 export const APOTHECARY_ITEMS: ItemTemplate[] = [
   // Common
-  { name: 'Dates', description: 'Sweet dried fruit, restores energy', category: MerchantType.APOTHECARY, basePrice: 3, rarity: 'common', effects: [{ type: 'heal', value: 10 }, { type: 'symptomRelief', stat: 'weakness', value: 8 }] },
+  { name: 'Dates', description: 'Sweet dried fruit that briefly restores energy to the weak', category: MerchantType.APOTHECARY, basePrice: 3, rarity: 'common', effects: [{ type: 'heal', value: 10 }, { type: 'symptomRelief', stat: 'weakness', value: 6 }] },
   { name: 'Cumin', description: 'Common spice for cooking and digestion', category: MerchantType.APOTHECARY, basePrice: 2, rarity: 'common' },
   { name: 'Black Pepper', description: 'Sharp spice from India', category: MerchantType.APOTHECARY, basePrice: 5, rarity: 'common' },
-  { name: 'Mint Leaves', description: 'Refreshing herb for tea and fever reduction', category: MerchantType.APOTHECARY, basePrice: 2, rarity: 'common', effects: [{ type: 'heal', value: 5 }, { type: 'symptomRelief', stat: 'fever', value: 10 }] },
-  { name: 'Honey', description: 'Sweet preservative with healing properties', category: MerchantType.APOTHECARY, basePrice: 8, rarity: 'common', effects: [{ type: 'heal', value: 15 }, { type: 'symptomRelief', stat: 'fever', value: 8 }] },
+  { name: 'Mint Leaves', description: 'Refreshing herb for tea and temporary easing of fever', category: MerchantType.APOTHECARY, basePrice: 2, rarity: 'common', effects: [{ type: 'heal', value: 5 }, { type: 'symptomRelief', stat: 'fever', value: 7 }] },
+  { name: 'Honey', description: 'Sweet preservative prized for soothing the throat and stomach', category: MerchantType.APOTHECARY, basePrice: 8, rarity: 'common', effects: [{ type: 'heal', value: 15 }, { type: 'symptomRelief', stat: 'fever', value: 5 }] },
   { name: 'Coriander Seeds', description: 'Aromatic spice and digestive aid', category: MerchantType.APOTHECARY, basePrice: 3, rarity: 'common' },
-  { name: 'Aloe Vera', description: 'Fresh succulent for burns and skin ailments', category: MerchantType.APOTHECARY, basePrice: 4, rarity: 'common', effects: [{ type: 'heal', value: 8 }, { type: 'symptomRelief', stat: 'fever', value: 8 }, { type: 'symptomRelief', stat: 'skinBleeding', value: 5 }] },
-  { name: 'Pomegranate Seeds', description: 'Dried seeds, valued as a digestive tonic', category: MerchantType.APOTHECARY, basePrice: 4, rarity: 'common', effects: [{ type: 'heal', value: 6 }, { type: 'symptomRelief', stat: 'weakness', value: 6 }] },
+  { name: 'Aloe Vera', description: 'Fresh succulent for burns and skin ailments', category: MerchantType.APOTHECARY, basePrice: 4, rarity: 'common', effects: [{ type: 'heal', value: 8 }, { type: 'symptomRelief', stat: 'fever', value: 6 }, { type: 'symptomRelief', stat: 'skinBleeding', value: 4 }] },
+  { name: 'Pomegranate Seeds', description: 'Dried seeds valued as a mild digestive tonic', category: MerchantType.APOTHECARY, basePrice: 4, rarity: 'common', effects: [{ type: 'heal', value: 6 }, { type: 'symptomRelief', stat: 'weakness', value: 5 }] },
   { name: 'Henna Powder', description: 'Red-orange dye for hands, hair, and nails', category: MerchantType.APOTHECARY, basePrice: 5, rarity: 'common' },
   { name: 'Kohl Powder', description: 'Black antimony powder for eye cosmetics', category: MerchantType.APOTHECARY, basePrice: 4, rarity: 'common' },
   { name: 'Vinegar', description: 'Sour wine turned preservative and medicinal tonic', category: MerchantType.APOTHECARY, basePrice: 3, rarity: 'common' },
 
   // Uncommon
-  { name: 'Rose Water', description: 'Fragrant distillation that clears the mind', category: MerchantType.APOTHECARY, basePrice: 25, rarity: 'uncommon', effects: [{ type: 'heal', value: 30 }, { type: 'symptomRelief', stat: 'fever', value: 15 }, { type: 'symptomRelief', stat: 'delirium', value: 10 }] },
+  { name: 'Rose Water', description: 'Fragrant distillation used to cool the brow and steady the mind', category: MerchantType.APOTHECARY, basePrice: 25, rarity: 'uncommon', effects: [{ type: 'heal', value: 30 }, { type: 'symptomRelief', stat: 'fever', value: 10 }, { type: 'symptomRelief', stat: 'delirium', value: 8 }] },
   { name: 'Saffron Threads', description: 'Precious spice and medicine from Persia', category: MerchantType.APOTHECARY, basePrice: 40, rarity: 'uncommon' },
-  { name: 'Camphor Oil', description: 'Aromatic remedy for respiratory ailments', category: MerchantType.APOTHECARY, basePrice: 35, rarity: 'uncommon', effects: [{ type: 'heal', value: 40 }, { type: 'symptomRelief', stat: 'fever', value: 20 }, { type: 'symptomRelief', stat: 'coughingBlood', value: 10 }] },
-  { name: 'Myrrh Resin', description: 'Medicinal gum from Arabia for treating swellings', category: MerchantType.APOTHECARY, basePrice: 30, rarity: 'uncommon', effects: [{ type: 'heal', value: 35 }, { type: 'symptomRelief', stat: 'buboes', value: 15 }, { type: 'symptomRelief', stat: 'fever', value: 10 }] },
+  { name: 'Camphor Oil', description: 'Aromatic remedy for respiratory distress and cooling compresses', category: MerchantType.APOTHECARY, basePrice: 35, rarity: 'uncommon', effects: [{ type: 'heal', value: 40 }, { type: 'symptomRelief', stat: 'fever', value: 12 }, { type: 'symptomRelief', stat: 'coughingBlood', value: 6 }] },
+  { name: 'Myrrh Resin', description: 'Medicinal gum from Arabia used in poultices and salves for swellings', category: MerchantType.APOTHECARY, basePrice: 30, rarity: 'uncommon', effects: [{ type: 'heal', value: 35 }, { type: 'symptomRelief', stat: 'buboes', value: 10 }, { type: 'symptomRelief', stat: 'fever', value: 6 }] },
   { name: 'Cardamom', description: 'Rare spice from distant lands', category: MerchantType.APOTHECARY, basePrice: 28, rarity: 'uncommon' },
 
   // Rare
-  { name: 'Theriac Compound', description: 'Ancient cure-all tonic of many ingredients', category: MerchantType.APOTHECARY, basePrice: 150, rarity: 'rare', effects: [{ type: 'heal', value: 100 }, { type: 'symptomRelief', stat: 'all', value: 20 }, { type: 'symptomRelief', stat: 'survivalChance', value: 15 }] },
+  { name: 'Theriac Compound', description: 'Famous universal antidote, prized more for hope and prestige than certainty', category: MerchantType.APOTHECARY, basePrice: 150, rarity: 'rare', effects: [{ type: 'heal', value: 100 }, { type: 'symptomRelief', stat: 'all', value: 10 }, { type: 'symptomRelief', stat: 'survivalChance', value: 6 }] },
   { name: 'Musk Perfume', description: 'Rare fragrance from the East', category: MerchantType.APOTHECARY, basePrice: 180, rarity: 'rare' },
   { name: 'Ambergris', description: 'Mysterious oceanic substance, invaluable', category: MerchantType.APOTHECARY, basePrice: 300, rarity: 'rare' },
-  { name: 'Opium Paste', description: 'Powerful sedative that numbs all pain, but weakens the body', category: MerchantType.APOTHECARY, basePrice: 120, rarity: 'rare', effects: [{ type: 'heal', value: 80 }, { type: 'symptomRelief', stat: 'all', value: 30 }, { type: 'debuff', stat: 'weakness', value: 20 }] },
+  { name: 'Opium Paste', description: 'Powerful sedative that dulls pain and terror, while weakening the body', category: MerchantType.APOTHECARY, basePrice: 120, rarity: 'rare', effects: [{ type: 'heal', value: 80 }, { type: 'symptomRelief', stat: 'all', value: 14 }, { type: 'debuff', stat: 'weakness', value: 28 }] },
   { name: 'Bezoar Stone', description: 'Stone from goat stomach, believed to cure poison', category: MerchantType.APOTHECARY, basePrice: 200, rarity: 'rare' }
 ];
 
@@ -90,7 +90,7 @@ export const METALSMITH_ITEMS: ItemTemplate[] = [
 export const BEDOUIN_ITEMS: ItemTemplate[] = [
   // Rare items only (Bedouin merchants specialize in exotic goods)
   { name: 'Desert Rose Crystal', description: 'Rare sand-formed mineral from the deep desert', category: MerchantType.BEDOUIN, basePrice: 140, rarity: 'rare' },
-  { name: 'Frankincense Tears', description: 'Premium resin believed to purify the air of pestilence', category: MerchantType.BEDOUIN, basePrice: 160, rarity: 'rare', effects: [{ type: 'plagueProtection', value: 20, duration: 2 }] },
+  { name: 'Frankincense Tears', description: 'Premium resin believed to purify pestilential air', category: MerchantType.BEDOUIN, basePrice: 160, rarity: 'rare', effects: [{ type: 'plagueProtection', value: 12, duration: 2 }] },
   { name: 'Bedouin Silver Bracelet', description: 'Traditional nomadic jewelry with tribal motifs', category: MerchantType.BEDOUIN, basePrice: 190, rarity: 'rare' },
   { name: 'Arabian Coffee Beans', description: 'Rare beans from Yemeni highlands', category: MerchantType.BEDOUIN, basePrice: 110, rarity: 'rare' },
   { name: 'Desert Truffles', description: 'Prized fungi from the arid plains', category: MerchantType.BEDOUIN, basePrice: 130, rarity: 'rare', effects: [{ type: 'heal', value: 50 }] },
@@ -130,8 +130,8 @@ export const TRADER_ITEMS: ItemTemplate[] = [
 
   // Uncommon
   { name: 'Glass Drinking Vessel', description: 'Fine Damascus glasswork', category: MerchantType.TRADER, basePrice: 20, rarity: 'uncommon' },
-  { name: 'Incense Sticks', description: 'Frankincense and myrrh blend', category: MerchantType.TRADER, basePrice: 15, rarity: 'uncommon', effects: [{ type: 'plagueProtection', value: 15, duration: 1 }] },
-  { name: 'Aromatic Herb Pouch', description: 'Mixed herbs to ward off pestilence when worn', category: MerchantType.TRADER, basePrice: 22, rarity: 'uncommon', effects: [{ type: 'plagueProtection', value: 30, duration: 4 }] },
+  { name: 'Incense Sticks', description: 'Frankincense and myrrh blend burned against foul air', category: MerchantType.TRADER, basePrice: 15, rarity: 'uncommon', effects: [{ type: 'plagueProtection', value: 8, duration: 1 }] },
+  { name: 'Aromatic Herb Pouch', description: 'Mixed herbs worn near the face to ward off corrupt air', category: MerchantType.TRADER, basePrice: 22, rarity: 'uncommon', effects: [{ type: 'plagueProtection', value: 16, duration: 4 }] },
   { name: 'Painted Ceramic Plate', description: 'Decorated with geometric patterns', category: MerchantType.TRADER, basePrice: 18, rarity: 'uncommon' },
   { name: 'Leather Satchel', description: 'Sturdy travel bag', category: MerchantType.TRADER, basePrice: 22, rarity: 'uncommon' },
   { name: 'Olive Oil (Amphora)', description: 'Fine pressed oil for cooking and lamps', category: MerchantType.TRADER, basePrice: 25, rarity: 'uncommon' },

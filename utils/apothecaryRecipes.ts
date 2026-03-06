@@ -74,7 +74,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A sweet cooling paste that reduces fever and calms the body. Made by grinding mint leaves with rose water and binding with honey.',
     ingredients: ['Rose Water', 'Honey', 'Mint Leaves'],
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -20 }
+      { type: 'symptomRelief', stat: 'fever', value: -14 }
     ],
     fee: 8
   },
@@ -88,7 +88,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A restorative paste to rebuild strength after illness. The dates provide vital nourishment while pomegranate balances the humors.',
     ingredients: ['Honey', 'Dates', 'Pomegranate Seeds'],
     effects: [
-      { type: 'symptomRelief', stat: 'weakness', value: -18 },
+      { type: 'symptomRelief', stat: 'weakness', value: -12 },
       { type: 'heal', value: 10 }
     ],
     fee: 10
@@ -103,8 +103,8 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'The legendary antidote compound, here prepared as a sweetened paste. The theriac\'s power is enhanced by rose water and preserved in honey.',
     ingredients: ['Theriac Compound', 'Honey', 'Rose Water'],
     effects: [
-      { type: 'symptomRelief', stat: 'all', value: -12 },
-      { type: 'symptomRelief', stat: 'survivalChance', value: 8 }
+      { type: 'symptomRelief', stat: 'all', value: -7 },
+      { type: 'symptomRelief', stat: 'survivalChance', value: 4 }
     ],
     fee: 25
   },
@@ -118,9 +118,9 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A powerful soporific paste that brings deep sleep and relief from all pain. The opium numbs the senses while saffron steadies the heart.',
     ingredients: ['Opium Paste', 'Honey', 'Saffron Threads'],
     effects: [
-      { type: 'symptomRelief', stat: 'all', value: -25 },
-      { type: 'symptomRelief', stat: 'delirium', value: -15 },
-      { type: 'debuff', stat: 'weakness', value: 15 }
+      { type: 'symptomRelief', stat: 'all', value: -14 },
+      { type: 'symptomRelief', stat: 'delirium', value: -10 },
+      { type: 'debuff', stat: 'weakness', value: 20 }
     ],
     fee: 30
   },
@@ -136,8 +136,8 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A delicate syrup infused with the essence of violets. Soothes fever and calms troubled minds, favored by physicians for treating melancholy.',
     ingredients: ['Honey', 'Rose Water'],
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -12 },
-      { type: 'symptomRelief', stat: 'delirium', value: -8 }
+      { type: 'symptomRelief', stat: 'fever', value: -9 },
+      { type: 'symptomRelief', stat: 'delirium', value: -6 }
     ],
     fee: 6
   },
@@ -151,7 +151,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A classic preparation of honey and vinegar, used since ancient times. Clears phlegm from the chest and eases breathing.',
     ingredients: ['Honey', 'Vinegar'],
     effects: [
-      { type: 'symptomRelief', stat: 'coughingBlood', value: -15 }
+      { type: 'symptomRelief', stat: 'coughingBlood', value: -10 }
     ],
     fee: 5
   },
@@ -165,7 +165,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A refreshing rose-water cordial with cooling mint. Reduces fever and promotes general healing. A favorite remedy of Persian physicians.',
     ingredients: ['Rose Water', 'Honey', 'Mint Leaves'],
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -15 },
+      { type: 'symptomRelief', stat: 'fever', value: -10 },
       { type: 'heal', value: 10 }
     ],
     fee: 7
@@ -182,7 +182,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A thick poultice designed to draw poison from plague buboes. The myrrh purifies while aloe soothes the inflammation.',
     ingredients: ['Myrrh Resin', 'Aloe Vera', 'Honey'],
     effects: [
-      { type: 'symptomRelief', stat: 'buboes', value: -18 }
+      { type: 'symptomRelief', stat: 'buboes', value: -12 }
     ],
     fee: 12
   },
@@ -196,8 +196,8 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A cooling balm that reduces fever when applied to the temples and wrists. The camphor also stanches bleeding.',
     ingredients: ['Camphor Oil', 'Aloe Vera'],
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -15 },
-      { type: 'symptomRelief', stat: 'skinBleeding', value: -10 }
+      { type: 'symptomRelief', stat: 'fever', value: -10 },
+      { type: 'symptomRelief', stat: 'skinBleeding', value: -6 }
     ],
     fee: 10
   },
@@ -211,8 +211,8 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A fragrant healing salve blessed by the sacred resin. Applied to buboes and wounds to promote healing and prevent corruption.',
     ingredients: ['Frankincense Tears', 'Aloe Vera', 'Honey'],
     effects: [
-      { type: 'symptomRelief', stat: 'buboes', value: -12 },
-      { type: 'symptomRelief', stat: 'skinBleeding', value: -8 }
+      { type: 'symptomRelief', stat: 'buboes', value: -8 },
+      { type: 'symptomRelief', stat: 'skinBleeding', value: -5 }
     ],
     fee: 11
   },
@@ -226,7 +226,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A simple but effective salve for treating wounds and stopping bleeding. The myrrh prevents infection while honey seals the wound.',
     ingredients: ['Myrrh Resin', 'Honey'],
     effects: [
-      { type: 'symptomRelief', stat: 'skinBleeding', value: -15 },
+      { type: 'symptomRelief', stat: 'skinBleeding', value: -10 },
       { type: 'heal', value: 5 }
     ],
     fee: 8
@@ -243,7 +243,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A powerful fumigant combining two sacred resins. When burned, the smoke is believed to purify the air of plague miasma.',
     ingredients: ['Frankincense Tears', 'Myrrh Resin'],
     effects: [
-      { type: 'plagueProtection', value: 35, duration: 4 }
+      { type: 'plagueProtection', value: 18, duration: 4 }
     ],
     fee: 14
   },
@@ -257,7 +257,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'The most potent protective fumigant, combining frankincense, camphor, and rose water. Creates a fragrant shield against the pestilence.',
     ingredients: ['Frankincense Tears', 'Camphor Oil', 'Rose Water'],
     effects: [
-      { type: 'plagueProtection', value: 45, duration: 6 }
+      { type: 'plagueProtection', value: 24, duration: 6 }
     ],
     fee: 20
   },
@@ -271,7 +271,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'Pure frankincense burned for its cleansing smoke. The most basic form of protection against corrupt air.',
     ingredients: ['Frankincense Tears'],
     effects: [
-      { type: 'plagueProtection', value: 20, duration: 2 }
+      { type: 'plagueProtection', value: 10, duration: 2 }
     ],
     fee: 4
   },
@@ -287,7 +287,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A cooling powder of dried mint and coriander. Taken with water to reduce fever and settle the stomach.',
     ingredients: ['Mint Leaves', 'Coriander Seeds'],
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -10 }
+      { type: 'symptomRelief', stat: 'fever', value: -7 }
     ],
     fee: 4
   },
@@ -318,8 +318,8 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'A concentrated camphor distillation with rose water. Powerfully cooling, it reduces fever and clears the lungs.',
     ingredients: ['Camphor Oil', 'Rose Water'],
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -18 },
-      { type: 'symptomRelief', stat: 'coughingBlood', value: -12 }
+      { type: 'symptomRelief', stat: 'fever', value: -12 },
+      { type: 'symptomRelief', stat: 'coughingBlood', value: -8 }
     ],
     fee: 12
   },
@@ -333,7 +333,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'Fresh mint distilled with rose water creates a cooling, refreshing medicine. Excellent for reducing fever and clearing the head.',
     ingredients: ['Mint Leaves', 'Rose Water'],
     effects: [
-      { type: 'symptomRelief', stat: 'fever', value: -14 }
+      { type: 'symptomRelief', stat: 'fever', value: -9 }
     ],
     fee: 7
   },
@@ -349,7 +349,7 @@ export const COMPOUND_RECIPES: CompoundRecipe[] = [
     description: 'Portable theriac pills for travelers and merchants. Provides long-lasting protection against plague exposure on the road.',
     ingredients: ['Theriac Compound'],
     effects: [
-      { type: 'plagueProtection', value: 25, duration: 8 }
+      { type: 'plagueProtection', value: 12, duration: 8 }
     ],
     fee: 15
   }

@@ -214,6 +214,7 @@ interface NPCProps {
   role?: string;
   /** Family relationship type for floating label */
   familyRelationship?: 'spouse' | 'child' | 'parent' | 'sibling';
+  npcDetailScale?: number;
 }
 
 export const NPC: React.FC<NPCProps> = memo(({
@@ -249,7 +250,8 @@ export const NPC: React.FC<NPCProps> = memo(({
   npcStateOverride,
   globalApproachCooldownRef,
   role,
-  familyRelationship
+  familyRelationship,
+  npcDetailScale = 1
 }) => {
   const ENABLE_SIMPLE_LOD = true;
   const SIMPLE_LOD_DISTANCE = 60;
@@ -365,9 +367,10 @@ export const NPC: React.FC<NPCProps> = memo(({
   const lastSpeedUpdateStateRef = useRef<AgentState>(initialState);
 
   // PERFORMANCE: Simplify far-away NPC steering without throttling visible movement
-  const FAR_SIMPLIFY_DISTANCE = 35;
-  const DETAIL_HIGH_DISTANCE = 18;
-  const DETAIL_MID_DISTANCE = 30;
+  const detailScale = THREE.MathUtils.clamp(npcDetailScale, 0.55, 1);
+  const FAR_SIMPLIFY_DISTANCE = 35 * detailScale;
+  const DETAIL_HIGH_DISTANCE = 18 * detailScale;
+  const DETAIL_MID_DISTANCE = 30 * detailScale;
 
   // BUILDING ENTRY/EXIT: Track when NPCs go inside buildings
   const activityStateRef = useRef<'WANDERING' | 'INSIDE_BUILDING'>('WANDERING');

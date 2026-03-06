@@ -60,6 +60,7 @@ import { generateClimbablesForBuilding, calculateRooftopHatchPosition, buildingC
 import { getBuildingMultipliers } from '../utils/buildingArchitecture';
 import { ISLAMIC_COLORS } from './environment/decorations/IslamicOrnaments';
 import { generateCitadelBuildings, getCitadelWallCollisions } from './environment/landmarks/CitadelComplex';
+import { RenderProfile } from '../utils/renderProfile';
 
 // Texture generators, constants, and hover system now imported from environment/
 
@@ -387,6 +388,7 @@ interface EnvironmentProps {
   isSprinting?: boolean;
   showCityWalls?: boolean;
   occludedBuildingIds?: string[];
+  renderProfile?: RenderProfile;
 }
 
 
@@ -2314,8 +2316,8 @@ const InstancedWindows: React.FC<{
 
     if (glowMeshRef.current) {
       let glowIndex = 0;
-      const glowIntensities: number[] = [];
-      const glowColorIndices: number[] = [];
+      const glowIntensities = new Float32Array(windowData.length);
+      const glowColorIndices = new Float32Array(windowData.length);
       const tempMatrix = new THREE.Matrix4();
       const tempPosition = new THREE.Vector3();
       const tempQuaternion = new THREE.Quaternion();
@@ -2335,30 +2337,24 @@ const InstancedWindows: React.FC<{
           tempMatrix.compose(tempPosition, tempQuaternion, tempScale);
 
           glowMeshRef.current!.setMatrixAt(glowIndex, tempMatrix);
-          glowIntensities.push(data.glowIntensity);
-          glowColorIndices.push(data.colorIndex);
+          glowIntensities[glowIndex] = data.glowIntensity;
+          glowColorIndices[glowIndex] = data.colorIndex;
           glowIndex++;
         }
       });
 
-      if (glowIndex > 0) {
-        glowMeshRef.current.count = glowIndex;
-        glowMeshRef.current.instanceMatrix.needsUpdate = true;
+      glowMeshRef.current.count = glowIndex;
+      glowMeshRef.current.instanceMatrix.needsUpdate = true;
 
-        // GRAPHICS: Set per-instance glow intensity as instance attribute
-        const intensityArray = new Float32Array(glowIntensities);
-        glowMeshRef.current.geometry.setAttribute(
-          'instanceGlowIntensity',
-          new THREE.InstancedBufferAttribute(intensityArray, 1)
-        );
-
-        // GRAPHICS: Set per-instance color index as instance attribute
-        const colorIndexArray = new Float32Array(glowColorIndices);
-        glowMeshRef.current.geometry.setAttribute(
-          'instanceColorIndex',
-          new THREE.InstancedBufferAttribute(colorIndexArray, 1)
-        );
-      }
+      // Keep instanced attribute buffers at a fixed capacity; only the mesh count changes.
+      glowMeshRef.current.geometry.setAttribute(
+        'instanceGlowIntensity',
+        new THREE.InstancedBufferAttribute(glowIntensities, 1)
+      );
+      glowMeshRef.current.geometry.setAttribute(
+        'instanceColorIndex',
+        new THREE.InstancedBufferAttribute(glowColorIndices, 1)
+      );
     }
   }, [windowData, latticeWindows, shutteredWindows]);
 
@@ -2370,8 +2366,6 @@ const InstancedWindows: React.FC<{
       glowMaterialRef.current.emissiveIntensity = baseIntensity;
     }
   }, [nightFactor]);
-
-  const glowCount = useMemo(() => windowData.filter(d => d.hasGlow).length, [windowData]);
 
   // Create custom shader material with per-instance intensity and color variation
   const glowMaterial = useMemo(() => {
@@ -2476,9 +2470,9 @@ const InstancedWindows: React.FC<{
         </instancedMesh>
       )}
 
-      {/* Window glow for lit windows at night */}
-      {glowCount > 0 && (
-        <instancedMesh ref={glowMeshRef} args={[undefined, undefined, glowCount]} material={glowMaterial}>
+      {/* Window glow uses fixed capacity; live visible instances are controlled via glowMeshRef.current.count */}
+      {windowData.length > 0 && (
+        <instancedMesh ref={glowMeshRef} args={[undefined, undefined, windowData.length]} material={glowMaterial}>
           <boxGeometry args={[1.0, 1.5, 0.02]} />
         </instancedMesh>
       )}
@@ -2500,7 +2494,8 @@ export const Buildings: React.FC<{
   selectedBuildingId?: string | null;
   onSelectBuilding?: (buildingId: string | null) => void;
   occludedBuildingIds?: string[];
-}> = ({ mapX, mapY, sessionSeed = 0, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap, isSprinting = false, selectionEnabled = false, selectedBuildingId = null, onSelectBuilding, occludedBuildingIds = [] }) => {
+  renderProfile?: RenderProfile;
+}> = ({ mapX, mapY, sessionSeed = 0, onBuildingsGenerated, nearBuildingId, torchIntensity, nightFactor, heightmap, isSprinting = false, selectionEnabled = false, selectedBuildingId = null, onSelectBuilding, occludedBuildingIds = [], renderProfile }) => {
   const occludedBuildingIdSet = useMemo(() => new Set(occludedBuildingIds), [occludedBuildingIds]);
   // PERFORMANCE: Use cached textures instead of recreating on every mount
   const noiseTextures = CACHED_NOISE_TEXTURES;
@@ -2521,20 +2516,20 @@ export const Buildings: React.FC<{
       const mat = new THREE.MeshStandardMaterial({
         ...props,
         // Normal map for surface detail (catches light realistically)
-        normalMap: normalMap,
+        normalMap: renderProfile?.enhancedSurfaceShaders ? normalMap : null,
         normalScale: useStoneNormal
           ? new THREE.Vector2(0.12, 0.12)  // Stone: moderate detail
           : new THREE.Vector2(0.06, 0.06), // Plaster: very subtle
       });
 
-      // Add shader-based ambient occlusion AND fresnel rim lighting
-      // Stronger effect (0.8 intensity, 1.8 power) for noticeable edge glow on buildings
-      addFresnelRimLighting(mat, { includeAO: true, rimIntensity: 0.8, fresnelPower: 1.8 });
+      if (renderProfile?.enhancedSurfaceShaders) {
+        addFresnelRimLighting(mat, { includeAO: true, rimIntensity: 0.8, fresnelPower: 1.8 });
+      }
 
       matMap.set(type as BuildingType, mat);
     });
     return matMap;
-  }, []);
+  }, [renderProfile?.enhancedSurfaceShaders]);
 
   const otherMaterials = useMemo(() => {
     // Create dome materials with fresnel rim lighting for beautiful curved surface highlights
@@ -2556,10 +2551,11 @@ export const Buildings: React.FC<{
       new THREE.MeshStandardMaterial({ color: '#5a7a5a', roughness: 0.55, metalness: 0.1 }), // dark green
     ];
 
-    // Apply stronger fresnel to domes - curved surfaces showcase rim lighting beautifully
-    domeMaterials.forEach(mat => {
-      addFresnelRimLighting(mat, { includeAO: false, rimIntensity: 1.0, fresnelPower: 1.5 });
-    });
+    if (renderProfile?.enhancedSurfaceShaders) {
+      domeMaterials.forEach(mat => {
+        addFresnelRimLighting(mat, { includeAO: false, rimIntensity: 1.0, fresnelPower: 1.5 });
+      });
+    }
 
     return {
     wood: new THREE.MeshStandardMaterial({ color: '#3d2817', roughness: 1.0 }),
@@ -2605,7 +2601,7 @@ export const Buildings: React.FC<{
       new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[1], color: '#4a6b8a', roughness: 0.88, side: THREE.DoubleSide }), // medium blue & white
       new THREE.MeshStandardMaterial({ map: CACHED_STRIPE_TEXTURES[2], color: '#5a7b9a', roughness: 0.88, side: THREE.DoubleSide }), // light blue & white
     ]
-  }; }, []);
+  }; }, [renderProfile?.enhancedSurfaceShaders]);
 
   const metadata = useMemo(() => {
     const bldMetadata: BuildingMetadata[] = [];
@@ -3270,7 +3266,12 @@ export const Buildings: React.FC<{
       {/* Instanced rendering for performance - reduces draw calls by ~10x */}
       {/* Windows use ALL buildings (not visibleBuildings) to prevent flicker from mesh recreation during frustum culling */}
       {/* Citadel buildings are excluded - they have custom visuals in CitadelComplex */}
-      <InstancedWindows buildings={renderableMetadata} district={district} nightFactor={nightFactor} />
+      <InstancedWindows
+        key={`windows-${mapX}-${mapY}-${renderableMetadata.length}`}
+        buildings={renderableMetadata}
+        district={district}
+        nightFactor={nightFactor}
+      />
       <InstancedDecorations buildings={renderableBuildings} district={district} />
       <InstancedGroundClutter buildings={renderableBuildings} district={district} />
       <BirdcageSystem buildings={renderableBuildings} district={district} mapSeed={sessionSeed} />
@@ -3712,7 +3713,7 @@ export const Ground: React.FC<{ mapX: number; mapY: number; onClick?: (point: TH
 // TOGGLE: Set to false to disable atmospheric dust particles
 const ENABLE_ATMOSPHERIC_DUST = false;
 
-export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, selectionEnabled = false, selectedBuildingId = null, onSelectBuilding, pushables = [], fogColor, heightmap, laundryLines = [], hangingCarpets = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true, occludedBuildingIds = [] }) => {
+export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSeed = 0, onGroundClick, onBuildingsGenerated, onClimbablesGenerated, onHeightmapBuilt, onTreePositionsGenerated, nearBuildingId, timeOfDay, enableHoverWireframe = false, enableHoverLabel = false, selectionEnabled = false, selectedBuildingId = null, onSelectBuilding, pushables = [], fogColor, heightmap, laundryLines = [], hangingCarpets = [], catPositionRef, ratPositions, npcPositions, playerPosition, isSprinting, showCityWalls = true, occludedBuildingIds = [], renderProfile }) => {
   const district = getDistrictType(mapX, mapY);
   const groundSeed = seededRandom(mapX * 1000 + mapY * 13 + 7);
   const terrainSeed = mapX * 1000 + mapY * 13 + 19;
@@ -3817,6 +3818,7 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
             occludedBuildingIds={occludedBuildingIds}
             GroundComponent={Ground}
             BuildingsComponent={Buildings}
+            buildingsProps={{ renderProfile }}
           />
           <EnvironmentDistricts
             mapX={mapX}
@@ -3838,12 +3840,14 @@ export const Environment: React.FC<EnvironmentProps> = ({ mapX, mapY, sessionSee
             hangingCarpets={hangingCarpets}
             time={time}
           />
-          <EnvironmentFauna
-            mapX={mapX}
-            mapY={mapY}
-            npcPositions={npcPositions}
-            playerPosition={playerPosition}
-          />
+          {renderProfile?.allowFauna !== false && (
+            <EnvironmentFauna
+              mapX={mapX}
+              mapY={mapY}
+              npcPositions={npcPositions}
+              playerPosition={playerPosition}
+            />
+          )}
           {/* Atmospheric dust particles - easily toggled via ENABLE_ATMOSPHERIC_DUST constant */}
           {ENABLE_ATMOSPHERIC_DUST && (
             <AtmosphericDust

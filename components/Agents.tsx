@@ -7,6 +7,7 @@ import { AgentSnapshot, SpatialHash, buildAgentHash } from '../utils/spatial';
 import { TerrainHeightmap } from '../utils/terrain';
 import { isBlockedByBuildings, isBlockedByObstacles } from '../utils/collision';
 import { seededRandom } from '../utils/procedural';
+import { RenderProfile } from '../utils/renderProfile';
 
 export interface MoraleStats {
   avgAwareness: number;  // 0-100 average plague awareness
@@ -43,6 +44,7 @@ interface AgentsProps {
   playerStats?: PlayerStats | null;
   /** Callback when a friendly NPC approaches and initiates an encounter */
   onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
+  renderProfile?: RenderProfile;
 }
 
 export const Agents: React.FC<AgentsProps> = ({
@@ -70,7 +72,8 @@ export const Agents: React.FC<AgentsProps> = ({
   npcStateOverride,
   npcPool = [],
   playerStats,
-  onNPCInitiatedEncounter
+  onNPCInitiatedEncounter,
+  renderProfile
 }) => {
   const agentRegistry = useRef<Map<string, { state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, plagueType?: import('../types').PlagueType }>>(new Map());
   const localAgentHashRef = useRef<SpatialHash<AgentSnapshot> | null>(null);
@@ -94,18 +97,29 @@ export const Agents: React.FC<AgentsProps> = ({
 
   const pool = npcPool;
 
+  const effectiveMaxAgents = Math.max(
+    3,
+    Math.round(
+      maxAgents * (
+        renderProfile?.quality === 'low' ? 0.8 :
+        renderProfile?.quality === 'medium' ? 0.92 :
+        1
+      )
+    )
+  );
+
   const getActiveCount = () => {
     const time = params.timeOfDay;
     // Peak around 10am; minimal around 2am.
     if (time >= 0 && time < 4) return Math.max(0, Math.round((time / 4) * 4));
     if (time >= 4 && time < 7) return 4 + Math.round(((time - 4) / 3) * 8);
-    if (time >= 7 && time < 10) return 12 + Math.round(((time - 7) / 3) * (maxAgents - 12));
-    if (time >= 10 && time < 18) return maxAgents - Math.round(((time - 10) / 8) * 8);
+    if (time >= 7 && time < 10) return 12 + Math.round(((time - 7) / 3) * (effectiveMaxAgents - 12));
+    if (time >= 10 && time < 18) return effectiveMaxAgents - Math.round(((time - 10) / 8) * 8);
     if (time >= 18 && time < 22) return 10 - Math.round(((time - 18) / 4) * 8);
     return 2;
   };
   const minVisible = params.timeOfDay >= 6 && params.timeOfDay <= 22 ? 8 : 4;
-  const activeCount = Math.min(maxAgents || pool.length, Math.max(minVisible, getActiveCount(), 0));
+  const activeCount = Math.min(effectiveMaxAgents || pool.length, Math.max(minVisible, getActiveCount(), 0));
 
   // PERFORMANCE: Memoize handlers to prevent NPC re-renders from reference changes
   const handleUpdate = useCallback((id: string, state: AgentState, pos: THREE.Vector3, awareness: number, panic: number, plagueMeta?: import('../types').NPCPlagueMeta) => {
@@ -337,6 +351,7 @@ export const Agents: React.FC<AgentsProps> = ({
             globalApproachCooldownRef={globalApproachCooldownRef}
             role={record.role}
             familyRelationship={record.role === 'family' ? playerStats?.familyMembers?.find(fm => fm.npcId === record.stats.id)?.relationship : undefined}
+            npcDetailScale={renderProfile?.npcDetailScale ?? 1}
           />
         );
       })}

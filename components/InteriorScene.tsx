@@ -19,6 +19,7 @@ import { FlickerLight } from './interior/primitives/Lighting';
 import { InteriorPropRenderer } from './interior/PropRenderer';
 import InteriorRoomMesh from './interior/RoomMesh';
 import { NarratorHighlightRing } from './NarratorHighlightRing';
+import { RenderProfile } from '../utils/renderProfile';
 
 interface InteriorSceneProps {
   spec: InteriorSpec;
@@ -51,6 +52,7 @@ interface InteriorSceneProps {
   onNPCInitiatedEncounter?: (npc: { stats: NPCStats; state: AgentState }) => void;
   /** Callback when player commits a crime witnessed by NPCs */
   onCrimeWitnessed?: (crime: { type: 'theft' | 'vandalism'; witnessCount: number }) => void;
+  renderProfile?: RenderProfile;
 }
 
 const INTERIOR_LIGHT_PROP_TYPES = new Set<InteriorPropType>([
@@ -61,7 +63,7 @@ const INTERIOR_LIGHT_PROP_TYPES = new Set<InteriorPropType>([
  
 
 
-export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0, onNearbyMerchant, onNearRoofHatch, narratorHighlight, onNPCInitiatedEncounter, onCrimeWitnessed }) => {
+export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simTime, playerStats, onPickupPrompt, onPickupItem, onNpcSelect, onNpcUpdate, onPlagueExposure, selectedNpcId, showDemographicsOverlay = false, npcStateOverride, onPlayerPositionUpdate, dropRequests, observeMode, onExitInterior, onNearChest, onNearStairs, activeFloorIndex = 0, onNearbyMerchant, onNearRoofHatch, narratorHighlight, onNPCInitiatedEncounter, onCrimeWitnessed, renderProfile }) => {
   const { scene, gl } = useThree();
   // Tap-to-move state for interior
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
@@ -147,6 +149,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
     : activeFloor?.exteriorDoorSide;
   const activeWallHeight = activeFloor?.wallHeight ?? spec.wallHeight;
   const activeSeed = activeFloor?.seed ?? spec.seed;
+  const interiorLightScale = renderProfile?.interiorLightScale ?? 1;
+  const allowInteriorWindowLights = renderProfile?.allowInteriorWindowLights !== false;
+  const allowInteriorRoomGlow = renderProfile?.allowInteriorRoomGlow !== false;
+  const allowInteriorShadowLights = renderProfile?.allowInteriorShadowLights !== false;
 
   const npcStatsMap = useMemo(() => new Map(activeNpcs.map((npc) => [npc.id, npc.stats])), [activeNpcs]);
 
@@ -1891,7 +1897,9 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             <planeGeometry args={[1.4, 1.1]} />
             <meshStandardMaterial color="#b3c5e6" emissive="#b3c5e6" emissiveIntensity={0.55} transparent opacity={0.6} />
           </mesh>
-          <pointLight position={[entryRoom.center[0], 2.4, entryRoom.center[2] - entryRoom.size[2] / 2 + 0.8]} intensity={0.7} color="#c8d8f2" distance={18} decay={2} />
+          {allowInteriorWindowLights && (
+            <pointLight position={[entryRoom.center[0], 2.4, entryRoom.center[2] - entryRoom.size[2] / 2 + 0.8]} intensity={0.7 * interiorLightScale} color="#c8d8f2" distance={18} decay={2} />
+          )}
         </>
       )}
 
@@ -1977,10 +1985,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
               sharedWalls={sharedWallsMap.get(room.id) ?? []}
             />
             <group position={[room.center[0], 0, room.center[2]]}>
-              {!isDay && roomGlow > 0 && (
+              {!isDay && allowInteriorRoomGlow && roomGlow > 0 && (
                 <pointLight
                   position={[0, 1.6, 0]}
-                  intensity={roomGlow}
+                  intensity={roomGlow * interiorLightScale}
                   color="#f0d5b2"
                   distance={Math.max(room.size[0], room.size[2]) * 1.1}
                   decay={2}
@@ -1988,10 +1996,10 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
               )}
               {/* Window panels temporarily removed for visual comparison. */}
               {/* Removed oversized light planes; dust beam handles visible light. */}
-              {isDay && (
+              {isDay && allowInteriorWindowLights && (
                 <pointLight
                   position={[windowOffset[0], 2.2, windowOffset[2] + (windowSide === 'north' ? -0.8 : windowSide === 'south' ? 0.8 : 0)]}
-                  intensity={0.45}
+                  intensity={0.45 * interiorLightScale}
                   color="#b9cbe8"
                   distance={14}
                   decay={2}
@@ -2020,6 +2028,7 @@ export const InteriorScene: React.FC<InteriorSceneProps> = ({ spec, params, simT
             roomSize={roomForProp?.size}
             isShattered={pushable?.isShattered || swingable?.isShattered}
             allowLight={
+              allowInteriorShadowLights &&
               prop.type !== InteriorPropType.LAMP
               && prop.type !== InteriorPropType.FLOOR_LAMP
               && prop.type !== InteriorPropType.LANTERN

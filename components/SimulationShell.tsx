@@ -1,10 +1,11 @@
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { AdaptiveEvents, PerformanceMonitor } from '@react-three/drei';
 import * as THREE from 'three';
 import { DevSettings, InteriorSpec, PlayerStats, SimulationParams, SimulationStats, NPCRecord, BuildingInfectionState, PlayerActionEvent, NpcStateOverride, InteriorNPC, InteriorMerchantData, MerchantNPC, MerchantInventory } from '../types';
 import { Simulation } from './Simulation';
 import { InteriorScene } from './InteriorScene';
+import { RenderProfile } from '../utils/renderProfile';
 
 interface SimulationShellProps {
   transitioning: boolean;
@@ -14,6 +15,7 @@ interface SimulationShellProps {
   params: SimulationParams;
   stats: SimulationStats;
   devSettings: DevSettings;
+  renderProfile: RenderProfile;
   playerStats: PlayerStats;
   canvasCamera: { position: [number, number, number]; fov: number };
   canvasDpr: [number, number];
@@ -91,8 +93,10 @@ interface SimulationShellProps {
     lowFpsThreshold: number;
     setPerformanceDegraded: (v: boolean) => void;
     setIndicatorDismissed: (v: boolean) => void;
+    setMeasuredFps: React.Dispatch<React.SetStateAction<number | null>>;
     devSettings: DevSettings;
     setDevSettings: React.Dispatch<React.SetStateAction<DevSettings>>;
+    renderProfile: RenderProfile;
   };
   hideOuterRobe?: boolean;
 }
@@ -105,6 +109,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   params,
   stats,
   devSettings,
+  renderProfile,
   playerStats,
   canvasCamera,
   canvasDpr,
@@ -165,6 +170,14 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
   performanceMonitor,
   hideOuterRobe
 }) => {
+  useEffect(() => {
+    const gl = r3fRef.current.gl;
+    if (!gl) return;
+    gl.shadowMap.type = renderProfile.shadowMapType === 'basic'
+      ? THREE.BasicShadowMap
+      : THREE.PCFSoftShadowMap;
+  }, [r3fRef, renderProfile.shadowMapType]);
+
   return (
     <Canvas
       shadows
@@ -175,7 +188,9 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
       onPointerMissed={onClearSelectedNpc}
       onCreated={({ gl, camera }) => {
         gl.shadowMap.enabled = true;
-        gl.shadowMap.type = THREE.PCFSoftShadowMap;
+        gl.shadowMap.type = renderProfile.shadowMapType === 'basic'
+          ? THREE.BasicShadowMap
+          : THREE.PCFSoftShadowMap;
         gl.toneMapping = THREE.ACESFilmicToneMapping;
         gl.outputColorSpace = THREE.SRGBColorSpace;
         r3fRef.current = { gl, camera };
@@ -206,6 +221,12 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
         onChange={({ factor, fps }) => {
           if (performanceMonitor.devSettings.enabled && performanceMonitor.devSettings.showPerfPanel) {
             console.log(`Performance: ${fps?.toFixed(1) ?? '?'} FPS, factor: ${factor.toFixed(2)}x`);
+          }
+          if (fps !== undefined) {
+            performanceMonitor.setMeasuredFps((prev) => {
+              const rounded = Math.round(fps * 10) / 10;
+              return prev === null || Math.abs(prev - rounded) >= 2 ? rounded : prev;
+            });
           }
           if (fps !== undefined && fps < performanceMonitor.lowFpsThreshold && performanceMonitor.devSettings.showShadows && !performanceMonitor.shadowsDisabledByPerf.current) {
             performanceMonitor.shadowsDisabledByPerf.current = true;
@@ -270,6 +291,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             onNearRooftopHatch={onNearRooftopHatch}
             onNearSpecialNpc={onNearSpecialNpc}
             narratorHighlight={narratorHighlight}
+            renderProfile={renderProfile}
             hideOuterRobe={hideOuterRobe}
           />
         )}
@@ -298,6 +320,7 @@ export const SimulationShell: React.FC<SimulationShellProps> = React.memo(({
             narratorHighlight={narratorHighlight}
             onNPCInitiatedEncounter={onNPCInitiatedEncounter}
             onCrimeWitnessed={onCrimeWitnessed}
+            renderProfile={renderProfile}
             onNearbyMerchant={(merchant) => {
               if (!merchant) {
                 onNearMerchant(null);

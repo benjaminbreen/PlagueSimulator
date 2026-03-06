@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
 import { SimulationParams, SimulationStats, PlayerStats, DevSettings, CameraMode, BuildingMetadata, BuildingType, BuildingInfectionState, MiniMapData, getLocationLabel, NPCStats, AgentState, ActionSlotState, ActionId, EventInstance, EventEffect, EventOption, SocialClass, ItemAppearance, DistrictType, getDistrictType } from '../types';
 import { MoraleStats } from './Agents';
@@ -23,11 +23,8 @@ import { BiomeAmbience, useBiomeAmbiencePreview, AMBIENCE_INFO, BiomeType } from
 import { AdhanSynth, MelodyName } from './audio/synthesis/AdhanSynth';
 import { SoundDebugPanel } from './audio/SoundDebugPanel';
 import { AUDIO_ENABLED } from '../utils/audioConfig';
-import { EncounterModal } from './EncounterModal/EncounterModal';
-import { EventModal } from './EventModal';
 import { ConversationSummary } from '../types';
 import { OverworldMap } from './OverworldMap';
-import { TravelConfirmationModal } from './TravelConfirmationModal';
 import { ConversationImpact } from '../utils/friendliness';
 import { getHealthStatusLabel, getPlagueTypeLabel } from '../utils/plague';
 import { ItemPreview3D } from './ItemPreview3D';
@@ -35,21 +32,29 @@ import { Compass } from './Compass';
 import { PerspectiveMenu } from './PerspectiveMenu';
 import { MobilePerspectiveMenu } from './MobilePerspectiveMenu';
 import { TopStatusBar } from './TopStatusBar';
-import { WeatherModal } from './WeatherModal';
 import { useNarration } from './useNarration';
-import { MapModal } from './MapModal';
-import { PlayerDossierModal } from './PlayerDossierModal';
-import { SettingsModal } from './SettingsModal';
 import { ReportsPanel } from './ReportsPanel';
 import { ReportsPanelMockupC } from './ReportsPanelMockupC';
-import { AboutModal } from './AboutModal';
-import { FamilyMemberModal } from './FamilyMemberModal';
+import { ConditionPanel } from './ConditionPanel';
 import { FamilyMember } from '../types';
 import { buildNarratorPrompt, NarratorContext } from '../utils/narratorPrompt';
 import { NarratorHighlightEntry } from './NarratorPanel';
-import { LLMTransparencyModal } from './LLMTransparencyModal';
-import { NpcListModal, NpcListEntry } from './NpcListModal';
-import { TaskModal } from './TaskModal';
+import type { NpcListEntry } from './NpcListModal';
+import { ConditionLogEntry, scoreConditionInventoryEntry } from '../utils/condition';
+import { resolveNarratorGuidance } from '../utils/narratorGuidance';
+
+const WeatherModal = lazy(() => import('./WeatherModal').then((module) => ({ default: module.WeatherModal })));
+const MapModal = lazy(() => import('./MapModal').then((module) => ({ default: module.MapModal })));
+const PlayerDossierModal = lazy(() => import('./PlayerDossierModal').then((module) => ({ default: module.PlayerDossierModal })));
+const SettingsModal = lazy(() => import('./SettingsModal').then((module) => ({ default: module.SettingsModal })));
+const EventModal = lazy(() => import('./EventModal').then((module) => ({ default: module.EventModal })));
+const EncounterModal = lazy(() => import('./EncounterModal/EncounterModal').then((module) => ({ default: module.EncounterModal })));
+const TravelConfirmationModal = lazy(() => import('./TravelConfirmationModal').then((module) => ({ default: module.TravelConfirmationModal })));
+const FamilyMemberModal = lazy(() => import('./FamilyMemberModal').then((module) => ({ default: module.FamilyMemberModal })));
+const AboutModal = lazy(() => import('./AboutModal').then((module) => ({ default: module.AboutModal })));
+const LLMTransparencyModal = lazy(() => import('./LLMTransparencyModal').then((module) => ({ default: module.LLMTransparencyModal })));
+const NpcListModal = lazy(() => import('./NpcListModal').then((module) => ({ default: module.NpcListModal })));
+const TaskModal = lazy(() => import('./TaskModal').then((module) => ({ default: module.TaskModal })));
 
 interface UIProps {
   params: SimulationParams;
@@ -129,6 +134,8 @@ interface UIProps {
   onDropItemAtScreen?: (item: { inventoryId: string; itemId: string; label: string; appearance?: ItemAppearance }, clientX: number, clientY: number) => void;
   /** Consume an inventory item (use its effects) */
   onConsumeItem?: (playerItem: import('../types').PlayerItem) => void;
+  /** Recent symptom, remedy, and treatment notes for the condition panel */
+  recentConditionLog: ConditionLogEntry[];
   /** Build a narrator context snapshot for LLM */
   getNarratorContext?: () => NarratorContext;
   /** Highlight a narrator target in-world */
@@ -140,6 +147,8 @@ interface UIProps {
     scheduleActive: boolean;
     lastScheduleMs: number;
     lastScheduleSimTime: number;
+    fpsSample?: number | null;
+    graphicsQuality?: 'high' | 'medium' | 'low';
   };
   /** Callback to trigger entering a building (same as pressing Enter) */
   onTriggerEnterBuilding?: () => void;
@@ -178,6 +187,14 @@ interface InventoryEntry {
   effects?: Array<{ type: string; value: number }>;
   appearance?: ItemAppearance;
 }
+
+const ModalFallback: React.FC = () => (
+  <div className="pointer-events-none fixed inset-0 z-[90] flex items-center justify-center">
+    <div className="rounded-full border border-amber-500/25 bg-black/70 px-4 py-2 text-[10px] uppercase tracking-[0.3em] text-amber-100/72 shadow-[0_0_24px_rgba(0,0,0,0.35)] backdrop-blur-md">
+      Opening panel
+    </div>
+  </div>
+);
 
 const MiniMap: React.FC<{ data: MiniMapData | null; sceneMode: 'outdoor' | 'interior'; onClose: () => void; onToggle: () => void; isNight?: boolean }> = ({ data, sceneMode, onClose, onToggle, isNight = false }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -1024,7 +1041,7 @@ const NpcPortrait: React.FC<{
   );
 };
 
-export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, getNarratorContext, onNarratorHighlight, getNpcListEntries, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome, onUnequipHeadwear, onEquipHeadwear, isInPrivateSpace = false, currentBuildingType, currentBuildingProfession, hideOuterRobe, onToggleOuterRobe }) => {
+export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, devSettings, setDevSettings, nearBuilding, buildingInfection, onFastTravel, selectedNpc, minimapData, sceneMode, mapX, mapY, overworldPath, pickupPrompt, climbablePrompt, isClimbing, onClimbInput, onTriggerPickup, onTriggerClimb, pickupToast, currentWeather, pushCharge, moraleStats, actionSlots, onTriggerAction, onTriggerPush, simTime, showPlayerModal, setShowPlayerModal, showMerchantModal = false, showEncounterModal, setShowEncounterModal, conversationHistories, onConversationResult, onTriggerConversationEvent, selectedNpcActivity, selectedNpcNearbyInfected, selectedNpcNearbyDeceased, selectedNpcRumors, activeEvent, onResolveEvent, onTriggerDebugEvent, llmEventsEnabled, setLlmEventsEnabled, lastEventNote, showDemographicsOverlay, setShowDemographicsOverlay, onForceNpcState, onForceAllNpcState, isNPCInitiatedEncounter = false, isFollowingAfterDismissal = false, onResetFollowingState, nearbyNPCs = [], onOpenGuideModal, onSelectGuideEntry, infectedHouseholds, onNavigateToHousehold, onNavigateToDeceased, onDropItem, onDropItemAtScreen, onConsumeItem, recentConditionLog, getNarratorContext, onNarratorHighlight, getNpcListEntries, perfDebug, onTriggerEnterBuilding, homeBuildingType, homeDistrictName, isOnHomeTile, onGoHome, onUnequipHeadwear, onEquipHeadwear, isInPrivateSpace = false, currentBuildingType, currentBuildingProfession, hideOuterRobe, onToggleOuterRobe }) => {
   const [showSettings, setShowSettings] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showMap, setShowMap] = useState(false);
@@ -1144,19 +1161,72 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     };
   }, [getNarratorContext, playerStats.familyMembers, params.mapX, params.mapY, sceneMode]);
 
+  const inventoryEntries = useMemo<InventoryEntry[]>(() => {
+    const rarityRank: Record<'common' | 'uncommon' | 'rare', number> = {
+      common: 0,
+      uncommon: 1,
+      rare: 2,
+    };
+    const entries = playerStats.inventory.map((item) => {
+      const details = getItemDetailsByItemId(item.itemId);
+      let displayName = details?.name ?? item.itemId ?? 'Unknown Item';
+      const isLetter = item.itemId?.startsWith('letter:') || item.itemId?.startsWith('letter-');
+
+      if (item.itemId?.startsWith('letter:')) {
+        const parts = item.itemId.split(':');
+        if (parts.length >= 2) {
+          displayName = `Letter to ${parts[1]}`;
+        }
+      } else if (item.itemId?.startsWith('letter-to-')) {
+        const parts = item.itemId.replace('letter-to-', '').split('-');
+        parts.pop();
+        const recipient = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+        displayName = `Letter to ${recipient}`;
+      }
+
+      return {
+        ...item,
+        name: displayName,
+        description: details?.description ?? (isLetter ? 'A sealed letter written by a scribe.' : 'No description available.'),
+        rarity: details?.rarity ?? 'common',
+        category: details?.category ?? (isLetter ? 'Document' : 'Unknown'),
+        effects: details?.effects ?? []
+      };
+    });
+    entries.sort((a, b) => {
+      const aName = a.name ?? '';
+      const bName = b.name ?? '';
+      const prioritizeMedical = playerStats.plague.state !== AgentState.HEALTHY || playerStats.activeEffects.length > 0;
+      if (prioritizeMedical) {
+        const scoreDelta = scoreConditionInventoryEntry(b, playerStats.plague) - scoreConditionInventoryEntry(a, playerStats.plague);
+        if (scoreDelta !== 0) return scoreDelta;
+      }
+      if (inventorySortBy === 'quantity') {
+        if (b.quantity !== a.quantity) return b.quantity - a.quantity;
+      } else if (inventorySortBy === 'rarity') {
+        if (rarityRank[b.rarity] !== rarityRank[a.rarity]) {
+          return rarityRank[b.rarity] - rarityRank[a.rarity];
+        }
+      } else {
+        const nameOrder = aName.localeCompare(bName);
+        if (nameOrder !== 0) return nameOrder;
+      }
+      return aName.localeCompare(bName);
+    });
+    return entries;
+  }, [playerStats.activeEffects.length, playerStats.inventory, playerStats.plague, inventorySortBy]);
+
   const handleNarratorSubmit = useCallback(async (question: string) => {
     if (!getNarratorContext || narratorLoading) return;
     setNarratorOpen(true);
     setNarratorLoading(true);
+    let prompt = '';
+    let allowedTerms: string[] = [];
     try {
       pushNarration(`You: ${question}`);
       narratorPendingQuestionRef.current = question;
       const baseContext = getNarratorContext();
-      const context = {
-        ...baseContext,
-        recentExchanges: narratorExchanges
-      };
-      const allowedTerms = [
+      allowedTerms = [
         baseContext.locationLabel,
         baseContext.district,
         ...(baseContext.nearbyBuildings.map((entry) => entry.label)),
@@ -1164,7 +1234,36 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         ...(baseContext.nearbyObjects.map((entry) => entry.label)),
         ...(baseContext.nearbyDistricts?.map((entry) => entry.locationLabel) ?? []),
       ].filter(Boolean);
-      const prompt = buildNarratorPrompt(question, context);
+      const localResponse = resolveNarratorGuidance(question, {
+        context: {
+          ...baseContext,
+          recentExchanges: narratorExchanges
+        },
+        plague: playerStats.plague,
+        activeEffects: playerStats.activeEffects,
+        inventoryEntries,
+        recentConditionLog,
+        isOnHomeTile
+      });
+
+      if (localResponse) {
+        pushNarration(localResponse);
+        setNarratorExchanges((prev) => {
+          const sanitized = sanitizeNarratorMemory(summarizeNarratorOutput(localResponse), allowedTerms);
+          const next = [...prev, {
+            player: narratorPendingQuestionRef.current ?? question,
+            narrator: sanitized
+          }];
+          return next.slice(-5);
+        });
+        return;
+      }
+
+      const context = {
+        ...baseContext,
+        recentExchanges: narratorExchanges
+      };
+      prompt = buildNarratorPrompt(question, context);
       const response = await fetch('/api/narrator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1237,7 +1336,7 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
       narratorPendingQuestionRef.current = null;
       setNarratorLoading(false);
     }
-  }, [getNarratorContext, narratorExchanges, narratorLoading, pushNarration, sanitizeNarratorMemory, setNarratorOpen, summarizeNarratorOutput]);
+  }, [getNarratorContext, inventoryEntries, isOnHomeTile, narratorExchanges, narratorLoading, playerStats.activeEffects, playerStats.plague, pushNarration, recentConditionLog, sanitizeNarratorMemory, setNarratorOpen, summarizeNarratorOutput]);
 
   // Weather change narrator messages
   useEffect(() => {
@@ -1524,58 +1623,6 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
     const timer = window.setTimeout(() => setTabPulse(null), 260);
     return () => window.clearTimeout(timer);
   }, [tabPulse]);
-  const inventoryEntries = useMemo<InventoryEntry[]>(() => {
-    const rarityRank: Record<'common' | 'uncommon' | 'rare', number> = {
-      common: 0,
-      uncommon: 1,
-      rare: 2,
-    };
-    const entries = playerStats.inventory.map((item) => {
-      const details = getItemDetailsByItemId(item.itemId);
-      // Format letter item names nicely
-      let displayName = details?.name ?? item.itemId ?? 'Unknown Item';
-      const isLetter = item.itemId?.startsWith('letter:') || item.itemId?.startsWith('letter-');
-
-      if (item.itemId?.startsWith('letter:')) {
-        // New format: "letter:Recipient Name:timestamp"
-        const parts = item.itemId.split(':');
-        if (parts.length >= 2) {
-          displayName = `Letter to ${parts[1]}`;
-        }
-      } else if (item.itemId?.startsWith('letter-to-')) {
-        // Legacy format: "letter-to-john-1234567890"
-        const parts = item.itemId.replace('letter-to-', '').split('-');
-        parts.pop(); // Remove timestamp
-        const recipient = parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
-        displayName = `Letter to ${recipient}`;
-      }
-
-      return {
-        ...item,
-        name: displayName,
-        description: details?.description ?? (isLetter ? 'A sealed letter written by a scribe.' : 'No description available.'),
-        rarity: details?.rarity ?? 'common',
-        category: details?.category ?? (isLetter ? 'Document' : 'Unknown'),
-        effects: details?.effects ?? []
-      };
-    });
-    entries.sort((a, b) => {
-      const aName = a.name ?? '';
-      const bName = b.name ?? '';
-      if (inventorySortBy === 'quantity') {
-        if (b.quantity !== a.quantity) return b.quantity - a.quantity;
-      } else if (inventorySortBy === 'rarity') {
-        if (rarityRank[b.rarity] !== rarityRank[a.rarity]) {
-          return rarityRank[b.rarity] - rarityRank[a.rarity];
-        }
-      } else {
-        const nameOrder = aName.localeCompare(bName);
-        if (nameOrder !== 0) return nameOrder;
-      }
-      return aName.localeCompare(bName);
-    });
-    return entries;
-  }, [playerStats.inventory, inventorySortBy]);
 
   const apparelRarity: InventoryEntry['rarity'] =
     playerStats.socialClass === SocialClass.NOBILITY ? 'rare'
@@ -2128,28 +2175,54 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
 
       {/* OVERWORLD MAP MODAL */}
       {showMap && (
-        <MapModal
-          currentX={params.mapX}
-          currentY={params.mapY}
-          onClose={() => setShowMap(false)}
-          onSelectLocation={(x, y) => {
-            onFastTravel(x, y);
-            setShowMap(false);
-          }}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <MapModal
+            currentX={params.mapX}
+            currentY={params.mapY}
+            onClose={() => setShowMap(false)}
+            onSelectLocation={(x, y) => {
+              onFastTravel(x, y);
+              setShowMap(false);
+            }}
+          />
+        </Suspense>
       )}
 
       {/* WEATHER MODAL */}
       {showWeather && (
-        <WeatherModal
-          timeOfDay={params.timeOfDay}
-          currentWeather={currentWeather}
-          onClose={() => setShowWeather(false)}
-        />
+        <Suspense fallback={<ModalFallback />}>
+          <WeatherModal
+            timeOfDay={params.timeOfDay}
+            currentWeather={currentWeather}
+            onClose={() => setShowWeather(false)}
+          />
+        </Suspense>
       )}
 
       {/* FLOATING WINDOWS */}
-      <div className={`flex flex-col flex-1 justify-between p-4 md:p-6 transition-all duration-500 ${params.uiMinimized ? 'opacity-0 scale-95 pointer-events-none translate-y-4' : 'opacity-100 scale-100'}`}>
+      <div className={`flex flex-col flex-1 items-start gap-3 md:gap-4 p-4 md:p-6 transition-all duration-500 ${params.uiMinimized ? 'opacity-0 scale-95 pointer-events-none translate-y-4' : 'opacity-100 scale-100'}`}>
+        <div className="pointer-events-auto w-full max-w-[420px]">
+          <ConditionPanel
+            plague={playerStats.plague}
+            activeEffects={playerStats.activeEffects}
+            simTime={simTime}
+            currentTaskTitle={playerStats.currentTask?.title ?? null}
+            recentConditionLog={recentConditionLog}
+            onOpenHealth={() => {
+              setDossierTab('health');
+              setShowPlayerModal(true);
+            }}
+            onOpenInventory={() => {
+              setDossierTab('inventory');
+              setInventoryView('grid');
+              setShowPlayerModal(true);
+            }}
+            onAskNarrator={(question) => {
+              void handleNarratorSubmit(question);
+            }}
+          />
+        </div>
+
         {/* Reports Panel - Hidden by default on mobile, slides in from left with swipe-to-dismiss */}
         {/* Also hidden when merchant modal is open */}
         <div
@@ -2344,30 +2417,24 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-x-3 gap-y-2 mt-4 text-[10px] text-amber-100/80">
+              <div className="grid grid-cols-2 gap-x-3 gap-y-2 mt-4 text-[10px] text-amber-100/80">
                 <div>
                   <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Mood</div>
                   <div className="font-semibold truncate">{selectedNpc.stats.mood}</div>
                 </div>
                 <div>
+                  <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Activity</div>
+                  <div className="font-semibold truncate">{selectedNpcActivity || selectedNpc.stats.goalOfDay || 'Moving through the quarter'}</div>
+                </div>
+                <div>
+                  <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Exposure Nearby</div>
+                  <div className="font-semibold truncate">
+                    {selectedNpcNearbyInfected} sick, {selectedNpcNearbyDeceased} dead
+                  </div>
+                </div>
+                <div>
                   <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Carrying</div>
                   <div className="font-semibold truncate">{getHeldItemLabel(selectedNpc.stats.heldItem)}</div>
-                </div>
-                <div>
-                  <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Headwear</div>
-                  <div className="font-semibold truncate">{selectedNpc.stats.headwearStyle ?? 'none'}</div>
-                </div>
-                <div>
-                  <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Footwear</div>
-                  <div className="font-semibold truncate">{selectedNpc.stats.footwearStyle ?? '—'}</div>
-                </div>
-                <div>
-                  <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Sleeves</div>
-                  <div className="font-semibold truncate">{selectedNpc.stats.sleeveCoverage ?? '—'}</div>
-                </div>
-                <div>
-                  <div className="uppercase tracking-widest text-amber-500/60 text-[9px]">Accessories</div>
-                  <div className="font-semibold truncate">{selectedNpc.stats.accessories?.length ? selectedNpc.stats.accessories.join(', ') : '—'}</div>
                 </div>
               </div>
 
@@ -2396,6 +2463,15 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
                   </div>
                 </div>
               </div>
+
+              {selectedNpcRumors.length > 0 && (
+                <div className="border-t border-amber-900/40 pt-3 mt-3">
+                  <div className="uppercase tracking-widest text-amber-500/60 text-[9px] mb-2">Local Rumor</div>
+                  <div className="text-[10px] text-amber-100/75 leading-relaxed">
+                    "{selectedNpcRumors[0]}"
+                  </div>
+                </div>
+              )}
 
               <div className="mt-4 flex items-center justify-between text-[10px] text-amber-100/70">
                 <span className="uppercase tracking-widest text-amber-500/60">Encounter</span>
@@ -2660,12 +2736,20 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
               </span>
             </div>
             <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">Tier</span>
+              <span className="font-mono uppercase">{perfDebug?.graphicsQuality ?? '—'}</span>
+            </div>
+            <div className="flex items-center justify-between">
               <span className="text-amber-200/60">Sched Age</span>
               <span className="font-mono">
                 {perfDebug?.lastScheduleMs
                   ? `${Math.max(0, (perfStats.now - perfDebug.lastScheduleMs) / 1000).toFixed(2)}s`
                   : '—'}
               </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-amber-200/60">Sampled FPS</span>
+              <span className="font-mono">{perfDebug?.fpsSample ? perfDebug.fpsSample.toFixed(1) : '—'}</span>
             </div>
             <div className="flex items-center justify-between col-span-2">
               <span className="text-amber-200/60">Heap MB</span>
@@ -2723,56 +2807,64 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         />
       )}
 
-      <SettingsModal
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-        settingsTab={settingsTab}
-        setSettingsTab={setSettingsTab}
-        llmEventsEnabled={llmEventsEnabled}
-        setLlmEventsEnabled={setLlmEventsEnabled}
-        currentPreview={currentPreview}
-        playPreview={safePlayPreview}
-        stopPreview={safeStopPreview}
-        currentAdhanPreview={currentAdhanPreview}
-        playAdhanPreview={playAdhanPreview}
-        stopAdhanPreview={stopAdhanPreview}
-        devSettings={devSettings}
-        setDevSettings={setDevSettings}
-        onTriggerDebugEvent={onTriggerDebugEvent}
-        lastEventNote={lastEventNote}
-        spreadRate={spreadRate}
-        mapX={params.mapX}
-        mapY={params.mapY}
-        stats={stats}
-        selectedNpc={selectedNpc}
-        onForceNpcState={onForceNpcState}
-        onForceAllNpcState={onForceAllNpcState}
-      />
+      {(showSettings || showPlayerModal) && (
+        <Suspense fallback={<ModalFallback />}>
+          {showSettings && (
+            <SettingsModal
+              open={showSettings}
+              onClose={() => setShowSettings(false)}
+              settingsTab={settingsTab}
+              setSettingsTab={setSettingsTab}
+              llmEventsEnabled={llmEventsEnabled}
+              setLlmEventsEnabled={setLlmEventsEnabled}
+              currentPreview={currentPreview}
+              playPreview={safePlayPreview}
+              stopPreview={safeStopPreview}
+              currentAdhanPreview={currentAdhanPreview}
+              playAdhanPreview={playAdhanPreview}
+              stopAdhanPreview={stopAdhanPreview}
+              devSettings={devSettings}
+              setDevSettings={setDevSettings}
+              onTriggerDebugEvent={onTriggerDebugEvent}
+              lastEventNote={lastEventNote}
+              spreadRate={spreadRate}
+              mapX={params.mapX}
+              mapY={params.mapY}
+              stats={stats}
+              selectedNpc={selectedNpc}
+              onForceNpcState={onForceNpcState}
+              onForceAllNpcState={onForceAllNpcState}
+            />
+          )}
 
-      <PlayerDossierModal
-        open={showPlayerModal}
-        playerStats={playerStats}
-        dossierTab={dossierTab}
-        onChangeTab={setDossierTab}
-        inventoryView={inventoryView}
-        onChangeInventoryView={setInventoryView}
-        inventoryEntries={inventoryEntries}
-        onSelectInventoryItem={setSelectedInventoryItem}
-        onDropItem={onDropItem}
-        onConsumeItem={onConsumeItem}
-        buildApparelEntry={buildApparelEntry}
-        onClose={() => setShowPlayerModal(false)}
-        getHealthStatusLabel={getHealthStatusLabel}
-        getPlagueTypeLabel={getPlagueTypeLabel}
-        homeBuildingType={homeBuildingType}
-        homeDistrictName={homeDistrictName}
-        isOnHomeTile={isOnHomeTile}
-        onGoHome={onGoHome}
-        onUnequipHeadwear={onUnequipHeadwear}
-        onEquipHeadwear={onEquipHeadwear}
-        hideOuterRobe={hideOuterRobe}
-        onToggleOuterRobe={onToggleOuterRobe}
-      />
+          {showPlayerModal && (
+            <PlayerDossierModal
+              open={showPlayerModal}
+              playerStats={playerStats}
+              dossierTab={dossierTab}
+              onChangeTab={setDossierTab}
+              inventoryView={inventoryView}
+              onChangeInventoryView={setInventoryView}
+              inventoryEntries={inventoryEntries}
+              onSelectInventoryItem={setSelectedInventoryItem}
+              onDropItem={onDropItem}
+              onConsumeItem={onConsumeItem}
+              buildApparelEntry={buildApparelEntry}
+              onClose={() => setShowPlayerModal(false)}
+              getHealthStatusLabel={getHealthStatusLabel}
+              getPlagueTypeLabel={getPlagueTypeLabel}
+              homeBuildingType={homeBuildingType}
+              homeDistrictName={homeDistrictName}
+              isOnHomeTile={isOnHomeTile}
+              onGoHome={onGoHome}
+              onUnequipHeadwear={onUnequipHeadwear}
+              onEquipHeadwear={onEquipHeadwear}
+              hideOuterRobe={hideOuterRobe}
+              onToggleOuterRobe={onToggleOuterRobe}
+            />
+          )}
+        </Suspense>
+      )}
 
       {selectedInventoryItem && (
         <div
@@ -2853,66 +2945,71 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
         </div>
       )}
 
-      {activeEvent && (
-        <EventModal
-          event={activeEvent}
-          playerStats={playerStats}
-          onChoose={onResolveEvent}
-        />
-      )}
+      {(activeEvent || (showEncounterModal && selectedNpc) || travelDestination || selectedFamilyMember !== null) && (
+        <Suspense fallback={<ModalFallback />}>
+          {activeEvent && (
+            <EventModal
+              event={activeEvent}
+              playerStats={playerStats}
+              onChoose={onResolveEvent}
+            />
+          )}
 
-      {showEncounterModal && selectedNpc && (
-        <EncounterModal
-          npc={selectedNpc.stats}
-          npcState={selectedNpc.state}
-          player={playerStats}
-          environment={{
-            timeOfDay: params.timeOfDay,
-            weather: currentWeather,
-            mapX: params.mapX,
-            mapY: params.mapY,
-            nearbyInfected: selectedNpcNearbyInfected,
-            nearbyDeceased: selectedNpcNearbyDeceased,
-            currentActivity: selectedNpcActivity,
-            localRumors: selectedNpcRumors,
-            isInterior: sceneMode === 'interior',
-            isPrivateSpace: isInPrivateSpace,
-            buildingType: currentBuildingType,
-            buildingProfession: currentBuildingProfession
-          }}
-          publicMorale={moraleStats}
-          simulationStats={stats}
-          conversationHistory={conversationHistories}
-          onClose={() => {
-            setShowEncounterModal(false);
-            if (onResetFollowingState) onResetFollowingState();
-          }}
-          onConversationResult={onConversationResult}
-          onTriggerEvent={onTriggerConversationEvent}
-          isNPCInitiated={isNPCInitiatedEncounter}
-          isFollowingAfterDismissal={isFollowingAfterDismissal}
-        />
-      )}
+          {showEncounterModal && selectedNpc && (
+            <EncounterModal
+              npc={selectedNpc.stats}
+              npcState={selectedNpc.state}
+              player={playerStats}
+              environment={{
+                timeOfDay: params.timeOfDay,
+                weather: currentWeather,
+                mapX: params.mapX,
+                mapY: params.mapY,
+                nearbyInfected: selectedNpcNearbyInfected,
+                nearbyDeceased: selectedNpcNearbyDeceased,
+                currentActivity: selectedNpcActivity,
+                localRumors: selectedNpcRumors,
+                isInterior: sceneMode === 'interior',
+                isPrivateSpace: isInPrivateSpace,
+                buildingType: currentBuildingType,
+                buildingProfession: currentBuildingProfession
+              }}
+              publicMorale={moraleStats}
+              simulationStats={stats}
+              conversationHistory={conversationHistories}
+              onClose={() => {
+                setShowEncounterModal(false);
+                if (onResetFollowingState) onResetFollowingState();
+              }}
+              onConversationResult={onConversationResult}
+              onTriggerEvent={onTriggerConversationEvent}
+              isNPCInitiated={isNPCInitiatedEncounter}
+              isFollowingAfterDismissal={isFollowingAfterDismissal}
+            />
+          )}
 
-      {travelDestination && (
-        <TravelConfirmationModal
-          destinationName={travelDestination.label}
-          onConfirm={handleTravelConfirm}
-          onCancel={handleTravelCancel}
-        />
-      )}
+          {travelDestination && (
+            <TravelConfirmationModal
+              destinationName={travelDestination.label}
+              onConfirm={handleTravelConfirm}
+              onCancel={handleTravelCancel}
+            />
+          )}
 
-      {/* Family Member Modal - opened from Reports Panel */}
-      <FamilyMemberModal
-        isOpen={selectedFamilyMember !== null}
-        onClose={() => setSelectedFamilyMember(null)}
-        member={selectedFamilyMember}
-        playerGender={playerStats.gender}
-        playerProfession={playerStats.profession}
-        socialClass={playerStats.socialClass}
-        skinTone={playerStats.skinTone}
-        hairColor={playerStats.hairColor}
-      />
+          {selectedFamilyMember !== null && (
+            <FamilyMemberModal
+              isOpen={selectedFamilyMember !== null}
+              onClose={() => setSelectedFamilyMember(null)}
+              member={selectedFamilyMember}
+              playerGender={playerStats.gender}
+              playerProfession={playerStats.profession}
+              socialClass={playerStats.socialClass}
+              skinTone={playerStats.skinTone}
+              hairColor={playerStats.hairColor}
+            />
+          )}
+        </Suspense>
+      )}
 
       {/* Action Bar - show in both outdoor and interior modes */}
       {(sceneMode === 'outdoor' || sceneMode === 'interior') && (
@@ -2939,29 +3036,41 @@ export const UI: React.FC<UIProps> = ({ params, setParams, stats, playerStats, d
           />
       )}
 
-      <AboutModal
-        isOpen={showAbout}
-        onClose={() => setShowAbout(false)}
-      />
+      {(showAbout || llmTransparencyOpen || npcListModalOpen || taskModalOpen) && (
+        <Suspense fallback={<ModalFallback />}>
+          {showAbout && (
+            <AboutModal
+              isOpen={showAbout}
+              onClose={() => setShowAbout(false)}
+            />
+          )}
 
-      <LLMTransparencyModal
-        isOpen={llmTransparencyOpen}
-        onClose={() => setLlmTransparencyOpen(false)}
-        entries={llmTransparencyEntries}
-      />
+          {llmTransparencyOpen && (
+            <LLMTransparencyModal
+              isOpen={llmTransparencyOpen}
+              onClose={() => setLlmTransparencyOpen(false)}
+              entries={llmTransparencyEntries}
+            />
+          )}
 
-      <NpcListModal
-        isOpen={npcListModalOpen}
-        onClose={() => setNpcListModalOpen(false)}
-        entries={npcListEntries}
-      />
-      <TaskModal
-        open={taskModalOpen}
-        onClose={() => setTaskModalOpen(false)}
-        currentX={params.mapX}
-        currentY={params.mapY}
-        task={playerStats.currentTask}
-      />
+          {npcListModalOpen && (
+            <NpcListModal
+              isOpen={npcListModalOpen}
+              onClose={() => setNpcListModalOpen(false)}
+              entries={npcListEntries}
+            />
+          )}
+          {taskModalOpen && (
+            <TaskModal
+              open={taskModalOpen}
+              onClose={() => setTaskModalOpen(false)}
+              currentX={params.mapX}
+              currentY={params.mapY}
+              task={playerStats.currentTask}
+            />
+          )}
+        </Suspense>
+      )}
     </div>
   );
 };

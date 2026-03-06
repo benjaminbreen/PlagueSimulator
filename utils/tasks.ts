@@ -1,4 +1,4 @@
-import { BuildingMetadata, BuildingType, DistrictType, FamilyMember, PlayerStats, PlayerTask, PlayerTaskTarget, getDistrictType, getLocationLabel } from '../types';
+import { AgentState, BuildingMetadata, BuildingType, DistrictType, FamilyMember, PlayerStats, PlayerTask, PlayerTaskTarget, PlagueType, getDistrictType, getLocationLabel } from '../types';
 import { seededRandom } from './procedural';
 import { getRelationshipLabel } from './family';
 
@@ -333,4 +333,97 @@ export const generateInitialTask = (player: PlayerStats, context: TaskContext): 
   if (matches.length === 0) return null;
   const pick = matches[0];
   return pick.build(player, context, rand);
+};
+
+export const generateUrgentPlagueTask = (player: PlayerStats, context: TaskContext): PlayerTask | null => {
+  const seedBase = context.seed + Math.floor(context.mapX * 43 + context.mapY * 79) + player.plague.daysInfected * 11;
+  let s = seedBase * 17 + 19;
+  const rand = () => seededRandom(s++);
+
+  if (player.plague.state === AgentState.HEALTHY || player.plague.state === AgentState.DECEASED) {
+    return null;
+  }
+
+  const homeTarget = buildHomeTarget(context, 'home');
+  const medicalBuilding = buildBuildingTarget(context.buildings, BuildingType.MEDICAL, context, 'clinic');
+  const marketRemedyTarget = buildDistrictTarget(['MARKET', 'SOUQ_AXIS', 'SALHIYYA'], context, rand, 'apothecary stalls');
+  const hospitalTarget = buildDistrictTarget(['SALHIYYA', 'UMAYYAD_MOSQUE', 'MARKET'], context, rand, 'physician quarter');
+
+  if (player.plague.state === AgentState.INCUBATING) {
+    if (medicalBuilding) {
+      return buildTask(
+        'illness-seek-counsel',
+        'Seek Medical Counsel',
+        'The body has begun to warn you. Visit the nearby clinic before the signs sharpen.',
+        medicalBuilding
+      );
+    }
+
+    if (marketRemedyTarget) {
+      return buildTask(
+        'illness-gather-remedy',
+        'Find Early Remedies',
+        `Before the sickness takes full hold, seek advice and small remedies at the ${marketRemedyTarget.label} in ${marketRemedyTarget.locationLabel}.`,
+        marketRemedyTarget
+      );
+    }
+  }
+
+  if (player.plague.state === AgentState.INFECTED) {
+    if (player.plague.coughingBlood > 35 && hospitalTarget) {
+      return buildTask(
+        'illness-find-hospital',
+        'Reach Professional Care',
+        `Your chest is turning against you. Make for the ${hospitalTarget.label} in ${hospitalTarget.locationLabel} before the illness outruns you.`,
+        hospitalTarget
+      );
+    }
+
+    if (player.plague.buboes > 45 && medicalBuilding) {
+      return buildTask(
+        'illness-drain-swelling',
+        'Seek a Barber or Hakim',
+        'The swelling has grown dangerous. Find skilled hands at the nearby clinic and risk treatment before the corruption spreads.',
+        medicalBuilding
+      );
+    }
+
+    if (player.plague.overallSeverity >= 65 && homeTarget) {
+      return buildTask(
+        'illness-return-home',
+        'Return To Your Household',
+        `Your strength is failing. Return to ${homeTarget.locationLabel} and gather yourself before attempting anything else.`,
+        homeTarget
+      );
+    }
+
+    if (player.plague.plagueType === PlagueType.BUBONIC && marketRemedyTarget) {
+      return buildTask(
+        'illness-find-fumigants',
+        'Obtain Stronger Compounds',
+        `Seek fumigants, syrups, and costly compounds at the ${marketRemedyTarget.label} in ${marketRemedyTarget.locationLabel}. Relief is no cure, but it may buy time.`,
+        marketRemedyTarget
+      );
+    }
+
+    if (medicalBuilding) {
+      return buildTask(
+        'illness-enter-clinic',
+        'Enter The Clinic',
+        'You need more than endurance now. Enter the nearby clinic and ask what can still be attempted.',
+        medicalBuilding
+      );
+    }
+
+    if (hospitalTarget) {
+      return buildTask(
+        'illness-find-healer',
+        'Find A Healer',
+        `No help is at hand. Go to the ${hospitalTarget.label} in ${hospitalTarget.locationLabel} and seek anyone who still treats the sick.`,
+        hospitalTarget
+      );
+    }
+  }
+
+  return null;
 };

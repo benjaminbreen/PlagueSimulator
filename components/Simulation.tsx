@@ -38,11 +38,13 @@ import { PlayerHomeMarker } from './environment/PlayerHomeMarker';
 import { buildWaterwayLayout } from './environment/districts/WaterwayDecor';
 import { BoundaryHeadingIndicator } from './BoundaryHeadingIndicator';
 import { NarratorHighlightRing } from './NarratorHighlightRing';
+import { RenderProfile } from '../utils/renderProfile';
 
 interface SimulationProps {
   params: SimulationParams;
   simTime: number;
   devSettings: DevSettings;
+  renderProfile: RenderProfile;
   playerStats: PlayerStats;
   onStatsUpdate: (stats: SimulationCounts) => void;
   onMapChange: (dx: number, dy: number, entrySpawn?: [number, number, number]) => void;
@@ -123,54 +125,64 @@ interface SimulationProps {
   hideOuterRobe?: boolean;
 }
 
-const MiasmaFog: React.FC<{ infectionRate: number }> = ({ infectionRate }) => {
+const MiasmaFog: React.FC<{ plaguePressure: number; center?: THREE.Vector3; particleCount: number }> = ({ plaguePressure, center, particleCount }) => {
   const meshRef = useRef<THREE.InstancedMesh>(null);
-  const count = 30;
   const tempObj = new THREE.Object3D();
+  const tempCenter = new THREE.Vector3();
 
   const particles = useMemo(() => {
-    return Array.from({ length: count }).map(() => ({
-      pos: new THREE.Vector3((Math.random() - 0.5) * 80, 0.5, (Math.random() - 0.5) * 80),
-      scale: 5 + Math.random() * 10,
+    return Array.from({ length: particleCount }).map(() => ({
+      radius: 2.5 + Math.random() * 7,
+      angle: Math.random() * Math.PI * 2,
+      height: 0.3 + Math.random() * 1.5,
+      scale: 1.8 + Math.random() * 3.6,
       phase: Math.random() * Math.PI * 2
     }));
-  }, []);
+  }, [particleCount]);
 
   useFrame((state) => {
     if (!meshRef.current) return;
-    
-    // Miasma only appears if infection rate (virulence) is above 60%
-    const isVisible = infectionRate > 0.6;
-    const intensity = isVisible ? Math.min(1, (infectionRate - 0.6) * 5) : 0;
-    
+
+    const intensity = THREE.MathUtils.clamp(plaguePressure, 0, 1);
+    tempCenter.copy(center ?? tempCenter.set(0, 0, 0));
+
     particles.forEach((p, i) => {
-      const y = 0.5 + Math.sin(state.clock.elapsedTime + p.phase) * 0.5;
-      tempObj.position.set(p.pos.x, y, p.pos.z);
-      tempObj.scale.set(p.scale * intensity, p.scale * intensity, p.scale * intensity);
+      const drift = state.clock.elapsedTime * (0.08 + intensity * 0.1);
+      const angle = p.angle + drift + Math.sin(state.clock.elapsedTime * 0.35 + p.phase) * 0.18;
+      const radius = p.radius * (0.85 + intensity * 0.55);
+      const y = p.height + Math.sin(state.clock.elapsedTime * 1.4 + p.phase) * 0.25;
+      tempObj.position.set(
+        tempCenter.x + Math.cos(angle) * radius,
+        y,
+        tempCenter.z + Math.sin(angle) * radius
+      );
+      const scale = p.scale * (0.25 + intensity * 0.95);
+      tempObj.scale.set(scale, scale * 0.7, scale);
       tempObj.updateMatrix();
       meshRef.current!.setMatrixAt(i, tempObj.matrix);
     });
     meshRef.current.instanceMatrix.needsUpdate = true;
-    
-    // Hide geometry completely if not visible to improve performance/cleanliness
+
     if (meshRef.current) {
-      meshRef.current.visible = intensity > 0.01;
+      meshRef.current.visible = intensity > 0.08;
     }
   });
 
+  if (particleCount <= 0) return null;
+
   return (
-    <instancedMesh ref={meshRef} args={[undefined, undefined, count]}>
-      <sphereGeometry args={[1, 8, 8]} />
-      <meshBasicMaterial color="#4d5d1a" transparent opacity={0.15} />
+    <instancedMesh ref={meshRef} args={[undefined, undefined, particleCount]}>
+      <sphereGeometry args={[1, 6, 6]} />
+      <meshBasicMaterial color="#6b6c4e" transparent opacity={0.12} depthWrite={false} />
     </instancedMesh>
   );
 };
 
 
 // GRAPHICS: Dust particles for sunny hot days - warm sun-baked atmosphere
-const DustParticles: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<WeatherState> }> = ({ timeOfDay, weather }) => {
+const DustParticles: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<WeatherState>; particleCount: number }> = ({ timeOfDay, weather, particleCount }) => {
   const pointsRef = useRef<THREE.Points>(null);
-  const count = 150;
+  const count = particleCount;
 
   const particles = useMemo(() => {
     const positions = new Float32Array(count * 3);
@@ -192,7 +204,7 @@ const DustParticles: React.FC<{ timeOfDay: number; weather: React.MutableRefObje
     }
 
     return { positions, velocities };
-  }, []);
+  }, [count]);
 
   useFrame((state, delta) => {
     if (!pointsRef.current) return;
@@ -242,6 +254,8 @@ const DustParticles: React.FC<{ timeOfDay: number; weather: React.MutableRefObje
     const material = pointsRef.current.material as THREE.PointsMaterial;
     material.opacity = opacity;
   });
+
+  if (particleCount <= 0) return null;
 
   return (
     <points ref={pointsRef}>
@@ -1397,7 +1411,7 @@ const SunDisc: React.FC<{ timeOfDay: number; weather: React.MutableRefObject<Wea
 };
 
 
-export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, onGravestoneDesecrated, onNearReadable, onNearWater, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch, onNearSpecialNpc, narratorHighlight, hideOuterRobe }) => {
+export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSettings, renderProfile, playerStats, onStatsUpdate, onMapChange, onNearBuilding, onBuildingsUpdate, onNearMerchant, onNearSpeakableNpc, onNpcSelect, onNpcUpdate, selectedNpcId, selectedBuildingId, onSelectBuilding, onMinimapUpdate, onPickupPrompt, onClimbablePrompt, onClimbingStateChange, onGravestoneDesecrated, onNearReadable, onNearWater, climbInputRef, pickupTriggerRef, climbTriggerRef, onPickupItem, onWeatherUpdate, onPushCharge, pushTriggerRef, onMoraleUpdate, actionEvent, showDemographicsOverlay, npcStateOverride, npcPool = [], buildingInfection, onPlayerPositionUpdate, dossierMode, merchantFocusPosition, onPlagueExposure, onNPCInitiatedEncounter, onFallDamage, cameraViewTarget, onPlayerStartMove, dropRequests, observeMode, gameLoading, mapEntrySpawn, onShowLootModal, onNearChest, onNearBirdcage, onNearRooftopHatch, onNearSpecialNpc, narratorHighlight, hideOuterRobe }) => {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const rimLightRef = useRef<THREE.DirectionalLight>(null);
   const shadowFillLightRef = useRef<THREE.DirectionalLight>(null);
@@ -1445,6 +1459,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const heightmapRef = useRef<import('../utils/terrain').TerrainHeightmap | null>(null);
   
   const [playerTarget, setPlayerTarget] = useState<THREE.Vector3 | null>(null);
+  const [localPlaguePressure, setLocalPlaguePressure] = useState(0);
   const [playerSpawn, setPlayerSpawn] = useState<[number, number, number]>(() => {
     // Start at edge to avoid spawning inside buildings in dense districts
     if (mapEntrySpawn && mapEntrySpawn.mapX === params.mapX && mapEntrySpawn.mapY === params.mapY) {
@@ -2799,21 +2814,28 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
   const [shouldEnableShadows, setShouldEnableShadows] = useState(true);
 
   useEffect(() => {
+    shadowUpdateIntervalRef.current = renderProfile.shadowUpdateInterval;
+  }, [renderProfile.shadowUpdateInterval]);
+
+  useEffect(() => {
     // Enable shadows only during clear weather
     const currentWeather = resolvedWeatherTypeRef.current;
-    const enableShadows = currentWeather === WeatherType.CLEAR && devSettings.showShadows;
+    const enableShadows = currentWeather === WeatherType.CLEAR && devSettings.showShadows && renderProfile.shadowMapSize > 0;
 
     setShouldEnableShadows(enableShadows);
     gl.shadowMap.enabled = enableShadows;
-    gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    gl.shadowMap.type = renderProfile.shadowMapType === 'basic'
+      ? THREE.BasicShadowMap
+      : THREE.PCFSoftShadowMap;
     if (lightRef.current?.shadow) {
+      lightRef.current.shadow.mapSize.set(renderProfile.shadowMapSize, renderProfile.shadowMapSize);
       lightRef.current.shadow.autoUpdate = false;
       lightRef.current.shadow.needsUpdate = true;
     }
-  }, [gl, devSettings.showShadows]);
+  }, [gl, devSettings.showShadows, renderProfile.shadowMapSize, renderProfile.shadowMapType]);
 
   useEffect(() => {
-    if (!devSettings.showShadows) return;
+    if (!devSettings.showShadows || renderProfile.shadowMapSize <= 0) return;
     // Disable shadow casting on non-building meshes to cut shadow map cost.
     scene.traverse((child) => {
       const mesh = child as THREE.Mesh;
@@ -2831,7 +2853,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
     if (lightRef.current?.shadow) {
       lightRef.current.shadow.needsUpdate = true;
     }
-  }, [scene, buildingsState, devSettings.showShadows]);
+  }, [scene, buildingsState, devSettings.showShadows, renderProfile.shadowMapSize]);
 
   const sunAngle = (params.timeOfDay / 24) * Math.PI * 2;
   const sunElevation = Math.sin(sunAngle - Math.PI / 2);
@@ -2894,6 +2916,36 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
           nearbyInfectedRef.current = nearbyInfected;
           nearbyDeceasedRef.current = nearbyDeceased;
+
+          let nearbyInfectedBuildings = 0;
+          let nearbyDeceasedBuildings = 0;
+          const buildingDangerRadiusSq = 18 * 18;
+          for (const building of buildingsRef.current) {
+            const infectionState = buildingInfection?.[building.id];
+            if (!infectionState) continue;
+            const dx = building.position[0] - playerPos.x;
+            const dz = building.position[2] - playerPos.z;
+            const distSq = dx * dx + dz * dz;
+            if (distSq > buildingDangerRadiusSq) continue;
+            if (infectionState.status === 'infected') nearbyInfectedBuildings += 1;
+            else if (infectionState.status === 'deceased') nearbyDeceasedBuildings += 1;
+            else if (infectionState.status === 'incubating') nearbyInfectedBuildings += 0.5;
+          }
+
+          const hygienePressure = THREE.MathUtils.clamp((0.45 - params.hygieneLevel) / 0.45, 0, 1);
+          const playerSeverity = THREE.MathUtils.clamp(playerStats.plague.overallSeverity / 100, 0, 1);
+          const plaguePressure = THREE.MathUtils.clamp(
+            nearbyInfected * 0.07 +
+            nearbyDeceased * 0.12 +
+            nearbyInfectedBuildings * 0.11 +
+            nearbyDeceasedBuildings * 0.18 +
+            playerSeverity * 0.3 +
+            hygienePressure * 0.08,
+            0,
+            1
+          );
+
+          setLocalPlaguePressure((prev) => Math.abs(prev - plaguePressure) > 0.025 ? plaguePressure : prev);
         }
       } else {
         npcPositionsRef.current.length = 0;
@@ -2954,7 +3006,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         }
 
         // Toggle shadows based on weather - OVERCAST gets soft diffuse shadows, only SANDSTORM disables
-        const enableShadows = resolvedWeatherType !== WeatherType.SANDSTORM && devSettings.showShadows;
+        const enableShadows = resolvedWeatherType !== WeatherType.SANDSTORM && devSettings.showShadows && renderProfile.shadowMapSize > 0;
         if (gl.shadowMap.enabled !== enableShadows) {
           gl.shadowMap.enabled = enableShadows;
           setShouldEnableShadows(enableShadows);
@@ -3113,9 +3165,6 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // Additional ambient lift for deep night - prevents pure black
         if (nightFactor > 0.5) {
           ambientIntensity += (nightFactor - 0.5) * 0.15; // Increased from 0.08
-          // Shift ambient toward moonlit blue-silver
-          temp1.set("#7888aa");
-          ambientColor.lerp(temp1, (nightFactor - 0.5) * 0.4);
         }
 
         const centerX = playerRef.current?.position.x ?? 0;
@@ -3204,6 +3253,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         // Lerp to night color
         temp2.set("#1a2040");
         ambientColor.lerp(temp2, nightFactor);
+        if (nightFactor > 0.5) {
+          // Deep night gets a slight moonlit silver-blue lift without changing the day path.
+          temp1.set("#7888aa");
+          ambientColor.lerp(temp1, (nightFactor - 0.5) * 0.25);
+        }
         ambientRef.current.color.set(ambientColor);  // Immediate set, no slow lerp
 
         // Hemisphere sky color - also blue to fill shadows from above
@@ -3264,7 +3318,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         if (gl) {
           // WARMER: Boosted exposure for sun-baked Mediterranean feel
           // Peak day now ~1.30 (was 1.16)
-          const targetExposure = 0.94 + dayFactor * 0.08 + nightFactor * 0.06 + twilightFactor * 0.05;
+          const targetExposure = (0.94 + dayFactor * 0.08 + nightFactor * 0.06 + twilightFactor * 0.05) * renderProfile.environmentIntensityScale;
           gl.toneMappingExposure = THREE.MathUtils.lerp(gl.toneMappingExposure, targetExposure, 0.05);
         }
 
@@ -3308,7 +3362,8 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
           const overheadFactor = params.cameraMode === CameraMode.OVERHEAD ? 0.25 : 1;
           const isoFactor = params.cameraMode === CameraMode.ISOMETRIC ? 0.8 : 1;
-          const fogTarget = (baseFog + horizonHaze + altitudeFactor + humidity * 0.003 + cloudCover * 0.003 + nightAtmosphere)
+          const plagueFog = localPlaguePressure * 0.0016 * renderProfile.plagueIntensityScale;
+          const fogTarget = (baseFog + horizonHaze + altitudeFactor + humidity * 0.003 + cloudCover * 0.003 + nightAtmosphere + plagueFog)
             * devSettings.fogDensityScale
             * overheadFactor
             * isoFactor;
@@ -3318,7 +3373,11 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
             0.01
           );
           const nightFogColor = new THREE.Color('#0a0f1a');
-          fogRef.current.color.lerp(fogColor.clone().lerp(nightFogColor, nightFactor), 0.07);
+          const targetFogColor = fogColor.clone().lerp(nightFogColor, nightFactor);
+          if (localPlaguePressure > 0.08) {
+            targetFogColor.lerp(new THREE.Color('#6f6a58'), localPlaguePressure * 0.18);
+          }
+          fogRef.current.color.lerp(targetFogColor, 0.07);
         }
 
         // scene.background = skyColor; // DISABLED: Now using SkyGradient component for realistic gradient
@@ -3738,7 +3797,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         ref={lightRef}
         position={[50, 50, 20]}
         castShadow={shouldEnableShadows}
-        shadow-mapSize={[512, 512]}
+        shadow-mapSize={[renderProfile.shadowMapSize, renderProfile.shadowMapSize]}
         shadow-camera-left={-20}
         shadow-camera-right={20}
         shadow-camera-top={20}
@@ -3769,19 +3828,20 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       <DreiEnvironment
         preset={envPreset}
         background={false}
-        blur={0.6}
-        environmentIntensity={(0.35 + dayFactor * 0.75) * Math.max(0.25, 1 - nightFactor * 0.45)}
+        blur={renderProfile.environmentBlur}
+        environmentIntensity={(0.35 + dayFactor * 0.75) * Math.max(0.25, 1 - nightFactor * 0.45) * renderProfile.environmentIntensityScale}
       />
       {/* SkyGradient disabled to avoid shader fallback to black; SkyGradientDome handles sky */}
       <HorizonHaze timeOfDay={params.timeOfDay} />
 
       {/* GRAPHICS: Smooth star fade and increased saturation for dramatic night sky */}
       {/* PERFORMANCE: Reduced from 9000 to 3000 stars for better nighttime FPS */}
-      {dayFactor < 0.3 && (
+      {renderProfile.allowStars && dayFactor < 0.3 && (
         <Stars
+          key={`stars-${renderProfile.starCount}`}
           radius={180}
           depth={80}
-          count={1500}
+          count={renderProfile.starCount}
           factor={5}
           saturation={0.95}
           fade
@@ -3791,8 +3851,9 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
       {/* GRAPHICS: Twinkling stars with shader-based animation - magical night sky effect */}
       {/* Each star has unique twinkle rate and color temperature */}
       <TwinklingStars
-        visible={dayFactor < 0.35}
-        count={600}
+        key={`twinkling-stars-${renderProfile.twinklingStarCount}`}
+        visible={renderProfile.allowTwinklingStars && dayFactor < 0.35}
+        count={renderProfile.twinklingStarCount}
         radius={190}
         moonBrightness={(() => {
           const moonPhase = (simTime / 29.5) % 1;
@@ -3800,7 +3861,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         })()}
       />
       <Moon timeOfDay={params.timeOfDay} simTime={simTime} />
-      <MilkyWay visible={dayFactor <= 0.4} simTime={simTime} />
+      <MilkyWay visible={renderProfile.allowMilkyWay && dayFactor <= 0.4} simTime={simTime} />
 
       {devSettings.showFog && <fogExp2 ref={fogRef} attach="fog" args={['#c5ddf5', 0.004]} />}
 
@@ -3842,6 +3903,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
         playerPosition={playerRef.current?.position}
         isSprinting={sprintStateRef.current}
         occludedBuildingIds={isometricOccludedIds}
+        renderProfile={renderProfile}
       />
 
       {/* Market Stalls - procedurally generated with variety */}
@@ -3906,23 +3968,35 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
 
       {/* Tier 3: Contact Shadows - adds depth and grounding to buildings */}
       {/* PERFORMANCE: Disabled at night (dayFactor < 0.1) to improve nighttime FPS */}
-      {devSettings.showShadows && dayFactor > 0.1 && (
+      {devSettings.showShadows && renderProfile.allowContactShadows && dayFactor > 0.1 && (
         <ContactShadows
           position={[0, 0.01, 0]}
           opacity={dayFactor * 0.5}
           scale={150}
-          blur={2.5}
+          blur={renderProfile.contactShadowBlur}
           far={20}
-          resolution={512}
+          resolution={renderProfile.contactShadowResolution}
           color="#000000"
         />
       )}
 
-      {/* Updated MiasmaFog to use infectionRate prop */}
-      {devSettings.showMiasma && <MiasmaFog infectionRate={params.infectionRate} />}
+      {devSettings.showMiasma && (
+        <MiasmaFog
+          key={`miasma-${renderProfile.plagueParticleCount}`}
+          plaguePressure={localPlaguePressure * renderProfile.plagueIntensityScale}
+          center={playerRef.current?.position}
+          particleCount={renderProfile.plagueParticleCount}
+        />
+      )}
 
-      {/* GRAPHICS: Dust particles for warm sun-baked atmosphere during sunny days */}
-      <DustParticles timeOfDay={params.timeOfDay} weather={weather} />
+      {renderProfile.allowDust && (
+        <DustParticles
+          key={`dust-${renderProfile.dustParticleCount}`}
+          timeOfDay={params.timeOfDay}
+          weather={weather}
+          particleCount={renderProfile.dustParticleCount}
+        />
+      )}
 
       <ImpactPuffs puffsRef={impactPuffsRef} />
       
@@ -3959,6 +4033,7 @@ export const Simulation: React.FC<SimulationProps> = ({ params, simTime, devSett
           showDemographicsOverlay={showDemographicsOverlay}
           npcPool={npcPool}
           playerStats={playerStats}
+          renderProfile={renderProfile}
           onNPCInitiatedEncounter={onNPCInitiatedEncounter}
         />
       )}

@@ -612,14 +612,14 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
     // Sickness overlay (greenish-gray pallor)
     if (sicknessLevel > 0) {
-      const sickColor = new THREE.Color('#8a9a7a'); // Pale greenish-gray
-      baseColor.lerp(sickColor, sicknessLevel * 0.4); // Up to 40% tint
+      const sickColor = new THREE.Color(isInfected ? '#7f8b71' : '#919987');
+      baseColor.lerp(sickColor, sicknessLevel * 0.48);
       baseColor.getHSL(hsl);
-      baseColor.setHSL(hsl.h, hsl.s * (1 - sicknessLevel * 0.5), hsl.l * (1 - sicknessLevel * 0.15));
+      baseColor.setHSL(hsl.h, hsl.s * (1 - sicknessLevel * 0.58), hsl.l * (1 - sicknessLevel * 0.18));
     }
 
     return baseColor.getStyle();
-  }, [headColor, sicknessLevel, age]);
+  }, [age, headColor, isInfected, sicknessLevel]);
   const rootRef = useRef<THREE.Group>(null);
   const lastShadowEnabledRef = useRef<boolean | null>(null);
   const lastShadowModeRef = useRef<'full' | 'proxy' | null>(null);
@@ -1953,8 +1953,10 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
 
       // ANIMATION: Apply inertia to body position - blend between breathing and bobbing
       // bodyBob already includes movementInertia, so we blend breathing with bob
-      const bodyVertical = breathing + bodyBob; // bodyBob fades to 0 as movementInertia decays
-      bodyGroup.current.position.y = bodyVertical + jumpLift + crouch + settle + interactionCrouch;
+      const sicknessBreath = (0.008 + sicknessLevel * 0.018) * Math.sin(state.clock.elapsedTime * (1.2 + sicknessLevel * 1.8));
+      const sicknessSlump = sicknessLevel * 0.035;
+      const bodyVertical = breathing + bodyBob + sicknessBreath; // bodyBob fades to 0 as movementInertia decays
+      bodyGroup.current.position.y = bodyVertical + jumpLift + crouch + settle + interactionCrouch - sicknessSlump;
 
       // ANIMATION: Forward lean blends smoothly between walk and run
       const walkLean = 0;
@@ -1966,10 +1968,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
       const jumpTilt = jumping ? (-0.15 + jumpT * 0.2) : 0;
       const crouchTilt = anticipate * 0.22;
       const landTilt = -landing * 0.18;
+      const sicknessLean = sicknessLevel * 0.12 + (isInfected ? 0.035 : 0);
 
       bodyGroup.current.rotation.x = THREE.MathUtils.lerp(
         bodyGroup.current.rotation.x,
-        targetRotationX + idleLean + jumpTilt + crouchTilt + landTilt + interactionLean,
+        targetRotationX + idleLean + jumpTilt + crouchTilt + landTilt + interactionLean + sicknessLean,
         0.15
       );
       bodyGroup.current.rotation.z = THREE.MathUtils.lerp(bodyGroup.current.rotation.z, sway, 0.1);
@@ -2045,10 +2048,11 @@ export const Humanoid: React.FC<HumanoidProps> = memo(({
         }
       }
 
-      headGroup.current.position.y = 1.75 + headBob;
+      const sicknessHeadDrop = sicknessLevel * 0.06 + (isInfected ? 0.02 : 0);
+      headGroup.current.position.y = 1.75 + headBob - sicknessHeadDrop * 0.3;
       // Include age-based head forward lean (elderly have head jutting forward)
       const ageHeadLean = agePosture.headForward;
-      headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headLag + headInteractionX + ageHeadLean, 0.15);
+      headGroup.current.rotation.x = THREE.MathUtils.lerp(headGroup.current.rotation.x, headLag + headInteractionX + ageHeadLean + sicknessHeadDrop, 0.15);
       // ANIMATION: Head turns toward new direction during pivots + gaze tracking
       // Combine gaze yaw with walking head turn (don't override!)
       headGroup.current.rotation.y = THREE.MathUtils.lerp(

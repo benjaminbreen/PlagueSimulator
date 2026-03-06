@@ -33,6 +33,7 @@ type EnvironmentBaseProps = {
   occludedBuildingIds?: string[];
   GroundComponent: ComponentType<any>;
   BuildingsComponent: ComponentType<any>;
+  buildingsProps?: Record<string, unknown>;
 };
 
 export const EnvironmentBase: React.FC<EnvironmentBaseProps> = ({
@@ -59,7 +60,8 @@ export const EnvironmentBase: React.FC<EnvironmentBaseProps> = ({
   onSelectBuilding,
   occludedBuildingIds,
   GroundComponent,
-  BuildingsComponent
+  BuildingsComponent,
+  buildingsProps
 }) => (
   <>
     <GroundComponent
@@ -87,6 +89,7 @@ export const EnvironmentBase: React.FC<EnvironmentBaseProps> = ({
       selectedBuildingId={selectedBuildingId}
       onSelectBuilding={onSelectBuilding}
       occludedBuildingIds={occludedBuildingIds}
+      {...buildingsProps}
     />
     {climbables.map((accessory) => (
       <ClimbableAccessory key={accessory.id} accessory={accessory} nightFactor={nightFactor} />
